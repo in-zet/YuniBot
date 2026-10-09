@@ -78,6 +78,10 @@ def _split_statements(script: str) -> list[str]:
     명시적 ``BEGIN``/커밋 안에서 하나씩 실행해 전체를 하나의 트랜잭션으로
     묶는다. 문자열 리터럴('...', 쌍따옴표 식별자, -- 줄 주석, /* */ 블록
     주석) 안의 세미콜론은 문장 구분자로 보지 않는다.
+
+    제한: ``CREATE TRIGGER ... BEGIN ... END`` 블록은 지원하지 않는다.
+    BEGIN/END 중첩을 추적하지 않으므로 트리거 본문 안의 세미콜론에서
+    잘못 분리되어 SQLite가 "incomplete input" 구문 오류를 낸다.
     """
     statements: list[str] = []
     buf: list[str] = []
