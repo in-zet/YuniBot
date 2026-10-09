@@ -26,7 +26,8 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["third_party"]
+# "."은 skills/<스킬>/tests/처럼 tests/ 패키지 밖의 스킬 테스트가 core를 import할 수 있게 한다.
+pythonpath = ["third_party", "."]
 asyncio_mode = "auto"
 
 [tool.ruff]
