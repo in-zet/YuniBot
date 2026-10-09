@@ -1,9 +1,27 @@
+import logging
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
 import discord
 import pytest
 
 from core.decorators import tool
-from core.slash import SlashPlanError, build_slash_plan
-from core.tool_types import ToolContext, ToolResult
+from core.executor import ToolExecutor
+from core.permissions import InMemoryTagProvider
+from core.registry import SkillRegistry
+from core.resolvers import ResolverRegistry
+from core.slash import (
+    ConfirmView,
+    SlashPlanError,
+    attach_to_tree,
+    build_slash_plan,
+    render_result,
+    slash_path_problems,
+)
+from core.tool_types import Display, ToolContext, ToolResult
+
+FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 @tool(slash="보더")
@@ -56,16 +74,34 @@ def test_build_plan_standalone_and_subcommands() -> None:
     assert ("관리", "스킬", "목록") in paths
 
 
-def test_build_plan_rejects_more_than_three_levels() -> None:
+def test_attach_to_tree_skips_more_than_three_levels_without_crashing() -> None:
+    # build_slash_plan은 더 이상 던지지 않는다(한 스킬 때문에 모든 스킬의 계획이 날아가면 안 된다).
+    # 깊이 규칙은 레지스트리가 1차로, attach_to_tree가 스킬 단위로 2차로 막는다.
     @tool(slash="너무 깊은 명령 경로 넷")
     async def too_deep(ctx: ToolContext) -> ToolResult:
         """4단계 깊이."""
         return ToolResult(data={})
 
-    with pytest.raises(SlashPlanError, match="3단계"):
-        _ = build_slash_plan(
-            [(_FakeSkill("x"), too_deep.__yuni_tool__)]  # pyright: ignore[reportFunctionMemberAccess, reportArgumentType]
-        )
+    plan = build_slash_plan(
+        [  # pyright: ignore[reportArgumentType]
+            (_FakeSkill("x"), too_deep.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
+            (_FakeSkill("border"), standalone.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
+        ]
+    )
+    executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(
+        discord.Client(intents=discord.Intents.none())
+    )
+
+    attach_to_tree(tree, plan, executor=executor)
+
+    assert tree.get_command("너무") is None
+    assert tree.get_command("보더") is not None
+
+
+def test_slash_path_problems_reports_depth() -> None:
+    assert any("3단계" in p for p in slash_path_problems("a b c d"))
+    assert slash_path_problems("연결 시작") == []
 
 
 def test_attach_to_tree_builds_offline_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,3 +201,201 @@ def test_build_callback_source_rejects_dunder_prefixed_arg_names() -> None:
         _build_callback_source(
             "fn", [ArgSpec(name="__options", py_type=str, required=True)]
         )
+
+
+# --- 결과 렌더링, 데모 태그 부여, 확인 버튼 ------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def send_message(self, content: str | None = None, **kwargs: Any) -> None:
+        self.calls.append({"content": content, **kwargs})
+
+
+class _FakeInteraction:
+    """슬래시 콜백과 버튼 콜백이 실제로 쓰는 속성(user.id, response.send_message)만 흉내 낸다."""
+
+    def __init__(self, user_id: int) -> None:
+        self.user = SimpleNamespace(id=user_id)
+        self.response = _FakeResponse()
+
+
+def _fake(user_id: int) -> Any:
+    # discord.Interaction 자리에 넘기므로 타입 검사기에는 Any로 보인다.
+    return _FakeInteraction(user_id)
+
+
+def _practice_tree() -> tuple[discord.app_commands.CommandTree[Any], ToolExecutor, InMemoryTagProvider]:
+    registry = SkillRegistry([FIXTURES / "skills_ok"])
+    registry.load()
+    tag_provider = InMemoryTagProvider()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=tag_provider, tag_definitions=registry.tag_definitions()
+    )
+    client = discord.Client(intents=discord.Intents.none())
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(client)
+    attach_to_tree(tree, build_slash_plan(registry.tool_specs()), executor=executor)
+    return tree, executor, tag_provider
+
+
+def _practice_command(tree: discord.app_commands.CommandTree[Any], sub: str) -> discord.app_commands.Command[Any, Any, Any]:
+    group = tree.get_command("연습")
+    assert isinstance(group, discord.app_commands.Group)
+    command = group.get_command(sub)
+    assert isinstance(command, discord.app_commands.Command)
+    return command
+
+
+def test_render_result_without_display_is_never_empty() -> None:
+    # 디스코드는 content도, embeds도, view도 없는 응답을 거부한다("This interaction failed").
+    kwargs = render_result(ToolResult(data={"foo": "bar"}))
+
+    assert kwargs["content"]
+    assert "foo: bar" in kwargs["content"]
+
+
+def test_render_result_without_display_or_data_is_never_empty() -> None:
+    assert render_result(ToolResult())["content"]
+
+
+def test_render_result_passes_display_through() -> None:
+    display = Display(content="표시물", embeds=[])
+    kwargs = render_result(ToolResult(data={"foo": "bar"}, display=display))
+
+    assert kwargs["content"] == "표시물"
+    assert "view" not in kwargs
+
+
+def test_render_result_error_is_ephemeral() -> None:
+    kwargs = render_result(ToolResult(error="안 돼요"))
+
+    assert kwargs == {"content": "안 돼요", "ephemeral": True}
+
+
+@pytest.mark.asyncio
+async def test_data_only_tool_reply_has_content() -> None:
+    tree, _, tag_provider = _practice_tree()
+    tag_provider.grant("1", "practice-unlocked")
+    interaction = _fake(1)
+
+    await _practice_command(tree, "보기").callback(interaction)  # pyright: ignore[reportCallIssue]
+
+    [call] = interaction.response.calls
+    assert call["content"]
+    assert not call.get("ephemeral")
+
+
+@pytest.mark.asyncio
+async def test_start_demo_grants_practice_unlocked_tag_and_unlocks_view() -> None:
+    tree, _, tag_provider = _practice_tree()
+    view_command = _practice_command(tree, "보기")
+
+    locked = _fake(42)
+    await view_command.callback(locked)  # pyright: ignore[reportCallIssue]
+    assert locked.response.calls[0].get("ephemeral") is True  # 아직 잠겨 있다
+
+    start = _fake(42)
+    await _practice_command(tree, "체험시작").callback(start)  # pyright: ignore[reportCallIssue]
+
+    assert "practice-unlocked" in await tag_provider.tags_for("42")
+    assert start.response.calls[0]["content"]
+    assert "_demo_grant_tag" not in start.response.calls[0]["content"]
+
+    unlocked = _fake(42)
+    await view_command.callback(unlocked)  # pyright: ignore[reportCallIssue]
+    assert not unlocked.response.calls[0].get("ephemeral")
+
+    # 다른 플레이어에게는 부여되지 않는다.
+    assert "practice-unlocked" not in await tag_provider.tags_for("7")
+
+
+async def _issue_reset_confirm(
+    tree: discord.app_commands.CommandTree[Any], user_id: int
+) -> ConfirmView:
+    interaction = _fake(user_id)
+    await _practice_command(tree, "초기화").callback(interaction)  # pyright: ignore[reportCallIssue]
+    [call] = interaction.response.calls
+    view = call["view"]
+    assert isinstance(view, ConfirmView)
+    return view
+
+
+@pytest.mark.asyncio
+async def test_confirm_view_rejects_other_players() -> None:
+    tree, _, _ = _practice_tree()
+    view = await _issue_reset_confirm(tree, user_id=1)
+
+    intruder = _fake(2)
+    allowed = await view.interaction_check(intruder)  # pyright: ignore[reportArgumentType]
+
+    assert allowed is False
+    [call] = intruder.response.calls
+    assert call.get("ephemeral") is True
+
+    owner = _fake(1)
+    assert await view.interaction_check(owner) is True  # pyright: ignore[reportArgumentType]
+    assert owner.response.calls == []
+
+
+@pytest.mark.asyncio
+async def test_confirm_button_shows_tool_output() -> None:
+    tree, _, _ = _practice_tree()
+    view = await _issue_reset_confirm(tree, user_id=1)
+
+    owner = _fake(1)
+    await view.confirm_button.callback(owner)  # pyright: ignore[reportCallIssue, reportUnknownMemberType]
+
+    [call] = owner.response.calls
+    assert "reset: True" in call["content"]
+
+
+@pytest.mark.asyncio
+async def test_confirm_button_handler_passes_presser_identity_to_executor() -> None:
+    # interaction_check를 건너뛰어도(두 번째 방어선) 실행기가 다른 플레이어의 확인을 거부해야 한다.
+    tree, _, _ = _practice_tree()
+    view = await _issue_reset_confirm(tree, user_id=1)
+
+    intruder = _fake(2)
+    await view.confirm_button.callback(intruder)  # pyright: ignore[reportCallIssue, reportUnknownMemberType]
+    [call] = intruder.response.calls
+    assert call.get("ephemeral") is True
+    assert "reset" not in (call["content"] or "")
+
+    owner = _fake(1)
+    await view.confirm_button.callback(owner)  # pyright: ignore[reportCallIssue, reportUnknownMemberType]
+    assert "reset: True" in owner.response.calls[0]["content"]
+
+
+def test_attach_to_tree_skips_a_broken_skill_and_keeps_the_rest(caplog: pytest.LogCaptureFixture) -> None:
+    # 레지스트리 검증을 빠져나온 결함이 있어도(방어선 2) 한 스킬의 명령 생성 실패가 나머지 스킬의
+    # 명령 등록을 막지 않는다. 여기서는 레지스트리를 거치지 않고 일부러 같은 경로를 두 스킬에 준다.
+    executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
+    client = discord.Client(intents=discord.Intents.none())
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(client)
+
+    @tool(slash="연결 시작 하나")
+    async def nested(ctx: ToolContext) -> ToolResult:
+        """연결 시작을 그룹으로 쓴다."""
+        return ToolResult(data={})
+
+    plan = build_slash_plan(
+        [  # pyright: ignore[reportArgumentType]
+            (_FakeSkill("good"), sub1.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
+            (_FakeSkill("broken"), standalone.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
+            (_FakeSkill("broken"), nested.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
+            (_FakeSkill("other"), lookup.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        attach_to_tree(tree, plan, executor=executor)
+
+    group = tree.get_command("연결")
+    assert isinstance(group, discord.app_commands.Group)
+    start = group.get_command("시작")
+    assert isinstance(start, discord.app_commands.Command)  # good의 명령이 그대로 남는다
+    assert tree.get_command("조회") is not None
+    assert tree.get_command("보더") is None  # broken 스킬의 명령은 하나도 남지 않는다(부분 등록 없음)
+    assert "broken" in caplog.text

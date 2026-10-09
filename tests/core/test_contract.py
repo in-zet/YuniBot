@@ -48,6 +48,18 @@ def test_bad_migration_filename_is_flagged() -> None:
     assert any("파일 이름" in v for v in violations["bad-migration-filename"])
 
 
+def test_real_skills_dir_has_no_contract_violations() -> None:
+    # 실제 skills/ 디렉터리에서 레지스트리가 켠 스킬 전부가 계약 검사를 통과해야 한다.
+    # 지금(2단계)은 _template뿐이라 검사 대상이 없지만, 3단계부터 실제 스킬이 들어오는 순간
+    # 따로 기억하지 않아도 이 테스트가 그 스킬을 검사한다. 레지스트리 단계 실패도 함께 본다.
+    registry = SkillRegistry([Path("skills")])
+    registry.load()
+
+    assert registry.failures() == {}
+    violations = run_all_contract_checks(registry)
+    assert {name: v for name, v in violations.items() if v} == {}
+
+
 def test_template_skill_is_excluded_from_registry_and_checks() -> None:
     registry = SkillRegistry([Path("skills")])
     registry.load()

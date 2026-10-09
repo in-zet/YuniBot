@@ -28,6 +28,7 @@ class _PendingConfirm:
     spec: ToolSpec | SlashOnlySpec
     ctx: ToolContext
     resolved_args: dict[str, Any]
+    requester_id: str  # 확인을 요청한 플레이어. 이 사람만 확인/취소할 수 있다.
 
 
 def _missing_tags(requirement: TagRequirement, player_tags: set[str]) -> set[str]:
@@ -87,14 +88,29 @@ class ToolExecutor:
 
             raw_value = raw_args[arg.name]
             if arg.is_ref_type:
+                # 세 경우를 구분한다. 어느 쪽이든 날것 예외를 호출자(슬래시/LLM 루프)에 흘려보내지 않는다.
+                # 1) 해석기 미등록: get()/resolve()를 부르기 전에 확인해 바로 에러 결과로.
+                # 2) ResolutionError: 해석기의 문서화된 실패(찾지 못함/후보 여럿) — 그대로 안내.
+                # 3) 그 밖의 예외: 해석기 자신의 버그다. 1)과 섞여 사라지지 않도록 로그를 남긴다.
+                if not self._resolvers.is_registered(arg.py_type):
+                    return ExecutionOutcome(
+                        result=ToolResult(error=f"{arg.py_type.__name__}에 등록된 해석기가 없다")
+                    )
+                resolver = self._resolvers.get(arg.py_type)
                 try:
-                    resolver = self._resolvers.get(arg.py_type)
                     resolved[arg.name] = await resolver.resolve(raw_value, ctx)
-                except (ResolutionError, KeyError) as exc:
-                    # KeyError: ResolverRegistry.get()이 등록되지 않은 타입에 대해 던진다.
-                    # 해석 실패도, 해석기 미등록도 모두 "해석 실패"로 같이 묶어 에러 ToolResult로
-                    # 돌려준다. 어느 쪽이든 날것 예외를 호출자(슬래시/LLM 루프)에 흘려보내지 않는다.
+                except ResolutionError as exc:
                     return ExecutionOutcome(result=ToolResult(error=str(exc)))
+                except Exception as exc:
+                    logger.exception(
+                        "resolver for %s raised unexpectedly (tool '%s', arg '%s')",
+                        arg.py_type.__name__,
+                        spec.name,
+                        arg.name,
+                    )
+                    return ExecutionOutcome(
+                        result=ToolResult(error=f"인자 '{arg.name}' 해석 중 오류: {exc}")
+                    )
             else:
                 resolved[arg.name] = raw_value
 
@@ -118,15 +134,28 @@ class ToolExecutor:
         confirm_mode = getattr(spec, "confirm", "never")
         if confirm_mode == "always":
             token = str(uuid.uuid4())
-            self._pending[token] = _PendingConfirm(spec=spec, ctx=ctx, resolved_args=resolved)
+            self._pending[token] = _PendingConfirm(
+                spec=spec, ctx=ctx, resolved_args=resolved, requester_id=ctx.player_id
+            )
             return ExecutionOutcome(result=None, needs_confirm=True, confirm_token=token)
 
         return ExecutionOutcome(result=await self._call(spec, ctx, resolved))
 
-    async def confirm(self, confirm_token: str, *, confirmed: bool) -> ToolResult:
-        pending = self._pending.pop(confirm_token, None)
+    async def confirm(self, confirm_token: str, *, confirmed: bool, player_id: str) -> ToolResult:
+        """player_id는 버튼을 누른 플레이어다. 요청한 본인이 아니면 실행도 취소도 하지 않고,
+        토큰도 소비하지 않는다(본인은 그대로 확인/취소할 수 있다)."""
+        pending = self._pending.get(confirm_token)
         if pending is None:
             return ToolResult(error="만료되었거나 모르는 확인 요청이다")
+        if pending.requester_id != player_id:
+            logger.warning(
+                "confirm token for '%s' pressed by another player (requester=%s, presser=%s)",
+                pending.spec.name,
+                pending.requester_id,
+                player_id,
+            )
+            return ToolResult(error="본인이 요청한 확인만 누를 수 있다")
+        del self._pending[confirm_token]
         if not confirmed:
             return ToolResult(error="취소했다")
         return await self._call(pending.spec, pending.ctx, pending.resolved_args)

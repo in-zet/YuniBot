@@ -93,3 +93,20 @@ def test_parse_manifest_defines_tags_and_settings() -> None:
     assert manifest.defines_tags[0].name == "demo-member"
     assert manifest.defines_tags[0].hidden is False
     assert manifest.settings[0].kind == "bool"
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    ["Chunithm-Border", "my_skill", "스킬", "foo bar", "x'); import os; ('", "", "a" * 65],
+)
+def test_parse_manifest_rejects_invalid_name(bad_name: str) -> None:
+    # name은 "소문자, 숫자, 하이픈"만 쓴다(00-core.md). 도구 이름의 접두사가 되고, 슬래시 콜백
+    # 이름을 만드는 코드 생성 단계까지 흘러가므로 매니페스트 단계에서 막아야 한다.
+    text = BORDER_EXAMPLE.replace("name: chunithm-border", f'name: "{bad_name}"')
+    with pytest.raises(ManifestError, match="name"):
+        parse_manifest(text)
+
+
+def test_parse_manifest_accepts_lowercase_digits_hyphens() -> None:
+    text = BORDER_EXAMPLE.replace("name: chunithm-border", "name: yuni-bond-2")
+    assert parse_manifest(text).name == "yuni-bond-2"

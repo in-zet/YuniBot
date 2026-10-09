@@ -1,4 +1,6 @@
 # tests/core/test_executor.py
+import logging
+
 import pytest
 
 from core.decorators import tool
@@ -154,7 +156,7 @@ async def test_invoke_confirm_flow() -> None:
     assert outcome.result is None
     assert outcome.confirm_token is not None
 
-    result = await executor.confirm(outcome.confirm_token, confirmed=True)
+    result = await executor.confirm(outcome.confirm_token, confirmed=True, player_id="p1")
     assert result.data == {"done": True}
 
 
@@ -165,7 +167,7 @@ async def test_invoke_confirm_declined_does_not_run() -> None:
 
     outcome = await executor.invoke(dangerous.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
     assert outcome.confirm_token is not None
-    result = await executor.confirm(outcome.confirm_token, confirmed=False)
+    result = await executor.confirm(outcome.confirm_token, confirmed=False, player_id="p1")
     assert result.error is not None
 
 
@@ -190,10 +192,10 @@ async def test_invoke_confirm_twice_second_call_fails() -> None:
     token = outcome.confirm_token
     assert token is not None
 
-    first = await executor.confirm(token, confirmed=True)
+    first = await executor.confirm(token, confirmed=True, player_id="p1")
     assert first.data == {"done": True}
 
-    second = await executor.confirm(token, confirmed=True)
+    second = await executor.confirm(token, confirmed=True, player_id="p1")
     assert second.error is not None
     assert second.data == {}
 
@@ -202,7 +204,7 @@ async def test_invoke_confirm_twice_second_call_fails() -> None:
 async def test_confirm_with_unknown_token_fails() -> None:
     executor, _ = _make_executor()
 
-    result = await executor.confirm("never-issued-token", confirmed=True)
+    result = await executor.confirm("never-issued-token", confirmed=True, player_id="p1")
 
     assert result.error is not None
 
@@ -268,7 +270,7 @@ async def test_invoke_missing_resolver_becomes_error_result() -> None:
 
 @pytest.mark.asyncio
 async def test_invoke_confirm_declined_does_not_call_function() -> None:
-    """미승인(confirmed=False)이면 실제 도구 함수가 호출되지 않는다는 것을
+    """미승인(confirmed=False, player_id="p1")이면 실제 도구 함수가 호출되지 않는다는 것을
     호출 횟수로 직접 증명한다(result is None이라는 구조만으로는 부족하다)."""
     before = len(_risky_call_count)
     executor, _ = _make_executor()
@@ -279,7 +281,7 @@ async def test_invoke_confirm_declined_does_not_call_function() -> None:
     assert len(_risky_call_count) == before  # invoke()만으로는 아직 호출되지 않는다
 
     assert outcome.confirm_token is not None
-    result = await executor.confirm(outcome.confirm_token, confirmed=False)
+    result = await executor.confirm(outcome.confirm_token, confirmed=False, player_id="p1")
 
     assert len(_risky_call_count) == before  # 거절해도 호출되지 않는다
     assert result.error is not None
@@ -296,9 +298,79 @@ async def test_invoke_confirm_after_decline_cannot_be_retried_as_confirmed() -> 
     assert outcome.confirm_token is not None
     token = outcome.confirm_token
 
-    declined = await executor.confirm(token, confirmed=False)
+    declined = await executor.confirm(token, confirmed=False, player_id="p1")
     assert declined.error is not None
 
-    retried = await executor.confirm(token, confirmed=True)
+    retried = await executor.confirm(token, confirmed=True, player_id="p1")
     assert retried.error is not None
     assert retried.data == {}
+
+
+@pytest.mark.asyncio
+async def test_confirm_by_a_different_player_is_rejected_and_does_not_run() -> None:
+    """확인 버튼은 요청한 본인만 누를 수 있다. 다른 플레이어가 같은 토큰으로 확인(또는 취소)해도
+    도구가 실행되지 않고, 토큰도 소비되지 않아 본인은 그대로 확인할 수 있어야 한다."""
+    before = len(_risky_call_count)
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(risky.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
+    token = outcome.confirm_token
+    assert token is not None
+
+    hijack = await executor.confirm(token, confirmed=True, player_id="p2")
+    assert hijack.error is not None
+    assert hijack.data == {}
+    assert len(_risky_call_count) == before
+
+    cancel_attempt = await executor.confirm(token, confirmed=False, player_id="p2")
+    assert cancel_attempt.error is not None
+    assert len(_risky_call_count) == before
+
+    owner = await executor.confirm(token, confirmed=True, player_id="p1")
+    assert owner.error is None
+    assert owner.data == {"done": True}
+    assert len(_risky_call_count) == before + 1
+
+
+class _BuggyResolver:
+    async def resolve(self, raw: object, ctx: ToolContext) -> object:
+        raise KeyError("resolver internal bug")
+
+
+@pytest.mark.asyncio
+async def test_buggy_registered_resolver_is_logged_not_masked_as_unregistered(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """등록된 해석기 자체의 버그(KeyError 등)는 "해석기 미등록"과 구분되어 로그에 남아야 한다.
+    그래도 호출자에게 날것 예외를 흘려보내지는 않는다."""
+    executor, _ = _make_executor()
+    executor._resolvers.register(ArcadeRef, _BuggyResolver())  # pyright: ignore[reportPrivateUsage]
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    with caplog.at_level(logging.ERROR):
+        outcome = await executor.invoke(
+            no_resolver_tool.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+            ctx,
+            {"arcade": "아무거나"},
+        )
+
+    assert outcome.result is not None
+    assert outcome.result.error is not None
+    assert "등록된 해석기가 없다" not in outcome.result.error
+    assert "resolver internal bug" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_unregistered_resolver_error_names_the_type() -> None:
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(
+        no_resolver_tool.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+        ctx,
+        {"arcade": "아무거나"},
+    )
+
+    assert outcome.result is not None
+    assert "ArcadeRef" in (outcome.result.error or "")

@@ -9,6 +9,7 @@ from pathlib import Path
 from core.decorators import SkillCode, SlashOnlySpec, ToolSpec, collect_specs
 from core.manifest import DefinedTag, SkillManifest, parse_manifest
 from core.schema import build_arg_schema
+from core.slash_rules import callback_arg_name_problems, slash_path_problems
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,22 @@ class SkillRegistry:
         code = collect_specs(module)
 
         for spec in [*code.tools, *code.slash_only_tools]:
-            build_arg_schema(spec.fn)  # 스키마 생성 불가면 SchemaBuildError 전파
+            schema = build_arg_schema(spec.fn)  # 스키마 생성 불가면 SchemaBuildError 전파
+            if spec.slash is not None:
+                problems = slash_path_problems(spec.slash)
+                problems += callback_arg_name_problems(arg.name for arg in schema.args)
+                if problems:
+                    raise _SkillLoadError(f"'{spec.name}': " + "; ".join(problems))
+
+        self_conflict = _find_self_slash_conflict(_slash_paths(code))
+        if self_conflict:
+            raise _SkillLoadError(self_conflict)
+
+        core_tag_redefined = {t.name for t in manifest.defines_tags} & CORE_DEFINED_TAGS
+        if core_tag_redefined:
+            raise _SkillLoadError(
+                f"코어 태그를 다시 정의할 수 없다: {', '.join(sorted(core_tag_redefined))}"
+            )
 
         declared_events = {h.event_name for h in code.event_handlers}
         undeclared_listens = declared_events - set(manifest.listens)
@@ -190,67 +206,90 @@ class SkillRegistry:
         return frozenset(emitted)
 
     def _detect_slash_collisions(self) -> None:
-        # 토큰 단위로 경로를 모아, "단독 명령으로 쓴 이름"과 "그룹(하위 명령 보유)으로 쓴 이름"이
-        # 겹치는지, 완전히 같은 경로가 두 번 쓰였는지를 검사한다.
-        path_owner: dict[tuple[str, ...], str] = {}
-        root_is_group: dict[str, bool] = {}
-        root_owner: dict[str, str] = {}
+        """스킬 사이의 슬래시 경로 충돌을 모든 깊이에서 찾는다(먼저 로드된 스킬이 이긴다).
+
+        경로 하나는 "명령(leaf)"이고, 그 경로의 모든 앞부분은 "그룹"이다. 두 스킬 사이에서
+        (1) 같은 경로를 둘 다 명령으로 쓰거나, (2) 한쪽이 명령으로 쓴 경로를 다른 쪽이 그룹으로
+        쓰면 충돌이다 — 루트 토큰이든 그 아래 단계든 똑같이 본다. 한 스킬 안의 자기 충돌은
+        _load_one이 이미 걸러냈다.
+
+        스킬의 경로를 전부 먼저 검사하고, 충돌이 없을 때만 소유권을 등록한다. 그래서 비활성화된
+        스킬의 경로가 남아 나중 스킬을 잘못 막는 일이 없다.
+        """
+        leaf_owner: dict[tuple[str, ...], str] = {}
+        group_owner: dict[tuple[str, ...], str] = {}
 
         for skill_name in list(self._loaded):
-            skill = self._loaded[skill_name]
-            paths = [
-                tuple(spec.slash.split())
-                for spec in [*skill.code.tools, *skill.code.slash_only_tools]
-                if spec.slash
-            ]
+            paths = _slash_paths(self._loaded[skill_name].code)
+            reason = _find_cross_slash_conflict(paths, leaf_owner, group_owner)
+            if reason:
+                self.disable(skill_name, reason)
+                continue
             for path in paths:
-                root = path[0]
-                is_group = len(path) > 1
+                leaf_owner.setdefault(path, skill_name)
+                for i in range(1, len(path)):
+                    group_owner.setdefault(path[:i], skill_name)
 
-                if root in root_owner and root_owner[root] != skill_name:
-                    if root_is_group[root] != is_group:
-                        self._disable(
-                            skill_name,
-                            f"슬래시 명령 '{root}'이 단독 명령과 그룹으로 동시에 쓰였다 "
-                            f"(이미 '{root_owner[root]}' 스킬이 다른 형태로 등록함)",
-                        )
-                        self._purge_owner_entries(skill_name, path_owner, root_owner, root_is_group)
-                        break
-                else:
-                    root_owner.setdefault(root, skill_name)
-                    root_is_group.setdefault(root, is_group)
-
-                if path in path_owner and path_owner[path] != skill_name:
-                    self._disable(
-                        skill_name,
-                        f"슬래시 경로 '{' '.join(path)}'가 '{path_owner[path]}' 스킬과 겹친다",
-                    )
-                    self._purge_owner_entries(skill_name, path_owner, root_owner, root_is_group)
-                    break
-                path_owner.setdefault(path, skill_name)
-
-    @staticmethod
-    def _purge_owner_entries(
-        skill_name: str,
-        path_owner: dict[tuple[str, ...], str],
-        root_owner: dict[str, str],
-        root_is_group: dict[str, bool],
-    ) -> None:
-        # 이 스킬이 비활성화되기 전까지 등록해 둔 소유권을 모두 지운다. 지우지 않으면 나중에 로드되는
-        # 스킬이 "이미 존재하지 않는 스킬"과 충돌한다고 잘못 판정된다.
-        for path in [p for p, owner in path_owner.items() if owner == skill_name]:
-            del path_owner[path]
-        for root in [r for r, owner in root_owner.items() if owner == skill_name]:
-            del root_owner[root]
-            root_is_group.pop(root, None)
-
-    def _disable(self, skill_name: str, reason: str) -> None:
+    def disable(self, skill_name: str, reason: str) -> None:
+        """활성화된 스킬을 이유와 함께 비활성화한다. 로드 뒤 계약 검사(core/bot.py)도 쓴다."""
         skill = self._loaded.pop(skill_name, None)
         self._failures[skill.path.name if skill else skill_name] = reason
 
 
 class _SkillLoadError(Exception):
     pass
+
+
+def _slash_paths(code: SkillCode) -> list[tuple[str, ...]]:
+    return [
+        tuple(spec.slash.split())
+        for spec in [*code.tools, *code.slash_only_tools]
+        if spec.slash is not None
+    ]
+
+
+def _fmt(path: tuple[str, ...]) -> str:
+    return " ".join(path)
+
+
+def _find_self_slash_conflict(paths: list[tuple[str, ...]]) -> str | None:
+    """한 스킬 안에서 같은 경로를 두 번 쓰거나, 명령으로 쓴 경로를 그룹으로도 쓰는지 본다."""
+    seen: set[tuple[str, ...]] = set()
+    for path in paths:
+        if path in seen:
+            return f"슬래시 경로 '{_fmt(path)}'를 한 스킬에서 두 번 썼다"
+        seen.add(path)
+    for path in paths:
+        for i in range(1, len(path)):
+            if path[:i] in seen:
+                return (
+                    f"슬래시 이름 '{_fmt(path[:i])}'을 단독 명령과 그룹('{_fmt(path)}')으로 "
+                    f"한 스킬에서 동시에 썼다"
+                )
+    return None
+
+
+def _find_cross_slash_conflict(
+    paths: list[tuple[str, ...]],
+    leaf_owner: dict[tuple[str, ...], str],
+    group_owner: dict[tuple[str, ...], str],
+) -> str | None:
+    for path in paths:
+        if path in leaf_owner:
+            return f"슬래시 경로 '{_fmt(path)}'가 '{leaf_owner[path]}' 스킬과 겹친다"
+        if path in group_owner:
+            return (
+                f"슬래시 이름 '{_fmt(path)}'을 단독 명령으로 쓰지만 '{group_owner[path]}' 스킬이 "
+                f"이미 그룹으로 쓴다"
+            )
+        for i in range(1, len(path)):
+            prefix = path[:i]
+            if prefix in leaf_owner:
+                return (
+                    f"슬래시 이름 '{_fmt(prefix)}'을 그룹('{_fmt(path)}')으로 쓰지만 "
+                    f"'{leaf_owner[prefix]}' 스킬이 이미 단독 명령으로 쓴다"
+                )
+    return None
 
 
 def _import_skill_module(skill_py: Path, *, module_name: str):

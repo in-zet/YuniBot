@@ -9,6 +9,7 @@ import discord
 from discord import app_commands
 
 from core.config import CoreConfig, load_config
+from core.contract_checks import run_all_contract_checks
 from core.executor import ToolExecutor
 from core.migrations import run_migrations
 from core.permissions import InMemoryTagProvider, TagProvider
@@ -54,6 +55,12 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry]:
 
     registry = SkillRegistry(config.skills_dirs)
     registry.load()
+    # 계약 검사(테이블 접두사, 마이그레이션 파일 이름, docstring)를 마이그레이션보다 먼저 돌린다.
+    # 적용한 SQL 파일은 고칠 수 없으므로, 규칙을 어긴 스킬의 마이그레이션이 한 번이라도 적용되면
+    # DB에 영구히 남는 실수가 된다. 어긴 스킬은 통째로 비활성화한다(마이그레이션도, 명령도 없다).
+    for skill_name, violations in run_all_contract_checks(registry).items():
+        if violations:
+            registry.disable(skill_name, "계약 검사 실패: " + "; ".join(violations))
     for skill_dir, reason in registry.failures().items():
         logger.warning("skill disabled: %s (%s)", skill_dir, reason)
 

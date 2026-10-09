@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 import msgspec
@@ -27,6 +28,10 @@ VALID_CATEGORIES: frozenset[str] = frozenset(
     }
 )
 VALID_GAMES: frozenset[str] = frozenset({"chunithm", "common"})
+
+# 00-core.md: name은 "소문자, 숫자, 하이픈"이고 64자 이내다.
+MAX_NAME_LENGTH = 64
+_NAME_RE = re.compile(rf"[a-z0-9-]{{1,{MAX_NAME_LENGTH}}}")
 
 
 class DefinedTag(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
@@ -75,6 +80,12 @@ def parse_manifest(text: str) -> SkillManifest:
     except msgspec.ValidationError as exc:
         raise ManifestError(f"manifest 검증 실패: {exc}") from exc
 
+    if not _NAME_RE.fullmatch(manifest.name):
+        # 이름은 도구 이름의 접두사가 되고, 슬래시 콜백 이름을 만드는 코드 생성(core/slash.py)까지
+        # 흘러간다. 여기서 막아야 이상한 이름 하나가 봇 전체 기동을 깨뜨리지 않는다.
+        raise ManifestError(
+            f"name '{manifest.name}'은 소문자, 숫자, 하이픈만 쓸 수 있다(1~{MAX_NAME_LENGTH}자)"
+        )
     if manifest.category not in VALID_CATEGORIES:
         raise ManifestError(
             f"category '{manifest.category}'는 허용된 분류가 아니다: {sorted(VALID_CATEGORIES)}"
