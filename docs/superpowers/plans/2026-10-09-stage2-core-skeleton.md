@@ -2730,7 +2730,7 @@ git commit -m "core: add skill registry with manifest/code validation, _template
 
 **Interfaces:**
 - Consumes: `core.schema.build_arg_schema`, `core.resolvers.ResolverRegistry`, `core.permissions.{check_tags, describe_lock, TagRequirement, TagProvider}`, `core.decorators.ToolSpec`, `core.tool_types.{ToolContext, ToolResult}`
-- Produces: `ExecutionOutcome(result: ToolResult | None, needs_confirm: bool, confirm_token: str | None)`, `ToolExecutor(resolvers, tag_provider, tag_definitions)`(`await invoke(spec, ctx, raw_args, *, bulk=False) -> ExecutionOutcome`, `await confirm(token, *, confirmed: bool) -> ToolResult`). Task 13(slash)이 이 실행기를 통해 모든 슬래시 호출을 처리한다.
+- Produces: `ExecutionOutcome(result: ToolResult | None, needs_confirm: bool, confirm_token: str | None)`, `ToolExecutor(resolvers, tag_provider, tag_definitions)`(`await invoke(spec, ctx, raw_args, *, skill_tags=None, skill_tags_any=None) -> ExecutionOutcome`, `await confirm(token, *, confirmed: bool) -> ToolResult`, 읽기 전용 프로퍼티 `tag_provider`). Task 13(slash)이 이 실행기를 통해 모든 슬래시 호출을 처리하고, Task 15(bot.py)가 `executor.tag_provider`로 디스코드 클라이언트와 같은 태그 제공자를 공유한다.
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -2949,6 +2949,11 @@ class ToolExecutor:
         self._tag_provider = tag_provider
         self._tag_definitions = tag_definitions
         self._pending: dict[str, _PendingConfirm] = {}
+
+    @property
+    def tag_provider(self) -> TagProvider:
+        """슬래시 콜백(core/slash.py)이 실행기와 같은 태그 제공자를 공유하기 위해 쓴다."""
+        return self._tag_provider
 
     async def invoke(
         self,
@@ -3584,7 +3589,7 @@ from discord import app_commands
 from core.config import CoreConfig, load_config
 from core.executor import ToolExecutor
 from core.migrations import run_migrations
-from core.permissions import InMemoryTagProvider
+from core.permissions import InMemoryTagProvider, TagProvider
 from core.registry import SkillRegistry
 from core.resolvers import ResolverRegistry
 from core.slash import attach_to_tree, build_slash_plan
@@ -3596,7 +3601,7 @@ class YuniClient(discord.Client):
     def __init__(self, *, intents: discord.Intents, test_guild_id: int | None) -> None:
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
-        self.tag_provider = InMemoryTagProvider()
+        self.tag_provider: TagProvider  # build_client()이 실행기와 같은 인스턴스로 채운다
         self._test_guild_id = test_guild_id
 
     async def setup_hook(self) -> None:
@@ -3632,7 +3637,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry]:
     intents = discord.Intents.default()
     intents.message_content = True
     client = YuniClient(intents=intents, test_guild_id=config.test_guild_id)
-    client.tag_provider = executor._tag_provider  # type: ignore[attr-defined]  # 실행기와 같은 임시 태그 제공자를 공유한다
+    client.tag_provider = executor.tag_provider  # 실행기와 같은 임시 태그 제공자를 공유한다
 
     plan = build_slash_plan(registry.tool_specs())
     attach_to_tree(client.tree, plan, executor=executor)
