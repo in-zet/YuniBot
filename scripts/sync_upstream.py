@@ -62,16 +62,16 @@ def run(cmd: list[str], cwd: Path | None = None) -> str:
 
 
 def clone_upstream(tmp: Path, ref: str | None) -> str:
-    run(["git", "clone", UPSTREAM_URL, str(tmp)])
+    _ = run(["git", "clone", UPSTREAM_URL, str(tmp)])
 
     if ref is not None:
-        run(["git", "checkout", ref], cwd=tmp)
+        _ = run(["git", "checkout", ref], cwd=tmp)
 
     return run(["git", "rev-parse", "HEAD"], cwd=tmp).strip()
 
 
 def apply_patches(tmp: Path) -> list[str]:
-    applied = []
+    applied: list[str] = []
 
     for patch in sorted(PATCHES_DIR.glob("*.patch")):
         check = subprocess.run(
@@ -90,7 +90,7 @@ def apply_patches(tmp: Path) -> list[str]:
             )
             raise RuntimeError(msg)
 
-        run(["git", "apply", str(patch)], cwd=tmp)
+        _ = run(["git", "apply", str(patch)], cwd=tmp)
         applied.append(patch.name)
 
     return applied
@@ -105,13 +105,13 @@ def discover_import_closure(tmp: Path) -> list[Path]:
     finally:
         sys.path.remove(str(tmp))
 
-    files = []
+    files: list[Path] = []
 
     for name, module in sorted(sys.modules.items()):
         if not name.startswith("chuni_penguin"):
             continue
 
-        file = getattr(module, "__file__", None)
+        file: str | None = getattr(module, "__file__", None)
 
         if file is None:
             continue
@@ -132,9 +132,9 @@ def vendor(tmp: Path, files: list[Path]) -> None:
         src = tmp / rel_path
         dst = THIRD_PARTY_DIR.parent / rel_path
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
+        _ = shutil.copy2(src, dst)
 
-    shutil.copy2(tmp / "LICENSE", THIRD_PARTY_DIR / "UPSTREAM_LICENSE")
+    _ = shutil.copy2(tmp / "LICENSE", THIRD_PARTY_DIR / "UPSTREAM_LICENSE")
 
 
 def write_upstream_file(commit: str, applied_patches: list[str]) -> None:
@@ -146,21 +146,22 @@ def write_upstream_file(commit: str, applied_patches: list[str]) -> None:
         *[f"  - third_party/patches/{name}" for name in applied_patches],
         "",
     ]
-    (THIRD_PARTY_DIR / "UPSTREAM").write_text("\n".join(lines), encoding="utf-8")
+    _ = (THIRD_PARTY_DIR / "UPSTREAM").write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    _ = parser.add_argument(
         "--ref",
         default=None,
         help="Upstream commit to pin to (default: latest default branch HEAD)",
     )
     args = parser.parse_args()
+    ref: str | None = args.ref  # pyright: ignore[reportAny]
 
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
-        commit = clone_upstream(tmp, args.ref)
+        commit = clone_upstream(tmp, ref)
         applied_patches = apply_patches(tmp)
         files = discover_import_closure(tmp)
         vendor(tmp, files)
