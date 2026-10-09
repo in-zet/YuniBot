@@ -15,5 +15,4 @@ RUN uv sync --locked --no-dev
 
 ENV PYTHONPATH=/app/third_party
 
-# 1단계 placeholder: 2단계에서 core/의 실제 엔트리포인트로 바꾼다.
-CMD ["sleep", "infinity"]
+CMD ["uv", "run", "python", "-m", "core.bot"]
