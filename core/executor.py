@@ -90,7 +90,10 @@ class ToolExecutor:
                 try:
                     resolver = self._resolvers.get(arg.py_type)
                     resolved[arg.name] = await resolver.resolve(raw_value, ctx)
-                except ResolutionError as exc:
+                except (ResolutionError, KeyError) as exc:
+                    # KeyError: ResolverRegistry.get()이 등록되지 않은 타입에 대해 던진다.
+                    # 해석 실패도, 해석기 미등록도 모두 "해석 실패"로 같이 묶어 에러 ToolResult로
+                    # 돌려준다. 어느 쪽이든 날것 예외를 호출자(슬래시/LLM 루프)에 흘려보내지 않는다.
                     return ExecutionOutcome(result=ToolResult(error=str(exc)))
             else:
                 resolved[arg.name] = raw_value

@@ -6,7 +6,7 @@ from core.executor import ToolExecutor
 from core.manifest import DefinedTag
 from core.permissions import InMemoryTagProvider
 from core.resolvers import ResolutionError, ResolverRegistry
-from core.tool_types import ChartRef, ToolContext, ToolResult
+from core.tool_types import ArcadeRef, ChartRef, ToolContext, ToolResult
 
 
 @tool(slash="보더")
@@ -31,6 +31,22 @@ async def hidden_tool(ctx: ToolContext) -> ToolResult:
 async def dangerous(ctx: ToolContext) -> ToolResult:
     """확인이 필요한 도구."""
     return ToolResult(data={"done": True})
+
+
+_risky_call_count: list[int] = []
+
+
+@tool(slash="위험2", mutates=True, confirm="always")
+async def risky(ctx: ToolContext) -> ToolResult:
+    """실제 호출 여부를 횟수로 증명하기 위한, 확인이 필요한 도구."""
+    _risky_call_count.append(1)
+    return ToolResult(data={"done": True})
+
+
+@tool(slash="해석기없음")
+async def no_resolver_tool(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
+    """ResolverRegistry에 해석기가 등록되지 않은 표준 타입을 쓰는 도구."""
+    return ToolResult(data={"arcade": arcade})
 
 
 @tool(slash="터짐")
@@ -230,3 +246,59 @@ async def test_skill_and_tool_tags_any_are_independent_conditions() -> None:
     )
     assert outcome_both.result is not None
     assert outcome_both.result.error is None
+
+
+@pytest.mark.asyncio
+async def test_invoke_missing_resolver_becomes_error_result() -> None:
+    """ref-type 인자의 해석기가 아예 등록되지 않았으면(ResolverRegistry.get()이 던지는
+    KeyError) 예외가 그대로 터지지 않고 에러 ToolResult로 와야 한다. invoke()는 호출자에게
+    절대 날것 예외를 흘려보내지 않는다는 보장이 해석 단계에도 적용돼야 한다."""
+    executor, _ = _make_executor()  # ArcadeRef용 해석기는 등록돼 있지 않다
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(
+        no_resolver_tool.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+        ctx,
+        {"arcade": "아무거나"},
+    )
+
+    assert outcome.result is not None
+    assert outcome.result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_invoke_confirm_declined_does_not_call_function() -> None:
+    """미승인(confirmed=False)이면 실제 도구 함수가 호출되지 않는다는 것을
+    호출 횟수로 직접 증명한다(result is None이라는 구조만으로는 부족하다)."""
+    before = len(_risky_call_count)
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(risky.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
+    assert outcome.needs_confirm is True
+    assert len(_risky_call_count) == before  # invoke()만으로는 아직 호출되지 않는다
+
+    assert outcome.confirm_token is not None
+    result = await executor.confirm(outcome.confirm_token, confirmed=False)
+
+    assert len(_risky_call_count) == before  # 거절해도 호출되지 않는다
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_invoke_confirm_after_decline_cannot_be_retried_as_confirmed() -> None:
+    """한 번 거절한 토큰으로 다시 confirmed=True를 보내도(토큰 재사용) 도구가
+    실행돼서는 안 된다 — 거절 시점에 토큰이 이미 소비된다."""
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(dangerous.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
+    assert outcome.confirm_token is not None
+    token = outcome.confirm_token
+
+    declined = await executor.confirm(token, confirmed=False)
+    assert declined.error is not None
+
+    retried = await executor.confirm(token, confirmed=True)
+    assert retried.error is not None
+    assert retried.data == {}
