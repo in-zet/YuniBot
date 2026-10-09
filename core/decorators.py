@@ -71,6 +71,11 @@ def _require_docstring(fn: Callable[..., Any]) -> None:
         raise DecoratorError(f"'{fn.__name__}'에 docstring이 없다. 도구 설명은 docstring에서 나온다")
 
 
+def _require_async(fn: Callable[..., Any]) -> None:
+    if not inspect.iscoroutinefunction(fn):
+        raise DecoratorError(f"'{fn.__name__}'은 async 함수여야 한다")
+
+
 def _require_tool_context_first_param(fn: Callable[..., Any]) -> None:
     params = list(inspect.signature(fn).parameters.values())
     if not params or params[0].name != "ctx":
@@ -89,6 +94,7 @@ def tool(
     cost: CostTier = "light",
 ) -> Callable[[F], F]:
     def deco(fn: F) -> F:
+        _require_async(fn)
         _require_docstring(fn)
         _require_tool_context_first_param(fn)
         fn.__yuni_tool__ = ToolSpec(  # pyright: ignore[reportFunctionMemberAccess]
@@ -115,6 +121,7 @@ def slash_only(
     confirm: ConfirmMode = "never",
 ) -> Callable[[F], F]:
     def deco(fn: F) -> F:
+        _require_async(fn)
         _require_docstring(fn)
         _require_tool_context_first_param(fn)
         fn.__yuni_slash_only__ = SlashOnlySpec(  # pyright: ignore[reportFunctionMemberAccess]
@@ -133,6 +140,7 @@ def slash_only(
 
 def on(event_name: str) -> Callable[[F], F]:
     def deco(fn: F) -> F:
+        _require_async(fn)
         _require_tool_context_first_param(fn)
         fn.__yuni_on__ = EventHandlerSpec(fn=fn, event_name=event_name)  # pyright: ignore[reportFunctionMemberAccess]
         return fn
@@ -142,6 +150,7 @@ def on(event_name: str) -> Callable[[F], F]:
 
 def schedule(cron: str, *, catch_up: bool = False) -> Callable[[F], F]:
     def deco(fn: F) -> F:
+        _require_async(fn)
         _require_tool_context_first_param(fn)
         fn.__yuni_schedule__ = ScheduleSpec(fn=fn, cron=cron, catch_up=catch_up)  # pyright: ignore[reportFunctionMemberAccess]
         return fn
@@ -151,6 +160,7 @@ def schedule(cron: str, *, catch_up: bool = False) -> Callable[[F], F]:
 
 def prompt_context(*, max_chars: int = 300) -> Callable[[F], F]:
     def deco(fn: F) -> F:
+        _require_async(fn)
         _require_tool_context_first_param(fn)
         fn.__yuni_prompt_context__ = PromptContextSpec(fn=fn, max_chars=max_chars)  # pyright: ignore[reportFunctionMemberAccess]
         return fn

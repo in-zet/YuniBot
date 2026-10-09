@@ -19,7 +19,7 @@ async def lookup(ctx: ToolContext, name: str) -> ToolResult:
 
 
 @on("chunithm.sync.completed")
-async def on_sync(ctx: ToolContext, payload: dict) -> None:
+async def on_sync(ctx: ToolContext, payload: dict[str, object]) -> None:
     """동기화 완료 이벤트를 받는다."""
 
 
@@ -41,7 +41,7 @@ async def start_demo(ctx: ToolContext) -> ToolResult:
 
 
 def test_tool_spec_attached() -> None:
-    spec = lookup.__yuni_tool__
+    spec = lookup.__yuni_tool__  # pyright: ignore[reportFunctionMemberAccess]
     assert spec.slash == "보더"
     assert spec.tags == ["chunithm-synced"]
     assert spec.cost == "network"
@@ -53,11 +53,13 @@ def test_collect_specs_groups_everything() -> None:
     import types
 
     module = types.ModuleType("fake_skill")
-    module.lookup = lookup
-    module.on_sync = on_sync
-    module.daily = daily
-    module.hint = hint
-    module.start_demo = start_demo
+    module.__dict__.update(
+        lookup=lookup,
+        on_sync=on_sync,
+        daily=daily,
+        hint=hint,
+        start_demo=start_demo,
+    )
 
     code = collect_specs(module)
 
@@ -67,6 +69,46 @@ def test_collect_specs_groups_everything() -> None:
     assert code.schedules[0].catch_up is True
     assert [spec.max_chars for spec in code.prompt_contexts] == [200]
     assert [spec.slash for spec in code.slash_only_tools] == ["연습 체험시작"]
+
+
+def test_collect_specs_ignores_bystanders() -> None:
+    import types
+
+    def helper(x: int) -> int:
+        return x
+
+    async def plain_async(ctx: ToolContext) -> None:
+        return None
+
+    module = types.ModuleType("noisy_skill")
+    module.__dict__.update(
+        lookup=lookup,
+        on_sync=on_sync,
+        daily=daily,
+        hint=hint,
+        start_demo=start_demo,
+        helper=helper,
+        plain_async=plain_async,
+        VERSION=3,
+        TABLE={"a": 1},
+    )
+
+    code = collect_specs(module)
+
+    assert [spec.fn.__name__ for spec in code.tools] == ["lookup"]
+    assert [spec.fn.__name__ for spec in code.event_handlers] == ["on_sync"]
+    assert [spec.fn.__name__ for spec in code.schedules] == ["daily"]
+    assert [spec.fn.__name__ for spec in code.prompt_contexts] == ["hint"]
+    assert [spec.fn.__name__ for spec in code.slash_only_tools] == ["start_demo"]
+
+
+def test_tool_requires_async_function() -> None:
+    with pytest.raises(DecoratorError, match="async"):
+
+        @tool(slash="실패3")  # pyright: ignore[reportArgumentType]
+        def sync_fn(ctx: ToolContext) -> ToolResult:
+            """동기 함수."""
+            return ToolResult(data={})
 
 
 def test_tool_requires_docstring() -> None:
