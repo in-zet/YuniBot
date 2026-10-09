@@ -101,14 +101,22 @@ def _build_callback_source(fn_name: str, args: list[ArgSpec]) -> str:
     하나씩 있는 `async def` 소스를 직접 만들어 `exec`한다.
 
     인자 이름은 전부 신뢰하는 스킬 코드의 실제 함수 파라미터 이름에서 온다(사용자 입력이
-    아니다). 그래도 생성한 소스에 그대로 꽂아 넣기 전에 식별자인지 다시 확인한다.
+    아니다). 그래도 생성한 소스에 그대로 꽂아 넣기 전에 식별자인지, 그리고 이 함수가 내부적으로
+    예약한 이름(`interaction` 파라미터 자신을 포함해 전부 `__`로 시작한다)과 겹치지 않는지
+    다시 확인한다. 도구 인자 이름이 `interaction`이어도 괜찮도록 생성한 함수의 실제 첫
+    파라미터는 `__interaction`으로 둔다(다른 내부 식별자처럼 전부 `__` 접두어를 쓴다) — 그래서
+    도구 인자 이름이 `__`로 시작하는 경우만 막으면 이 함수가 쓰는 어떤 내부 이름과도 겹칠 수
+    없다(`__options`, `__dispatch`, `__Interaction`, `__type_*`, `__default_*`, `__interaction`).
     """
-    params = ["interaction: __Interaction"]
+    for arg in args:
+        if not arg.name.isidentifier() or keyword.iskeyword(arg.name) or arg.name.startswith("__"):
+            reason = "식별자가 아니거나, 예약어이거나, '__'로 시작해 내부 이름과 겹친다"
+            raise SlashPlanError(f"도구 인자 이름 '{arg.name}'은 슬래시 콜백에 쓸 수 없다({reason})")
+
+    params = ["__interaction: __Interaction"]
     if args:
         params.append("*")
     for arg in args:
-        if not arg.name.isidentifier() or keyword.iskeyword(arg.name):
-            raise SlashPlanError(f"도구 인자 이름 '{arg.name}'은 유효한 식별자가 아니다")
         type_ref = f"__type_{arg.name}"
         if arg.required:
             params.append(f"{arg.name}: {type_ref}")
@@ -120,7 +128,7 @@ def _build_callback_source(fn_name: str, args: list[ArgSpec]) -> str:
     source = (
         f"async def {fn_name}({', '.join(params)}) -> None:\n"
         f"{body}"
-        f"    await __dispatch(interaction, __options)\n"
+        f"    await __dispatch(__interaction, __options)\n"
     )
     return source
 

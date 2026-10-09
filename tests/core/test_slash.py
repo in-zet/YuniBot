@@ -30,6 +30,12 @@ async def lookup(ctx: ToolContext, song: str, count: int = 3) -> ToolResult:
     return ToolResult(data={"song": song, "count": count})
 
 
+@tool(slash="충돌")
+async def arg_named_interaction(ctx: ToolContext, interaction: str) -> ToolResult:
+    """도구 인자 이름이 생성한 콜백의 내부 예약 이름(`interaction`)과 고의로 겹친다."""
+    return ToolResult(data={"interaction": interaction})
+
+
 class _FakeSkill:
     def __init__(self, name: str) -> None:
         self.manifest = type("M", (), {"name": name, "tags": [], "tags_any": []})()
@@ -103,10 +109,59 @@ def test_attach_to_tree_builds_real_named_options_for_argument_tool() -> None:
     command = tree.get_command("조회")
     assert isinstance(command, discord.app_commands.Command)
 
-    params = command._params
-    assert set(params) == {"song", "count"}
-    assert params["song"].required is True
-    assert params["song"].type is discord.AppCommandOptionType.string
-    assert params["count"].required is False
-    assert params["count"].type is discord.AppCommandOptionType.integer
-    assert params["count"].default == 3
+    names = {p.name for p in command.parameters}
+    assert names == {"song", "count"}
+
+    song = command.get_parameter("song")
+    count = command.get_parameter("count")
+    assert song is not None
+    assert count is not None
+    assert song.required is True
+    assert song.type is discord.AppCommandOptionType.string
+    assert count.required is False
+    assert count.type is discord.AppCommandOptionType.integer
+    assert count.default == 3
+
+
+def test_attach_to_tree_handles_tool_arg_named_interaction_without_crashing() -> None:
+    """생성한 콜백의 "진짜" interaction 파라미터가 그냥 `interaction`이라는 이름이면, 도구 인자
+    이름도 우연히 `interaction`일 때 `compile()`이
+    `SyntaxError: duplicate argument 'interaction' in function definition`을 던진다 — 봇 시작을
+    낮은 수준의 알아보기 힘든 에러로 깨뜨린다. 고친 방식은 생성한 콜백의 interaction 파라미터
+    이름 자체를 다른 내부 이름들처럼 `__interaction`으로 예약해 두어서, 도구 인자 이름이
+    `interaction`이어도 전혀 겹치지 않는다 — 그래서 이 입력은 더 이상 막을 필요가 없고 그냥
+    정상적으로 동작해야 한다(SyntaxError도, SlashPlanError도 나지 않는다)."""
+    from core.executor import ToolExecutor
+    from core.permissions import InMemoryTagProvider
+    from core.resolvers import ResolverRegistry
+    from core.slash import attach_to_tree
+
+    client = discord.Client(intents=discord.Intents.none())
+    tree = discord.app_commands.CommandTree(client)
+    plan = build_slash_plan(
+        [(_FakeSkill("x"), arg_named_interaction.__yuni_tool__)]  # pyright: ignore[reportFunctionMemberAccess, reportArgumentType]
+    )
+    executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
+
+    attach_to_tree(tree, plan, executor=executor)
+
+    command = tree.get_command("충돌")
+    assert isinstance(command, discord.app_commands.Command)
+    param = command.get_parameter("interaction")
+    assert param is not None
+    assert param.required is True
+    assert param.type is discord.AppCommandOptionType.string
+
+
+def test_build_callback_source_rejects_dunder_prefixed_arg_names() -> None:
+    """`__options`처럼 이 모듈이 내부적으로 쓰는 이름과 똑같은 도구 인자는 생성한 함수 본문에서
+    자기 자신을 가리키게 되어(예: `__options = {}` 뒤 `__options['__options'] = __options`) 전달된
+    실제 값이 조용히 사라진다(크래시 없이 틀린 값). `_build_callback_source`가 `__`로 시작하는
+    인자 이름을 전부 막아서 이 경우를 포함한 어떤 내부 이름과의 충돌도 미리 거른다."""
+    from core.schema import ArgSpec
+    from core.slash import _build_callback_source  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(SlashPlanError, match="__options"):
+        _build_callback_source(
+            "fn", [ArgSpec(name="__options", py_type=str, required=True)]
+        )
