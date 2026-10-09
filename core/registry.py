@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.decorators import SkillCode, SlashOnlySpec, ToolSpec, collect_specs
-from core.manifest import DefinedTag, ManifestError, SkillManifest, parse_manifest
-from core.schema import SchemaBuildError, build_arg_schema
+from core.manifest import DefinedTag, SkillManifest, parse_manifest
+from core.schema import build_arg_schema
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,8 @@ class SkillRegistry:
         for skill_dir in candidates:
             try:
                 manifest, code = self._load_one(skill_dir)
-            except (ManifestError, SchemaBuildError, _SkillLoadError) as exc:
+            except Exception as exc:  # noqa: BLE001 - 한 스킬의 어떤 실패도 레지스트리 전체를 죽이면 안 된다
+                logger.warning("스킬 '%s' 로드 실패: %s", skill_dir.name, exc)
                 self._failures[skill_dir.name] = str(exc)
                 continue
             parsed.append((skill_dir, manifest, code))
@@ -139,6 +140,13 @@ class SkillRegistry:
                 f"manifest.listens에 없는 이벤트를 구독한다: {', '.join(sorted(undeclared_listens))}"
             )
 
+        orphan_listens = set(manifest.listens) - declared_events
+        if orphan_listens:
+            raise _SkillLoadError(
+                f"manifest.listens에 선언했지만 처리하는 @on 핸들러가 없다: "
+                f"{', '.join(sorted(orphan_listens))}"
+            )
+
         return manifest, code
 
     def _validate_cross_skill(
@@ -206,6 +214,7 @@ class SkillRegistry:
                             f"슬래시 명령 '{root}'이 단독 명령과 그룹으로 동시에 쓰였다 "
                             f"(이미 '{root_owner[root]}' 스킬이 다른 형태로 등록함)",
                         )
+                        self._purge_owner_entries(skill_name, path_owner, root_owner, root_is_group)
                         break
                 else:
                     root_owner.setdefault(root, skill_name)
@@ -216,8 +225,24 @@ class SkillRegistry:
                         skill_name,
                         f"슬래시 경로 '{' '.join(path)}'가 '{path_owner[path]}' 스킬과 겹친다",
                     )
+                    self._purge_owner_entries(skill_name, path_owner, root_owner, root_is_group)
                     break
                 path_owner.setdefault(path, skill_name)
+
+    @staticmethod
+    def _purge_owner_entries(
+        skill_name: str,
+        path_owner: dict[tuple[str, ...], str],
+        root_owner: dict[str, str],
+        root_is_group: dict[str, bool],
+    ) -> None:
+        # 이 스킬이 비활성화되기 전까지 등록해 둔 소유권을 모두 지운다. 지우지 않으면 나중에 로드되는
+        # 스킬이 "이미 존재하지 않는 스킬"과 충돌한다고 잘못 판정된다.
+        for path in [p for p, owner in path_owner.items() if owner == skill_name]:
+            del path_owner[path]
+        for root in [r for r, owner in root_owner.items() if owner == skill_name]:
+            del root_owner[root]
+            root_is_group.pop(root, None)
 
     def _disable(self, skill_name: str, reason: str) -> None:
         skill = self._loaded.pop(skill_name, None)
