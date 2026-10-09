@@ -40,7 +40,7 @@ Oct 9, 2026 · @astrove
 **chuni-penguin** ([저장소](https://github.com/beer-psi/chuni-penguin))
 
 - CHUNITHM-NET 접속과 파싱은 `chuni_penguin/adapters/`에 분리되어 있다. `NetworkAdapter` 추상 클래스가 프로필, 최근 기록, 베스트, 레이팅 내역, 코스 기록 등을 비동기 함수로 제공한다.
-- 실제 구현인 `ChunithmNetAdapter`는 httpx와 selectolax만 쓰고 discord.py를 가져오지 않는다. 다만 같은 패키지의 `types`, `constants`, `utils`에는 의존한다. 원본은 Python 3.14 이상을 요구하고, 시드 데이터에 노트 수, 채보 제작자, sdvx.in 매핑(수록 중인 MAS·ULT 1,672채보 중 1,670개), 곡별 위키 문서명이 들어 있다. 한국어 별칭은 없다.
+- 실제 구현인 `ChunithmNetAdapter`는 httpx와 selectolax로 HTTP와 파싱을 하지만, `discord.utils.MISSING` 같은 사소한 참조로 discord.py를 가져오긴 한다(우리도 쓰는 라이브러리라 문제는 아니다). 같은 패키지의 `types`, `constants`, `utils`, `calculation`에 의존한다. 점수를 돌려주는 메서드 대부분은 원래 chuni-penguin 자신의 SQLAlchemy DB(곡 메타데이터 보강, 레이팅 계산, PB upsert, 숨김곡 보정)에 묶여 있었는데, 그 보강은 우리의 `songdb`/`records` 서비스가 대신하기로 했으므로 1단계에서 그 결합 부분만 `third_party/patches/`의 작은 패치로 떼어냈다. 또 다른 패치 하나는 전송 계층 문제를 고친다: 원본이 쓰는 `httpx_aiohttp.AIOHTTPTransport`는 그들 저장소 안의 로컬 포크(`packages/httpx-aiohttp`, 버전 `0.1.0`)에만 있고, PyPI에 공개된 `httpx-aiohttp` 패키지는 같은 클래스를 `AiohttpTransport`로 부른다 — 이 차이는 실제로 어댑터를 생성해 보는 테스트가 아니면 안 드러난다(파싱만 테스트해서는 못 잡았다). 두 패치의 상세는 `third_party/patches/README.md`에 있다. 패치 후에는 SQLAlchemy, structlog, chuni-penguin 자신의 설정 파일(`bot.ini`)이 전부 필요 없다. 원본은 Python 3.14 이상을 요구하고, 선택적 네이티브(Rust) 모듈(`penguin-native`)은 음성 기능에만 쓰여 필수가 아니다. 시드 데이터(`database/seeds/songs.json`)는 SQLAlchemy와 무관한 순수 JSON 리스트라 그대로 데이터로 쓸 수 있고, 노트 수, 채보 제작자, sdvx.in 매핑(수록 중인 MAS·ULT 1,672채보 중 1,670개), 곡별 위키 문서명이 들어 있다. 한국어 별칭은 없다.
 - 디스코드 기능은 `cogs/` 아래 21개 묶음으로 나뉘고, `cogs/__init__.py`의 `COG_LIST` 한 곳에서 불러온다.
 - 라이선스는 BSD Zero Clause(0BSD)다. 복사, 수정, 재배포에 조건이 없다.
 
@@ -638,10 +638,10 @@ yuni-bot/
 
 | 항목 | 상태 | 대응 |
 | --- | --- | --- |
-| 원본 `adapters`가 의존하는 파일 범위 | `types`, `constants`, `utils` 의존까지만 확인 | 1단계에서 전부 추적. 그 파일들이 다시 discord에 의존하면 그 부분만 우리 쪽에서 다시 쓴다. 선택적 네이티브 모듈(Rust)이 필수인지도 확인한다 |
+| 원본 `adapters`가 의존하는 파일 범위 | 확인됨 (1단계). `types`/`constants`/`utils`/`calculation`까지 필요. 점수 조회 메서드는 chuni-penguin 자신의 SQLAlchemy DB에 묶여 있어 `third_party/patches/`의 패치로 그 부분만 제거했다. 네이티브(Rust) 모듈은 음성 기능 전용이라 불필요 | 패치가 업스트림 변경으로 깨지면 `sync_upstream.py`가 실패하도록 했다(실제 검증함). 그때 사람이 다시 diff를 맞춘다 |
 | 원본 구조가 바뀌면 `sync_upstream.py`가 깨짐 | 예상되는 위험 | 가져올 경로 목록을 한 곳에 두고, 가져온 뒤 계약 테스트와 파서 테스트를 돌린다 |
 | 국제판 버전업 | 일본판은 이미 다음 버전 가동 중, 국제판 시기는 미정 | 버전업 직후 파서와 신곡 기준일을 점검하고 원본 어댑터 수정을 가져온다. `chunithm-updates`가 관리자에게 알린다 |
-| 원본 시드를 데이터로만 쓸 수 있는지 | 확인 못 함 | 4단계에서 시드 형식을 보고 읽기 코드를 새로 쓸지 정한다 |
+| 원본 시드를 데이터로만 쓸 수 있는지 | 확인됨 (1단계). `database/seeds/songs.json`은 SQLAlchemy와 무관한 순수 JSON 리스트라 그대로 데이터로 읽어 쓸 수 있다 | 4단계에서 이 형식으로 `songdb` 읽기 코드를 쓴다 |
 | 레이팅·오버파워 계산이 CHUNITHM-NET과 맞는지 | 확인 못 함 | `records`가 동기화마다 대조하고, 어긋나면 리포트에 표시한다 |
 | `open_skill` 왕복의 지연과 비용 | 측정 전 | 6단계에서 `instructions`와 `full` 모드를 비교한다 |
 | Gemini가 안정적으로 고르는 도구 수 | 문서에서 찾지 못함 | 위와 같은 평가로 잰다 |

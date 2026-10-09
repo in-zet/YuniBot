@@ -24,3 +24,11 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["third_party"]
+
+[tool.ruff]
+# third_party/는 가져온 코드 그대로다. 린트는 우리가 쓴 코드만 본다.
+exclude = ["third_party"]
+
+[tool.basedpyright]
+exclude = ["third_party"]
+extraPaths = ["third_party"]

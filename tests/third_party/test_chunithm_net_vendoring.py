@@ -15,6 +15,7 @@ def test_parses_saved_player_data_page():
     profile = parse_player_data(LexborHTMLParser(html))
 
     assert profile.username
+    assert profile.level is not None
     assert profile.level > 0
 
 

@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 UPSTREAM_URL = "https://github.com/beer-psi/chuni-penguin.git"
@@ -77,6 +77,7 @@ def apply_patches(tmp: Path) -> list[str]:
         check = subprocess.run(
             ["git", "apply", "--check", str(patch)],
             cwd=tmp,
+            check=False,
             capture_output=True,
             text=True,
         )
@@ -140,7 +141,7 @@ def write_upstream_file(commit: str, applied_patches: list[str]) -> None:
     lines = [
         f"source: {UPSTREAM_URL}",
         f"commit: {commit}",
-        f"synced_at: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        f"synced_at: {datetime.now(UTC).isoformat(timespec='seconds')}",
         "patches:",
         *[f"  - third_party/patches/{name}" for name in applied_patches],
         "",

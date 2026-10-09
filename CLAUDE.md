@@ -25,7 +25,7 @@
 - 스킬은 다른 스킬을 import하지 않는다. 스킬끼리는 서비스와 이벤트로만 주고받는다.
 - 스킬은 manifest의 `services`에 적은 서비스만 `ctx`로 쓴다. 다른 스킬의 테이블과 설정은 읽지 않는다.
 - 새 스킬은 `skills/_template/`을 복사해 만든다. 스킬을 더하려고 코어나 다른 스킬을 고쳐야 한다면, 규격이 모자라다는 뜻이므로 규격부터 고친다.
-- `third_party/`는 직접 고치지 않는다. 원본이 바뀌면 `scripts/sync_upstream.py`로 통째 교체하고, `UPSTREAM` 파일에 원본 커밋을 남긴다.
+- `third_party/`는 직접 고치지 않는다. 원본이 바뀌면 `scripts/sync_upstream.py`로 통째 교체하고, `UPSTREAM` 파일에 원본 커밋을 남긴다. 꼭 필요한 작은 동작 차이는 `third_party/patches/*.patch`로 보관해 `sync_upstream.py`가 교체 후 자동 적용하고, 패치가 더 안 맞으면 스크립트가 실패한다.
 
 ## DB와 마이그레이션
 
@@ -76,14 +76,18 @@
 
 ## 명령
 
-1단계에서 실제로 돌려 보고 이 절을 채운다. 예상:
+1단계에서 실제로 돌려서 확인했다(x86-64 리눅스, 미니 PC와 같은 아키텍처).
 
 ```bash
-uv sync                                      # 의존성 설치
-uv run pytest                                # 테스트
-uv run ruff check . && uv run basedpyright   # 린트와 타입 검사
-docker compose up -d --build                 # 미니 PC 배포 (x86-64 우분투)
+uv sync                                                    # 의존성 설치
+uv run pytest                                               # 테스트
+uv run ruff check .                                          # 린트
+uv run basedpyright                                          # 타입 검사
+uv run python3 scripts/sync_upstream.py [--ref <commit>]     # chuni-penguin 재동기화 (버전 고정 시 --ref)
+docker compose up -d --build                                 # 기동
 ```
+
+`ruff`와 `basedpyright`는 `third_party/`를 보지 않는다(가져온 코드라 우리가 고칠 것이 아니다. `pyproject.toml`의 `[tool.ruff]`/`[tool.basedpyright]`에서 제외했다). 테스트와 타입 검사가 `third_party/`의 vendored 코드를 import하려면 `pythonpath`/`extraPaths`로 `third_party`를 추가 경로에 넣어야 한다(이미 설정됨).
 
 ## 스택
 
