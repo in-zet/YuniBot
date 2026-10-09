@@ -19,3 +19,12 @@ SQLAlchemy DB에 묶여 있다(곡 메타데이터 보강, 레이팅 계산, PB 
 패치 적용 후 `self.database`를 읽는 코드는 생성자(`chuni_penguin/adapters/base.py`)
 말고는 남지 않는다. 그래서 우리 쪽에서 `ChunithmNetAdapter(database=None, ...)`로
 생성해도 된다 — `database`는 저장만 되고 아무도 읽지 않는다.
+
+## 0002-chunithm-net-adapter-public-httpx-aiohttp-name.patch
+
+업스트림은 자기 저장소 안의 `packages/httpx-aiohttp/`(로컬 포크, 버전 `0.1.0`)를
+쓰는데, 그 포크의 전송 클래스 이름이 `AIOHTTPTransport`다. PyPI에 공개된
+`httpx-aiohttp`(우리가 쓰는 것, 0.1.1~0.2.0)는 같은 클래스를 `AiohttpTransport`로
+부른다 — 버전이 아니라 이름 자체가 다른 포크라 어느 PyPI 버전을 깔아도 못 맞춘다.
+이 패치는 그 참조 하나만 PyPI 쪽 이름으로 바꾼다. 생성자 시그니처(특히 `retries`
+키워드)는 호환된다.

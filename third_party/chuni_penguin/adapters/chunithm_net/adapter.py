@@ -113,7 +113,7 @@ class ChunithmNetAdapter(NetworkAdapter):
             timeout=httpx.Timeout(timeout=60.0),
             follow_redirects=True,
             event_hooks=event_hooks,
-            transport=httpx_aiohttp.AIOHTTPTransport(retries=5),
+            transport=httpx_aiohttp.AiohttpTransport(retries=5),
             headers={
                 # clients are recommended to update this user agent
                 "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/114.0",
