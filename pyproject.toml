@@ -1,0 +1,26 @@
+[project]
+name = "yunibot"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.14"
+dependencies = [
+    "aiolimiter~=1.2",
+    "aiosqlite>=0.21",
+    "discord-py~=2.7",
+    "hishel==0.1.3",
+    "httpx~=0.28.1",
+    "httpx-aiohttp>=0.2.0",
+    "msgspec~=0.20.0",
+    "platformdirs~=4.5",
+    "selectolax==0.4.10",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.2",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["third_party"]

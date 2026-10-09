@@ -1,0 +1,96 @@
+diff --git a/chuni_penguin/adapters/chunithm_net/adapter.py b/chuni_penguin/adapters/chunithm_net/adapter.py
+index a22a900..2f9c92b 100644
+--- a/chuni_penguin/adapters/chunithm_net/adapter.py
++++ b/chuni_penguin/adapters/chunithm_net/adapter.py
+@@ -14,10 +14,6 @@ from selectolax.lexbor import LexborHTMLParser
+ from chuni_penguin.adapters._hooks import raise_on_server_errors
+ from chuni_penguin.adapters.base import NetworkAdapter
+ from chuni_penguin.adapters.errors import AlreadyFriends, InvalidFriendCode
+-from chuni_penguin.adapters.utils import (
+-    calculate_ongeki_rating_breakdown,
+-    process_records,
+-)
+ from chuni_penguin.constants import CURRENT_CHUNITHM_VERSION, ChunithmVersion
+ from chuni_penguin.types import (
+     CourseRecord,
+@@ -141,26 +137,12 @@ class ChunithmNetAdapter(NetworkAdapter):
+         return LexborHTMLParser(resp.content, is_fragment=False)
+ 
+     async def _process_records[T: Score](self, records: Sequence[T]) -> list[T]:
+-        records = await process_records(
+-            self.database, self.discord_id, self.NAME, records
+-        )
+-        song_ids = [r.song.id for r in records]
+-        ult_song_ids = [
+-            r.song.id for r in records if r.chart.difficulty == Difficulty.ultima
+-        ]
+-
+-        if len(song_ids) > 0:
+-            await self.database.songs.set_available(song_ids, available=True)
+-            await self.database.charts.set_available(
+-                song_ids, available=True, is_ultima=False
+-            )
+-
+-        if len(ult_song_ids) > 0:
+-            await self.database.charts.set_available(
+-                ult_song_ids, available=True, is_ultima=True
+-            )
+-
+-        return records
++        # YUNIBOT PATCH (see third_party/patches/README.md): upstream hydrates
++        # records against chuni-penguin's own SQLAlchemy DB (song metadata,
++        # rating/overpower calc, personal-best upsert) and marks songs/charts
++        # "available" there. We never wire up that DB, so return the raw
++        # parsed records as-is; our own songdb/records services hydrate them.
++        return list(records)
+ 
+     @property
+     def _token(self):
+@@ -222,20 +204,10 @@ class ChunithmNetAdapter(NetworkAdapter):
+     async def _get_hidden_personal_bests(
+         self, level: str | None = None, difficulty: Difficulty | None = None
+     ):
+-        hidden_charts = await self.database.charts.get_hidden_on_chuninet(
+-            level=level, difficulty=difficulty
+-        )
+-        hidden_song_ids = {c.song_id for c in hidden_charts}
+-        pbs: list[PersonalBest] = []
+-
+-        for song_id in hidden_song_ids:
+-            # get the records for the hidden chart's song id
+-            hidden_records = await self.get_personal_bests_on_song(song_id)
+-
+-            # and insert it into our records, if a record is not already there
+-            pbs.extend(hidden_records)
+-
+-        return pbs
++        # YUNIBOT PATCH: upstream tracks which charts it has flagged hidden on
++        # CHUNITHM-NET in its own DB, then re-fetches PBs for those songs. We
++        # don't have that table, so there is nothing to add back here.
++        return []
+ 
+     async def get_personal_bests(
+         self,
+@@ -436,7 +408,11 @@ class ChunithmNetAdapter(NetworkAdapter):
+                 key=lambda x: new20_charts.index((x.song.id, x.chart.difficulty))
+             )
+ 
+-            hidden_songs = await self.database.songs.get_hidden_on_chuninet()
++            # YUNIBOT PATCH: upstream looks up songs it has flagged hidden
++            # on CHUNITHM-NET in its own DB. We don't have that table, so this
++            # workaround is disabled; our own songdb service should take over
++            # the hidden-song accounting it needs.
++            hidden_songs = []
+ 
+             # Sometimes, SEGA likes to hide some scores from appearing in
+             # CHUNITHM-NET. This is a workaround. Basically:
+@@ -542,9 +518,6 @@ class ChunithmNetAdapter(NetworkAdapter):
+                 },
+             )
+ 
+-        if rating_type in (RatingType.ongeki, RatingType.ongeki_naive):
+-            return calculate_ongeki_rating_breakdown(rating_type, pbs)
+-
+         msg = f"Unknown RatingType variant {rating_type!r}"
+         raise RuntimeError(msg)
+ 
