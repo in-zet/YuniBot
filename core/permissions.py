@@ -55,6 +55,7 @@ def describe_lock(
         return LockResult(visible=True, message=None)
 
     definitions = [tag_definitions[name] for name in missing_tags if name in tag_definitions]
+    # 정의되지 않은 태그도 숨김으로 취급한다(fail-closed). 3단계 레지스트리 전까지의 기본값.
     if any(d.hidden for d in definitions) or len(definitions) != len(missing_tags):
         return LockResult(visible=False, message=None)
 

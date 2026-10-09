@@ -64,3 +64,25 @@ def test_describe_lock_hidden_tag_gives_no_guidance() -> None:
     lock = describe_lock(missing_tags=["practice-secret"], tag_definitions=defs)
     assert lock.visible is False
     assert lock.message is None
+
+
+def test_describe_lock_mixed_hidden_and_visible_gives_no_guidance() -> None:
+    defs = {
+        "hidden_tag": DefinedTag(
+            name="hidden_tag",
+            description="숨김 태그",
+            how_to_get="관리자가 직접 부여",
+            hidden=True,
+        ),
+        "visible_tag": DefinedTag(
+            name="visible_tag",
+            description="공개 상태 태그",
+            how_to_get="로그인하면 얻는다",
+            hidden=False,
+        ),
+    }
+    lock = describe_lock(
+        missing_tags=["hidden_tag", "visible_tag"], tag_definitions=defs
+    )
+    assert lock.visible is False
+    assert lock.message is None
