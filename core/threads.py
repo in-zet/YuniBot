@@ -1,11 +1,14 @@
 # core/threads.py
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, Protocol
+
+logger = logging.getLogger(__name__)
 
 ClosedReason = Literal["explicit", "timeout"]
 
@@ -76,6 +79,8 @@ class ThreadManager:
         session = self._sessions.get(thread_id)
         if session is None or session.state == "closed":
             return
+        if player_id != session.player_id:
+            return
         session.transcript.append(ThreadMessage(player_id=player_id, content=content, at=now))
         session.last_activity = now
         session.state = "open"
@@ -83,18 +88,24 @@ class ThreadManager:
 
     async def check_idle(self, *, now: datetime) -> None:
         for session in list(self._sessions.values()):
-            if session.state == "closed":
-                continue
+            try:
+                await self._check_session(session, now=now)
+            except Exception:
+                logger.exception("thread check failed for %s (%s)", session.thread_id, session.skill_name)
 
-            if session.state == "open":
-                if (now - session.last_activity).total_seconds() >= session.idle_timeout:
-                    await session.transport.send_message("다 끝났나요?")
-                    session.state = "checking"
-                    session.checked_at = now
-            elif session.state == "checking":
-                assert session.checked_at is not None
-                if (now - session.checked_at).total_seconds() >= session.close_timeout:
-                    await self.close(session.thread_id, reason="timeout")
+    async def _check_session(self, session: ThreadSession, *, now: datetime) -> None:
+        if session.state == "closed":
+            return
+
+        if session.state == "open":
+            if (now - session.last_activity).total_seconds() >= session.idle_timeout:
+                await session.transport.send_message("다 끝났나요?")
+                session.state = "checking"
+                session.checked_at = now
+        elif session.state == "checking":
+            assert session.checked_at is not None
+            if (now - session.checked_at).total_seconds() >= session.close_timeout:
+                await self.close(session.thread_id, reason="timeout")
 
     async def close(self, thread_id: str, *, reason: ClosedReason) -> None:
         session = self._sessions.get(thread_id)

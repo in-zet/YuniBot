@@ -109,3 +109,110 @@ async def test_explicit_close_delivers_transcript_immediately() -> None:
     assert len(closed) == 1
     assert closed[0].closed_reason == "explicit"
     assert closed[0].messages[0].content == "끝낼게"
+
+
+class _RaisingTransport:
+    async def send_message(self, text: str) -> None:
+        _ = text
+        raise RuntimeError("discord down")
+
+
+@pytest.mark.asyncio
+async def test_message_from_other_player_is_rejected() -> None:
+    manager = ThreadManager()
+    transport = _FakeTransport()
+    closed: list[ThreadTranscript] = []
+
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    session = await manager.open(
+        skill_name="chunithm-session",
+        player_id="p1",
+        transport=transport,
+        idle_timeout=300.0,
+        close_timeout=300.0,
+        on_close=lambda t: closed.append(t),
+        now=base,
+    )
+
+    await manager.receive(session.thread_id, "p2", "남의 메시지", now=base + timedelta(seconds=10))
+
+    assert session.transcript == []
+    assert session.last_activity == base
+    assert session.state == "open"
+
+
+@pytest.mark.asyncio
+async def test_receive_on_unknown_or_closed_thread_is_noop() -> None:
+    manager = ThreadManager()
+    transport = _FakeTransport()
+    closed: list[ThreadTranscript] = []
+
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    await manager.receive("no-such-thread", "p1", "유령", now=base)  # 예외 없이 무시
+
+    session = await manager.open(
+        skill_name="chunithm-session",
+        player_id="p1",
+        transport=transport,
+        on_close=lambda t: closed.append(t),
+        now=base,
+    )
+    await manager.close(session.thread_id, reason="explicit")
+    await manager.receive(session.thread_id, "p1", "닫힌 뒤", now=base + timedelta(seconds=1))
+
+    assert session.transcript == []
+    assert len(closed) == 1
+
+
+@pytest.mark.asyncio
+async def test_double_close_delivers_transcript_once() -> None:
+    manager = ThreadManager()
+    transport = _FakeTransport()
+    closed: list[ThreadTranscript] = []
+
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    session = await manager.open(
+        skill_name="chunithm-session",
+        player_id="p1",
+        transport=transport,
+        on_close=lambda t: closed.append(t),
+        now=base,
+    )
+    await manager.close(session.thread_id, reason="explicit")
+    await manager.close(session.thread_id, reason="timeout")
+
+    assert len(closed) == 1
+    assert closed[0].closed_reason == "explicit"
+
+
+@pytest.mark.asyncio
+async def test_failing_session_does_not_block_other_sessions() -> None:
+    manager = ThreadManager()
+    good_transport = _FakeTransport()
+    closed: list[ThreadTranscript] = []
+
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _ = await manager.open(
+        skill_name="chunithm-session",
+        player_id="p1",
+        transport=_RaisingTransport(),
+        on_close=lambda t: None,
+        now=base,
+    )
+    good = await manager.open(
+        skill_name="chunithm-session",
+        player_id="p2",
+        transport=good_transport,
+        on_close=lambda t: closed.append(t),
+        now=base,
+    )
+
+    # 첫 세션의 send_message가 예외를 던져도 두 번째 세션의 확인 메시지는 처리된다
+    await manager.check_idle(now=base + timedelta(seconds=301))
+    assert good_transport.sent == ["다 끝났나요?"]
+    assert good.state == "checking"
+
+    # 두 번째 세션의 닫기도 첫 세션 실패에 막히지 않는다
+    await manager.check_idle(now=base + timedelta(seconds=602))
+    assert len(closed) == 1
+    assert closed[0].closed_reason == "timeout"
