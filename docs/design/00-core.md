@@ -639,7 +639,8 @@ yuni-bot/
 | 항목 | 상태 | 대응 |
 | --- | --- | --- |
 | 원본 `adapters`가 의존하는 파일 범위 | 확인됨 (1단계). `types`/`constants`/`utils`/`calculation`까지 필요. 점수 조회 메서드는 chuni-penguin 자신의 SQLAlchemy DB에 묶여 있어 `third_party/patches/`의 패치로 그 부분만 제거했다. 네이티브(Rust) 모듈은 음성 기능 전용이라 불필요 | 패치가 업스트림 변경으로 깨지면 `sync_upstream.py`가 실패하도록 했다(실제 검증함). 그때 사람이 다시 diff를 맞춘다 |
-| 원본 구조가 바뀌면 `sync_upstream.py`가 깨짐 | 예상되는 위험 | 가져올 경로 목록을 한 곳에 두고, 가져온 뒤 계약 테스트와 파서 테스트를 돌린다 |
+| 원본 구조가 바뀌면 `sync_upstream.py`가 깨짐 | 예상되는 위험 | 경로 목록을 손으로 안 두고, 패치 적용 후 실제로 import해서 생긴 `chuni_penguin.*` 모듈 전체를 가져오는 방식으로 짰다(1단계). 패치가 안 맞으면 스크립트가 실패하고, 가져온 뒤 스모크 테스트를 돌린다 |
+| `httpx-aiohttp` 패치가 업스트림 포크의 재시도 동작을 잃음 | 확인됨 (1단계). PyPI 쪽 `AiohttpTransport`는 `retries` 값을 받긴 하지만 실제로 재시도하지 않는다 — 업스트림 포크는 지수 백오프로 재시도한다 | 상세는 `third_party/patches/README.md`. 4단계(`chunithm_net` 서비스)에서 포크를 들여올지 서비스 레벨에서 재시도를 새로 짤지 정한다 |
 | 국제판 버전업 | 일본판은 이미 다음 버전 가동 중, 국제판 시기는 미정 | 버전업 직후 파서와 신곡 기준일을 점검하고 원본 어댑터 수정을 가져온다. `chunithm-updates`가 관리자에게 알린다 |
 | 원본 시드를 데이터로만 쓸 수 있는지 | 확인됨 (1단계). `database/seeds/songs.json`은 SQLAlchemy와 무관한 순수 JSON 리스트라 그대로 데이터로 읽어 쓸 수 있다 | 4단계에서 이 형식으로 `songdb` 읽기 코드를 쓴다 |
 | 레이팅·오버파워 계산이 CHUNITHM-NET과 맞는지 | 확인 못 함 | `records`가 동기화마다 대조하고, 어긋나면 리포트에 표시한다 |

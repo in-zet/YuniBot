@@ -20,11 +20,30 @@ SQLAlchemy DB에 묶여 있다(곡 메타데이터 보강, 레이팅 계산, PB 
 말고는 남지 않는다. 그래서 우리 쪽에서 `ChunithmNetAdapter(database=None, ...)`로
 생성해도 된다 — `database`는 저장만 되고 아무도 읽지 않는다.
 
+**이 패치가 가져오는 부작용**: DB 보강을 안 하므로, 이 어댑터가 돌려주는 레코드의
+`rating`, `chart.internal_level` 같은 계산값은 전부 `None`이다. 특히
+`get_rating_breakdown(RatingType.naive)`는 이 값들로 정렬·합산을 하는데, 에러 없이
+레이팅 0을 조용히 돌려준다(정렬도 임의 순서가 된다). `records` 서비스가 실제
+계산을 하기 전까지, 이 어댑터의 레이팅 관련 반환값(naive 레이팅, `rating`,
+`internal_level` 필드)은 믿지 않는다. 4단계에서 `records`가 이 계산을 대신한다.
+
 ## 0002-chunithm-net-adapter-public-httpx-aiohttp-name.patch
 
 업스트림은 자기 저장소 안의 `packages/httpx-aiohttp/`(로컬 포크, 버전 `0.1.0`)를
 쓰는데, 그 포크의 전송 클래스 이름이 `AIOHTTPTransport`다. PyPI에 공개된
-`httpx-aiohttp`(우리가 쓰는 것, 0.1.1~0.2.0)는 같은 클래스를 `AiohttpTransport`로
+`httpx-aiohttp`(우리가 쓰는 것, `0.2.0`으로 고정)는 같은 클래스를 `AiohttpTransport`로
 부른다 — 버전이 아니라 이름 자체가 다른 포크라 어느 PyPI 버전을 깔아도 못 맞춘다.
-이 패치는 그 참조 하나만 PyPI 쪽 이름으로 바꾼다. 생성자 시그니처(특히 `retries`
-키워드)는 호환된다.
+이 패치는 그 참조 하나만 PyPI 쪽 이름으로 바꾼다.
+
+**생성자 시그니처는 맞지만 동작은 다르다**: `retries` 키워드는 두 쪽 다 받는다.
+업스트림의 포크는 이걸 실제로 쓴다 — `packages/httpx-aiohttp/src/httpx_aiohttp/_transport.py`의
+`RetryMiddleware`가 연결 실패를 지수 백오프로 재시도한다. PyPI의 `0.2.0`은
+`retries` 값을 저장만 하고 아무 데도 안 쓴다 — 즉 지금은 `retries=5`를 줘도
+실질적으로 `retries=0`이다. 미니 PC가 매일 새벽 꺼져 있다가 다시 켜질 때처럼
+일시적인 연결 실패가 날 상황에서, 지금은 업스트림과 달리 재시도가 없다.
+
+업스트림의 포크(`packages/httpx-aiohttp/`)도 같은 저장소의 0BSD 라이선스 아래
+있어서 그대로 들여올 수는 있다. 그 작업과 재시도 정책을 우리가 직접 어떻게
+가져갈지는 4단계(`chunithm_net` 서비스, 접속 횟수 제한을 다루는 곳)에서 다시
+정한다 — 서비스 자체가 재시도/속도 제한 정책을 가지므로, 포크를 통째로 들여오는 것과
+서비스 레벨에서 재시도를 새로 짜는 것 중에 그때 고른다.

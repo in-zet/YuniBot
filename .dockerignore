@@ -1,0 +1,10 @@
+.env
+data/
+.git/
+.venv/
+.superpowers/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+yuni-bot-design.tar
