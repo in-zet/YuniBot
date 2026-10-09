@@ -29,21 +29,21 @@ VALID_CATEGORIES: frozenset[str] = frozenset(
 VALID_GAMES: frozenset[str] = frozenset({"chunithm", "common"})
 
 
-class DefinedTag(msgspec.Struct, kw_only=True):
+class DefinedTag(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
     name: str
     description: str
     how_to_get: str = ""
     hidden: bool = False
 
 
-class SettingSpec(msgspec.Struct, kw_only=True):
+class SettingSpec(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
     name: str
     kind: Literal["bool", "int", "float", "str"]
     default: Any
     description: str
 
 
-class SkillManifest(msgspec.Struct, kw_only=True):
+class SkillManifest(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
     name: str
     description: str
     examples: list[str]
@@ -63,7 +63,10 @@ class SkillManifest(msgspec.Struct, kw_only=True):
 def parse_manifest(text: str) -> SkillManifest:
     """SKILL.md 전체 텍스트에서 '---'로 감싼 YAML 프런트매터를 읽어 SkillManifest로 검증한다."""
     frontmatter = _extract_frontmatter(text)
-    raw: object = yaml.safe_load(frontmatter)
+    try:
+        raw: object = yaml.safe_load(frontmatter)
+    except yaml.YAMLError as exc:
+        raise ManifestError(f"프런트매터 YAML 문법 오류: {exc}") from exc
     if not isinstance(raw, dict):
         raise ManifestError("프런트매터가 YAML 매핑(dict)이 아니다")
 

@@ -41,6 +41,18 @@ def test_parse_manifest_missing_required_field() -> None:
         parse_manifest(text)
 
 
+def test_parse_manifest_malformed_yaml_raises_manifest_error() -> None:
+    text = BORDER_EXAMPLE.replace("services: [songdb, records]", "services: [songdb, records")
+    with pytest.raises(ManifestError):
+        parse_manifest(text)
+
+
+def test_parse_manifest_unknown_top_level_key_raises() -> None:
+    text = BORDER_EXAMPLE.replace("services: [songdb, records]", "servicess: [songdb, records]")
+    with pytest.raises(ManifestError):
+        parse_manifest(text)
+
+
 def test_parse_manifest_bad_category() -> None:
     text = BORDER_EXAMPLE.replace("category: 곡 정보", "category: 없는분류")
     with pytest.raises(ManifestError, match="category"):
