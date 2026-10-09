@@ -15,6 +15,9 @@ async def simple(ctx: ToolContext, name: str, count: int = 3) -> None: ...
 async def with_ref(ctx: ToolContext, chart: ChartRef, rank: str | None = None) -> None: ...
 async def with_enum(ctx: ToolContext, difficulty: Difficulty) -> None: ...
 async def unsupported(ctx: ToolContext, blob: dict[str, object]) -> None: ...
+async def required_optional(ctx: ToolContext, x: str | None) -> None: ...
+async def optional_enum(ctx: ToolContext, difficulty: Difficulty | None = None) -> None: ...
+async def optional_unsupported(ctx: ToolContext, blob: int | str | None) -> None: ...
 
 
 def test_build_arg_schema_primitives() -> None:
@@ -30,6 +33,7 @@ def test_build_arg_schema_ref_type_and_optional() -> None:
     chart_arg, rank_arg = schema.args
     assert chart_arg.is_ref_type is True
     assert chart_arg.py_type is ChartRef
+    assert chart_arg.required is True
     assert rank_arg.required is False
     assert rank_arg.is_ref_type is False
 
@@ -37,6 +41,23 @@ def test_build_arg_schema_ref_type_and_optional() -> None:
 def test_build_arg_schema_enum() -> None:
     schema = build_arg_schema(with_enum)
     assert schema.args[0].py_type is Difficulty
+
+
+def test_build_arg_schema_required_optional_primitive() -> None:
+    schema = build_arg_schema(required_optional)
+    assert schema.args[0].py_type is str
+    assert schema.args[0].required is False
+
+
+def test_build_arg_schema_optional_enum() -> None:
+    schema = build_arg_schema(optional_enum)
+    assert schema.args[0].py_type is Difficulty
+    assert schema.args[0].required is False
+
+
+def test_build_arg_schema_rejects_optional_multi_member_union() -> None:
+    with pytest.raises(SchemaBuildError, match="blob"):
+        build_arg_schema(optional_unsupported)
 
 
 def test_build_arg_schema_rejects_unsupported_type() -> None:
