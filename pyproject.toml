@@ -12,6 +12,8 @@ dependencies = [
     "httpx-aiohttp==0.2.0",
     "msgspec~=0.20.0",
     "platformdirs~=4.5",
+    "python-dotenv>=1.2.4",
+    "pyyaml>=6.0.3",
     "selectolax==0.4.10",
 ]
 
@@ -19,11 +21,13 @@ dependencies = [
 dev = [
     "basedpyright>=1.40.2",
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.16.10",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["third_party"]
+asyncio_mode = "auto"
 
 [tool.ruff]
 # third_party/는 가져온 코드 그대로다. 린트는 우리가 쓴 코드만 본다.
