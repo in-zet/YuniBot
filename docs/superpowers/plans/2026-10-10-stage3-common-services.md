@@ -3619,7 +3619,7 @@ async def test_sync_recurring_creates_row_with_next_run(conn: aiosqlite.Connecti
     await scheduler.sync_recurring([("chunithm-updates", "check_updates", "0 9 * * *", True)], now=now)
 
     due = await scheduler.startup_catch_up(now=datetime.datetime(2026, 10, 10, 9, 0))
-    assert due == []  # 아직 '오늘' 몫이 지나지 않았다(9시 정각은 <= 9시라 아래에서 확인)
+    assert due == []  # 9시 정각은 아직 "밀렸다"가 아니다(엄격히 과거만 캐치업 대상)
 
 
 async def test_sync_recurring_is_idempotent_across_restarts(conn: aiosqlite.Connection) -> None:
@@ -3747,10 +3747,14 @@ class Scheduler:
 
     async def startup_catch_up(self, *, now: datetime.datetime) -> list[tuple[str, str]]:
         """기동 시 한 번 부른다. catch_up이 켜졌고 그 밀린 몫이 '오늘' 날짜인 것만 돌려준다.
-        그 밖의 밀린 몫(catch_up 꺼짐, 또는 여러 날 전)은 돌리지 않고 다음 시각으로 민다."""
+        그 밖의 밀린 몫(catch_up 꺼짐, 또는 여러 날 전)은 돌리지 않고 다음 시각으로 민다.
+
+        '밀렸다'는 엄격히 과거(next_run_at < now)만 본다 — 정확히 지금 이 순간인 것은 아직
+        "missed"가 아니라 정상 운영 중 실시간 루프(지금은 없고, 9단계에서 실제 사용 스킬이
+        생길 때 더한다)가 그 순간에 맞춰 돌릴 몫으로 본다."""
         cursor = await self._conn.execute(
             "SELECT owner_skill, fn_name, cron, catch_up, next_run_at FROM schedule_recurring "
-            "WHERE next_run_at <= ?",
+            "WHERE next_run_at < ?",
             (now.isoformat(),),
         )
         rows = await cursor.fetchall()
@@ -3793,10 +3797,11 @@ class Scheduler:
 
     async def startup_catch_up_once(self, *, now: datetime.datetime) -> list[OnceSchedule]:
         """한 번 도는 예약 중 아직 안 돈 것을 본다. '오늘' 날짜로 예정됐던 것만 낸다 —
-        catch_up 여부와 무관하게 하루가 지나면 더는 의미가 없다고 보고 그냥 닫는다."""
+        catch_up 여부와 무관하게 하루가 지나면 더는 의미가 없다고 보고 그냥 닫는다.
+        '밀렸다'의 기준은 startup_catch_up과 같이 엄격히 과거(fire_at < now)다."""
         cursor = await self._conn.execute(
             "SELECT id, owner_skill, event_name, payload, fire_at FROM schedule_once "
-            "WHERE fired_at IS NULL AND fire_at <= ?",
+            "WHERE fired_at IS NULL AND fire_at < ?",
             (now.isoformat(),),
         )
         rows = await cursor.fetchall()
