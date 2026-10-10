@@ -3269,7 +3269,7 @@ class ArcadesService:
         if candidates:
             raise ResolutionError(candidates=candidates)
 
-        raise ResolutionError(message="그런 오락실을 찾을 수 없다")
+        raise ResolutionError(message="그런 오락실은 이 서버에 없음")
 ```
 
 - [ ] **Step 5: 테스트 통과 확인**
