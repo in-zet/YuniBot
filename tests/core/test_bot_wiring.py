@@ -151,6 +151,26 @@ async def test_contract_check_failure_blocks_migrations_and_disables_skill(tmp_p
     await client.close()
 
 
+@pytest.mark.asyncio
+async def test_unresolvable_event_handler_annotation_disables_only_that_skill(tmp_path: Path) -> None:
+    # @on 핸들러의 반환 타입 힌트가 get_type_hints()로 풀리지 않으면(NameError) 그 스킬 하나만
+    # 비활성화돼야 한다 — build_client() 전체가 죽어서는 안 된다(한 스킬의 결함이 다른 스킬의
+    # 명령/마이그레이션을 막지 않는다는 보장은 이벤트 핸들러 등록에도 똑같이 적용된다).
+    config = _config(tmp_path, Path("tests/fixtures/skills_bad/bad_event_handler_annotation"))
+
+    client, registry, _executor = await build_client(config)
+
+    assert {s.manifest.name for s in registry.enabled_skills()} == {"practice"}
+    [reason] = registry.failures().values()
+    assert "이벤트 핸들러" in reason
+    assert "NotDefinedAnywhere" in reason  # NameError 메시지가 그대로 담겨 있어야 진단할 수 있다
+
+    # 비활성화된 스킬의 명령도, practice의 명령도 정상이다 — 코어가 죽지 않았다는 증거.
+    assert client.tree.get_command("연습") is not None
+
+    await client.close()
+
+
 async def test_sync_admin_bootstrap_does_not_touch_manually_granted_admin() -> None:
     conn = await aiosqlite.connect(":memory:")
     await conn.executescript(Path("migrations/core/001_players.sql").read_text())

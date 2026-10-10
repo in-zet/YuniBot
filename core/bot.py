@@ -83,14 +83,26 @@ async def _sync_admin_bootstrap(players: PlayersService, admin_discord_ids: froz
             await players.revoke_tag(player_id, "admin")
 
 
-def _register_event_handlers(bus: EventBus, skills: list[LoadedSkill]) -> None:
-    for skill in skills:
-        for handler in skill.code.event_handlers:
-            kind = handler_kind(handler.fn)
-            if kind == "gather":
-                bus.register_gather(handler.event_name, owner_skill=skill.manifest.name, fn=handler.fn)
-            else:
-                bus.register_notify(handler.event_name, owner_skill=skill.manifest.name, fn=handler.fn)
+def _register_event_handlers(bus: EventBus, registry: SkillRegistry) -> None:
+    """스킬별로 핸들러 등록은 전부-아니면-전무다.
+
+    handler_kind()는 @on 핸들러의 반환 타입 힌트를 get_type_hints()로 해석하는데, 그 힌트가
+    핸들러 자신의 모듈 전역에서 풀리지 않는 이름이면 NameError가 난다(core/events.py 참고,
+    Task 2 리뷰에서 의도적으로 가드를 안 둔 지점). 이 예외를 여기서 잡지 않으면 build_client()
+    전체가 죽어 "한 스킬의 결함이 다른 스킬을 막지 않는다"는 보장이 깨진다. 그래서 스킬 하나의
+    핸들러 등록 전체를 한 try/except로 묶어, 실패하면 그 스킬 전체를 registry.disable()로
+    비활성화하고 다음 스킬로 넘어간다 — 계약 검사 실패를 처리하는 build_client의 방식과 같다.
+    """
+    for skill in registry.enabled_skills():
+        try:
+            for handler in skill.code.event_handlers:
+                kind = handler_kind(handler.fn)
+                if kind == "gather":
+                    bus.register_gather(handler.event_name, owner_skill=skill.manifest.name, fn=handler.fn)
+                else:
+                    bus.register_notify(handler.event_name, owner_skill=skill.manifest.name, fn=handler.fn)
+        except Exception as exc:  # noqa: BLE001 - 한 스킬의 어떤 실패도 코어 전체를 죽이면 안 된다
+            registry.disable(skill.manifest.name, f"이벤트 핸들러 등록 실패: {exc}")
 
 
 async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, ToolExecutor]:
@@ -104,6 +116,13 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     for skill_name, violations in run_all_contract_checks(registry).items():
         if violations:
             registry.disable(skill_name, "계약 검사 실패: " + "; ".join(violations))
+
+    # 이벤트 핸들러 등록도 마이그레이션보다 먼저 끝내야 한다 — 여기서 비활성화되는 스킬이
+    # 있으면 그 스킬의 마이그레이션도, 슬래시 명령도 함께 빠져야 하기 때문이다(아래
+    # registry.enabled_skills() 호출들이 이 시점 이후의 _loaded를 본다).
+    event_bus = EventBus()
+    _register_event_handlers(event_bus, registry)
+
     for skill_dir, reason in registry.failures().items():
         logger.warning("skill disabled: %s (%s)", skill_dir, reason)
 
@@ -116,9 +135,6 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
 
     skill_tables = await discover_skill_tables(conn)
     player_data = PlayerDataScanner(conn=conn, table_names=skill_tables)
-
-    event_bus = EventBus()
-    _register_event_handlers(event_bus, registry.enabled_skills())
 
     resolvers = ResolverRegistry()
     resolvers.register(PlayerRef, players)
