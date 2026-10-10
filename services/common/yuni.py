@@ -20,7 +20,8 @@ class YuniService:
     인터페이스. 11단계에서 실제 LLM 구현으로 바꿔 끼울 때 이 두 메서드를 부르는 쪽
     코드가 바뀌지 않도록, 인자와 반환 형식을 설계서 이벤트 절의 조각 칸에 맞춘다."""
 
-    def line(self, sections: list[Section]) -> str:
+    async def line(self, sections: list[Section]) -> str:
+        """11단계에서 LLM 호출로 바뀐다. 그때 부르는 쪽이 바뀌지 않도록 지금부터 비동기다."""
         stages = [s.stage for s in sections if s.stage is not None]
         if not stages:
             return _DEFAULT_LINE
