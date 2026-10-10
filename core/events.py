@@ -5,7 +5,7 @@ import contextvars
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, get_type_hints
 
 logger = logging.getLogger(__name__)
 
@@ -94,3 +94,20 @@ class EventBus:
         """테스트 전용: 배경에서 도는 notify 핸들러가 모두 끝나길 기다린다."""
         while self._background_tasks:
             await asyncio.gather(*list(self._background_tasks), return_exceptions=True)
+
+
+def handler_kind(fn: Callable[[Any], Awaitable[Any]]) -> Literal["notify", "gather"]:
+    """@on 핸들러의 반환 타입 힌트로 notify/gather를 추론한다.
+
+    @on 데코레이터(core/decorators.py)는 종류를 받지 않는다 — 핸들러가 Section을
+    돌려주면(모으기), 아니면 아무것도 안 돌려주면(알림) 그 자체로 의도가 드러나기
+    때문에, 스킬 작성자가 매번 kind="gather" 같은 걸 더 적을 필요가 없게 한다.
+    """
+    hints = get_type_hints(fn)
+    ret = hints.get("return")
+    if ret is Section:
+        return "gather"
+    args = getattr(ret, "__args__", ())
+    if Section in args:
+        return "gather"
+    return "notify"

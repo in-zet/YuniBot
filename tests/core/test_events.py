@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from core.events import EventBus, Section
+from core.events import EventBus, Section, handler_kind
 
 
 @pytest.mark.asyncio
@@ -93,3 +93,14 @@ async def test_chain_depth_limit_enforced() -> None:
     await bus.drain()
 
     assert depths_seen == [0, 1, 2, 3]  # 0에서 시작해 depth 3까지만 돌고 4단계(다음 체인)는 끊긴다
+
+
+def test_handler_kind_infers_gather_from_return_annotation() -> None:
+    async def gather_handler(payload: object) -> Section | None:
+        return None
+
+    async def notify_handler(payload: object) -> None:
+        return None
+
+    assert handler_kind(gather_handler) == "gather"
+    assert handler_kind(notify_handler) == "notify"

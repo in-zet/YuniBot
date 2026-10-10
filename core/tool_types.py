@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from core.events import EventBus
+
 
 class UndeclaredServiceError(AttributeError):
     def __init__(self, service_name: str) -> None:
@@ -21,6 +23,8 @@ class ToolContext:
     player_id: str
     tags: frozenset[str]
     services: Mapping[str, object] = field(default_factory=dict)
+    guild_id: str | None = None
+    event_bus: EventBus = field(default_factory=EventBus)
 
     def __getattr__(self, name: str) -> Any:
         # dataclass가 정의한 필드(player_id, tags, services)는 정상 __getattribute__로 먼저 해석되므로
@@ -29,6 +33,10 @@ class ToolContext:
         if name in services:
             return services[name]
         raise UndeclaredServiceError(name)
+
+    async def emit(self, event_name: str, payload: Any) -> None:
+        """스킬이 알림 이벤트를 낸다. 모으기 이벤트는 각 스킬이 직접 내지 않고 모으는 쪽이 bus.emit_gather를 부른다."""
+        await self.event_bus.emit_notify(event_name, payload)
 
 
 @dataclass(slots=True, kw_only=True)
