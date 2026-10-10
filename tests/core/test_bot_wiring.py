@@ -31,10 +31,15 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
         cookie_encryption_key=b"",
     )
 
-    client, registry, _executor = await build_client(config)
+    client, registry, executor = await build_client(config)
 
     assert "practice" in {s.manifest.name for s in registry.enabled_skills()}
     assert client.tree.get_command("연습") is not None  # 그룹: "연습 보기" 등
+    # 이 단계(18단계)에서 와이어링한 여섯 서비스가 전부 실행기까지 도달해야 한다 —
+    # scheduler catch-up이 services 채우기보다 먼저 돌면 이 중 일부가 비어 있다.
+    assert set(executor.services) == {
+        "players", "settings", "memory", "arcades", "http", "notify", "yuni",
+    }
 
     await client.close()
 

@@ -208,8 +208,33 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         settings=settings_service,
     )
 
+    # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야
+    # 하기 때문이다(아래 YuniClient.close() 참고). notify_service는 반대로 client가 있어야
+    # (게이트웨이가 discord.Client를 감싸므로) client 다음에 만든다.
+    http_service = await build_http_service(cache_db_path=config.db_path.parent / "http_cache.sqlite")
+
+    intents = discord.Intents.default()
+    intents.message_content = True
+    client = YuniClient(
+        intents=intents, test_guild_id=config.test_guild_id, conn=conn, http_service=http_service
+    )
+
+    notify_service = NotifyService(
+        gateway=_BotDiscordGateway(client),
+        players=players,
+        settings=settings_service,
+        threads=ThreadManager(),
+    )
+    yuni_service = YuniService()
+
+    services["http"] = http_service
+    services["notify"] = notify_service
+    services["yuni"] = yuni_service
+
     # 기동 시 한 번: 스킬의 @schedule을 DB와 맞추고, 꺼져 있던 동안 밀린 "오늘" 몫만 돌린다.
     # 평상시 실시간 폴링 루프는 @schedule을 쓰는 스킬이 생기는 단계에서 더한다(지금은 없다).
+    # services가 전부 채워진 뒤에 돌려야 한다 — 밀린 작업이 ctx.notify/http/yuni를 쓰면
+    # ToolContext.__getattr__이 UndeclaredServiceError를 던져 build_client 전체가 죽는다.
     scheduler = Scheduler(conn, quiet_start=config.quiet_hours_start, quiet_end=config.quiet_hours_end)
     now = datetime.datetime.now()  # noqa: DTZ005 - cron/정지 시간대는 서버 로컬 벽시계 시간 기준이다(UTC 타임스탬프가 아니다)
     recurring_specs = [
@@ -235,29 +260,6 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     due_once = await scheduler.startup_catch_up_once(now=now)
     for once in due_once:
         await event_bus.emit_notify(once.event_name, once.payload)
-
-    # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야
-    # 하기 때문이다(아래 YuniClient.close() 참고). notify_service는 반대로 client가 있어야
-    # (게이트웨이가 discord.Client를 감싸므로) client 다음에 만든다.
-    http_service = await build_http_service(cache_db_path=config.db_path.parent / "http_cache.sqlite")
-
-    intents = discord.Intents.default()
-    intents.message_content = True
-    client = YuniClient(
-        intents=intents, test_guild_id=config.test_guild_id, conn=conn, http_service=http_service
-    )
-
-    notify_service = NotifyService(
-        gateway=_BotDiscordGateway(client),
-        players=players,
-        settings=settings_service,
-        threads=ThreadManager(),
-    )
-    yuni_service = YuniService()
-
-    services["http"] = http_service
-    services["notify"] = notify_service
-    services["yuni"] = yuni_service
 
     plan = build_slash_plan(registry.tool_specs())
     snapshot = build_snapshot(registry)
