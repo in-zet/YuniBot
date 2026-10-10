@@ -5,6 +5,8 @@ from core.decorators import tool
 from core.tool_types import PlayerRef, ToolContext, ToolResult
 from services.common.players import Player
 
+_UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
+
 
 @tool(slash="관리 사용량")
 async def usage(ctx: ToolContext) -> ToolResult:
@@ -29,6 +31,16 @@ async def skills(ctx: ToolContext) -> ToolResult:
 @tool(slash="관리 스킬설정", mutates=True, confirm="always")
 async def toggle_skill(ctx: ToolContext, skill_name: str, enabled: bool) -> ToolResult:
     """이 서버에서 스킬을 켜거나 끈다."""
+    # admin을 끄면 /관리 전체가 "모르는 명령"이 되어 DB를 직접 고치기 전에는 되돌릴 길이 없다.
+    # account-link은 연결·해제의 유일한 경로다. 둘 다 끌 수 없다.
+    if skill_name in _UNTOGGLEABLE_SKILLS:
+        return ToolResult(error=f"'{skill_name}' 스킬은 끌 수 없다")
+    snapshot = ctx.registry_snapshot
+    if snapshot is None:
+        return ToolResult(error="스킬 현황을 아직 알 수 없다")
+    if skill_name not in {s.name for s in snapshot.skills}:
+        # 오타로 존재하지 않는 스킬 이름의 설정 행이 조용히 생기지 않게 한다.
+        return ToolResult(error=f"'{skill_name}'이라는 등록된 스킬이 없다")
     if ctx.guild_id is None:
         return ToolResult(error="서버 안에서만 쓸 수 있다")
     await ctx.settings.set_skill_enabled(

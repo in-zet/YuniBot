@@ -9,6 +9,7 @@ import pytest
 
 from core.executor import ToolExecutor
 from core.registry import SkillRegistry
+from core.registry_snapshot import RegistrySnapshot, SkillSummary
 from core.resolvers import ResolverRegistry
 from core.tool_types import PlayerRef, ToolContext
 from services.common.players import PlayersService
@@ -40,10 +41,20 @@ async def admin_env():
     settings = SettingsService(conn)
     skill = _load_skill()
 
+    # admin은 registry_snapshot을 manifest.services에 선언했으므로 _dispatch가 채워 준다 —
+    # 여기서도 같은 자리에 실제 모양의 스냅샷을 준다.
+    snapshot = RegistrySnapshot(
+        skills=tuple(
+            SkillSummary(name=name, game="common", version=1, enabled=True)
+            for name in ("admin", "account-link", "web-qa")
+        ),
+        failures={},
+    )
+
     def make_ctx(player_id: str, *, guild_id: str | None = "g1") -> ToolContext:
         return ToolContext(
             player_id=player_id, tags=frozenset(), services={"players": players, "settings": settings},
-            guild_id=guild_id,
+            guild_id=guild_id, registry_snapshot=snapshot,
         )
 
     try:
@@ -111,6 +122,33 @@ async def test_toggle_skill_sets_guild_scoped_flag(admin_env) -> None:
 
     assert result.error is None
     assert await settings.is_skill_enabled(guild_id="g1", skill="web-qa") is False
+
+
+@pytest.mark.parametrize("protected", ["admin", "account-link"])
+async def test_toggle_skill_refuses_to_disable_protected_skills(admin_env, protected: str) -> None:
+    """리뷰(최종) Fix 5: admin을 끄면 /관리 전체가 잠겨 되돌릴 길이 없다. account-link도 끌 수 없다."""
+    skill, _, settings, make_ctx = admin_env
+
+    result = await skill.toggle_skill(make_ctx("admin1", guild_id="g1"), skill_name=protected, enabled=False)
+
+    assert result.error is not None
+    assert "끌 수 없다" in result.error
+    assert await settings.is_skill_enabled(guild_id="g1", skill=protected) is True
+
+
+async def test_toggle_skill_rejects_unknown_skill_name(admin_env) -> None:
+    skill, _, settings, make_ctx = admin_env
+
+    result = await skill.toggle_skill(make_ctx("admin1", guild_id="g1"), skill_name="web-qq", enabled=False)
+
+    assert result.error is not None
+    assert "web-qq" in result.error
+    # 오타 이름으로 설정 행이 생기지 않았다.
+    cursor = await settings._conn.execute(  # pyright: ignore[reportPrivateUsage]
+        "SELECT COUNT(*) FROM settings_skill_toggles"
+    )
+    row = await cursor.fetchone()
+    assert row is not None and row[0] == 0
 
 
 async def test_set_limits_stores_guild_scoped_values(admin_env) -> None:
