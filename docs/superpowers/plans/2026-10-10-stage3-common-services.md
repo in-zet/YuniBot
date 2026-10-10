@@ -1639,6 +1639,39 @@ if __name__ == "__main__":
 
 `tests/core/test_bot_wiring.py`가 `build_client(config)`의 반환값 개수(2개 → 3개)에 맞춰 구조분해하는 줄들을 `client, registry, _executor = await build_client(config)`처럼 고친다. 또한 테스트가 끝난 뒤 `await client.conn.close()` 또는 `await client.close()`로 연결을 닫아야 파일 기반 임시 DB(`tmp_path`)가 다음 테스트에 영향을 주지 않는다.
 
+`_sync_admin_bootstrap`은 Review Focus 2번("env 동기화가 수동 부여를 건드리지 않는가")이 직접 가리키는 함수다 — `build_client`를 통째로 거치는 통합 테스트만으로는 "수동으로 admin을 받은 사람은 `.env` 목록이 바뀌어도 그대로 유지된다"는 조건을 놓치기 쉽다. 전용 단위 테스트를 더한다:
+
+```python
+# tests/core/test_bot_wiring.py 에 추가 (Path, aiosqlite는 이미 import돼 있을 것이다 — 없으면 더한다)
+from core.bot import _sync_admin_bootstrap
+from services.common.players import PlayersService
+
+
+async def test_sync_admin_bootstrap_does_not_touch_manually_granted_admin() -> None:
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(Path("migrations/core/001_players.sql").read_text())
+    await conn.executescript(Path("migrations/core/002_player_tags.sql").read_text())
+    await conn.commit()
+    players = PlayersService(conn)
+
+    env_admin = await players.create_player()
+    await players.link_account(env_admin.id, "111")
+    manual_admin = await players.create_player()
+    await players.link_account(manual_admin.id, "222")
+    await players.grant_tag(manual_admin.id, "admin", source="admin:111")
+
+    await _sync_admin_bootstrap(players, frozenset({"111"}))
+    assert await players.tags_for(env_admin.id) == {"admin"}
+    assert await players.tags_for(manual_admin.id) == {"admin"}  # 수동 부여는 그대로
+
+    # .env에서 111이 빠지면 env_bootstrap 소스만 회수된다.
+    await _sync_admin_bootstrap(players, frozenset())
+    assert await players.tags_for(env_admin.id) == set()
+    assert await players.tags_for(manual_admin.id) == {"admin"}  # 여전히 안 건드린다
+
+    await conn.close()
+```
+
 - [ ] **Step 6: 테스트 통과 확인**
 
 ```bash
@@ -4394,6 +4427,11 @@ async def join_link(ctx: ToolContext, code: str) -> ToolResult:
         )
         return ToolResult(error="코드가 틀렸거나 만료됐다")
 
+    if link_code.status != "pending":
+        # 이미 다른 사람이 참여해 'joined' 이상으로 넘어간 코드다 — 코드가 유출돼 두 번째
+        # 참여자가 끼어들어도 먼저 참여한 쪽의 진행을 덮어쓰지 않는다(중복 소비 방지).
+        return ToolResult(error="이미 다른 사람이 참여한 코드다")
+
     if link_code.issuer_player_id == ctx.player_id:
         return ToolResult(error="이미 같은 플레이어다")
 
@@ -4702,6 +4740,57 @@ async def test_cancel_discard_changes_nothing(link_env) -> None:
 
     assert await players.tags_for(joiner.id) == {"tester"}  # 그대로다
     assert await players.player_for_discord("222") == joiner  # 아무것도 안 바뀌었다
+
+
+async def test_second_join_with_same_code_is_rejected(link_env) -> None:
+    skill, players, _, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    started = await skill.start_link(make_ctx(issuer.id))
+    code = started.data["code"]
+
+    first_joiner = await players.create_player()
+    await players.link_account(first_joiner.id, "222")
+    await skill.join_link(make_ctx(first_joiner.id), code=code)
+
+    second_joiner = await players.create_player()
+    await players.link_account(second_joiner.id, "333")
+    result = await skill.join_link(make_ctx(second_joiner.id), code=code)
+
+    assert result.error is not None
+    assert "다른 사람" in result.error
+    # 첫 참여자의 진행이 덮어써지지 않았는지, models로 직접 확인한다.
+    link_code = await skill.models.get_code(make_ctx(issuer.id).db, code)
+    assert link_code is not None
+    assert link_code.joiner_discord_id == "222"
+
+
+async def test_confirm_button_rejects_expired_code(link_env) -> None:
+    skill, players, _, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    issuer_ctx = make_ctx(issuer.id)
+    started = await skill.start_link(issuer_ctx)
+    code = started.data["code"]
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joined = await skill.join_link(make_ctx(joiner.id), code=code)
+    joiner_view = joined.display.view
+
+    # 코드를 과거로 되돌려 '만료된 뒤에 버튼을 누른' 상황을 흉내 낸다.
+    assert issuer_ctx.db is not None
+    await issuer_ctx.db.execute(
+        "UPDATE account_link_codes SET expires_at = ? WHERE code = ?",
+        ((datetime.now(UTC) - timedelta(minutes=1)).isoformat(), code),
+    )
+    await issuer_ctx.db.commit()
+
+    expired_click = _FakeInteraction("222")
+    await joiner_view.confirm.callback(expired_click)  # pyright: ignore[reportCallIssue]
+
+    assert "만료" in expired_click.response.calls[0]["content"]
+    assert await players.player_for_discord("111") != await players.player_for_discord("222")
 ```
 
 (`test_cancel_discard_changes_nothing`이 "데이터가 있는 계정"을 흉내 내려면 `player_data.count(joiner.id)`가 0이 아니어야 한다 — 태그는 `discover_skill_tables`가 보는 "스킬 테이블"이 아니므로(코어 자신의 테이블이라 `CORE_OWNED_TABLES`에서 빠진다) 이 테스트는 실제로는 `counts`가 비어 확인 버튼이 안 뜨는 경로를 탄다. 구현 때 이 픽스처에 `player_id` 컬럼을 가진 가짜 스킬 테이블을 하나 만들어 데이터를 넣어야 분기를 제대로 타게 된다 — 아래처럼 `link_env` 픽스처에 추가한다.)
@@ -4735,7 +4824,7 @@ Expected: FAIL (`skills/account-link/skill.py` 등이 없음)
 uv run pytest skills/account-link/tests/test_account_link.py -v
 ```
 
-Expected: PASS (5 tests)
+Expected: PASS (7 tests)
 
 - [ ] **Step 11: 전체 회귀 확인**
 
