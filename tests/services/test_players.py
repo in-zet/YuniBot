@@ -4,15 +4,19 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
+from core.resolvers import ResolutionError
+from core.tool_types import ToolContext
 from services.common.players import PlayersService
 
 _MIGRATION = Path("migrations/core/001_players.sql").read_text()
+_TAGS_MIGRATION = Path("migrations/core/002_player_tags.sql").read_text()
 
 
 @pytest.fixture
 async def conn() -> AsyncIterator[aiosqlite.Connection]:
     connection = await aiosqlite.connect(":memory:")
     await connection.executescript(_MIGRATION)
+    await connection.executescript(_TAGS_MIGRATION)
     await connection.commit()
     try:
         yield connection
@@ -124,3 +128,75 @@ async def test_set_visibility_updates_single_flag(conn: aiosqlite.Connection) ->
     assert refreshed is not None
     assert refreshed.records_public is True
     assert refreshed.memos_public is False
+
+
+async def test_grant_and_revoke_tag(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    player = await service.create_player()
+
+    await service.grant_tag(player.id, "tester", source="admin:111")
+    assert await service.tags_for(player.id) == {"tester"}
+    assert await service.tag_source(player.id, "tester") == "admin:111"
+
+    await service.revoke_tag(player.id, "tester")
+    assert await service.tags_for(player.id) == set()
+
+
+async def test_grant_tag_rejects_status_tags(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    player = await service.create_player()
+
+    with pytest.raises(ValueError, match="상태 태그"):
+        await service.grant_tag(player.id, "chunithm-linked", source="admin:111")
+
+
+async def test_players_with_tag_filters_by_source(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    env_admin = await service.create_player()
+    manual_admin = await service.create_player()
+    await service.grant_tag(env_admin.id, "admin", source="env_bootstrap")
+    await service.grant_tag(manual_admin.id, "admin", source="admin:111")
+
+    assert set(await service.players_with_tag("admin")) == {env_admin.id, manual_admin.id}
+    assert await service.players_with_tag("admin", source="env_bootstrap") == [env_admin.id]
+
+
+async def test_resolve_player_ref_self(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    player = await service.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+
+    resolved = await service.resolve("나", ctx)
+    assert resolved.id == player.id
+
+
+async def test_resolve_player_ref_mention(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    target = await service.create_player()
+    await service.link_account(target.id, "123456789012345678")
+    caller = await service.create_player()
+    ctx = ToolContext(player_id=caller.id, tags=frozenset(), services={})
+
+    resolved = await service.resolve("<@123456789012345678>", ctx)
+    assert resolved.id == target.id
+
+    resolved_bare = await service.resolve("<@!123456789012345678>", ctx)
+    assert resolved_bare.id == target.id
+
+
+async def test_resolve_player_ref_unknown_mention_fails(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    caller = await service.create_player()
+    ctx = ToolContext(player_id=caller.id, tags=frozenset(), services={})
+
+    with pytest.raises(ResolutionError, match="모름"):
+        await service.resolve("<@999999999999999999>", ctx)
+
+
+async def test_resolve_player_ref_free_text_fails(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    caller = await service.create_player()
+    ctx = ToolContext(player_id=caller.id, tags=frozenset(), services={})
+
+    with pytest.raises(ResolutionError, match="모름"):
+        await service.resolve("크로노", ctx)

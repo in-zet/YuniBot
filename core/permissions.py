@@ -6,6 +6,11 @@ from typing import Protocol
 
 from core.manifest import DefinedTag
 
+# "상태 태그"는 서비스가 상태를 보고 자동으로만 붙이고 뗀다. 손으로(admin의 grant_tag/
+# revoke_tag 포함) 못 바꾼다. 지금은 아무 서비스도 이 태그를 실제로 붙이지 않지만,
+# 이름은 2단계 레지스트리(core/registry.py의 CORE_DEFINED_TAGS)에 이미 있다.
+STATUS_ONLY_TAGS: frozenset[str] = frozenset({"chunithm-linked", "chunithm-synced"})
+
 
 @dataclass(slots=True, kw_only=True)
 class TagRequirement:
