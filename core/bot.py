@@ -1,6 +1,7 @@
 # core/bot.py
 from __future__ import annotations
 
+import datetime
 import logging
 from pathlib import Path
 
@@ -16,9 +17,10 @@ from core.migrations import run_migrations
 from core.player_data import PlayerDataScanner, discover_skill_tables
 from core.registry import LoadedSkill, SkillRegistry
 from core.resolvers import ResolverRegistry
+from core.scheduler import Scheduler
 from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
-from core.tool_types import PlayerRef
+from core.tool_types import PlayerRef, ToolContext
 from services.common.players import PlayersService
 from services.common.settings import SettingsService
 
@@ -153,6 +155,34 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         player_data=player_data,
         settings=settings_service,
     )
+
+    # 기동 시 한 번: 스킬의 @schedule을 DB와 맞추고, 꺼져 있던 동안 밀린 "오늘" 몫만 돌린다.
+    # 평상시 실시간 폴링 루프는 @schedule을 쓰는 스킬이 생기는 단계에서 더한다(지금은 없다).
+    scheduler = Scheduler(conn, quiet_start=config.quiet_hours_start, quiet_end=config.quiet_hours_end)
+    now = datetime.datetime.now()  # noqa: DTZ005 - cron/정지 시간대는 서버 로컬 벽시계 시간 기준이다(UTC 타임스탬프가 아니다)
+    recurring_specs = [
+        (skill.manifest.name, spec.fn.__name__, spec.cron, spec.catch_up)
+        for skill in registry.enabled_skills()
+        for spec in skill.code.schedules
+    ]
+    await scheduler.sync_recurring(recurring_specs, now=now)
+    due_recurring = await scheduler.startup_catch_up(now=now)
+    schedule_fns = {
+        (skill.manifest.name, spec.fn.__name__): spec
+        for skill in registry.enabled_skills()
+        for spec in skill.code.schedules
+    }
+    for owner_skill, fn_name in due_recurring:
+        spec = schedule_fns[(owner_skill, fn_name)]
+        ctx = ToolContext(
+            player_id="system", tags=frozenset(), services=services, event_bus=event_bus, player_data=player_data
+        )
+        await spec.fn(ctx)
+        await scheduler.mark_run(owner_skill, fn_name, cron=spec.cron, ran_at=now)
+
+    due_once = await scheduler.startup_catch_up_once(now=now)
+    for once in due_once:
+        await event_bus.emit_notify(once.event_name, once.payload)
 
     intents = discord.Intents.default()
     intents.message_content = True
