@@ -21,9 +21,16 @@ from core.resolvers import ResolverRegistry
 from core.scheduler import Scheduler
 from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
-from core.tool_types import PlayerRef, ToolContext
+from core.threads import ThreadManager
+from core.tool_types import ArcadeRef, PlayerRef, ToolContext
+from services.common.arcades import ArcadesService
+from services.common.http import HttpService, build_http_service
+from services.common.memory import MemoryService
+from services.common.notify import NotifyService
 from services.common.players import PlayersService
+from services.common.secrets import SecretsService
 from services.common.settings import SettingsService
+from services.common.yuni import YuniService
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +38,18 @@ CORE_MIGRATIONS_ROOT = Path("migrations/core")
 
 
 class YuniClient(discord.Client):
-    def __init__(self, *, intents: discord.Intents, test_guild_id: int | None, conn: aiosqlite.Connection) -> None:
+    def __init__(
+        self,
+        *,
+        intents: discord.Intents,
+        test_guild_id: int | None,
+        conn: aiosqlite.Connection,
+        http_service: HttpService,
+    ) -> None:
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self.conn = conn
+        self.http_service = http_service
         self._test_guild_id = test_guild_id
 
     async def setup_hook(self) -> None:
@@ -46,8 +61,32 @@ class YuniClient(discord.Client):
             await self.tree.sync()
 
     async def close(self) -> None:
+        # http_service.aclose()는 hishel의 AsyncCacheTransport.aclose()를 거쳐 캐시용
+        # SQLite 연결(anysqlite)까지 닫는다 — 코어 DB 연결을 닫는 아래 줄과 같은 역할이다.
+        await self.http_service.aclose()
         await self.conn.close()
         await super().close()
+
+
+class _BotDiscordGateway:
+    """NotifyService가 쓰는 DiscordGateway 프로토콜의 유일한 구현. discord API는 여기서만 안다."""
+
+    def __init__(self, discord_client: discord.Client) -> None:
+        self._client = discord_client
+
+    async def send_channel_message(self, channel_id: str, content: str) -> None:
+        channel = self._client.get_channel(int(channel_id))
+        # get_channel()의 반환형은 카테고리/포럼 채널도 포함한다 — 그런 채널에는 보낼 수
+        # 없으므로(런타임에도 실패한다), Messageable로 좁혀진 것만 보낸다.
+        if isinstance(channel, discord.abc.Messageable):
+            await channel.send(content)
+
+    async def send_dm(self, discord_id: str, content: str, *, view: discord.ui.View | None = None) -> None:
+        user = await self._client.fetch_user(int(discord_id))
+        if view is not None:
+            await user.send(content, view=view)
+        else:
+            await user.send(content)
 
 
 def _migration_roots(skills: list[LoadedSkill]) -> list[tuple[str, Path]]:
@@ -141,11 +180,23 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     skill_tables = await discover_skill_tables(conn)
     player_data = PlayerDataScanner(conn=conn, table_names=skill_tables)
 
+    settings_service = SettingsService(conn)
+    memory_service = MemoryService(conn)
+    arcades_service = ArcadesService(conn)
+    secrets_service = SecretsService(config.cookie_encryption_key) if config.cookie_encryption_key else None
+
     resolvers = ResolverRegistry()
     resolvers.register(PlayerRef, players)
+    resolvers.register(ArcadeRef, arcades_service)
 
-    settings_service = SettingsService(conn)
-    services: dict[str, object] = {"players": players, "settings": settings_service}
+    services: dict[str, object] = {
+        "players": players,
+        "settings": settings_service,
+        "memory": memory_service,
+        "arcades": arcades_service,
+    }
+    if secrets_service is not None:
+        services["secrets"] = secrets_service
 
     executor = ToolExecutor(
         resolvers=resolvers,
@@ -185,9 +236,28 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     for once in due_once:
         await event_bus.emit_notify(once.event_name, once.payload)
 
+    # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야
+    # 하기 때문이다(아래 YuniClient.close() 참고). notify_service는 반대로 client가 있어야
+    # (게이트웨이가 discord.Client를 감싸므로) client 다음에 만든다.
+    http_service = await build_http_service(cache_db_path=config.db_path.parent / "http_cache.sqlite")
+
     intents = discord.Intents.default()
     intents.message_content = True
-    client = YuniClient(intents=intents, test_guild_id=config.test_guild_id, conn=conn)
+    client = YuniClient(
+        intents=intents, test_guild_id=config.test_guild_id, conn=conn, http_service=http_service
+    )
+
+    notify_service = NotifyService(
+        gateway=_BotDiscordGateway(client),
+        players=players,
+        settings=settings_service,
+        threads=ThreadManager(),
+    )
+    yuni_service = YuniService()
+
+    services["http"] = http_service
+    services["notify"] = notify_service
+    services["yuni"] = yuni_service
 
     plan = build_slash_plan(registry.tool_specs())
     snapshot = build_snapshot(registry)
