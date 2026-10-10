@@ -298,6 +298,20 @@ def test_render_result_error_is_ephemeral() -> None:
     assert kwargs == {"content": "안 돼요", "ephemeral": True}
 
 
+def test_render_result_display_not_ephemeral_by_default() -> None:
+    display = Display(content="표시물")
+    kwargs = render_result(ToolResult(data={}, display=display))
+
+    assert "ephemeral" not in kwargs
+
+
+def test_render_result_passes_display_ephemeral_through() -> None:
+    display = Display(content="너만 보여요", ephemeral=True)
+    kwargs = render_result(ToolResult(data={}, display=display))
+
+    assert kwargs["ephemeral"] is True
+
+
 async def test_data_only_tool_reply_has_content(
     practice_tree: tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService],
 ) -> None:

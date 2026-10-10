@@ -6,6 +6,7 @@ CREATE TABLE account_link_codes (
     status TEXT NOT NULL DEFAULT 'pending',
     issuer_confirmed INTEGER NOT NULL DEFAULT 0,
     joiner_confirmed INTEGER NOT NULL DEFAULT 0,
+    discard_agreed INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL
 );

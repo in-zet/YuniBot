@@ -237,6 +237,8 @@ def render_result(result: ToolResult) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"content": display.content, "embeds": list(display.embeds)}
         if display.view is not None:
             kwargs["view"] = display.view
+        if display.ephemeral:
+            kwargs["ephemeral"] = True
         return kwargs
 
     return {"content": _fallback_content(result.data)[:_DISCORD_CONTENT_LIMIT]}
@@ -278,6 +280,7 @@ def _build_command(
             event_bus=executor.event_bus,
             player_data=executor.player_data,
             db=db,
+            discord_id=discord_id,
         )
 
         if is_new_player:

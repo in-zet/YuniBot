@@ -70,3 +70,17 @@ def test_tool_context_defaults_guild_id_and_event_bus() -> None:
 def test_tool_context_db_defaults_to_none() -> None:
     ctx = ToolContext(player_id="1", tags=frozenset(), services={})
     assert ctx.db is None
+
+
+def test_tool_context_discord_id_defaults_to_none() -> None:
+    ctx = ToolContext(player_id="1", tags=frozenset(), services={})
+    assert ctx.discord_id is None
+
+
+def test_tool_context_discord_id_round_trips() -> None:
+    ctx = ToolContext(player_id="1", tags=frozenset(), services={}, discord_id="111")
+    assert ctx.discord_id == "111"
+
+
+def test_display_ephemeral_defaults_to_false() -> None:
+    assert Display(content="hi").ephemeral is False

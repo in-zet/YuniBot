@@ -16,6 +16,7 @@ class LinkCode:
     status: str
     issuer_confirmed: bool
     joiner_confirmed: bool
+    discard_agreed: bool
     expires_at: str
 
 
@@ -28,6 +29,7 @@ def _row_to_code(row: aiosqlite.Row) -> LinkCode:
         status=row["status"],
         issuer_confirmed=bool(row["issuer_confirmed"]),
         joiner_confirmed=bool(row["joiner_confirmed"]),
+        discard_agreed=bool(row["discard_agreed"]),
         expires_at=row["expires_at"],
     )
 
@@ -69,6 +71,13 @@ async def set_confirmed(conn: aiosqlite.Connection, code: str, *, side: str) -> 
 
 async def mark_status(conn: aiosqlite.Connection, code: str, *, status: str) -> None:
     await conn.execute("UPDATE account_link_codes SET status = ? WHERE code = ?", (status, code))
+    await conn.commit()
+
+
+async def mark_discard_agreed(conn: aiosqlite.Connection, code: str) -> None:
+    await conn.execute(
+        "UPDATE account_link_codes SET discard_agreed = 1 WHERE code = ?", (code,)
+    )
     await conn.commit()
 
 

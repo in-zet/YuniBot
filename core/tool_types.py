@@ -30,6 +30,7 @@ class ToolContext:
     event_bus: EventBus = field(default_factory=EventBus)
     player_data: PlayerDataScanner | None = None
     db: aiosqlite.Connection | None = None
+    discord_id: str | None = None
 
     def __getattr__(self, name: str) -> Any:
         # dataclass가 정의한 필드(player_id, tags, services)는 정상 __getattribute__로 먼저 해석되므로
@@ -51,6 +52,7 @@ class Display:
     content: str | None = None
     embeds: list[Any] = field(default_factory=list)
     view: Any | None = None
+    ephemeral: bool = False
 
 
 @dataclass(slots=True, kw_only=True)
