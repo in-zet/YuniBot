@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from core.events import EventBus
+from core.player_data import PlayerDataScanner
 
 
 class UndeclaredServiceError(AttributeError):
@@ -25,6 +26,7 @@ class ToolContext:
     services: Mapping[str, object] = field(default_factory=dict)
     guild_id: str | None = None
     event_bus: EventBus = field(default_factory=EventBus)
+    player_data: PlayerDataScanner | None = None
 
     def __getattr__(self, name: str) -> Any:
         # dataclass가 정의한 필드(player_id, tags, services)는 정상 __getattribute__로 먼저 해석되므로
