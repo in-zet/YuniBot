@@ -56,11 +56,23 @@
 - Modify: `pyproject.toml` (의존성: `cryptography`, `croniter`, `hishel[sqlite]`)
 - Modify: `core/config.py`
 - Modify: `tests/core/test_config.py`
+- Modify: `tests/core/test_bot_wiring.py` (`CoreConfig(...)`를 직접 만드는 두 곳에 새 필드를 채운다)
 - Modify: `.env.example` (없으면 생성)
 
 **Interfaces:**
 - Consumes: 없음
-- Produces: `CoreConfig`에 `admin_discord_ids: frozenset[str]`, `quiet_hours_start: datetime.time`, `quiet_hours_end: datetime.time`, `cookie_encryption_key: bytes` 필드 추가. 이후 모든 Task가 이 설정으로 경로/키/시간대를 받는다.
+- Produces: `CoreConfig`에 `admin_discord_ids: frozenset[str]`, `quiet_hours_start: datetime.time`, `quiet_hours_end: datetime.time`, `cookie_encryption_key: bytes` 필드 추가(전부 필수 필드, 기본값 없음 — 기존 필드들과 같은 모양이다). 이후 모든 Task가 이 설정으로 경로/키/시간대를 받는다.
+
+`CoreConfig`의 네 새 필드는 기본값이 없으므로, `tests/core/test_bot_wiring.py`가 `load_config()`를 거치지 않고 `CoreConfig(...)`를 직접 만드는 두 곳(각각 `discord_token`/`skills_dirs`/`db_path`/`test_guild_id`만 채우는 생성자 호출)이 당장 깨진다. 두 곳 모두 아래 네 줄을 추가한다:
+
+```python
+        admin_discord_ids=frozenset(),
+        quiet_hours_start=datetime.time(2, 0),
+        quiet_hours_end=datetime.time(6, 0),
+        cookie_encryption_key=b"",
+```
+
+(파일 상단에 `import datetime`이 없으면 더한다.)
 
 - [ ] **Step 1: 의존성 추가**
 
@@ -216,7 +228,7 @@ EOF
 - [ ] **Step 7: 커밋**
 
 ```bash
-git add pyproject.toml uv.lock core/config.py tests/core/test_config.py .env.example
+git add pyproject.toml uv.lock core/config.py tests/core/test_config.py tests/core/test_bot_wiring.py .env.example
 git commit -m "core: add admin ids, quiet hours, cookie key to config"
 ```
 
