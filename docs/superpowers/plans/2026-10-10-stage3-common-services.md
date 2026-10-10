@@ -3315,11 +3315,20 @@ def call_counter() -> list[httpx.Request]:
 
 
 def _cached_handler(calls: list[httpx.Request]) -> "httpx.AsyncBaseTransport":
+    from email.utils import formatdate
+
     async def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         return httpx.Response(
             200,
-            headers={"Cache-Control": "max-age=3600", "ETag": '"v1"'},
+            # hishel은 Date 헤더로 신선도(max-age 대비 경과 시간)를 계산한다. 실제
+            # 서버는 항상 Date를 보내지만, 가짜 전송(MockTransport)은 직접 안 채우면
+            # 비워지므로 캐시가 "신선"하다고 판단하지 못해 매번 다시 호출해 버린다.
+            headers={
+                "Cache-Control": "max-age=3600",
+                "ETag": '"v1"',
+                "Date": formatdate(usegmt=True),
+            },
             json={"hits": len(calls)},
         )
 
