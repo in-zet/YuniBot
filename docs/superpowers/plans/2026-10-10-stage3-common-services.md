@@ -4373,6 +4373,7 @@ from __future__ import annotations
 import importlib.util
 import secrets
 import string
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -4390,6 +4391,13 @@ _MODELS_PATH = Path(__file__).parent / "models.py"
 _spec = importlib.util.spec_from_file_location("_account_link_models", _MODELS_PATH)
 assert _spec is not None and _spec.loader is not None
 models = importlib.util.module_from_spec(_spec)
+# sys.modules에 먼저 등록해야 한다 — models.py는 `from __future__ import annotations`를 쓰는
+# @dataclass(slots=True)를 담고 있는데, dataclasses가 KW_ONLY/ClassVar 판별에 쓰는 문자열
+# 애너테이션 해석이 sys.modules[cls.__module__]로 그 모듈의 전역을 찾는다. module_from_spec만
+# 부르고 등록을 안 하면 그 조회가 None이 되어 "AttributeError: 'NoneType' object has no
+# attribute '__dict__'"로 죽는다(Python 3.14에서 실제로 재현됨). 자기 데이터클래스가 없는
+# skills/_template/skill.py는 이 문제를 안 겪어서 거기엔 없던 줄이다.
+sys.modules[_spec.name] = models
 _spec.loader.exec_module(models)
 
 CODE_LENGTH = 6
