@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from core.threads import ThreadManager, ThreadSession, ThreadTranscript, ThreadTransport
 from services.common.players import PlayersService
@@ -18,7 +18,7 @@ class DiscordGateway(Protocol):
     모른다 — 이 프로토콜이 유일한 창구다."""
 
     async def send_channel_message(self, channel_id: str, content: str) -> None: ...
-    async def send_dm(self, discord_id: str, content: str) -> None: ...
+    async def send_dm(self, discord_id: str, content: str, *, view: Any | None = None) -> None: ...
 
 
 class NotifyService:
@@ -38,11 +38,11 @@ class NotifyService:
     async def post(self, channel_id: str, content: str) -> None:
         await self._gateway.send_channel_message(channel_id, content)
 
-    async def dm(self, player_id: str, content: str) -> None:
+    async def dm(self, player_id: str, content: str, *, view: Any | None = None) -> None:
         player = await self._players.get_player(player_id)
         if player is None or player.primary_discord_id is None:
             return
-        await self._gateway.send_dm(player.primary_discord_id, content)
+        await self._gateway.send_dm(player.primary_discord_id, content, view=view)
 
     async def mention(self, player_id: str, content: str) -> str:
         """알림 멘션 설정(account-link의 '알림을 받을 계정')을 반영해 멘션 문자열을 만든다."""

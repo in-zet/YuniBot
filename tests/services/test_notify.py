@@ -20,13 +20,13 @@ _MIGRATIONS = [
 class _FakeGateway:
     def __init__(self) -> None:
         self.channel_messages: list[tuple[str, str]] = []
-        self.dms: list[tuple[str, str]] = []
+        self.dms: list[tuple[str, str, object]] = []
 
     async def send_channel_message(self, channel_id: str, content: str) -> None:
         self.channel_messages.append((channel_id, content))
 
-    async def send_dm(self, discord_id: str, content: str) -> None:
-        self.dms.append((discord_id, content))
+    async def send_dm(self, discord_id: str, content: str, *, view: object | None = None) -> None:
+        self.dms.append((discord_id, content, view))
 
 
 @pytest.fixture
@@ -58,7 +58,7 @@ async def test_dm_uses_primary_account(env) -> None:
 
     await notify.dm(player.id, "쿠키가 만료됐어요")
 
-    assert gateway.dms == [("111", "쿠키가 만료됐어요")]
+    assert gateway.dms == [("111", "쿠키가 만료됐어요", None)]
 
 
 async def test_dm_noop_when_player_has_no_account(env) -> None:
@@ -68,6 +68,17 @@ async def test_dm_noop_when_player_has_no_account(env) -> None:
     await notify.dm(player.id, "아무도 못 받는 DM")
 
     assert gateway.dms == []
+
+
+async def test_dm_passes_view_through(env) -> None:
+    notify, players, _, gateway = env
+    player = await players.create_player()
+    await players.link_account(player.id, "111")
+
+    sentinel_view = object()
+    await notify.dm(player.id, "확인해 주세요", view=sentinel_view)
+
+    assert gateway.dms == [("111", "확인해 주세요", sentinel_view)]
 
 
 async def test_mention_defaults_to_primary_account(env) -> None:

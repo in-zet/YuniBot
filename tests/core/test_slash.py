@@ -2,7 +2,7 @@ import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import aiosqlite
 import discord
@@ -30,6 +30,10 @@ _PLAYERS_MIGRATION = (
     Path("migrations/core/001_players.sql").read_text()
     + Path("migrations/core/002_player_tags.sql").read_text()
 )
+
+# 이 모듈의 많은 테스트는 attach_to_tree의 새 db 매개변수를 쓰지 않는다(ctx.db에 접근하는
+# 도구가 없다) — 매번 실제 연결을 여는 대신 타입만 맞춘 가짜를 하나 공유한다.
+_NO_DB = cast(aiosqlite.Connection, object())
 
 
 @tool(slash="보더")
@@ -101,7 +105,7 @@ def test_attach_to_tree_skips_more_than_three_levels_without_crashing() -> None:
         discord.Client(intents=discord.Intents.none())
     )
 
-    attach_to_tree(tree, plan, executor=executor)
+    attach_to_tree(tree, plan, executor=executor, db=_NO_DB)
 
     assert tree.get_command("너무") is None
     assert tree.get_command("보더") is not None
@@ -125,7 +129,7 @@ def test_attach_to_tree_builds_offline_command(monkeypatch: pytest.MonkeyPatch) 
     )
     executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
 
-    attach_to_tree(tree, plan, executor=executor)
+    attach_to_tree(tree, plan, executor=executor, db=_NO_DB)
 
     assert tree.get_command("보더") is not None
 
@@ -148,7 +152,7 @@ def test_attach_to_tree_builds_real_named_options_for_argument_tool() -> None:
     )
     executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
 
-    attach_to_tree(tree, plan, executor=executor)
+    attach_to_tree(tree, plan, executor=executor, db=_NO_DB)
 
     command = tree.get_command("조회")
     assert isinstance(command, discord.app_commands.Command)
@@ -187,7 +191,7 @@ def test_attach_to_tree_handles_tool_arg_named_interaction_without_crashing() ->
     )
     executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
 
-    attach_to_tree(tree, plan, executor=executor)
+    attach_to_tree(tree, plan, executor=executor, db=_NO_DB)
 
     command = tree.get_command("충돌")
     assert isinstance(command, discord.app_commands.Command)
@@ -253,7 +257,7 @@ async def practice_tree() -> AsyncIterator[tuple[discord.app_commands.CommandTre
     )
     client = discord.Client(intents=discord.Intents.none())
     tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(client)
-    attach_to_tree(tree, build_slash_plan(registry.tool_specs()), executor=executor)
+    attach_to_tree(tree, build_slash_plan(registry.tool_specs()), executor=executor, db=conn)
     try:
         yield tree, executor, players
     finally:
@@ -418,7 +422,7 @@ def test_attach_to_tree_skips_a_broken_skill_and_keeps_the_rest(caplog: pytest.L
     )
 
     with caplog.at_level(logging.WARNING):
-        attach_to_tree(tree, plan, executor=executor)
+        attach_to_tree(tree, plan, executor=executor, db=_NO_DB)
 
     group = tree.get_command("연결")
     assert isinstance(group, discord.app_commands.Group)

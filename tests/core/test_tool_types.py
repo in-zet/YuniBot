@@ -65,3 +65,8 @@ def test_tool_context_defaults_guild_id_and_event_bus() -> None:
     ctx = ToolContext(player_id="1", tags=frozenset(), services={})
     assert ctx.guild_id is None
     assert ctx.event_bus is not None
+
+
+def test_tool_context_db_defaults_to_none() -> None:
+    ctx = ToolContext(player_id="1", tags=frozenset(), services={})
+    assert ctx.db is None

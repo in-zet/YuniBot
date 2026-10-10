@@ -189,7 +189,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     client = YuniClient(intents=intents, test_guild_id=config.test_guild_id, conn=conn)
 
     plan = build_slash_plan(registry.tool_specs())
-    attach_to_tree(client.tree, plan, executor=executor)
+    attach_to_tree(client.tree, plan, executor=executor, db=conn)
     client.tree.add_command(
         build_settings_group(registry=registry, settings=settings_service, players=players)
     )

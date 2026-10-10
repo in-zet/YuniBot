@@ -193,6 +193,18 @@ async def test_resolve_player_ref_unknown_mention_fails(conn: aiosqlite.Connecti
         await service.resolve("<@999999999999999999>", ctx)
 
 
+async def test_dissolve_player_removes_accounts_and_tags(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    player = await service.create_player()
+    await service.link_account(player.id, "111")
+    await service.grant_tag(player.id, "tester", source="admin:1")
+
+    await service.dissolve_player(player.id)
+
+    assert await service.player_for_discord("111") is None
+    assert await service.tags_for(player.id) == set()
+
+
 async def test_resolve_player_ref_free_text_fails(conn: aiosqlite.Connection) -> None:
     service = PlayersService(conn)
     caller = await service.create_player()

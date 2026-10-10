@@ -227,6 +227,16 @@ class PlayersService:
         rows = await cursor.fetchall()
         return [row["player_id"] for row in rows]
 
+    async def dissolve_player(self, player_id: str) -> None:
+        """플레이어를 완전히 해체한다 — 계정 연결과 태그를 전부 지우고 플레이어 행은
+        고아로 남긴다. 계정 연결의 '버리고 연결'에서만 쓰는 내부 정리 경로라, grant_tag/
+        revoke_tag와 달리 상태 태그 보호를 거치지 않는다(admin의 손태그 변경 금지와는
+        다른 종류의 작업이다)."""
+        for account in await self.accounts_for(player_id):
+            await self.unlink_account(account.discord_id)
+        await self._conn.execute("DELETE FROM player_tags WHERE player_id = ?", (player_id,))
+        await self._conn.commit()
+
     async def resolve(self, raw: str, ctx: ToolContext) -> Player:
         """PlayerRef 해석기. 지원 범위는 설계서 합의된 단순화 1번 참고:
         멘션(<@id>/<@!id>), 디스코드 스노우플레이크 숫자열, '나'/'저'/'me'/'자신'뿐이다."""
