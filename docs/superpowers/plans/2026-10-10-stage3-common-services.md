@@ -3693,6 +3693,19 @@ async def test_schedule_once_gives_up_after_the_day_passes(conn: aiosqlite.Conne
     next_day_wakeup = datetime.datetime(2026, 10, 11, 7, 0)
     due = await scheduler.startup_catch_up_once(now=next_day_wakeup)
     assert due == []
+
+
+async def test_schedule_once_ignores_non_catch_up_even_same_day(conn: aiosqlite.Connection) -> None:
+    scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
+    fire_at = datetime.datetime(2026, 10, 10, 20, 0)
+    await scheduler.schedule_once(
+        owner_skill="chunithm-goals", event_name="chunithm.goal.due",
+        payload={"goal_id": "g1"}, fire_at=fire_at, catch_up=False,
+    )
+
+    same_day_wakeup = datetime.datetime(2026, 10, 10, 23, 0)
+    due = await scheduler.startup_catch_up_once(now=same_day_wakeup)
+    assert due == []  # catch_up=False라 같은 날이어도 돌지 않는다 — 그냥 닫힌다
 ```
 
 - [ ] **Step 7: 테스트 실패 확인**
@@ -3796,19 +3809,20 @@ class Scheduler:
         return row_id
 
     async def startup_catch_up_once(self, *, now: datetime.datetime) -> list[OnceSchedule]:
-        """한 번 도는 예약 중 아직 안 돈 것을 본다. '오늘' 날짜로 예정됐던 것만 낸다 —
-        catch_up 여부와 무관하게 하루가 지나면 더는 의미가 없다고 보고 그냥 닫는다.
-        '밀렸다'의 기준은 startup_catch_up과 같이 엄격히 과거(fire_at < now)다."""
+        """한 번 도는 예약 중 아직 안 돈 것을 본다. catch_up이 켜졌고 '오늘' 날짜로
+        예정됐던 것만 낸다 — recurring 쪽(startup_catch_up)과 완전히 같은 규칙이다.
+        catch_up이 꺼졌거나 오늘이 아니면 그냥 닫는다(다시는 안 돈다 — one-off라 미룰
+        '다음 시각'이 없다). '밀렸다'의 기준은 startup_catch_up과 같이 엄격히 과거다."""
         cursor = await self._conn.execute(
-            "SELECT id, owner_skill, event_name, payload, fire_at FROM schedule_once "
+            "SELECT id, owner_skill, event_name, payload, fire_at, catch_up FROM schedule_once "
             "WHERE fired_at IS NULL AND fire_at < ?",
             (now.isoformat(),),
         )
         rows = await cursor.fetchall()
         today = now.date().isoformat()
         due: list[OnceSchedule] = []
-        for row_id, owner_skill, event_name, payload, fire_at in rows:
-            if fire_at[:10] == today:
+        for row_id, owner_skill, event_name, payload, fire_at, catch_up in rows:
+            if catch_up and fire_at[:10] == today:
                 due.append(
                     OnceSchedule(owner_skill=owner_skill, event_name=event_name, payload=json.loads(payload))
                 )
@@ -3825,7 +3839,7 @@ class Scheduler:
 uv run pytest tests/core/test_scheduler.py -v
 ```
 
-Expected: PASS (9 tests)
+Expected: PASS (10 tests)
 
 - [ ] **Step 10: `core/bot.py` 와이어링 — 기동 시 동기화와 catch_up**
 
