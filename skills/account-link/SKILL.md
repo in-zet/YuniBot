@@ -7,8 +7,14 @@ examples:
 category: 계정 연결
 game: common
 version: 1
-services: [players, notify, db, player_data]
+services: [players, notify, memory, db, player_data]
 emits: [players.linked]
+settings:
+  - name: 알림을 받을 계정
+    kind: str
+    default: primary
+    description: 동기화 알림을 어느 계정으로 멘션할지(primary/all/특정 디스코드 ID)
+    scope: player
 ---
 
 ## SKILL.md 본문

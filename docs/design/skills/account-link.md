@@ -15,9 +15,17 @@ examples:
 category: 계정 연결
 game: common
 version: 1
-services: [players, notify]
+services: [players, notify, memory, db, player_data]
 emits: [players.linked]
+settings:
+  - name: 알림을 받을 계정
+    kind: str
+    default: primary
+    description: 동기화 알림을 어느 계정으로 멘션할지(primary/all/특정 디스코드 ID)
+    scope: player
 ```
+
+`db`(자기 테이블 `account_link_codes`)와 `player_data`(버리고 연결할 때 모든 스킬 테이블의 행 세기·지우기)는 코어 전용 맥락이라 manifest에 선언해야 받는다. `memory`는 코어 테이블이라 `player_data`가 세지 않는 메모리를 따로 보고 지우는 데 쓴다.
 
 태그 조건은 없다.
 

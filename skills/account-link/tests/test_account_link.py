@@ -14,11 +14,13 @@ import pytest
 from core.events import EventBus
 from core.player_data import PlayerDataScanner, discover_skill_tables
 from core.tool_types import ToolContext
+from services.common.memory import MemoryService
 from services.common.players import PlayersService
 
 _CORE_MIGRATIONS = [
     Path("migrations/core/001_players.sql").read_text(),
     Path("migrations/core/002_player_tags.sql").read_text(),
+    Path("migrations/core/004_memory.sql").read_text(),
 ]
 _SKILL_MIGRATION = Path(__file__).parent.parent / "migrations" / "001_init.sql"
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -67,6 +69,7 @@ async def link_env():
 
     players = PlayersService(conn)
     notify = _FakeNotify()
+    memory = MemoryService(conn)
     player_data = PlayerDataScanner(conn=conn, table_names=await discover_skill_tables(conn))
     skill = _load_skill()
 
@@ -75,8 +78,11 @@ async def link_env():
         # interaction.user.id를 ToolContext.discord_id에 싣는 것과 같은 자리를 흉내 낸다.
         # 플레이어가 이미 여러 계정을 연결했어도 accounts_for()의 첫 번째가 아니라
         # 바로 이 값을 써야 한다(리뷰 Finding 1).
+        # db/player_data는 _dispatch가 manifest.services에 선언한 스킬에게만 채워 준다 —
+        # account-link은 둘 다 선언했으므로(SKILL.md) 여기서도 그대로 준다.
         return ToolContext(
-            player_id=player_id, tags=frozenset(), services={"players": players, "notify": notify},
+            player_id=player_id, tags=frozenset(),
+            services={"players": players, "notify": notify, "memory": memory},
             db=conn, event_bus=EventBus(), player_data=player_data, discord_id=discord_id,
         )
 
@@ -539,6 +545,203 @@ async def test_unlink_rejects_removing_primary_while_other_accounts_remain(link_
     assert "대표" in result.error
     assert await players.player_for_discord("111") is not None
     assert await players.player_for_discord("222") is not None
+
+
+async def test_unlink_rejects_another_players_account(link_env) -> None:
+    """리뷰(최종) Fix 1 [Critical]: /연결 해제에 남의 디스코드 ID를 넣어도 남의 연결이 끊기면 안 된다."""
+    skill, players, _, make_ctx = link_env
+    attacker = await players.create_player()
+    await players.link_account(attacker.id, "111")
+    victim = await players.create_player()
+    await players.link_account(victim.id, "222")
+    await players.link_account(victim.id, "333")
+    await players.grant_tag(victim.id, "tester", source="test")
+    ctx = make_ctx(attacker.id, "111")
+
+    for target in ("222", "333"):  # 대표 계정이든 아니든
+        result = await skill.unlink(ctx, discord_id=target)
+        assert result.error is not None
+        assert "내 플레이어" in result.error
+
+    # 피해자는 그대로다 — 계정, 대표, 태그 모두.
+    assert [a.discord_id for a in await players.accounts_for(victim.id)] == ["222", "333"]
+    refreshed_victim = await players.get_player(victim.id)
+    assert refreshed_victim is not None
+    assert refreshed_victim.primary_discord_id == "222"
+    assert await players.tags_for(victim.id) == {"tester"}
+    # 공격자 자신도 그대로다.
+    assert [a.discord_id for a in await players.accounts_for(attacker.id)] == ["111"]
+
+
+async def test_unlink_own_non_primary_account_still_works(link_env) -> None:
+    skill, players, _, make_ctx = link_env
+    player = await players.create_player()
+    await players.link_account(player.id, "111")
+    await players.link_account(player.id, "222")
+
+    result = await skill.unlink(make_ctx(player.id, "111"), discord_id="222")
+
+    assert result.error is None
+    assert await players.player_for_discord("222") is None
+    assert [a.discord_id for a in await players.accounts_for(player.id)] == ["111"]
+
+
+async def test_issuer_started_from_non_primary_account_can_confirm_from_any_linked_account(link_env) -> None:
+    """리뷰(최종) Fix 2: 발급자 확인 DM은 notify.dm이 대표 계정으로 보낸다. /연결 시작을 대표가
+    아닌 계정에서 쳐도 교착되면 안 된다 — 발급자 플레이어의 어느 계정이든 확인을 누를 수 있다."""
+    skill, players, notify, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    await players.link_account(issuer.id, "333")
+    await players.set_primary(issuer.id, "333")  # DM은 333으로 간다
+
+    started = await skill.start_link(make_ctx(issuer.id, "111"))  # 대표가 아닌 111에서 시작
+    code = started.data["code"]
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=code)
+    joiner_view = joined.display.view
+    dm_player_id, _, issuer_view = notify.dms[-1]
+    assert dm_player_id == issuer.id
+
+    # 남이나 상대(참여자)는 발급자 쪽 버튼을 못 누른다.
+    stranger = _FakeInteraction("999")
+    await issuer_view.confirm.callback(stranger)  # pyright: ignore[reportCallIssue]
+    assert "당신" in stranger.response.calls[0]["content"]
+    joiner_on_issuer_side = _FakeInteraction("222")
+    await issuer_view.confirm.callback(joiner_on_issuer_side)  # pyright: ignore[reportCallIssue]
+    assert "당신" in joiner_on_issuer_side.response.calls[0]["content"]
+    # 발급자도 참여자 쪽 버튼을 못 누른다.
+    issuer_on_joiner_side = _FakeInteraction("333")
+    await joiner_view.confirm.callback(issuer_on_joiner_side)  # pyright: ignore[reportCallIssue]
+    assert "당신" in issuer_on_joiner_side.response.calls[0]["content"]
+
+    # DM을 받은 대표 계정 333이 확인한다(명령을 친 111이 아니다).
+    primary_click = _FakeInteraction("333")
+    await issuer_view.confirm.callback(primary_click)  # pyright: ignore[reportCallIssue]
+    assert "기다리는" in primary_click.response.calls[0]["content"]
+
+    joiner_click = _FakeInteraction("222")
+    await joiner_view.confirm.callback(joiner_click)  # pyright: ignore[reportCallIssue]
+    assert joiner_click.response.calls[0]["content"] == "연결이 완료됐다!"
+
+    moved = await players.player_for_discord("222")
+    assert moved is not None
+    assert moved.id == issuer.id
+
+
+async def test_issuer_command_account_can_also_confirm(link_env) -> None:
+    skill, players, notify, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    await players.link_account(issuer.id, "333")
+    await players.set_primary(issuer.id, "333")
+    started = await skill.start_link(make_ctx(issuer.id, "111"))
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=started.data["code"])
+    issuer_view = notify.dms[-1][2]
+
+    await issuer_view.confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+    await joined.display.view.confirm.callback(_FakeInteraction("222"))  # pyright: ignore[reportCallIssue]
+
+    moved = await players.player_for_discord("222")
+    assert moved is not None
+    assert moved.id == issuer.id
+
+
+async def test_finalize_dissolves_stale_joiner_so_its_admin_tag_is_not_counted(link_env) -> None:
+    """리뷰(최종) Fix 4: 참여자의 옛 플레이어(계정 하나짜리)는 연결 뒤 닿을 수 없는 고아가 된다.
+    그 고아가 손으로 받은 admin 태그를 계속 쥐고 있으면 players_with_tag("admin")이 유령 관리자를
+    세어 admin의 '마지막 관리자' 검사가 속는다. 마무리가 dissolve_player로 태그까지 지워야 한다."""
+    skill, players, notify, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    started = await skill.start_link(make_ctx(issuer.id, "111"))
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    await players.grant_tag(joiner.id, "admin", source="admin:someone")
+    await players.grant_tag(joiner.id, "tester", source="test")
+    assert joiner.id in await players.players_with_tag("admin")
+
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=started.data["code"])
+    await notify.dms[-1][2].confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+    await joined.display.view.confirm.callback(_FakeInteraction("222"))  # pyright: ignore[reportCallIssue]
+
+    moved = await players.player_for_discord("222")
+    assert moved is not None
+    assert moved.id == issuer.id
+    assert joiner.id not in await players.players_with_tag("admin")
+    assert await players.tags_for(joiner.id) == set()
+    assert await players.accounts_for(joiner.id) == []
+    # 태그는 합치지 않는다 — 발급자는 참여자의 옛 태그를 얻지 않는다.
+    assert await players.tags_for(issuer.id) == set()
+
+
+async def test_finalize_without_discard_keeps_stale_joiner_with_other_accounts_intact(link_env) -> None:
+    """Fix 4의 경계: 버릴 데이터가 없는 경로에서 확인을 기다리는 사이 옛 플레이어가 계정을 하나 더
+    얻었다면, 그 플레이어는 고아가 아니다 — 해체하지 않고 옮기는 계정 하나만 뗀다."""
+    skill, players, notify, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    started = await skill.start_link(make_ctx(issuer.id, "111"))
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    await players.grant_tag(joiner.id, "tester", source="test")
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=started.data["code"])
+    await players.link_account(joiner.id, "999")  # 확인 버튼이 떠 있는 사이
+
+    await notify.dms[-1][2].confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+    await joined.display.view.confirm.callback(_FakeInteraction("222"))  # pyright: ignore[reportCallIssue]
+
+    moved = await players.player_for_discord("222")
+    assert moved is not None
+    assert moved.id == issuer.id
+    assert [a.discord_id for a in await players.accounts_for(joiner.id)] == ["999"]
+    assert await players.tags_for(joiner.id) == {"tester"}
+
+
+async def test_memory_only_joiner_gets_discard_prompt_and_memory_is_cleared(link_env) -> None:
+    """리뷰(최종) Fix 7: player_data 스캐너는 코어 테이블(player_memory)을 세지 않는다. 메모리만
+    있는 계정도 버리기 확인을 받아야 하고, 버리고 연결하면 그 메모리가 실제로 지워져야 한다."""
+    skill, players, notify, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    started = await skill.start_link(make_ctx(issuer.id, "111"))
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joiner_ctx = make_ctx(joiner.id, "222")
+    await joiner_ctx.memory.set(joiner.id, "호칭: 펭귄")
+    assert joiner_ctx.player_data is not None
+    assert await joiner_ctx.player_data.count(joiner.id) == {}  # 스킬 테이블 행은 없다
+
+    result = await skill.join_link(joiner_ctx, code=started.data["code"])
+    assert result.data["has_memory"] is True
+    assert result.display is not None
+    assert "메모리" in (result.display.content or "")
+    discard_view = result.display.view
+    assert discard_view is not None
+    # 아직 상호 확인으로 넘어가지 않았다(발급자에게 DM이 가지 않았다).
+    assert notify.dms == []
+
+    discard_click = _FakeInteraction("222")
+    await discard_view.discard_and_continue.callback(discard_click)  # pyright: ignore[reportCallIssue]
+    joiner_view = discard_click.response.calls[0]["view"]
+    # 양쪽이 확인하기 전에는 아직 지우지 않는다.
+    assert await joiner_ctx.memory.get(joiner.id) == "호칭: 펭귄"
+
+    await notify.dms[-1][2].confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+    await joiner_view.confirm.callback(_FakeInteraction("222"))  # pyright: ignore[reportCallIssue]
+
+    moved = await players.player_for_discord("222")
+    assert moved is not None
+    assert moved.id == issuer.id
+    assert await joiner_ctx.memory.get(joiner.id) == ""
 
 
 def test_account_link_manifest_declares_every_ctx_field_it_uses() -> None:
