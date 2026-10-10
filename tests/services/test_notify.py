@@ -122,6 +122,26 @@ async def test_mention_respects_specific_account_setting(env) -> None:
     assert mentioned == "<@222> 안녕하세요"
 
 
+@pytest.mark.parametrize("bogus", ["999", "222> @everyone <@111", "<@333>", "nobody"])
+async def test_mention_falls_back_to_primary_for_value_not_among_own_accounts(env, bogus: str) -> None:
+    """리뷰(최종) Fix 6: 설정값이 이 플레이어의 실제 연결 계정 ID가 아니면(남의 계정, 해제된
+    계정, 멘션 문법을 깨려는 값) 그대로 끼우지 않고 대표 계정으로 되돌아간다."""
+    notify, players, settings, _ = env
+    player = await players.create_player()
+    await players.link_account(player.id, "111")
+    await players.link_account(player.id, "222")
+    other = await players.create_player()
+    await players.link_account(other.id, "999")
+    await settings.set_value(
+        scope="player", scope_id=player.id, skill="account-link", name="알림을 받을 계정",
+        value=bogus, updated_by=player.id,
+    )
+
+    mentioned = await notify.mention(player.id, "안녕하세요")
+
+    assert mentioned == "<@111> 안녕하세요"
+
+
 async def test_open_thread_delegates_to_thread_manager(env) -> None:
     notify, players, _, _ = env
     player = await players.create_player()

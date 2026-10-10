@@ -54,12 +54,16 @@ class NotifyService:
         if player is None:
             raise ValueError("모르는 플레이어다")
 
+        accounts = await self._players.accounts_for(player_id)
         if target == "all":
-            accounts = await self._players.accounts_for(player_id)
             mentions = " ".join(f"<@{a.discord_id}>" for a in accounts)
             return f"{mentions} {content}" if mentions else content
 
-        discord_id = player.primary_discord_id if target in ("primary", "") else target
+        # 특정 계정을 고른 값은 플레이어가 /설정으로 넣은 임의 문자열이다 — 그대로 멘션 문법에
+        # 끼우면 멘션 밖으로 빠져나가는 값을 넣을 수 있다. 이 플레이어의 실제 연결 계정 ID일
+        # 때만 쓰고, 아니면(오타, 해제된 계정, 조작된 값) 대표 계정으로 되돌아간다.
+        own_ids = {a.discord_id for a in accounts}
+        discord_id = target if isinstance(target, str) and target in own_ids else player.primary_discord_id
         return f"<@{discord_id}> {content}" if discord_id else content
 
     async def open_thread(

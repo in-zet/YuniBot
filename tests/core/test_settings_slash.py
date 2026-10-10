@@ -109,3 +109,42 @@ async def test_change_guild_scoped_requires_admin_tag(settings_env) -> None:
         interaction2, skill="with-settings", setting="기준일", value="30"  # pyright: ignore[reportArgumentType, reportCallIssue]
     )
     assert "바꿨다" in interaction2.response.calls[0]["content"]
+
+
+async def test_account_link_mention_setting_is_reachable_through_settings_command() -> None:
+    """리뷰(최종) Fix 6: notify.mention이 읽는 account-link의 '알림을 받을 계정'은 manifest에
+    선언돼야 /설정으로 보이고 바꿀 수 있다."""
+    conn = await aiosqlite.connect(":memory:")
+    for migration in _CORE_MIGRATIONS:
+        await conn.executescript(migration)
+    await conn.commit()
+    players = PlayersService(conn)
+    settings = SettingsService(conn)
+    registry = SkillRegistry([Path("skills/account-link")])
+    registry.load()
+    assert registry.failures() == {}
+    group = build_settings_group(registry=registry, settings=settings, players=players)
+    player = await players.create_player()
+    await players.link_account(player.id, "1")
+
+    try:
+        view = group.get_command("보기")
+        assert isinstance(view, discord.app_commands.Command)
+        shown = _FakeInteraction(1)
+        await view.callback(shown)  # pyright: ignore[reportArgumentType, reportCallIssue]
+        assert "account-link" in shown.response.calls[0]["content"]
+        assert "알림을 받을 계정" in shown.response.calls[0]["content"]
+        assert "primary" in shown.response.calls[0]["content"]
+
+        change = group.get_command("바꾸기")
+        assert isinstance(change, discord.app_commands.Command)
+        changed = _FakeInteraction(1)
+        await change.callback(
+            changed, skill="account-link", setting="알림을 받을 계정", value="all"  # pyright: ignore[reportArgumentType, reportCallIssue]
+        )
+        assert "바꿨다" in changed.response.calls[0]["content"]
+        assert await settings.get_value(
+            scope="player", scope_id=player.id, skill="account-link", name="알림을 받을 계정", default="primary"
+        ) == "all"
+    finally:
+        await conn.close()
