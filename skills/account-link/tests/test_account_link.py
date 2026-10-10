@@ -387,6 +387,131 @@ async def test_concurrent_confirm_clicks_do_not_double_finalize_or_delete_issuer
     assert await issuer_ctx.player_data.count(issuer.id) == {}
 
 
+async def test_single_side_confirm_does_not_write_status(link_env) -> None:
+    """리뷰(3차) Important: '혼자만 확인했다 — 상대를 기다리는 중' 분기(else)는 예전에
+    status를 "{side}_confirmed" 문자열로 덮어썼다. 이 분기와 마무리(완료) 분기 사이에 다른
+    클릭이 끼어들어 먼저 마무리를 끝내 버리면(status='completed'), 그 뒤 늦게 도착하는 이
+    쓰기가 'completed'를 되돌려 마무리를 한 번 더 돌게 만들 수 있었다(재현됨: 두 번째
+    link_account 호출의 UNIQUE 충돌, 또는 데이터 있음 경로에서는 'finalizing'에 영구히
+    갇힘). 고친 뒤에는 이 분기가 status를 전혀 쓰지 않으므로, 혼자 확인해도 status는 그대로
+    'joined'로 남아야 한다 — 되돌릴 쓰기 자체가 없다는 것을 직접 확인한다."""
+    skill, players, _, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    issuer_ctx = make_ctx(issuer.id, "111")
+    started = await skill.start_link(issuer_ctx)
+    code = started.data["code"]
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=code)
+    issuer_view = issuer_ctx.services["notify"].dms[-1][2]
+
+    assert joined.display is not None  # 데이터가 없어 바로 상호 확인으로 들어갔다
+    before = await skill.models.get_code(issuer_ctx.db, code)
+    assert before is not None
+    assert before.status == "joined"
+
+    click = _FakeInteraction("111")
+    await issuer_view.confirm.callback(click)  # pyright: ignore[reportCallIssue]
+
+    assert "상대의 확인을 기다리는" in click.response.calls[0]["content"]
+    after = await skill.models.get_code(issuer_ctx.db, code)
+    assert after is not None
+    assert after.status == "joined"  # 혼자 확인해도 status는 전혀 안 바뀐다
+    assert after.issuer_confirmed is True
+    assert after.joiner_confirmed is False
+
+
+async def test_concurrent_both_sides_first_confirm_ends_with_completed_status(link_env) -> None:
+    """리뷰(3차) Important: 양쪽이 "처음" 확인하는 클릭이 동시에 겹쳐도(이전 라운드 테스트는
+    같은 쪽의 두 번째 클릭이었다 — 이번엔 서로 다른 쪽의 첫 클릭을 asyncio.gather로 동시에
+    누른다), 최종 status는 'completed'로 남아야 하고 완료 메시지는 정확히 한 번만 나와야
+    한다. '상대를 기다리는 중' 분기가 더는 status를 쓰지 않으므로, 어느 쪽이 마무리를
+    가져가든 다른 쪽의 (지금은 없는) 쓰기가 되돌릴 일이 없다."""
+    skill, players, _, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    issuer_ctx = make_ctx(issuer.id, "111")
+    started = await skill.start_link(issuer_ctx)
+    code = started.data["code"]
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=code)
+    joiner_view = joined.display.view
+    issuer_view = issuer_ctx.services["notify"].dms[-1][2]
+
+    issuer_click = _FakeInteraction("111")
+    joiner_click = _FakeInteraction("222")
+    await asyncio.gather(
+        issuer_view.confirm.callback(issuer_click),  # pyright: ignore[reportCallIssue]
+        joiner_view.confirm.callback(joiner_click),  # pyright: ignore[reportCallIssue]
+    )
+
+    responses = [c["content"] for c in issuer_click.response.calls] + [c["content"] for c in joiner_click.response.calls]
+    assert responses.count("연결이 완료됐다!") == 1
+
+    link_code = await skill.models.get_code(issuer_ctx.db, code)
+    assert link_code is not None
+    assert link_code.status == "completed"
+
+    moved = await players.player_for_discord("222")
+    assert moved is not None
+    assert moved.id == issuer.id
+
+
+async def test_finalize_rechecks_joiner_account_count_before_discarding_data(link_env) -> None:
+    """리뷰(3차) Important(좁은 범위): join_link은 '버릴 데이터' 확인을 보여줄 때 참여자
+    계정이 하나뿐인지 확인하지만, 확인 버튼은 최대 10분(CODE_TTL) 떠 있다 — 그 사이 참여자가
+    완전히 다른(동시에 진행 중인) 연결 흐름으로 계정을 하나 더 얻으면, join_link이 막으려던
+    "이 데이터가 어느 계정 것인지 모호한" 상황이 마무리 시점에 되살아난다. 마무리가 실제로
+    지우기 직전에 다시 확인해서 거절하는지 본다."""
+    skill, players, _, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    issuer_ctx = make_ctx(issuer.id, "111")
+    started = await skill.start_link(issuer_ctx)
+    code = started.data["code"]
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joiner_ctx = make_ctx(joiner.id, "222")
+    assert joiner_ctx.db is not None
+    await joiner_ctx.db.execute(
+        "INSERT INTO goals_items (id, player_id, text) VALUES ('g3', ?, '목표')", (joiner.id,)
+    )
+    await joiner_ctx.db.commit()
+
+    joined = await skill.join_link(joiner_ctx, code=code)
+    discard_view = joined.display.view
+    assert discard_view is not None
+
+    discard_click = _FakeInteraction("222")
+    await discard_view.discard_and_continue.callback(discard_click)  # pyright: ignore[reportCallIssue]
+    joiner_view = discard_click.response.calls[0]["view"]
+
+    # 확인 버튼이 떠 있는 동안, 참여자가 (이 코드와 무관한) 다른 계정을 하나 더 연결했다고
+    # 가정한다.
+    await players.link_account(joiner.id, "999")
+
+    issuer_view = issuer_ctx.services["notify"].dms[-1][2]
+    await issuer_view.confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+
+    joiner_click = _FakeInteraction("222")
+    await joiner_view.confirm.callback(joiner_click)  # pyright: ignore[reportCallIssue]
+
+    assert "안전하게" in joiner_click.response.calls[0]["content"]
+    # 아무것도 지워지거나 옮겨지지 않았다 — 두 계정 다 여전히 원래 joiner 플레이어다.
+    moved_check = await players.player_for_discord("222")
+    assert moved_check is not None
+    assert moved_check.id == joiner.id
+    other_account = await players.player_for_discord("999")
+    assert other_account is not None
+    assert other_account.id == joiner.id
+    assert await joiner_ctx.player_data.count(joiner.id) == {"goals_items": 1}  # pyright: ignore[reportOptionalMemberAccess]
+
+
 async def test_start_link_rejects_when_already_at_max_linked_accounts(link_env) -> None:
     skill, players, _, make_ctx = link_env
     player = await players.create_player()

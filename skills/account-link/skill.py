@@ -74,13 +74,19 @@ async def start_link(ctx: ToolContext) -> ToolResult:
     )
 
 
-async def _proceed_to_mutual_confirm(ctx: ToolContext, link_code: Any, joiner_discord_id: str) -> ToolResult:
+async def _proceed_to_mutual_confirm(
+    ctx: ToolContext, link_code: Any, joiner_discord_id: str, *, discard_agreed: bool = False
+) -> ToolResult:
     assert ctx.db is not None
     # mark_joined는 WHERE status = 'pending'까지 포함한 원자적 UPDATE다 — 호출자(join_link의
     # 직행 경로, discard_and_continue 둘 다)가 이미 "status가 pending"임을 확인했더라도, 그
     # 확인과 이 호출 사이에 다른 참여자가 먼저 끝냈을 수 있다(두 await 사이의 TOCTOU). 그래서
-    # 반환값을 반드시 확인한다 — False면 이 호출은 아무것도 바꾸지 못했다는 뜻이다.
-    if not await models.mark_joined(ctx.db, link_code.code, joiner_discord_id=joiner_discord_id):
+    # 반환값을 반드시 확인한다 — False면 이 호출은 아무것도 바꾸지 못했다는 뜻이다. discard_agreed도
+    # 이 같은 호출에 함께 실어, "버리는 데 동의했다"는 표시가 실제로 이 전이를 가져간 참여자와
+    # 분리될 수 없게 한다(같은 유출된 코드로 다른 참여자가 경쟁해도 섞이지 않는다).
+    if not await models.mark_joined(
+        ctx.db, link_code.code, joiner_discord_id=joiner_discord_id, discard_agreed=discard_agreed
+    ):
         return ToolResult(error="이미 다른 사람이 참여한 코드다")
 
     issuer_view = _ConfirmButtonsView(code=link_code.code, side="issuer", ctx=ctx)
@@ -187,11 +193,13 @@ class _DiscardConfirmView(discord.ui.View):
             await interaction.response.send_message("이미 다른 사람이 참여한 코드다", ephemeral=True)
             return
 
-        # 아직 아무것도 지우지 않는다 — "버리는 데 동의했다"는 표시만 남기고, 실제로 지우는
-        # 일은 양쪽이 다 확인했을 때 한 번만 일어난다(_ConfirmButtonsView.confirm).
-        await models.mark_discard_agreed(self._ctx.db, self._code)
-
-        result = await _proceed_to_mutual_confirm(self._ctx, link_code, self._joiner_discord_id)
+        # 아직 아무것도 지우지 않는다 — "버리는 데 동의했다"는 표시는 아래 _proceed_to_mutual_confirm이
+        # mark_joined와 같은 원자적 UPDATE 안에서 같이 남긴다(별도 UPDATE로 미리 써 두면, 같은
+        # 유출된 코드로 다른 참여자가 경쟁할 때 그 표시가 실제로 이긴 참여자와 분리될 수 있다).
+        # 실제로 지우는 일은 양쪽이 다 확인했을 때 한 번만 일어난다(_ConfirmButtonsView.confirm).
+        result = await _proceed_to_mutual_confirm(
+            self._ctx, link_code, self._joiner_discord_id, discard_agreed=True
+        )
         await interaction.response.send_message(**render_result(result))
 
     @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
@@ -262,6 +270,21 @@ class _ConfirmButtonsView(discord.ui.View):
                         raise RuntimeError(
                             "account-link 불변 조건 위반: 버릴 데이터의 주인이 이미 발급자와 같다"
                         )
+                    # join_link이 "버릴 데이터" 확인을 보여줄 때는 참여자 계정이 하나뿐이었다
+                    # (그래야 "이 계정의 데이터"와 "이 플레이어의 데이터"가 같은 것이 된다).
+                    # 하지만 확인 버튼은 최대 CODE_TTL(10분)까지 떠 있고, 그 사이 참여자가
+                    # (완전히 다른, 동시에 진행 중인) 별도의 연결 흐름으로 계정을 하나 더
+                    # 얻었을 수 있다 — join_link이 막으려던 바로 그 모호함이 되살아난다.
+                    # 지우기 바로 전에 다시 확인한다. 여기서 멈추면 status는 'finalizing'에
+                    # 남는다 — 이 드문 경우의 복구는 이번 라운드에서 다루지 않는다.
+                    stale_accounts = await self._ctx.players.accounts_for(stale_joiner.id)
+                    if len(stale_accounts) != 1:
+                        await interaction.response.send_message(
+                            "참여자 계정 상태가 바뀌어 더 이상 안전하게 처리할 수 없다. "
+                            "처음부터 다시 시도해 달라",
+                            ephemeral=True,
+                        )
+                        return
                     await self._ctx.player_data.delete(stale_joiner.id)
             # 참여자 계정은 아직 자기 자신의(또는 다른) 플레이어에 연결되어 있을 수 있다 —
             # player_discord_accounts.discord_id는 유니크라 그대로 link_account를 부르면
@@ -282,7 +305,14 @@ class _ConfirmButtonsView(discord.ui.View):
             await self._ctx.notify.dm(refreshed.issuer_player_id, "연결이 완료됐다.")
             await interaction.response.send_message("연결이 완료됐다!", ephemeral=True)
         else:
-            await models.mark_status(self._ctx.db, self._code, status=f"{self._side}_confirmed")
+            # status는 여기서 건드리지 않는다 — issuer_confirmed/joiner_confirmed 두 불리언
+            # 컬럼이 "누가 지금까지 확인했는가"를 이미 완전히 담고 있다. 예전에는 여기서
+            # status를 "{side}_confirmed" 문자열로 덮어썼는데, 이 분기와 아래 완료 분기
+            # 사이에도 다른 클릭이 끼어들 수 있어서(같은 코드에 두 쪽 다 확인된 뒤 이 느린
+            # 쪽 쓰기가 나중에 끝나면) 이미 'completed'/'finalizing'으로 넘어간 status를
+            # 되돌려 마무리를 한 번 더 돌게 만들 수 있었다(실제로 재현됐다). status의 전이는
+            # pending → joined → finalizing → completed 뿐이고, 그 바깥 어떤 쓰기도 이
+            # 분기에서는 하지 않는다.
             await interaction.response.send_message("확인했다. 상대의 확인을 기다리는 중이다.", ephemeral=True)
 
 

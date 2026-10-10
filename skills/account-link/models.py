@@ -55,16 +55,24 @@ async def get_code(conn: aiosqlite.Connection, code: str) -> LinkCode | None:
     return _row_to_code(row) if row else None
 
 
-async def mark_joined(conn: aiosqlite.Connection, code: str, *, joiner_discord_id: str) -> bool:
+async def mark_joined(
+    conn: aiosqlite.Connection, code: str, *, joiner_discord_id: str, discard_agreed: bool = False
+) -> bool:
     """pending → joined 전이를 원자적으로 시도한다. 두 참여자가 동시에 같은 코드로 들어와도
     SELECT로 status를 미리 확인하고 나중에 UPDATE하는 식(확인-행동 사이에 await가 끼어드는
     TOCTOU)으로는 막을 수 없다 — WHERE status = 'pending'까지 포함한 UPDATE 한 문장만이
     원자적이다. 돌려주는 bool은 "이 호출이 실제로 그 전이를 해냈는가"다(아니면 이미 다른
-    참여자가 가져갔다는 뜻)."""
+    참여자가 가져갔다는 뜻).
+
+    discard_agreed도 같은 UPDATE 문에서 함께 쓴다 — 예전에는 버리고 연결 버튼이 이걸 따로
+    된 UPDATE로 미리 써 놓았는데, 같은 유출된 코드로 두 참여자가 경쟁하면 "버리는 데
+    동의했다"는 표시가 실제로 이 전이를 가져간(mark_joined에서 이긴) 참여자가 아니라 먼저
+    클릭만 한 참여자 쪽에 붙어 버릴 수 있었다. 전이를 가져가는 이 한 문장에 같이 실어야
+    누가 이 코드를 "정말로" 가져갔는지와 묶인다."""
     cursor = await conn.execute(
-        "UPDATE account_link_codes SET joiner_discord_id = ?, status = 'joined' "
+        "UPDATE account_link_codes SET joiner_discord_id = ?, status = 'joined', discard_agreed = ? "
         "WHERE code = ? AND status = 'pending'",
-        (joiner_discord_id, code),
+        (joiner_discord_id, 1 if discard_agreed else 0, code),
     )
     await conn.commit()
     return cursor.rowcount == 1
@@ -93,13 +101,6 @@ async def set_confirmed(conn: aiosqlite.Connection, code: str, *, side: str) -> 
 
 async def mark_status(conn: aiosqlite.Connection, code: str, *, status: str) -> None:
     await conn.execute("UPDATE account_link_codes SET status = ? WHERE code = ?", (status, code))
-    await conn.commit()
-
-
-async def mark_discard_agreed(conn: aiosqlite.Connection, code: str) -> None:
-    await conn.execute(
-        "UPDATE account_link_codes SET discard_agreed = 1 WHERE code = ?", (code,)
-    )
     await conn.commit()
 
 
