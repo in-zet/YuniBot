@@ -229,7 +229,8 @@ class PlayersService:
 
     async def dissolve_player(self, player_id: str) -> None:
         """플레이어를 완전히 해체한다 — 계정 연결과 태그를 전부 지우고 플레이어 행은
-        고아로 남긴다. 계정 연결의 '버리고 연결'에서만 쓰는 내부 정리 경로라, grant_tag/
+        고아로 남긴다. account-link가 계정이 정확히 하나뿐인 플레이어를 다른 플레이어로
+        흡수할 때(버리고 연결이든 아니든) finalize에서 쓰는 내부 정리 경로라, grant_tag/
         revoke_tag와 달리 상태 태그 보호를 거치지 않는다(admin의 손태그 변경 금지와는
         다른 종류의 작업이다)."""
         for account in await self.accounts_for(player_id):
