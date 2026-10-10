@@ -4,13 +4,9 @@ from core.tool_types import ToolContext, ToolResult
 
 @slash_only("연습 체험시작")
 async def start_demo(ctx: ToolContext) -> ToolResult:
-    """연습 체험을 시작해 practice-unlocked 태그를 받는다.
-
-    2단계 데모 전용: data의 `_demo_grant_tag` 표시를 보고 슬래시 경로(core/slash.py)가 요청한
-    플레이어에게 이 스킬이 정의한 태그를 임시 태그 제공자로 부여한다. 3단계 players 서비스가
-    생기면 실제 부여 방식으로 바뀐다.
-    """
-    return ToolResult(data={"_demo_grant_tag": "practice-unlocked"})
+    """연습 체험을 시작해 practice-unlocked 태그를 받는다."""
+    await ctx.players.grant_tag(ctx.player_id, "practice-unlocked", source="self:practice")
+    return ToolResult(data={"unlocked": "practice-unlocked"})
 
 
 @tool(slash="연습 보기", tags=["practice-unlocked"])

@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from core.decorators import SlashOnlySpec, ToolSpec
+from core.events import EventBus
 from core.manifest import DefinedTag
 from core.permissions import TagProvider, TagRequirement, check_tags, describe_lock
+from core.player_data import PlayerDataScanner
 from core.resolvers import ResolutionError, ResolverRegistry
 from core.schema import build_arg_schema
 from core.tool_types import ToolContext, ToolResult
@@ -46,16 +49,35 @@ class ToolExecutor:
         resolvers: ResolverRegistry,
         tag_provider: TagProvider,
         tag_definitions: dict[str, DefinedTag],
+        services: Mapping[str, object] | None = None,
+        event_bus: EventBus | None = None,
+        player_data: PlayerDataScanner | None = None,
     ) -> None:
         self._resolvers = resolvers
         self._tag_provider = tag_provider
         self._tag_definitions = tag_definitions
+        self._services = services or {}
+        self._event_bus = event_bus or EventBus()
+        self._player_data = player_data
         self._pending: dict[str, _PendingConfirm] = {}
 
     @property
     def tag_provider(self) -> TagProvider:
         """슬래시 콜백(core/slash.py)이 실행기와 같은 태그 제공자를 공유하기 위해 쓴다."""
         return self._tag_provider
+
+    @property
+    def services(self) -> Mapping[str, object]:
+        """등록된 모든 공통/게임 서비스. 슬래시 콜백이 스킬별로 걸러 ToolContext에 싣는다."""
+        return self._services
+
+    @property
+    def event_bus(self) -> EventBus:
+        return self._event_bus
+
+    @property
+    def player_data(self) -> PlayerDataScanner | None:
+        return self._player_data
 
     async def invoke(
         self,

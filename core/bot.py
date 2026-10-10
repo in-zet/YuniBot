@@ -10,12 +10,15 @@ from discord import app_commands
 
 from core.config import CoreConfig, load_config
 from core.contract_checks import run_all_contract_checks
+from core.events import EventBus, handler_kind
 from core.executor import ToolExecutor
 from core.migrations import run_migrations
-from core.permissions import InMemoryTagProvider, TagProvider
+from core.player_data import PlayerDataScanner, discover_skill_tables
 from core.registry import LoadedSkill, SkillRegistry
 from core.resolvers import ResolverRegistry
 from core.slash import attach_to_tree, build_slash_plan
+from core.tool_types import PlayerRef
+from services.common.players import PlayersService
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +26,10 @@ CORE_MIGRATIONS_ROOT = Path("migrations/core")
 
 
 class YuniClient(discord.Client):
-    def __init__(self, *, intents: discord.Intents, test_guild_id: int | None) -> None:
+    def __init__(self, *, intents: discord.Intents, test_guild_id: int | None, conn: aiosqlite.Connection) -> None:
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
-        self.tag_provider: TagProvider  # build_client()이 실행기와 같은 인스턴스로 채운다
+        self.conn = conn
         self._test_guild_id = test_guild_id
 
     async def setup_hook(self) -> None:
@@ -36,6 +39,10 @@ class YuniClient(discord.Client):
             await self.tree.sync(guild=guild)
         else:
             await self.tree.sync()
+
+    async def close(self) -> None:
+        await self.conn.close()
+        await super().close()
 
 
 def _migration_roots(skills: list[LoadedSkill]) -> list[tuple[str, Path]]:
@@ -50,7 +57,43 @@ def _migration_roots(skills: list[LoadedSkill]) -> list[tuple[str, Path]]:
     return [("core", CORE_MIGRATIONS_ROOT), *skill_roots]
 
 
-async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry]:
+async def _sync_admin_bootstrap(players: PlayersService, admin_discord_ids: frozenset[str]) -> None:
+    """ADMIN_DISCORD_IDS에만 쓰인 admin 태그를 그 목록과 맞춘다.
+
+    admin 스킬로 "추가로" 받은 admin 태그(source가 env_bootstrap이 아닌 것)는 건드리지
+    않는다 — 그 사람들은 다른 경로로 admin이 됐으므로 .env 목록과 무관하게 유지된다.
+    """
+    for discord_id in admin_discord_ids:
+        player = await players.player_for_discord(discord_id)
+        if player is None:
+            player = await players.create_player()
+            await players.link_account(player.id, discord_id)
+        await players.grant_tag(player.id, "admin", source="env_bootstrap")
+
+    current_accounts: set[str] = set()
+    for discord_id in admin_discord_ids:
+        player = await players.player_for_discord(discord_id)
+        if player is not None:
+            for account in await players.accounts_for(player.id):
+                current_accounts.add(account.discord_id)
+
+    for player_id in await players.players_with_tag("admin", source="env_bootstrap"):
+        accounts = await players.accounts_for(player_id)
+        if not any(a.discord_id in admin_discord_ids for a in accounts):
+            await players.revoke_tag(player_id, "admin")
+
+
+def _register_event_handlers(bus: EventBus, skills: list[LoadedSkill]) -> None:
+    for skill in skills:
+        for handler in skill.code.event_handlers:
+            kind = handler_kind(handler.fn)
+            if kind == "gather":
+                bus.register_gather(handler.event_name, owner_skill=skill.manifest.name, fn=handler.fn)
+            else:
+                bus.register_notify(handler.event_name, owner_skill=skill.manifest.name, fn=handler.fn)
+
+
+async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, ToolExecutor]:
     config.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     registry = SkillRegistry(config.skills_dirs)
@@ -65,35 +108,51 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry]:
         logger.warning("skill disabled: %s (%s)", skill_dir, reason)
 
     roots = _migration_roots(registry.enabled_skills())
-    async with aiosqlite.connect(config.db_path) as conn:
-        await run_migrations(conn, roots=roots)
-    # 이 단계(2단계)에서는 마이그레이션 적용 말고 런타임에 DB를 쓰는 서비스가 없다.
-    # 그래서 연결은 마이그레이션이 끝나는 대로 바로 닫는다 - 열어 둔 채로 돌려주면
-    # aiosqlite의 백그라운드 스레드가 아무도 닫지 않는 채 계속 떠 있게 된다.
+    conn = await aiosqlite.connect(config.db_path)
+    await run_migrations(conn, roots=roots)
+
+    players = PlayersService(conn)
+    await _sync_admin_bootstrap(players, config.admin_discord_ids)
+
+    skill_tables = await discover_skill_tables(conn)
+    player_data = PlayerDataScanner(conn=conn, table_names=skill_tables)
+
+    event_bus = EventBus()
+    _register_event_handlers(event_bus, registry.enabled_skills())
 
     resolvers = ResolverRegistry()
+    resolvers.register(PlayerRef, players)
+
+    services: dict[str, object] = {"players": players}
+
     executor = ToolExecutor(
         resolvers=resolvers,
-        tag_provider=InMemoryTagProvider(),
+        tag_provider=players,
         tag_definitions=registry.tag_definitions(),
+        services=services,
+        event_bus=event_bus,
+        player_data=player_data,
     )
 
     intents = discord.Intents.default()
     intents.message_content = True
-    client = YuniClient(intents=intents, test_guild_id=config.test_guild_id)
-    client.tag_provider = executor.tag_provider  # 실행기와 같은 임시 태그 제공자를 공유한다
+    client = YuniClient(intents=intents, test_guild_id=config.test_guild_id, conn=conn)
 
     plan = build_slash_plan(registry.tool_specs())
     attach_to_tree(client.tree, plan, executor=executor)
 
-    return client, registry
+    return client, registry, executor
 
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     config = load_config()
-    client, _registry = await build_client(config)
-    await client.start(config.discord_token)
+    client, _registry, _executor = await build_client(config)
+    try:
+        await client.start(config.discord_token)
+    finally:
+        if not client.is_closed():
+            await client.close()
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import enum
-import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -15,6 +14,7 @@ from core.executor import ToolExecutor
 from core.schema import ArgSpec, build_arg_schema
 from core.slash_rules import callback_arg_name_problems, slash_path_problems
 from core.tool_types import ToolContext, ToolResult
+from services.common.players import PlayersService
 
 if TYPE_CHECKING:
     from core.registry import LoadedSkill
@@ -24,12 +24,6 @@ __all__ = ["callback_arg_name_problems", "slash_path_problems"]  # 테스트/호
 logger = logging.getLogger(__name__)
 
 _DISCORD_CONTENT_LIMIT = 2000
-
-# 2단계 임시 장치(데모 전용): 성공한 도구 결과의 data에 이 키가 있으면, 슬래시 경로가 그 값을
-# 요청한 플레이어에게 태그로 부여한다. 3단계 players 서비스/관리자 태그 부여가 생기면 없앤다.
-# 다른 스킬이 기대도 되는 오래가는 인터페이스가 아니다. 그 스킬이 manifest의 defines_tags에
-# 스스로 정의한 태그만 부여할 수 있다(코어 태그나 남의 태그는 못 준다).
-DEMO_GRANT_TAG_KEY = "_demo_grant_tag"
 
 
 class SlashPlanError(ValueError):
@@ -46,7 +40,7 @@ class SlashPlanEntry:
     skill_tags: list[str]
     skill_tags_any: list[str]
     spec: ToolSpec | SlashOnlySpec
-    skill_defined_tags: frozenset[str] = field(default_factory=frozenset)
+    skill_services: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -69,7 +63,7 @@ def build_slash_plan(specs: list[tuple[LoadedSkill, ToolSpec | SlashOnlySpec]]) 
                 skill_name=manifest.name,
                 skill_tags=list(getattr(manifest, "tags", [])),
                 skill_tags_any=list(getattr(manifest, "tags_any", [])),
-                skill_defined_tags=frozenset(t.name for t in getattr(manifest, "defines_tags", [])),
+                skill_services=list(getattr(manifest, "services", [])),
                 spec=spec,
             )
         )
@@ -221,7 +215,7 @@ def _build_callback_source(fn_name: str, args: list[ArgSpec]) -> str:
 
 def _fallback_content(data: dict[str, Any]) -> str:
     # 표시물이 없는 결과도 디스코드에 빈 응답을 보내면 안 된다("This interaction failed").
-    # "_"로 시작하는 키는 코어 내부 표시(예: DEMO_GRANT_TAG_KEY)라 보여주지 않는다.
+    # "_"로 시작하는 키는 코어 내부 표시라 보여주지 않는다.
     lines = [f"{key}: {value}" for key, value in data.items() if not key.startswith("_")]
     return "\n".join(["완료했다.", *lines])
 
@@ -244,36 +238,7 @@ def render_result(result: ToolResult) -> dict[str, Any]:
     return {"content": _fallback_content(result.data)[:_DISCORD_CONTENT_LIMIT]}
 
 
-async def _apply_demo_grant(
-    executor: ToolExecutor, *, player_id: str, result: ToolResult, grantable_tags: frozenset[str]
-) -> None:
-    """DEMO_GRANT_TAG_KEY 설명 참고. 2단계 데모 전용 임시 장치다."""
-    if result.error:
-        return
-    tag = result.data.get(DEMO_GRANT_TAG_KEY)
-    if tag is None:
-        return
-    if not isinstance(tag, str) or tag not in grantable_tags:
-        logger.warning("데모 태그 부여 거부: '%s'는 이 스킬이 정의한 태그가 아니다", tag)
-        return
-    grant = getattr(executor.tag_provider, "grant", None)
-    if not callable(grant):
-        logger.warning("데모 태그 부여 불가: 태그 제공자에 grant가 없다")
-        return
-    outcome = grant(player_id, tag)
-    if inspect.isawaitable(outcome):
-        await outcome
-
-
-async def _send_result(
-    interaction: discord.Interaction,
-    result: ToolResult,
-    *,
-    executor: ToolExecutor,
-    player_id: str,
-    grantable_tags: frozenset[str],
-) -> None:
-    await _apply_demo_grant(executor, player_id=player_id, result=result, grantable_tags=grantable_tags)
+async def _send_result(interaction: discord.Interaction, result: ToolResult) -> None:
     await interaction.response.send_message(**render_result(result))
 
 
@@ -286,29 +251,43 @@ def _build_command(entry: SlashPlanEntry, *, executor: ToolExecutor) -> app_comm
         raise SlashPlanError(f"스킬 이름 '{entry.skill_name}'은 슬래시 콜백 이름으로 쓸 수 없다")
 
     async def _dispatch(interaction: discord.Interaction, options: dict[str, Any]) -> None:
-        player_id = str(interaction.user.id)
-        tags = frozenset(await executor.tag_provider.tags_for(player_id))
+        discord_id = str(interaction.user.id)
+        players: PlayersService = executor.services["players"]  # pyright: ignore[reportAssignmentType]
 
-        ctx = ToolContext(player_id=player_id, tags=tags, services={})
+        player = await players.player_for_discord(discord_id)
+        is_new_player = player is None
+        if player is None:
+            player = await players.create_player()
+            await players.link_account(player.id, discord_id)
+
+        tags = frozenset(await executor.tag_provider.tags_for(player.id))
+        skill_services = {
+            name: executor.services[name] for name in entry.skill_services if name in executor.services
+        }
+        ctx = ToolContext(
+            player_id=player.id,
+            tags=tags,
+            services=skill_services,
+            guild_id=str(interaction.guild_id) if interaction.guild_id else None,
+            event_bus=executor.event_bus,
+            player_data=executor.player_data,
+        )
+
+        if is_new_player:
+            await executor.event_bus.emit_notify("players.first_seen", {"player_id": player.id})
+
         outcome = await executor.invoke(
             entry.spec, ctx, options, skill_tags=entry.skill_tags, skill_tags_any=entry.skill_tags_any
         )
 
         if outcome.needs_confirm:
-            view = ConfirmView(
-                executor=executor,
-                token=outcome.confirm_token or "",
-                requester_id=player_id,
-                grantable_tags=entry.skill_defined_tags,
-            )
+            view = ConfirmView(executor=executor, token=outcome.confirm_token or "", requester_id=player.id)
             await interaction.response.send_message("확인해 주세요.", view=view)
             return
 
         result = outcome.result
         assert result is not None
-        await _send_result(
-            interaction, result, executor=executor, player_id=player_id, grantable_tags=entry.skill_defined_tags
-        )
+        await _send_result(interaction, result)
 
     source = _build_callback_source(fn_name, schema.args)
     namespace: dict[str, Any] = {"__Interaction": discord.Interaction, "__dispatch": _dispatch}
@@ -341,26 +320,27 @@ class ConfirmView(discord.ui.View):
         executor: ToolExecutor,
         token: str,
         requester_id: str,
-        grantable_tags: frozenset[str] = frozenset(),
     ) -> None:
         super().__init__(timeout=120)
         self._executor = executor
         self._token = token
         self._requester_id = requester_id
-        self._grantable_tags = grantable_tags
+
+    async def _player_id_for(self, interaction: discord.Interaction) -> str:
+        players: PlayersService = self._executor.services["players"]  # pyright: ignore[reportAssignmentType]
+        player = await players.player_for_discord(str(interaction.user.id))
+        return player.id if player is not None else str(interaction.user.id)
 
     async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
-        if str(interaction.user.id) == self._requester_id:
+        if await self._player_id_for(interaction) == self._requester_id:
             return True
         await interaction.response.send_message("이건 당신의 확인 요청이 아니에요.", ephemeral=True)
         return False
 
     async def _finish(self, interaction: discord.Interaction, *, confirmed: bool) -> None:
-        player_id = str(interaction.user.id)
+        player_id = await self._player_id_for(interaction)
         result = await self._executor.confirm(self._token, confirmed=confirmed, player_id=player_id)
-        await _send_result(
-            interaction, result, executor=self._executor, player_id=player_id, grantable_tags=self._grantable_tags
-        )
+        await _send_result(interaction, result)
 
     @discord.ui.button(label="확인", style=discord.ButtonStyle.danger)
     async def confirm_button(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:

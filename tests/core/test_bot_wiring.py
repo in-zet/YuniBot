@@ -7,12 +7,14 @@ import pytest
 
 from core.bot import (  # pyright: ignore[reportPrivateUsage]
     _migration_roots,
+    _sync_admin_bootstrap,
     build_client,
 )
 from core.config import CoreConfig
 from core.decorators import SkillCode
 from core.manifest import SkillManifest
 from core.registry import LoadedSkill
+from services.common.players import PlayersService
 from tests.core.skill_factory import slash_tool, write_skill
 
 
@@ -29,7 +31,7 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
         cookie_encryption_key=b"",
     )
 
-    client, registry = await build_client(config)
+    client, registry, _executor = await build_client(config)
 
     assert "practice" in {s.manifest.name for s in registry.enabled_skills()}
     assert client.tree.get_command("연습") is not None  # 그룹: "연습 보기" 등
@@ -102,7 +104,7 @@ async def test_one_broken_slash_skill_does_not_take_down_build_client(tmp_path: 
     skills_root = tmp_path / "skills"
     _ = write_skill(skills_root, broken, _BROKEN_SKILLS[broken])
 
-    client, registry = await build_client(_config(tmp_path, skills_root))
+    client, registry, _executor = await build_client(_config(tmp_path, skills_root))
 
     assert {s.manifest.name for s in registry.enabled_skills()} == {"practice"}
     assert set(registry.failures()) == {broken}
@@ -119,7 +121,7 @@ async def test_invalid_manifest_name_does_not_take_down_build_client(tmp_path: P
     # 이 이름이 코어의 슬래시 콜백 코드 생성 단계까지 가면 SlashPlanError로 build_client 전체가 죽었다.
     _ = write_skill(skills_root, "bad-name", slash_tool("a", "foo"), manifest_name="x'); import os; ('")
 
-    client, registry = await build_client(_config(tmp_path, skills_root))
+    client, registry, _executor = await build_client(_config(tmp_path, skills_root))
 
     assert {s.manifest.name for s in registry.enabled_skills()} == {"practice"}
     assert set(registry.failures()) == {"bad-name"}
@@ -134,7 +136,7 @@ async def test_contract_check_failure_blocks_migrations_and_disables_skill(tmp_p
     # 고칠 수 없으므로 DB에 영구히 남는 실수가 된다).
     config = _config(tmp_path, Path("tests/fixtures/skills_bad/bad_table_prefix"))
 
-    client, registry = await build_client(config)
+    client, registry, _executor = await build_client(config)
 
     assert {s.manifest.name for s in registry.enabled_skills()} == {"practice"}
     [reason] = registry.failures().values()
@@ -147,3 +149,28 @@ async def test_contract_check_failure_blocks_migrations_and_disables_skill(tmp_p
     assert "totally_unrelated_table" not in tables
 
     await client.close()
+
+
+async def test_sync_admin_bootstrap_does_not_touch_manually_granted_admin() -> None:
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(Path("migrations/core/001_players.sql").read_text())
+    await conn.executescript(Path("migrations/core/002_player_tags.sql").read_text())
+    await conn.commit()
+    players = PlayersService(conn)
+
+    env_admin = await players.create_player()
+    await players.link_account(env_admin.id, "111")
+    manual_admin = await players.create_player()
+    await players.link_account(manual_admin.id, "222")
+    await players.grant_tag(manual_admin.id, "admin", source="admin:111")
+
+    await _sync_admin_bootstrap(players, frozenset({"111"}))
+    assert await players.tags_for(env_admin.id) == {"admin"}
+    assert await players.tags_for(manual_admin.id) == {"admin"}  # 수동 부여는 그대로
+
+    # .env에서 111이 빠지면 env_bootstrap 소스만 회수된다.
+    await _sync_admin_bootstrap(players, frozenset())
+    assert await players.tags_for(env_admin.id) == set()
+    assert await players.tags_for(manual_admin.id) == {"admin"}  # 여전히 안 건드린다
+
+    await conn.close()

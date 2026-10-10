@@ -6,7 +6,7 @@ examples:
 category: 메모
 game: common
 version: 1
-services: []
+services: [players]
 defines_tags:
   - name: practice-unlocked
     description: 연습 체험을 시작한 플레이어

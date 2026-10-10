@@ -1,8 +1,10 @@
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import aiosqlite
 import discord
 import pytest
 
@@ -20,8 +22,14 @@ from core.slash import (
     slash_path_problems,
 )
 from core.tool_types import Display, ToolContext, ToolResult
+from services.common.players import PlayersService
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
+
+_PLAYERS_MIGRATION = (
+    Path("migrations/core/001_players.sql").read_text()
+    + Path("migrations/core/002_player_tags.sql").read_text()
+)
 
 
 @tool(slash="보더")
@@ -215,10 +223,11 @@ class _FakeResponse:
 
 
 class _FakeInteraction:
-    """슬래시 콜백과 버튼 콜백이 실제로 쓰는 속성(user.id, response.send_message)만 흉내 낸다."""
+    """슬래시 콜백과 버튼 콜백이 실제로 쓰는 속성(user.id, guild_id, response.send_message)만 흉내 낸다."""
 
-    def __init__(self, user_id: int) -> None:
+    def __init__(self, user_id: int, *, guild_id: int | None = None) -> None:
         self.user = SimpleNamespace(id=user_id)
+        self.guild_id = guild_id
         self.response = _FakeResponse()
 
 
@@ -227,17 +236,28 @@ def _fake(user_id: int) -> Any:
     return _FakeInteraction(user_id)
 
 
-def _practice_tree() -> tuple[discord.app_commands.CommandTree[Any], ToolExecutor, InMemoryTagProvider]:
+@pytest.fixture
+async def practice_tree() -> AsyncIterator[tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService]]:
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(_PLAYERS_MIGRATION)
+    await conn.commit()
+    players = PlayersService(conn)
+
     registry = SkillRegistry([FIXTURES / "skills_ok"])
     registry.load()
-    tag_provider = InMemoryTagProvider()
     executor = ToolExecutor(
-        resolvers=ResolverRegistry(), tag_provider=tag_provider, tag_definitions=registry.tag_definitions()
+        resolvers=ResolverRegistry(),
+        tag_provider=players,
+        tag_definitions=registry.tag_definitions(),
+        services={"players": players},
     )
     client = discord.Client(intents=discord.Intents.none())
     tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(client)
     attach_to_tree(tree, build_slash_plan(registry.tool_specs()), executor=executor)
-    return tree, executor, tag_provider
+    try:
+        yield tree, executor, players
+    finally:
+        await conn.close()
 
 
 def _practice_command(tree: discord.app_commands.CommandTree[Any], sub: str) -> discord.app_commands.Command[Any, Any, Any]:
@@ -274,10 +294,13 @@ def test_render_result_error_is_ephemeral() -> None:
     assert kwargs == {"content": "안 돼요", "ephemeral": True}
 
 
-@pytest.mark.asyncio
-async def test_data_only_tool_reply_has_content() -> None:
-    tree, _, tag_provider = _practice_tree()
-    tag_provider.grant("1", "practice-unlocked")
+async def test_data_only_tool_reply_has_content(
+    practice_tree: tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService],
+) -> None:
+    tree, _, players = practice_tree
+    player = await players.create_player()
+    await players.link_account(player.id, "1")
+    await players.grant_tag(player.id, "practice-unlocked", source="test")
     interaction = _fake(1)
 
     await _practice_command(tree, "보기").callback(interaction)  # pyright: ignore[reportCallIssue]
@@ -287,9 +310,10 @@ async def test_data_only_tool_reply_has_content() -> None:
     assert not call.get("ephemeral")
 
 
-@pytest.mark.asyncio
-async def test_start_demo_grants_practice_unlocked_tag_and_unlocks_view() -> None:
-    tree, _, tag_provider = _practice_tree()
+async def test_start_demo_grants_practice_unlocked_tag_and_unlocks_view(
+    practice_tree: tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService],
+) -> None:
+    tree, _, players = practice_tree
     view_command = _practice_command(tree, "보기")
 
     locked = _fake(42)
@@ -298,17 +322,18 @@ async def test_start_demo_grants_practice_unlocked_tag_and_unlocks_view() -> Non
 
     start = _fake(42)
     await _practice_command(tree, "체험시작").callback(start)  # pyright: ignore[reportCallIssue]
-
-    assert "practice-unlocked" in await tag_provider.tags_for("42")
     assert start.response.calls[0]["content"]
-    assert "_demo_grant_tag" not in start.response.calls[0]["content"]
+
+    player = await players.player_for_discord("42")
+    assert player is not None
+    assert "practice-unlocked" in await players.tags_for(player.id)
 
     unlocked = _fake(42)
     await view_command.callback(unlocked)  # pyright: ignore[reportCallIssue]
     assert not unlocked.response.calls[0].get("ephemeral")
 
-    # 다른 플레이어에게는 부여되지 않는다.
-    assert "practice-unlocked" not in await tag_provider.tags_for("7")
+    # 다른 디스코드 계정은 참조도 안 됐으니 플레이어 자체가 아직 없다.
+    assert await players.player_for_discord("7") is None
 
 
 async def _issue_reset_confirm(
@@ -322,9 +347,10 @@ async def _issue_reset_confirm(
     return view
 
 
-@pytest.mark.asyncio
-async def test_confirm_view_rejects_other_players() -> None:
-    tree, _, _ = _practice_tree()
+async def test_confirm_view_rejects_other_players(
+    practice_tree: tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService],
+) -> None:
+    tree, _, _ = practice_tree
     view = await _issue_reset_confirm(tree, user_id=1)
 
     intruder = _fake(2)
@@ -339,9 +365,10 @@ async def test_confirm_view_rejects_other_players() -> None:
     assert owner.response.calls == []
 
 
-@pytest.mark.asyncio
-async def test_confirm_button_shows_tool_output() -> None:
-    tree, _, _ = _practice_tree()
+async def test_confirm_button_shows_tool_output(
+    practice_tree: tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService],
+) -> None:
+    tree, _, _ = practice_tree
     view = await _issue_reset_confirm(tree, user_id=1)
 
     owner = _fake(1)
@@ -351,10 +378,11 @@ async def test_confirm_button_shows_tool_output() -> None:
     assert "reset: True" in call["content"]
 
 
-@pytest.mark.asyncio
-async def test_confirm_button_handler_passes_presser_identity_to_executor() -> None:
+async def test_confirm_button_handler_passes_presser_identity_to_executor(
+    practice_tree: tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService],
+) -> None:
     # interaction_check를 건너뛰어도(두 번째 방어선) 실행기가 다른 플레이어의 확인을 거부해야 한다.
-    tree, _, _ = _practice_tree()
+    tree, _, _ = practice_tree
     view = await _issue_reset_confirm(tree, user_id=1)
 
     intruder = _fake(2)
