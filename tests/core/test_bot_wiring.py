@@ -1,3 +1,4 @@
+import datetime
 from pathlib import Path
 
 import aiosqlite
@@ -22,6 +23,10 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
         skills_dirs=[Path("tests/fixtures/skills_ok")],
         db_path=tmp_path / "test.db",
         test_guild_id=None,
+        admin_discord_ids=frozenset(),
+        quiet_hours_start=datetime.time(2, 0),
+        quiet_hours_end=datetime.time(6, 0),
+        cookie_encryption_key=b"",
     )
 
     client, registry = await build_client(config)
@@ -70,6 +75,10 @@ def _config(tmp_path: Path, *skill_roots: Path) -> CoreConfig:
         skills_dirs=[Path("tests/fixtures/skills_ok"), *skill_roots],
         db_path=tmp_path / "test.db",
         test_guild_id=None,
+        admin_discord_ids=frozenset(),
+        quiet_hours_start=datetime.time(2, 0),
+        quiet_hours_end=datetime.time(6, 0),
+        cookie_encryption_key=b"",
     )
 
 

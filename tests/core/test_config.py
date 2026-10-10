@@ -1,4 +1,5 @@
 # tests/core/test_config.py
+import datetime
 from pathlib import Path
 
 import pytest
@@ -38,3 +39,33 @@ def test_load_config_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(RuntimeError, match="DISCORD_TOKEN"):
         load_config()
+
+
+def test_load_config_parses_admin_ids_and_quiet_hours(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.setenv("ADMIN_DISCORD_IDS", "111, 222 ,111")
+    monkeypatch.setenv("QUIET_HOURS_START", "02:00")
+    monkeypatch.setenv("QUIET_HOURS_END", "06:00")
+    monkeypatch.setenv("COOKIE_ENCRYPTION_KEY", "Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9n")
+
+    config = load_config()
+
+    assert config.admin_discord_ids == frozenset({"111", "222"})
+    assert config.quiet_hours_start == datetime.time(2, 0)
+    assert config.quiet_hours_end == datetime.time(6, 0)
+    assert config.cookie_encryption_key == b"Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9n"
+
+
+def test_load_config_defaults_admin_ids_and_quiet_hours(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.delenv("ADMIN_DISCORD_IDS", raising=False)
+    monkeypatch.delenv("QUIET_HOURS_START", raising=False)
+    monkeypatch.delenv("QUIET_HOURS_END", raising=False)
+    monkeypatch.delenv("COOKIE_ENCRYPTION_KEY", raising=False)
+
+    config = load_config()
+
+    assert config.admin_discord_ids == frozenset()
+    assert config.quiet_hours_start == datetime.time(2, 0)
+    assert config.quiet_hours_end == datetime.time(6, 0)
+    assert config.cookie_encryption_key == b""

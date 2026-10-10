@@ -1,6 +1,7 @@
 # core/config.py
 from __future__ import annotations
 
+import datetime
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,17 @@ class CoreConfig:
     skills_dirs: list[Path]
     db_path: Path
     test_guild_id: int | None
+    admin_discord_ids: frozenset[str]
+    quiet_hours_start: datetime.time
+    quiet_hours_end: datetime.time
+    cookie_encryption_key: bytes
+
+
+def _parse_time(raw: str, default: datetime.time) -> datetime.time:
+    if not raw:
+        return default
+    hour, _, minute = raw.partition(":")
+    return datetime.time(int(hour), int(minute))
 
 
 def load_config() -> CoreConfig:
@@ -32,9 +44,23 @@ def load_config() -> CoreConfig:
     guild_raw = os.environ.get("TEST_GUILD_ID")
     test_guild_id = int(guild_raw) if guild_raw else None
 
+    admin_ids_raw = os.environ.get("ADMIN_DISCORD_IDS", "")
+    admin_discord_ids = frozenset(
+        part.strip() for part in admin_ids_raw.split(",") if part.strip()
+    )
+
+    quiet_start = _parse_time(os.environ.get("QUIET_HOURS_START", ""), datetime.time(2, 0))
+    quiet_end = _parse_time(os.environ.get("QUIET_HOURS_END", ""), datetime.time(6, 0))
+
+    cookie_key = os.environ.get("COOKIE_ENCRYPTION_KEY", "").encode()
+
     return CoreConfig(
         discord_token=token,
         skills_dirs=skills_dirs,
         db_path=db_path,
         test_guild_id=test_guild_id,
+        admin_discord_ids=admin_discord_ids,
+        quiet_hours_start=quiet_start,
+        quiet_hours_end=quiet_end,
+        cookie_encryption_key=cookie_key,
     )
