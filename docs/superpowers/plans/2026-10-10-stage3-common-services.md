@@ -420,6 +420,7 @@ CREATE INDEX idx_player_discord_accounts_player_id ON player_discord_accounts(pl
 
 ```python
 # tests/services/test_players.py
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
@@ -431,7 +432,7 @@ _MIGRATION = Path("migrations/core/001_players.sql").read_text()
 
 
 @pytest.fixture
-async def conn() -> aiosqlite.Connection:
+async def conn() -> AsyncIterator[aiosqlite.Connection]:
     connection = await aiosqlite.connect(":memory:")
     await connection.executescript(_MIGRATION)
     await connection.commit()
@@ -995,6 +996,8 @@ git commit -m "services: add player tag storage and PlayerRef resolver"
 
 ```python
 # tests/core/test_player_data.py
+from collections.abc import AsyncIterator
+
 import aiosqlite
 import pytest
 
@@ -1002,7 +1005,7 @@ from core.player_data import PlayerDataScanner, discover_skill_tables
 
 
 @pytest.fixture
-async def conn() -> aiosqlite.Connection:
+async def conn() -> AsyncIterator[aiosqlite.Connection]:
     connection = await aiosqlite.connect(":memory:")
     await connection.executescript(
         """
@@ -1863,6 +1866,7 @@ CREATE TABLE settings_skill_toggles (
 
 ```python
 # tests/services/test_settings.py
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
@@ -1874,7 +1878,7 @@ _MIGRATION = Path("migrations/core/003_settings.sql").read_text()
 
 
 @pytest.fixture
-async def conn() -> aiosqlite.Connection:
+async def conn() -> AsyncIterator[aiosqlite.Connection]:
     connection = await aiosqlite.connect(":memory:")
     await connection.executescript(_MIGRATION)
     await connection.commit()
@@ -2578,6 +2582,7 @@ CREATE TABLE player_memory (
 
 ```python
 # tests/services/test_memory.py
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
@@ -2589,7 +2594,7 @@ _MIGRATION = Path("migrations/core/004_memory.sql").read_text()
 
 
 @pytest.fixture
-async def conn() -> aiosqlite.Connection:
+async def conn() -> AsyncIterator[aiosqlite.Connection]:
     connection = await aiosqlite.connect(":memory:")
     await connection.executescript(_MIGRATION)
     await connection.commit()
@@ -3024,6 +3029,7 @@ CREATE TABLE arcade_visits (
 
 ```python
 # tests/services/test_arcades.py
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
@@ -3037,7 +3043,7 @@ _MIGRATION = Path("migrations/core/005_arcades.sql").read_text()
 
 
 @pytest.fixture
-async def conn() -> aiosqlite.Connection:
+async def conn() -> AsyncIterator[aiosqlite.Connection]:
     connection = await aiosqlite.connect(":memory:")
     await connection.executescript(_MIGRATION)
     await connection.commit()
@@ -3504,6 +3510,7 @@ CREATE TABLE schedule_once (
 ```python
 # tests/core/test_scheduler.py
 import datetime
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
@@ -3586,7 +3593,7 @@ Expected: PASS (3 tests)
 ```python
 # tests/core/test_scheduler.py 에 추가
 @pytest.fixture
-async def conn() -> aiosqlite.Connection:
+async def conn() -> AsyncIterator[aiosqlite.Connection]:
     connection = await aiosqlite.connect(":memory:")
     await connection.executescript(_MIGRATION)
     await connection.commit()
