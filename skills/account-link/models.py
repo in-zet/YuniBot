@@ -55,12 +55,34 @@ async def get_code(conn: aiosqlite.Connection, code: str) -> LinkCode | None:
     return _row_to_code(row) if row else None
 
 
-async def mark_joined(conn: aiosqlite.Connection, code: str, *, joiner_discord_id: str) -> None:
-    await conn.execute(
-        "UPDATE account_link_codes SET joiner_discord_id = ?, status = 'joined' WHERE code = ?",
+async def mark_joined(conn: aiosqlite.Connection, code: str, *, joiner_discord_id: str) -> bool:
+    """pending → joined 전이를 원자적으로 시도한다. 두 참여자가 동시에 같은 코드로 들어와도
+    SELECT로 status를 미리 확인하고 나중에 UPDATE하는 식(확인-행동 사이에 await가 끼어드는
+    TOCTOU)으로는 막을 수 없다 — WHERE status = 'pending'까지 포함한 UPDATE 한 문장만이
+    원자적이다. 돌려주는 bool은 "이 호출이 실제로 그 전이를 해냈는가"다(아니면 이미 다른
+    참여자가 가져갔다는 뜻)."""
+    cursor = await conn.execute(
+        "UPDATE account_link_codes SET joiner_discord_id = ?, status = 'joined' "
+        "WHERE code = ? AND status = 'pending'",
         (joiner_discord_id, code),
     )
     await conn.commit()
+    return cursor.rowcount == 1
+
+
+async def mark_finalizing(conn: aiosqlite.Connection, code: str) -> bool:
+    """양쪽이 다 확인한 뒤 실제로 계정을 옮기고 데이터를 지우는 마무리 단계를 "한 번만" 하는
+    주장(claim)을 원자적으로 시도한다. mark_joined와 같은 이유로 — 확인 버튼 콜백은 매
+    await마다 다른 클릭이 끼어들 수 있는 별도의 asyncio 태스크라서, 상태를 먼저 읽고 나중에
+    파괴적인 작업을 하는 방식은 두 번째 클릭이 끼어들면 안전하지 않다. 이 UPDATE 한 문장만이
+    "내가 지금 이 코드의 마무리를 가져간다"를 원자적으로 보장한다."""
+    cursor = await conn.execute(
+        "UPDATE account_link_codes SET status = 'finalizing' "
+        "WHERE code = ? AND status NOT IN ('finalizing', 'completed')",
+        (code,),
+    )
+    await conn.commit()
+    return cursor.rowcount == 1
 
 
 async def set_confirmed(conn: aiosqlite.Connection, code: str, *, side: str) -> None:

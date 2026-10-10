@@ -1,6 +1,7 @@
 # skills/account-link/tests/test_account_link.py
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -229,14 +230,15 @@ async def test_stranger_clicking_discard_confirm_is_rejected(link_env) -> None:
     assert await joiner_ctx.player_data.count(joiner.id) == {"goals_items": 1}
 
 
-async def test_multi_account_joiner_keeps_other_account_and_tag_after_link(link_env) -> None:
-    """리뷰 Finding 2: 참여자가 다른 계정/태그를 더 갖고 있어도, 연결이 끝난 뒤 그 계정/태그는
-    원래(이제는 분리된) 플레이어에 그대로 남아야 한다 — 참여에 쓴 계정 하나만 발급자 쪽으로 옮겨간다."""
+async def test_multi_account_joiner_is_rejected_and_nothing_changes(link_env) -> None:
+    """리뷰(2차) Important(이미 결정된 설계): player_data는 계정이 아니라 플레이어에 딸린다 —
+    참여자가 이미 계정을 2개 이상 연결했다면 "버릴 데이터가 어느 계정 것인지"가 애매해진다.
+    그 모호함을 풀지 않고, 참여 자체를 거절해 애초에 그 상황이 생기지 않게 한다. 거절 뒤에는
+    계정도 태그도 코드 상태도 전혀 바뀌지 않아야 한다."""
     skill, players, _, make_ctx = link_env
     issuer = await players.create_player()
     await players.link_account(issuer.id, "111")
-    issuer_ctx = make_ctx(issuer.id, "111")
-    started = await skill.start_link(issuer_ctx)
+    started = await skill.start_link(make_ctx(issuer.id, "111"))
     code = started.data["code"]
 
     joiner = await players.create_player()
@@ -244,24 +246,24 @@ async def test_multi_account_joiner_keeps_other_account_and_tag_after_link(link_
     await players.link_account(joiner.id, "333")
     await players.grant_tag(joiner.id, "tester", source="test")
 
-    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=code)  # 222 계정에서 참여
-    joiner_view = joined.display.view
-    issuer_view = issuer_ctx.services["notify"].dms[-1][2]
+    result = await skill.join_link(make_ctx(joiner.id, "222"), code=code)  # 222 계정에서 참여 시도
 
-    await issuer_view.confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
-    await joiner_view.confirm.callback(_FakeInteraction("222"))  # pyright: ignore[reportCallIssue]
+    assert result.error is not None
+    assert "다른 계정" in result.error
 
-    # 참여에 쓴 계정(222)은 발급자 플레이어로 옮겨갔다.
+    # 아무것도 바뀌지 않았다 — 계정도, 태그도, 코드 상태도 그대로다.
     moved = await players.player_for_discord("222")
     assert moved is not None
-    assert moved.id == issuer.id
-
-    # 건드리지 않은 계정(333)과 태그는 원래(분리된) joiner 플레이어에 그대로다.
+    assert moved.id == joiner.id
     remaining = await players.player_for_discord("333")
     assert remaining is not None
     assert remaining.id == joiner.id
-    assert remaining.id != issuer.id
     assert await players.tags_for(joiner.id) == {"tester"}
+
+    link_code = await skill.models.get_code(make_ctx(issuer.id, "111").db, code)
+    assert link_code is not None
+    assert link_code.status == "pending"
+    assert link_code.joiner_discord_id is None
 
 
 async def test_second_join_with_same_code_is_rejected(link_env) -> None:
@@ -338,6 +340,51 @@ async def test_confirm_after_completion_does_not_crash(link_env) -> None:
     await joiner_view.confirm.callback(second_click)  # pyright: ignore[reportCallIssue]
 
     assert "끝났다" in second_click.response.calls[0]["content"]
+
+
+async def test_concurrent_confirm_clicks_do_not_double_finalize_or_delete_issuer_data(link_env) -> None:
+    """리뷰(2차) New Critical: 마무리 단계(양쪽 다 확인된 뒤 실제로 계정을 옮기고 필요하면
+    데이터를 지우는 부분)는 '상태를 읽고 나중에 행동'하는 식이라 매 await마다 다른 클릭이
+    끼어들 수 있다. 재현된 문제: 두 번째 클릭이 끝나기 전 클릭과 겹치면 link_account가 두 번
+    불려 터지거나, 이미 발급자로 옮겨간 참여자 계정을 다시 조회해 발급자 자신의 데이터를
+    지워 버릴 수 있었다. mark_finalizing의 원자적 UPDATE가 이 경쟁을 실제로 막는지, 같은
+    버튼을 asyncio.gather로 동시에 눌러 확인한다."""
+    skill, players, _, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    issuer_ctx = make_ctx(issuer.id, "111")
+    started = await skill.start_link(issuer_ctx)
+    code = started.data["code"]
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=code)
+    joiner_view = joined.display.view
+    issuer_view = issuer_ctx.services["notify"].dms[-1][2]
+
+    # 발급자는 먼저 확인해 둔다 — 그래야 참여자의 확인이 "양쪽 다 확인됨" 분기(마무리 단계)로
+    # 바로 들어간다.
+    await issuer_view.confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+
+    click_a = _FakeInteraction("222")
+    click_b = _FakeInteraction("222")
+    await asyncio.gather(
+        joiner_view.confirm.callback(click_a),  # pyright: ignore[reportCallIssue]
+        joiner_view.confirm.callback(click_b),  # pyright: ignore[reportCallIssue]
+    )
+
+    # 터지지 않았고(gather가 예외 없이 끝났다), "연결이 완료됐다!"는 정확히 한 번만 나왔다.
+    responses = [c["content"] for c in click_a.response.calls] + [c["content"] for c in click_b.response.calls]
+    assert responses.count("연결이 완료됐다!") == 1
+
+    moved = await players.player_for_discord("222")
+    assert moved is not None
+    assert moved.id == issuer.id
+
+    # 이 테스트는 버릴 데이터가 없는(discard_agreed=False) 경로다 — 그래도 발급자 자신의
+    # player_data가 지워졌다면(재현된 버그) 여기서 드러난다.
+    assert issuer_ctx.player_data is not None
+    assert await issuer_ctx.player_data.count(issuer.id) == {}
 
 
 async def test_start_link_rejects_when_already_at_max_linked_accounts(link_env) -> None:

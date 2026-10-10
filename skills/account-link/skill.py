@@ -76,7 +76,12 @@ async def start_link(ctx: ToolContext) -> ToolResult:
 
 async def _proceed_to_mutual_confirm(ctx: ToolContext, link_code: Any, joiner_discord_id: str) -> ToolResult:
     assert ctx.db is not None
-    await models.mark_joined(ctx.db, link_code.code, joiner_discord_id=joiner_discord_id)
+    # mark_joined는 WHERE status = 'pending'까지 포함한 원자적 UPDATE다 — 호출자(join_link의
+    # 직행 경로, discard_and_continue 둘 다)가 이미 "status가 pending"임을 확인했더라도, 그
+    # 확인과 이 호출 사이에 다른 참여자가 먼저 끝냈을 수 있다(두 await 사이의 TOCTOU). 그래서
+    # 반환값을 반드시 확인한다 — False면 이 호출은 아무것도 바꾸지 못했다는 뜻이다.
+    if not await models.mark_joined(ctx.db, link_code.code, joiner_discord_id=joiner_discord_id):
+        return ToolResult(error="이미 다른 사람이 참여한 코드다")
 
     issuer_view = _ConfirmButtonsView(code=link_code.code, side="issuer", ctx=ctx)
     await ctx.notify.dm(
@@ -122,6 +127,16 @@ async def join_link(ctx: ToolContext, code: str) -> ToolResult:
         return ToolResult(error="이미 같은 플레이어다")
 
     await models.reset_wrong_attempts(ctx.db, joiner_discord_id)
+
+    # player_data는 계정이 아니라 플레이어에 딸린다. 참여자가 이미 계정을 2개 이상 연결했다면
+    # "버릴 데이터"가 지금 쓴 계정의 것인지, 다른 계정의 것인지 구분할 길이 없다 — 그 모호함을
+    # 풀려고 하지 않고, 참여 자체를 거절해 애초에 그 상황이 생기지 않게 한다(설계 결정).
+    # 이렇게 하면 아래 버리고 연결 분기는 "계정 하나 = 플레이어 전부"인 경우에만 돈다.
+    joiner_accounts = await ctx.players.accounts_for(ctx.player_id)
+    if len(joiner_accounts) > 1:
+        return ToolResult(
+            error="이미 다른 계정과 연결된 플레이어다. 먼저 /연결 해제로 풀고 다시 시도해 달라"
+        )
 
     counts = await ctx.player_data.count(ctx.player_id) if ctx.player_data is not None else {}
     if counts:
@@ -203,9 +218,11 @@ class _ConfirmButtonsView(discord.ui.View):
         if link_code is None or link_code.expires_at <= datetime.now(UTC).isoformat():
             await interaction.response.send_message("만료된 요청이다", ephemeral=True)
             return
-        if link_code.status == "completed":
-            # 이미 끝난 코드로 다시 눌렀다(두 번 클릭 등) — link_account를 또 부르면
-            # player_discord_accounts.discord_id 유니크 제약으로 터진다. 조용히 안내만 한다.
+        if link_code.status in ("completed", "finalizing"):
+            # 이미 끝났거나(두 번 클릭 등) 다른 클릭이 지금 막 마무리하고 있다 — 조용히
+            # 안내만 한다. (이 검사는 사용자 경험을 위한 빠른 길일 뿐, 진짜 방어선은 아래
+            # mark_finalizing의 원자적 UPDATE다 — 이 검사와 그 UPDATE 사이에도 다른 클릭이
+            # 끼어들 수 있기 때문이다.)
             await interaction.response.send_message("이미 연결이 끝났다", ephemeral=True)
             return
 
@@ -220,11 +237,31 @@ class _ConfirmButtonsView(discord.ui.View):
 
         if refreshed.issuer_confirmed and refreshed.joiner_confirmed:
             assert refreshed.joiner_discord_id is not None
-            # 파괴적인 동작(데이터 삭제, 계정 재배치)은 여기, 양쪽이 다 확인한 이 순간에만
-            # 일어난다 — 버리고 연결 확인이든, 데이터 없음 직행 경로든 마찬가지다.
+            # 여기부터는 파괴적이다(데이터 삭제, 계정 재배치) — 그런데 여기 도달하기까지
+            # set_confirmed → get_code 두 번의 await를 거쳤다. discord.py는 버튼 클릭마다
+            # 별도의 asyncio 태스크를 돌리고, await 지점마다 다른 클릭이 끼어들 수 있다.
+            # "상태를 읽고 나중에 행동하는" 방식(check-then-act)은 이 틈에서 안전하지 않다 —
+            # 두 클릭이 동시에 여기 도달하면 link_account가 두 번 불려 UNIQUE 제약으로 터지거나,
+            # 더 나쁘게는 첫 클릭이 이미 끝낸 뒤 두 번째 클릭이 "참여자였던 계정 = 지금은
+            # 발급자 플레이어"를 다시 조회해 발급자의 데이터를 지워 버릴 수 있다(실제로
+            # 재현됐다). mark_finalizing은 "내가 이 코드의 마무리를 가져간다"를 단일 SQL
+            # UPDATE(WHERE status NOT IN ('finalizing','completed'))로 원자적으로 주장한다 —
+            # 이 호출에서 실패(False)하면 다른 클릭이 이미 가져갔거나 끝냈다는 뜻이니 아무것도
+            # 하지 않고 멈춘다.
+            if not await models.mark_finalizing(self._ctx.db, self._code):
+                await interaction.response.send_message("이미 처리되고 있다", ephemeral=True)
+                return
+
             if refreshed.discard_agreed and self._ctx.player_data is not None:
                 stale_joiner = await self._ctx.players.player_for_discord(refreshed.joiner_discord_id)
                 if stale_joiner is not None:
+                    # 지우려는 플레이어가 이미 발급자 자신이면 뭔가 근본적으로 잘못됐다는
+                    # 뜻이다(예: 마무리 주장을 두 번 가져갈 수 있었다는 버그) — 조용히
+                    # 발급자의 데이터를 지우는 대신 여기서 터뜨린다.
+                    if stale_joiner.id == refreshed.issuer_player_id:
+                        raise RuntimeError(
+                            "account-link 불변 조건 위반: 버릴 데이터의 주인이 이미 발급자와 같다"
+                        )
                     await self._ctx.player_data.delete(stale_joiner.id)
             # 참여자 계정은 아직 자기 자신의(또는 다른) 플레이어에 연결되어 있을 수 있다 —
             # player_discord_accounts.discord_id는 유니크라 그대로 link_account를 부르면
