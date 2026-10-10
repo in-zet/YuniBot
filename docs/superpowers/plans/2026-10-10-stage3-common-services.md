@@ -837,14 +837,14 @@ async def test_resolve_player_ref_self(conn: aiosqlite.Connection) -> None:
 async def test_resolve_player_ref_mention(conn: aiosqlite.Connection) -> None:
     service = PlayersService(conn)
     target = await service.create_player()
-    await service.link_account(target.id, "555")
+    await service.link_account(target.id, "123456789012345678")
     caller = await service.create_player()
     ctx = ToolContext(player_id=caller.id, tags=frozenset(), services={})
 
-    resolved = await service.resolve("<@555>", ctx)
+    resolved = await service.resolve("<@123456789012345678>", ctx)
     assert resolved.id == target.id
 
-    resolved_bare = await service.resolve("<@!555>", ctx)
+    resolved_bare = await service.resolve("<@!123456789012345678>", ctx)
     assert resolved_bare.id == target.id
 
 
@@ -854,7 +854,7 @@ async def test_resolve_player_ref_unknown_mention_fails(conn: aiosqlite.Connecti
     ctx = ToolContext(player_id=caller.id, tags=frozenset(), services={})
 
     with pytest.raises(ResolutionError, match="모름"):
-        await service.resolve("<@999999>", ctx)
+        await service.resolve("<@999999999999999999>", ctx)
 
 
 async def test_resolve_player_ref_free_text_fails(conn: aiosqlite.Connection) -> None:
