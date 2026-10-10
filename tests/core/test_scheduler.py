@@ -125,3 +125,16 @@ async def test_schedule_once_gives_up_after_the_day_passes(conn: aiosqlite.Conne
     next_day_wakeup = datetime.datetime(2026, 10, 11, 7, 0)
     due = await scheduler.startup_catch_up_once(now=next_day_wakeup)
     assert due == []
+
+
+async def test_schedule_once_ignores_non_catch_up_even_same_day(conn: aiosqlite.Connection) -> None:
+    scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
+    fire_at = datetime.datetime(2026, 10, 10, 20, 0)
+    await scheduler.schedule_once(
+        owner_skill="chunithm-goals", event_name="chunithm.goal.due",
+        payload={"goal_id": "g1"}, fire_at=fire_at, catch_up=False,
+    )
+
+    same_day_wakeup = datetime.datetime(2026, 10, 10, 23, 0)
+    due = await scheduler.startup_catch_up_once(now=same_day_wakeup)
+    assert due == []  # catch_up=False라 같은 날이어도 돌지 않는다 — 그냥 닫힌다

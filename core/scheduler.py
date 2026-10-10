@@ -109,18 +109,20 @@ class Scheduler:
         return row_id
 
     async def startup_catch_up_once(self, *, now: datetime.datetime) -> list[OnceSchedule]:
-        """한 번 도는 예약 중 아직 안 돈 것을 본다. '오늘' 날짜로 예정됐던 것만 낸다 —
-        catch_up 여부와 무관하게 하루가 지나면 더는 의미가 없다고 보고 그냥 닫는다."""
+        """한 번 도는 예약 중 아직 안 돈 것을 본다. catch_up이 켜졌고 '오늘' 날짜로
+        예정됐던 것만 낸다 — recurring 쪽(startup_catch_up)과 완전히 같은 규칙이다.
+        catch_up이 꺼졌거나 오늘이 아니면 그냥 닫는다(다시는 안 돈다 — one-off라 미룰
+        '다음 시각'이 없다). '밀렸다'의 기준은 startup_catch_up과 같이 엄격히 과거다."""
         cursor = await self._conn.execute(
-            "SELECT id, owner_skill, event_name, payload, fire_at FROM schedule_once "
-            "WHERE fired_at IS NULL AND fire_at <= ?",
+            "SELECT id, owner_skill, event_name, payload, fire_at, catch_up FROM schedule_once "
+            "WHERE fired_at IS NULL AND fire_at < ?",
             (now.isoformat(),),
         )
         rows = await cursor.fetchall()
         today = now.date().isoformat()
         due: list[OnceSchedule] = []
-        for row_id, owner_skill, event_name, payload, fire_at in rows:
-            if fire_at[:10] == today:
+        for row_id, owner_skill, event_name, payload, fire_at, catch_up in rows:
+            if catch_up and fire_at[:10] == today:
                 due.append(
                     OnceSchedule(owner_skill=owner_skill, event_name=event_name, payload=json.loads(payload))
                 )
