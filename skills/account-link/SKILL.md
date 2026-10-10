@@ -7,7 +7,7 @@ examples:
 category: 계정 연결
 game: common
 version: 1
-services: [players, notify]
+services: [players, notify, db, player_data]
 emits: [players.linked]
 ---
 

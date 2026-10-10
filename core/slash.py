@@ -281,15 +281,19 @@ def _build_command(
         skill_services = {
             name: executor.services[name] for name in entry.skill_services if name in executor.services
         }
+        # db/player_data/registry_snapshot은 ToolContext의 전용 필드지만, 다른 서비스와 똑같이
+        # manifest.services에 선언한 스킬에게만 준다(core/registry.py의 CTX_FIELD_SERVICE_NAMES).
+        # 선언하지 않은 스킬이 임의 테이블을 읽고 쓰거나 남의 데이터를 지울 수 없게 한다.
+        declared = set(entry.skill_services)
         ctx = ToolContext(
             player_id=player.id,
             tags=tags,
             services=skill_services,
             guild_id=str(interaction.guild_id) if interaction.guild_id else None,
             event_bus=executor.event_bus,
-            player_data=executor.player_data,
-            db=db,
-            registry_snapshot=registry_snapshot,
+            player_data=executor.player_data if "player_data" in declared else None,
+            db=db if "db" in declared else None,
+            registry_snapshot=registry_snapshot if "registry_snapshot" in declared else None,
             discord_id=discord_id,
         )
 

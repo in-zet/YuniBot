@@ -51,6 +51,20 @@ def test_undeclared_service_usage_is_disabled() -> None:
     assert "songdb" in reason
 
 
+@pytest.mark.parametrize("field", ["db", "player_data", "registry_snapshot"])
+def test_undeclared_ctx_field_usage_is_detected(tmp_path: Path, field: str) -> None:
+    """리뷰(최종) Fix 3: ctx.db/ctx.player_data/ctx.registry_snapshot도 선언 없이 쓰면 걸린다."""
+    from core.registry import (
+        _find_undeclared_service_usage,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    skill_py = tmp_path / "skill.py"
+    skill_py.write_text(f"async def f(ctx):\n    return ctx.{field}\n")
+
+    assert _find_undeclared_service_usage(skill_py, declared={"players"}) == {field}
+    assert _find_undeclared_service_usage(skill_py, declared={"players", field}) == set()
+
+
 def test_unknown_listen_is_disabled() -> None:
     registry = SkillRegistry([FIXTURES / "skills_bad" / "unknown_listen"])
     registry.load()

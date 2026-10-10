@@ -450,3 +450,142 @@ def test_attach_to_tree_skips_a_broken_skill_and_keeps_the_rest(caplog: pytest.L
     assert tree.get_command("조회") is not None
     assert tree.get_command("보더") is None  # broken 스킬의 명령은 하나도 남지 않는다(부분 등록 없음)
     assert "broken" in caplog.text
+
+
+# --- manifest.services로 막는 코어 전용 맥락(db, player_data, registry_snapshot) -------------
+
+
+class _FakeSkillWithServices:
+    def __init__(self, name: str, services: list[str]) -> None:
+        self.manifest = type("M", (), {"name": name, "tags": [], "tags_any": [], "services": services})()
+
+
+async def test_dispatch_gives_db_player_data_snapshot_only_to_skills_that_declare_them() -> None:
+    """리뷰(최종) Fix 3: _dispatch가 db/player_data/registry_snapshot을 모든 스킬에게 무조건 주면
+    services: [players]만 선언한 스킬도 임의 테이블을 읽고 쓰거나 남의 데이터를 지울 수 있다.
+    manifest.services에 적은 스킬만 받고, 나머지는 None이어야 한다."""
+    from core.player_data import PlayerDataScanner
+
+    seen: dict[str, ToolContext] = {}
+
+    @tool(slash="게이트없음")
+    async def undeclared_tool(ctx: ToolContext) -> ToolResult:
+        """선언 없음."""
+        seen["undeclared"] = ctx
+        return ToolResult(data={})
+
+    @tool(slash="게이트있음")
+    async def declared_tool(ctx: ToolContext) -> ToolResult:
+        """선언 있음."""
+        seen["declared"] = ctx
+        return ToolResult(data={})
+
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(_PLAYERS_MIGRATION)
+    await conn.commit()
+    players = PlayersService(conn)
+    player_data = PlayerDataScanner(conn=conn, table_names=())
+    snapshot = RegistrySnapshot(skills=(), failures={"x": "y"})
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=players, tag_definitions={},
+        services={"players": players}, player_data=player_data,
+    )
+    plan = build_slash_plan(
+        [  # pyright: ignore[reportArgumentType]
+            (_FakeSkillWithServices("plain", ["players"]), undeclared_tool.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
+            (
+                _FakeSkillWithServices("core-ish", ["players", "db", "player_data", "registry_snapshot"]),
+                declared_tool.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+            ),
+        ]
+    )
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(
+        discord.Client(intents=discord.Intents.none())
+    )
+    attach_to_tree(tree, plan, executor=executor, db=conn, registry_snapshot=snapshot)
+
+    try:
+        for name in ("게이트없음", "게이트있음"):
+            command = tree.get_command(name)
+            assert isinstance(command, discord.app_commands.Command)
+            await command.callback(_fake(1))  # pyright: ignore[reportCallIssue]
+
+        plain = seen["undeclared"]
+        assert plain.db is None
+        assert plain.player_data is None
+        assert plain.registry_snapshot is None
+
+        declared = seen["declared"]
+        assert declared.db is conn
+        assert declared.player_data is player_data
+        assert declared.registry_snapshot is snapshot
+    finally:
+        await conn.close()
+
+
+async def test_practice_fixture_with_only_players_gets_no_db_or_player_data(
+    practice_tree: tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실제 픽스처 스킬(practice, services: [players])도 같은 규칙을 따른다."""
+    tree, executor, players = practice_tree
+    captured: list[ToolContext] = []
+    original_invoke = executor.invoke
+
+    async def spy(spec: Any, ctx: ToolContext, *args: Any, **kwargs: Any) -> Any:
+        captured.append(ctx)
+        return await original_invoke(spec, ctx, *args, **kwargs)
+
+    monkeypatch.setattr(executor, "invoke", spy)
+    player = await players.create_player()
+    await players.link_account(player.id, "1")
+    await players.grant_tag(player.id, "practice-unlocked", source="test")
+
+    await _practice_command(tree, "보기").callback(_fake(1))  # pyright: ignore[reportCallIssue]
+
+    [ctx] = captured
+    assert ctx.db is None
+    assert ctx.player_data is None
+    assert ctx.registry_snapshot is None
+
+
+async def test_real_admin_skill_receives_registry_snapshot_through_dispatch() -> None:
+    """admin은 manifest에 registry_snapshot을 선언했으니 /관리 스킬이 실제 스냅샷을 받는다."""
+    from core.registry_snapshot import build_snapshot
+    from services.common.settings import SettingsService
+
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(_PLAYERS_MIGRATION + Path("migrations/core/003_settings.sql").read_text())
+    await conn.commit()
+    players = PlayersService(conn)
+    registry = SkillRegistry([Path("skills/admin")])
+    registry.load()
+    assert registry.failures() == {}
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=players, tag_definitions=registry.tag_definitions(),
+        services={"players": players, "settings": SettingsService(conn)},
+    )
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(
+        discord.Client(intents=discord.Intents.none())
+    )
+    attach_to_tree(
+        tree, build_slash_plan(registry.tool_specs()), executor=executor, db=conn,
+        registry_snapshot=build_snapshot(registry),
+    )
+    player = await players.create_player()
+    await players.link_account(player.id, "1")
+    await players.grant_tag(player.id, "admin", source="test")
+
+    group = tree.get_command("관리")
+    assert isinstance(group, discord.app_commands.Group)
+    command = group.get_command("스킬")
+    assert isinstance(command, discord.app_commands.Command)
+    interaction = _fake(1)
+    try:
+        await command.callback(interaction)  # pyright: ignore[reportCallIssue]
+    finally:
+        await conn.close()
+
+    [call] = interaction.response.calls
+    assert not call.get("ephemeral")  # 오류("스킬 현황을 아직 알 수 없다")가 아니다
+    assert "admin" in call["content"]

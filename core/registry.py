@@ -13,10 +13,17 @@ from core.slash_rules import callback_arg_name_problems, slash_path_problems
 
 logger = logging.getLogger(__name__)
 
+# 뒤의 세 이름(db, player_data, registry_snapshot)은 executor.services에 든 진짜 서비스가
+# 아니라 ToolContext의 전용 필드다. 그래도 스킬이 쓰려면 다른 서비스처럼 manifest.services에
+# 적어야 한다 — core/slash.py의 _dispatch는 선언한 스킬에게만 채워 주고(아니면 None), 아래
+# 정적 검사는 선언하지 않고 ctx.db 등을 쓰는 skill.py를 로드 단계에서 막는다.
+CTX_FIELD_SERVICE_NAMES: frozenset[str] = frozenset({"db", "player_data", "registry_snapshot"})
+
 KNOWN_SERVICE_NAMES: frozenset[str] = frozenset(
     {
         "players", "settings", "memory", "notify", "yuni", "secrets", "arcades",
         "websearch", "http", "chunithm_net", "songdb", "records", "terms",
+        *CTX_FIELD_SERVICE_NAMES,
     }
 )
 

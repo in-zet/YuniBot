@@ -539,3 +539,12 @@ async def test_unlink_rejects_removing_primary_while_other_accounts_remain(link_
     assert "대표" in result.error
     assert await players.player_for_discord("111") is not None
     assert await players.player_for_discord("222") is not None
+
+
+def test_account_link_manifest_declares_every_ctx_field_it_uses() -> None:
+    """리뷰(최종) Fix 3: ctx.db/ctx.player_data도 manifest.services에 선언해야 로드된다."""
+    from core.registry import SkillRegistry
+
+    registry = SkillRegistry([Path("skills/account-link")])
+    registry.load()
+    assert registry.failures() == {}
