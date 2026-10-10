@@ -277,7 +277,12 @@ def _build_command(entry: SlashPlanEntry, *, executor: ToolExecutor) -> app_comm
             await executor.event_bus.emit_notify("players.first_seen", {"player_id": player.id})
 
         outcome = await executor.invoke(
-            entry.spec, ctx, options, skill_tags=entry.skill_tags, skill_tags_any=entry.skill_tags_any
+            entry.spec,
+            ctx,
+            options,
+            skill_tags=entry.skill_tags,
+            skill_tags_any=entry.skill_tags_any,
+            skill_name=entry.skill_name,
         )
 
         if outcome.needs_confirm:

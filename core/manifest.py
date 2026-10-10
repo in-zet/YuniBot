@@ -46,6 +46,7 @@ class SettingSpec(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
     kind: Literal["bool", "int", "float", "str"]
     default: Any
     description: str
+    scope: Literal["player", "guild"] = "player"
 
 
 class SkillManifest(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):

@@ -374,3 +374,59 @@ async def test_unregistered_resolver_error_names_the_type() -> None:
 
     assert outcome.result is not None
     assert "ArcadeRef" in (outcome.result.error or "")
+
+
+class _FakeSettings:
+    def __init__(self) -> None:
+        self._disabled: set[tuple[str, str]] = set()
+
+    def disable(self, guild_id: str, skill: str) -> None:
+        self._disabled.add((guild_id, skill))
+
+    async def is_skill_enabled(self, *, guild_id: str, skill: str) -> bool:
+        return (guild_id, skill) not in self._disabled
+
+
+async def test_invoke_blocks_tool_when_skill_disabled_for_guild() -> None:
+    @tool(slash="보더")
+    async def lookup(ctx: ToolContext) -> ToolResult:
+        """더미."""
+        return ToolResult(data={})
+
+    settings = _FakeSettings()
+    settings.disable("g1", "chunithm-border")
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(),
+        tag_provider=InMemoryTagProvider(),
+        tag_definitions={},
+        settings=settings,  # type: ignore[arg-type]
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
+
+    outcome = await executor.invoke(
+        lookup.__yuni_tool__, ctx, {}, skill_name="chunithm-border"  # pyright: ignore[reportFunctionMemberAccess]
+    )
+
+    assert outcome.result is not None
+    assert outcome.result.error == "모르는 명령이에요"
+
+
+async def test_invoke_allows_tool_when_no_guild_context() -> None:
+    @tool(slash="보더2")
+    async def lookup(ctx: ToolContext) -> ToolResult:
+        """더미."""
+        return ToolResult(data={"ok": True})
+
+    settings = _FakeSettings()
+    settings.disable("g1", "chunithm-border")
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={}, settings=settings  # type: ignore[arg-type]
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id=None)
+
+    outcome = await executor.invoke(
+        lookup.__yuni_tool__, ctx, {}, skill_name="chunithm-border"  # pyright: ignore[reportFunctionMemberAccess]
+    )
+
+    assert outcome.result is not None
+    assert outcome.result.data == {"ok": True}

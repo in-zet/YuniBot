@@ -5,7 +5,7 @@ import logging
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from core.decorators import SlashOnlySpec, ToolSpec
 from core.events import EventBus
@@ -34,6 +34,10 @@ class _PendingConfirm:
     requester_id: str  # 확인을 요청한 플레이어. 이 사람만 확인/취소할 수 있다.
 
 
+class SkillToggleProvider(Protocol):
+    async def is_skill_enabled(self, *, guild_id: str, skill: str) -> bool: ...
+
+
 def _missing_tags(requirement: TagRequirement, player_tags: set[str]) -> set[str]:
     """requirement를 만족하지 못했을 때, 안내에 쓸 "빠진 태그" 이름들을 모은다."""
     missing = set(requirement.tags) - player_tags
@@ -52,6 +56,7 @@ class ToolExecutor:
         services: Mapping[str, object] | None = None,
         event_bus: EventBus | None = None,
         player_data: PlayerDataScanner | None = None,
+        settings: SkillToggleProvider | None = None,
     ) -> None:
         self._resolvers = resolvers
         self._tag_provider = tag_provider
@@ -59,6 +64,7 @@ class ToolExecutor:
         self._services = services or {}
         self._event_bus = event_bus or EventBus()
         self._player_data = player_data
+        self._settings = settings
         self._pending: dict[str, _PendingConfirm] = {}
 
     @property
@@ -87,6 +93,7 @@ class ToolExecutor:
         *,
         skill_tags: list[str] | None = None,
         skill_tags_any: list[str] | None = None,
+        skill_name: str | None = None,
     ) -> ExecutionOutcome:
         """skill_tags/skill_tags_any는 이 도구가 속한 스킬 manifest의 조건이다.
 
@@ -98,6 +105,14 @@ class ToolExecutor:
         tags_any=[C,D]일 때 플레이어가 A만 가져도 통과해 버리는 것은 잘못이다.
         (A 또는 B)와 (C 또는 D)를 모두 만족해야 한다).
         """
+        if (
+            skill_name is not None
+            and ctx.guild_id is not None
+            and self._settings is not None
+            and not await self._settings.is_skill_enabled(guild_id=ctx.guild_id, skill=skill_name)
+        ):
+            return ExecutionOutcome(result=ToolResult(error="모르는 명령이에요"))
+
         schema = build_arg_schema(spec.fn)
 
         resolved: dict[str, Any] = {}

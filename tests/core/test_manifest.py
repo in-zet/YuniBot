@@ -93,6 +93,29 @@ def test_parse_manifest_defines_tags_and_settings() -> None:
     assert manifest.defines_tags[0].name == "demo-member"
     assert manifest.defines_tags[0].hidden is False
     assert manifest.settings[0].kind == "bool"
+    assert manifest.settings[0].scope == "player"
+
+
+def test_parse_manifest_setting_scope_guild() -> None:
+    text = (
+        "---\n"
+        "name: demo2\n"
+        "description: 데모\n"
+        "examples: [하나]\n"
+        "category: 메모\n"
+        "game: common\n"
+        "version: 1\n"
+        "services: []\n"
+        "settings:\n"
+        "  - name: 오랜만의 기준\n"
+        "    kind: int\n"
+        "    default: 14\n"
+        "    description: 며칠이면 오랜만인지\n"
+        "    scope: guild\n"
+        "---\n본문"
+    )
+    manifest = parse_manifest(text)
+    assert manifest.settings[0].scope == "guild"
 
 
 @pytest.mark.parametrize(

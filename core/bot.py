@@ -16,9 +16,11 @@ from core.migrations import run_migrations
 from core.player_data import PlayerDataScanner, discover_skill_tables
 from core.registry import LoadedSkill, SkillRegistry
 from core.resolvers import ResolverRegistry
+from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
 from core.tool_types import PlayerRef
 from services.common.players import PlayersService
+from services.common.settings import SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +141,8 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     resolvers = ResolverRegistry()
     resolvers.register(PlayerRef, players)
 
-    services: dict[str, object] = {"players": players}
+    settings_service = SettingsService(conn)
+    services: dict[str, object] = {"players": players, "settings": settings_service}
 
     executor = ToolExecutor(
         resolvers=resolvers,
@@ -148,6 +151,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         services=services,
         event_bus=event_bus,
         player_data=player_data,
+        settings=settings_service,
     )
 
     intents = discord.Intents.default()
@@ -156,6 +160,9 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
 
     plan = build_slash_plan(registry.tool_specs())
     attach_to_tree(client.tree, plan, executor=executor)
+    client.tree.add_command(
+        build_settings_group(registry=registry, settings=settings_service, players=players)
+    )
 
     return client, registry, executor
 
