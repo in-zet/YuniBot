@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiosqlite
@@ -9,7 +10,7 @@ _MIGRATION = Path("migrations/core/001_players.sql").read_text()
 
 
 @pytest.fixture
-async def conn() -> aiosqlite.Connection:
+async def conn() -> AsyncIterator[aiosqlite.Connection]:
     connection = await aiosqlite.connect(":memory:")
     await connection.executescript(_MIGRATION)
     await connection.commit()
