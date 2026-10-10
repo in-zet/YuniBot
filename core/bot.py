@@ -11,6 +11,7 @@ from discord import app_commands
 
 from core.config import CoreConfig, load_config
 from core.contract_checks import run_all_contract_checks
+from core.decorators import ScheduleSpec
 from core.events import EventBus, handler_kind
 from core.executor import ToolExecutor
 from core.migrations import run_migrations
@@ -149,6 +150,32 @@ def _register_event_handlers(bus: EventBus, registry: SkillRegistry) -> None:
             registry.disable(skill.manifest.name, f"이벤트 핸들러 등록 실패: {exc}")
 
 
+async def _run_due_recurring(
+    due: list[tuple[str, str]],
+    schedule_fns: dict[tuple[str, str], ScheduleSpec],
+    *,
+    scheduler: Scheduler,
+    services: dict[str, object],
+    event_bus: EventBus,
+    player_data: PlayerDataScanner,
+    now: datetime.datetime,
+) -> None:
+    """기동 시 밀린 반복 예약을 하나씩 돌린다. 한 작업이 실패해도 경고만 남기고 다음 작업으로
+    넘어간다 — 그렇지 않으면 예약 하나의 결함이 build_client()를 터뜨려 봇 전체가 못 뜬다.
+    실패한 작업은 mark_run하지 않는다(실행한 것이 아니므로)."""
+    for owner_skill, fn_name in due:
+        try:
+            spec = schedule_fns[(owner_skill, fn_name)]
+            ctx = ToolContext(
+                player_id="system", tags=frozenset(), services=services, event_bus=event_bus,
+                player_data=player_data,
+            )
+            await spec.fn(ctx)
+            await scheduler.mark_run(owner_skill, fn_name, cron=spec.cron, ran_at=now)
+        except Exception:  # 한 예약 작업의 어떤 실패도 기동 전체를 죽이면 안 된다
+            logger.warning("밀린 예약 작업 '%s.%s' 실행 실패, 건너뛴다", owner_skill, fn_name, exc_info=True)
+
+
 async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, ToolExecutor]:
     config.db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -249,13 +276,10 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         for skill in registry.enabled_skills()
         for spec in skill.code.schedules
     }
-    for owner_skill, fn_name in due_recurring:
-        spec = schedule_fns[(owner_skill, fn_name)]
-        ctx = ToolContext(
-            player_id="system", tags=frozenset(), services=services, event_bus=event_bus, player_data=player_data
-        )
-        await spec.fn(ctx)
-        await scheduler.mark_run(owner_skill, fn_name, cron=spec.cron, ran_at=now)
+    await _run_due_recurring(
+        due_recurring, schedule_fns, scheduler=scheduler, services=services, event_bus=event_bus,
+        player_data=player_data, now=now,
+    )
 
     due_once = await scheduler.startup_catch_up_once(now=now)
     for once in due_once:

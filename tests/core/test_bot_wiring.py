@@ -7,11 +7,12 @@ import pytest
 
 from core.bot import (  # pyright: ignore[reportPrivateUsage]
     _migration_roots,
+    _run_due_recurring,
     _sync_admin_bootstrap,
     build_client,
 )
 from core.config import CoreConfig
-from core.decorators import SkillCode
+from core.decorators import ScheduleSpec, SkillCode
 from core.manifest import SkillManifest
 from core.registry import LoadedSkill
 from services.common.players import PlayersService
@@ -174,6 +175,44 @@ async def test_unresolvable_event_handler_annotation_disables_only_that_skill(tm
     assert client.tree.get_command("연습") is not None
 
     await client.close()
+
+
+async def test_failing_catch_up_job_is_isolated_and_others_still_run(caplog: pytest.LogCaptureFixture) -> None:
+    """리뷰(최종) Fix 9: 밀린 예약 작업 하나가 터져도 build_client()가 죽지 않고, 다음 작업은 돈다."""
+    import logging
+
+    from core.events import EventBus
+    from core.player_data import PlayerDataScanner
+
+    ran: list[str] = []
+    marked: list[tuple[str, str]] = []
+
+    async def boom(ctx: object) -> None:
+        raise RuntimeError("예약 작업 실패")
+
+    async def ok(ctx: object) -> None:
+        ran.append("ok")
+
+    class _FakeScheduler:
+        async def mark_run(self, owner_skill: str, fn_name: str, *, cron: str, ran_at: datetime.datetime) -> None:
+            marked.append((owner_skill, fn_name))
+
+    conn = await aiosqlite.connect(":memory:")
+    try:
+        with caplog.at_level(logging.WARNING):
+            await _run_due_recurring(
+                [("a", "boom"), ("b", "ok")],
+                {("a", "boom"): ScheduleSpec(fn=boom, cron="0 9 * * *"), ("b", "ok"): ScheduleSpec(fn=ok, cron="0 9 * * *")},
+                scheduler=_FakeScheduler(),  # pyright: ignore[reportArgumentType]
+                services={}, event_bus=EventBus(), player_data=PlayerDataScanner(conn=conn, table_names=()),
+                now=datetime.datetime(2026, 10, 10, 9, 0),  # noqa: DTZ001 - 예약은 서버 로컬 벽시계 기준(core/bot.py)
+            )
+    finally:
+        await conn.close()
+
+    assert ran == ["ok"]
+    assert marked == [("b", "ok")]  # 실패한 작업은 돌린 것으로 기록하지 않는다
+    assert "a.boom" in caplog.text
 
 
 async def test_sync_admin_bootstrap_does_not_touch_manually_granted_admin() -> None:
