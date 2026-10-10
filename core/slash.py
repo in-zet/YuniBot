@@ -12,6 +12,7 @@ from discord import app_commands
 
 from core.decorators import SlashOnlySpec, ToolSpec
 from core.executor import ToolExecutor
+from core.registry_snapshot import RegistrySnapshot
 from core.schema import ArgSpec, build_arg_schema
 from core.slash_rules import callback_arg_name_problems, slash_path_problems
 from core.tool_types import ToolContext, ToolResult
@@ -75,7 +76,12 @@ _Container = app_commands.Group | None  # None은 트리 최상위
 
 
 def attach_to_tree(
-    tree: app_commands.CommandTree[Any], plan: SlashPlan, *, executor: ToolExecutor, db: aiosqlite.Connection
+    tree: app_commands.CommandTree[Any],
+    plan: SlashPlan,
+    *,
+    executor: ToolExecutor,
+    db: aiosqlite.Connection,
+    registry_snapshot: RegistrySnapshot,
 ) -> None:
     """스킬 단위로 명령을 붙인다. 한 스킬의 명령을 만들거나 붙이다가 무엇이든 실패하면, 그 스킬이
     이미 붙인 명령/그룹을 되돌리고 경고를 남긴 뒤 다음 스킬로 넘어간다(다른 스킬은 영향 없음).
@@ -88,7 +94,7 @@ def attach_to_tree(
 
     for skill_name, entries in by_skill.items():
         try:
-            _attach_skill(tree, groups, entries, executor=executor, db=db)
+            _attach_skill(tree, groups, entries, executor=executor, db=db, registry_snapshot=registry_snapshot)
         except Exception:
             logger.warning("스킬 '%s'의 슬래시 명령을 등록하지 못해 건너뛴다", skill_name, exc_info=True)
 
@@ -100,6 +106,7 @@ def _attach_skill(
     *,
     executor: ToolExecutor,
     db: aiosqlite.Connection,
+    registry_snapshot: RegistrySnapshot,
 ) -> None:
     # 1) 트리를 건드리기 전에 이 스킬의 명령을 전부 만든다(검사 실패/생성 실패는 여기서 끝난다).
     built: list[tuple[tuple[str, ...], app_commands.Command[Any, Any, Any]]] = []
@@ -107,7 +114,9 @@ def _attach_skill(
         problems = slash_path_problems(" ".join(entry.path))
         if problems:
             raise SlashPlanError("; ".join(problems))
-        built.append((entry.path, _build_command(entry, executor=executor, db=db)))
+        built.append(
+            (entry.path, _build_command(entry, executor=executor, db=db, registry_snapshot=registry_snapshot))
+        )
 
     # 2) 붙인다. 중간에 실패하면 이 스킬이 붙인 것만 되돌린다.
     added: list[tuple[_Container, app_commands.Command[Any, Any, Any] | app_commands.Group]] = []
@@ -249,7 +258,7 @@ async def _send_result(interaction: discord.Interaction, result: ToolResult) -> 
 
 
 def _build_command(
-    entry: SlashPlanEntry, *, executor: ToolExecutor, db: aiosqlite.Connection
+    entry: SlashPlanEntry, *, executor: ToolExecutor, db: aiosqlite.Connection, registry_snapshot: RegistrySnapshot
 ) -> app_commands.Command[Any, Any, Any]:
     schema = build_arg_schema(entry.spec.fn)
     fn_name = f"slash_{entry.skill_name}_{entry.spec.name}".replace("-", "_")
@@ -280,6 +289,7 @@ def _build_command(
             event_bus=executor.event_bus,
             player_data=executor.player_data,
             db=db,
+            registry_snapshot=registry_snapshot,
             discord_id=discord_id,
         )
 
