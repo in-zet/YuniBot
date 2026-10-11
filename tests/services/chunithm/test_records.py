@@ -17,6 +17,7 @@ from core.tool_types import ToolContext
 from services.chunithm import records as records_module
 from services.chunithm.chunithm_net import SyncFetch
 from services.chunithm.records import RecordsService
+from services.chunithm.records_calc import allowed_attacks, remaining_to_target
 from services.chunithm.songdb import SongDbService
 from services.common.players import PlayersService
 
@@ -262,7 +263,7 @@ async def test_best_score_returns_none_when_never_played(conn) -> None:
     assert score is None
 
 
-async def test_last_sync_at_returns_most_recent(conn) -> None:
+async def test_last_sync_at_returns_most_recent(conn, monkeypatch) -> None:
     players = PlayersService(conn)
     player = await players.create_player()
     ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
@@ -270,18 +271,32 @@ async def test_last_sync_at_returns_most_recent(conn) -> None:
 
     assert await service.last_sync_at(player.id) is None
 
+    # 두 번 동기화해 ORDER BY synced_at DESC가 실제로 골라야 하는 상황을 만든다.
+    _freeze_now(monkeypatch, utc=datetime(2026, 10, 10, 12, 0, tzinfo=UTC), local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+    await service.save_sync(player.id, _fixture_fetch(), ctx)
+    _freeze_now(monkeypatch, utc=datetime(2026, 10, 11, 12, 0, tzinfo=UTC), local=datetime(2026, 10, 11, 21, 0, tzinfo=UTC))
     await service.save_sync(player.id, _fixture_fetch(), ctx)
 
-    assert await service.last_sync_at(player.id) is not None
+    # 첫 번째(10일)가 아니라 나중(11일) 동기화 시각이어야 한다.
+    assert await service.last_sync_at(player.id) == "2026-10-11T12:00:00+00:00"
 
 
 async def test_allowed_attacks_and_remaining_to_target_are_exposed_passthroughs(conn) -> None:
     players = PlayersService(conn)
     service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
 
-    assert service.allowed_attacks(3000, 1_007_500) is not None
-    assert service.remaining_to_target(3000, 1_000_000, 1_007_500) is not None
+    # 같은 순수 함수에 같은 인자를 넘긴 결과와 정확히 같아야 한다(인자 순서 포함).
+    assert service.allowed_attacks(3000, 1_007_500) == allowed_attacks(3000, 1_007_500)
+    assert service.remaining_to_target(3000, 1_000_000, 1_007_500) == remaining_to_target(
+        3000, 1_000_000, 1_007_500
+    )
     assert service.allowed_attacks(None, 1_007_500) is None
+    assert service.remaining_to_target(None, 1_000_000, 1_007_500) is None
+
+    # 기대값도 손으로 계산해 고정한다: (1,010,000 - 1,007,500) * 3000 / 510,000 = 14.70...
+    assert service.allowed_attacks(3000, 1_007_500) == Decimal("14.70")
+    # 남은 점수 7,500, 어택 7,500 * 3000 / 510,000 = 44.11...
+    assert service.remaining_to_target(3000, 1_000_000, 1_007_500) == (7500, Decimal("44.11"))
 
 
 def _freeze_now(monkeypatch: pytest.MonkeyPatch, *, utc: datetime, local: datetime) -> None:
