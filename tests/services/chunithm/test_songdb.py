@@ -140,6 +140,49 @@ async def test_refresh_from_chunimaru_with_malformed_response_keeps_previous_sta
     assert song.is_new is False
 
 
+async def test_seed_loads_bpm_version_level_and_sdvxin(songdb: SongDbService) -> None:
+    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
+    assert song.bpm is not None
+    assert song.version is not None
+    mas = song.charts["MAS"]
+    assert mas.level is not None
+
+
+async def test_find_by_const_returns_sorted_hits_in_range(songdb: SongDbService) -> None:
+    hits = songdb.find_by_const(min_const=12.0, max_const=13.0, difficulty="MAS")
+    assert hits  # 로컬 시드에 12~13 상수의 MAS 채보가 있어야 한다
+    # find_by_const는 이미 const가 None인 채보를 걸러낸다; 아래 필터는 그 사실을
+    # 타입 체커에게도 알려주기 위한 것이다(동작에는 영향 없음).
+    consts = [c for hit in hits if (c := hit.chart.const) is not None]
+    assert len(consts) == len(hits)
+    assert consts == sorted(consts)
+    assert all(12.0 <= c <= 13.0 for c in consts)
+
+
+async def test_find_by_const_excludes_unavailable_songs(songdb: SongDbService) -> None:
+    hits = songdb.find_by_const(min_const=0.0, max_const=99.0, difficulty="BAS")
+    assert all(hit.song.title != "天体観測" for hit in hits)  # 국제판 미수록곡은 제외
+
+
+async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService) -> None:
+    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
+    link = songdb.chart_link(song, song.charts["MAS"])
+    assert link.has_mapping is True
+    assert "sdvx.in" in link.url
+
+
+async def test_chart_link_falls_back_to_youtube_without_mapping(songdb: SongDbService) -> None:
+    from services.chunithm.songdb import ChartRecord, SongRecord
+
+    fake_song = SongRecord(title="테스트곡", aliases=(), artist="", charts={})
+    fake_chart = ChartRecord(difficulty="MAS", const=10.0, note_count=1000, sdvxin=None)
+
+    link = songdb.chart_link(fake_song, fake_chart)
+
+    assert link.has_mapping is False
+    assert "youtube.com" in link.url
+
+
 async def test_chunimaru_only_song_becomes_resolvable(songdb: SongDbService) -> None:
     synthetic = {
         "songs": [

@@ -17,9 +17,22 @@ _SEED_PATH = (
 )
 _MAX_CANDIDATES = 8
 
+# terms.resolve_difficulty()가 돌려주는 정식 긴 이름("MASTER")을 이 서비스가 쓰는
+# 짧은 코드("MAS")로 바꾼다. chart_ref.py도 이 매핑을 그대로 쓴다(중복 정의하지 않는다).
+LONG_TO_SHORT_DIFFICULTY: dict[str, str] = {
+    "BASIC": "BAS", "ADVANCED": "ADV", "EXPERT": "EXP",
+    "MASTER": "MAS", "ULTIMA": "ULT", "WORLD'S END": "WE",
+}
+
 
 class _HttpGetJson(Protocol):
     async def get_json(self, url: str) -> Any: ...
+
+
+@dataclass(slots=True, kw_only=True)
+class SdvxinMapping:
+    id: str
+    end_index: str = ""
 
 
 @dataclass(slots=True, kw_only=True)
@@ -31,6 +44,8 @@ class ChartRecord:
     # 국제판에서 지금 고를 수 있는 채보인가. 같은 제목의 시드 엔트리 중 일부만
     # available이면, 곡은 찾을 수 있어도 그 채보(흔히 삭제된 WE)는 고를 수 없다.
     is_available: bool = True
+    level: str | None = None
+    sdvxin: SdvxinMapping | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -40,6 +55,20 @@ class SongRecord:
     artist: str
     charts: dict[str, ChartRecord] = field(default_factory=dict)
     is_new: bool = False
+    bpm: float | None = None
+    version: str | None = None
+
+
+@dataclass(slots=True, kw_only=True)
+class ConstRangeHit:
+    song: SongRecord
+    chart: ChartRecord
+
+
+@dataclass(slots=True, kw_only=True)
+class ChartLinkInfo:
+    url: str
+    has_mapping: bool
 
 
 def _note_count(chart: dict[str, Any]) -> int | None:
@@ -75,6 +104,8 @@ def _load_seed(seed_path: Path) -> dict[str, SongRecord]:
                 aliases=tuple(entry.get("aliases") or ()),
                 artist=entry.get("artist", ""),
                 charts={},
+                bpm=entry.get("bpm"),
+                version=entry.get("version"),
             )
             songs[title] = song
         for c in entry.get("charts", []):
@@ -84,9 +115,15 @@ def _load_seed(seed_path: Path) -> dict[str, SongRecord]:
                 entry_available and not winner_is_available[key]
             ):
                 continue
+            sdvxin_data = c.get("sdvxin")
             song.charts[code] = ChartRecord(
                 difficulty=code, const=c.get("const"), note_count=_note_count(c),
-                is_available=entry_available,
+                is_available=entry_available, level=c.get("level"),
+                sdvxin=(
+                    SdvxinMapping(id=str(sdvxin_data["id"]), end_index=sdvxin_data.get("end_index") or "")
+                    if sdvxin_data
+                    else None
+                ),
             )
             winner_is_available[key] = entry_available
     return songs
@@ -137,6 +174,42 @@ class SongDbService:
             return None
         chart = song.charts.get(difficulty)
         return chart.note_count if chart else None
+
+    def find_by_const(
+        self, *, min_const: float, max_const: float, difficulty: str
+    ) -> list[ConstRangeHit]:
+        """상수 범위(양끝 포함)와 난이도 코드로, 지금 국제판에서 고를 수 있는 채보를
+        상수 오름차순(같으면 제목순)으로 찾는다. difficulty는 짧은 코드("MAS" 등)다."""
+        hits: list[ConstRangeHit] = []
+        for title, song in self._songs.items():
+            if title not in self._available_intl:
+                continue
+            chart = song.charts.get(difficulty)
+            if chart is None or not chart.is_available or chart.const is None:
+                continue
+            if min_const <= chart.const <= max_const:
+                hits.append(ConstRangeHit(song=song, chart=chart))
+        hits.sort(key=lambda hit: (hit.chart.const, hit.song.title))
+        return hits
+
+    def chart_link(self, song: SongRecord, chart: ChartRecord) -> ChartLinkInfo:
+        """채보 뷰어 링크. sdvx.in 매핑이 있으면 그 링크, 없으면 유튜브 검색 링크."""
+        if chart.sdvxin is not None:
+            from types import SimpleNamespace
+
+            from chuni_penguin.utils.formatting import sdvxin_link
+
+            view = SimpleNamespace(
+                id=chart.sdvxin.id, difficulty=chart.difficulty, end_index=chart.sdvxin.end_index
+            )
+            return ChartLinkInfo(url=sdvxin_link(view), has_mapping=True)
+
+        from urllib.parse import quote
+
+        query = quote(f"{song.title} {chart.difficulty} 譜面確認")
+        return ChartLinkInfo(
+            url=f"https://www.youtube.com/results?search_query={query}", has_mapping=False
+        )
 
     def _apply_chunimaru(self, data: dict[str, Any]) -> None:
         """Chunimaru songdb 응답(이미 디코딩된 dict)을 로컬 시드에 덧씌운다.

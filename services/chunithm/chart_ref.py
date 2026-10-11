@@ -4,18 +4,12 @@ from dataclasses import dataclass
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
+from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY as _LONG_TO_SHORT
 from services.chunithm.songdb import ChartRecord, SongDbService, SongRecord
 from services.chunithm.terms import TermsService
 
 _DEFAULT_DIFFICULTY = "MASTER"
 _DEFAULT_DIFFICULTY_CODE = "MAS"
-
-# terms.difficulty_token()이 돌려주는 정식 긴 이름("MASTER")을 로컬 시드가 쓰는
-# 짧은 코드("MAS")로 바꾼다 — songdb의 ChartRecord.difficulty는 짧은 코드를 쓴다.
-_LONG_TO_SHORT = {
-    "BASIC": "BAS", "ADVANCED": "ADV", "EXPERT": "EXP",
-    "MASTER": "MAS", "ULTIMA": "ULT", "WORLD'S END": "WE",
-}
 
 
 @dataclass(slots=True, kw_only=True)
