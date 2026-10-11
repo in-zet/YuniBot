@@ -22,6 +22,7 @@ def test_load_config_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_load_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("core.config.load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
     monkeypatch.delenv("SKILLS_DIRS", raising=False)
     monkeypatch.delenv("DB_PATH", raising=False)
@@ -35,6 +36,7 @@ def test_load_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_load_config_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("core.config.load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.delenv("DISCORD_TOKEN", raising=False)
 
     with pytest.raises(RuntimeError, match="DISCORD_TOKEN"):
