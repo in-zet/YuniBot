@@ -276,3 +276,60 @@ async def test_server_alias_lookup_is_case_insensitive(songdb_with_conn: SongDbS
 
     await songdb_with_conn.remove_alias(guild_id="g1", alias="RFTS")
     assert await songdb_with_conn.get_alias(guild_id="g1", alias="rfts") is None
+
+
+async def test_add_alias_same_song_reregister_does_not_steal_ownership(
+    songdb_with_conn: SongDbService,
+) -> None:
+    # finding 1: 같은 별칭을 같은 곡으로 다시 등록하는 것(멱등 재등록)은 허용되지만,
+    # added_by/created_at은 원래 추가한 사람 걸로 남아야 한다. 안 그러면 누구나 재등록만
+    # 으로 alias_remove의 "추가한 사람이나 admin만 지운다" 제한을 비껴갈 수 있다.
+    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="playerA")
+
+    row_before = await songdb_with_conn.get_alias(guild_id="g1", alias="크로노")
+    assert row_before is not None and row_before.added_by == "playerA"
+
+    # player B가 같은 별칭을, 같은 곡으로 재등록한다 — 이건 기존 충돌 검사를 통과한다
+    # (song_title이 같으므로). 그래도 소유자는 바뀌면 안 된다.
+    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="playerB")
+
+    row_after = await songdb_with_conn.get_alias(guild_id="g1", alias="크로노")
+    assert row_after is not None
+    assert row_after.added_by == "playerA"
+
+
+async def test_add_alias_colliding_with_other_songs_exact_title_raises(
+    songdb_with_conn: SongDbService,
+) -> None:
+    # finding 2: "Reach For The Stars"는 실제 시드에 있는 다른 곡의 정식 제목이다.
+    # "B.B.K.K.B.K.K."에 그 이름을 서버 별칭으로 등록하면, 이후 resolve()가 그 서버에서
+    # "Reach For The Stars"를 "B.B.K.K.B.K.K."로 잘못 돌려주게 된다 — 막아야 한다.
+    with pytest.raises(ValueError, match="이미"):
+        await songdb_with_conn.add_alias(
+            guild_id="g1", alias="Reach For The Stars", song_title="B.B.K.K.B.K.K.", added_by="p1"
+        )
+
+
+async def test_add_alias_colliding_with_other_songs_global_alias_raises(
+    songdb_with_conn: SongDbService,
+) -> None:
+    # finding 2: "RFTS"는 실제 시드에서 "Reach For The Stars"의 전역(시드) 별칭이다.
+    # "B.B.K.K.B.K.K."에 서버 별칭으로 등록하려 하면 막아야 한다(서버 별칭과 전역
+    # 별칭은 같은 우선순위라는 결정 사항 6번).
+    with pytest.raises(ValueError, match="이미"):
+        await songdb_with_conn.add_alias(
+            guild_id="g1", alias="RFTS", song_title="B.B.K.K.B.K.K.", added_by="p1"
+        )
+
+
+async def test_add_alias_matching_own_songs_global_alias_is_allowed(
+    songdb_with_conn: SongDbService,
+) -> None:
+    # "RFTS"를 그 별칭의 원래 주인인 "Reach For The Stars" 자신에게 서버 별칭으로
+    # 등록하는 것은 중복이지만 충돌이 아니다 — 허용한다(finding 2, "같은 곡" 예외).
+    await songdb_with_conn.add_alias(
+        guild_id="g1", alias="RFTS", song_title="Reach For The Stars", added_by="p1"
+    )
+    row = await songdb_with_conn.get_alias(guild_id="g1", alias="RFTS")
+    assert row is not None
+    assert row.song_title == "Reach For The Stars"

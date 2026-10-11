@@ -121,3 +121,52 @@ async def test_remaining_unknown_note_count_is_an_error() -> None:
 
     assert result.error is not None
     assert "계산 불가" in result.error
+
+
+async def test_remaining_locked_without_chunithm_synced_shows_how_to_get_it() -> None:
+    """chunithm-synced는 chunithm-account의 defines_tags가 설명을 소유한다(finding 3).
+    두 스킬을 함께 real SkillRegistry로 읽어야 (1) chunithm-border의 tags=["chunithm-synced"]가
+    "정의되지 않은 태그" 검사를 통과하고, (2) describe_lock이 쓸 설명이 채워진다."""
+    from core.executor import ToolExecutor
+    from core.permissions import InMemoryTagProvider
+    from core.registry import SkillRegistry
+    from core.resolvers import ResolverRegistry
+    from core.tool_types import ChartRef, RankRef
+
+    registry = SkillRegistry([Path("skills/chunithm-account"), Path("skills/chunithm-border")])
+    registry.load()
+    assert registry.failures() == {}
+
+    [(skill, spec)] = [(s, sp) for s, sp in registry.tool_specs() if sp.name == "remaining"]
+
+    # 태그 검사는 ChartRef/RankRef 해석보다 뒤에 있어 해석기가 등록돼 있어야 그 지점까지
+    # 간다 — 값 자체은 태그 검사가 막아 spec.fn에 안 쓰인다.
+    class _StubChartResolver:
+        async def resolve(self, raw: str, ctx: ToolContext) -> ResolvedChart:
+            return _chart(3000)
+
+    class _StubRankResolver:
+        async def resolve(self, raw: str, ctx: ToolContext) -> ResolvedRank:
+            return ResolvedRank(canonical="SSS", min_score=1_007_500)
+
+    resolvers = ResolverRegistry()
+    resolvers.register(ChartRef, _StubChartResolver())
+    resolvers.register(RankRef, _StubRankResolver())
+
+    executor = ToolExecutor(
+        resolvers=resolvers,
+        tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(),
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(
+        spec, ctx,
+        {"chart": "테스트곡", "rank": "SSS"},
+        skill_tags=skill.manifest.tags, skill_name="chunithm-border",
+    )
+
+    assert outcome.result is not None
+    assert outcome.result.error is not None
+    assert outcome.result.error != "모르는 명령이에요"
+    assert "동기화" in outcome.result.error

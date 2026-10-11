@@ -187,16 +187,42 @@ class SongDbService:
         assert self._conn is not None
         alias = alias.lower()
         existing = await self.get_alias(guild_id=guild_id, alias=alias)
-        if existing is not None and existing.song_title != song_title:
-            raise ValueError(f"'{alias}'는 이미 '{existing.song_title}'에 쓰인 별칭이다")
+        if existing is not None:
+            if existing.song_title != song_title:
+                raise ValueError(f"'{alias}'는 이미 '{existing.song_title}'에 쓰인 별칭이다")
+            # 같은 곡으로 다시 등록하는 멱등 호출이다 — 아무것도 바꾸지 않는다. 원래
+            # 소유자(added_by)/시각(created_at)을 덮어쓰면 누구나 재등록만으로 다른
+            # 사람의 별칭 소유권을 뺏고, alias_remove의 "추가한 사람만 지운다" 제한을
+            # 돌아갈 수 있다(finding 1).
+            return
+
+        # 다른 곡의 정식 제목이나 전역(시드) 별칭과 겹치는 이름은 서버 별칭으로 등록할 수
+        # 없다 — 서버 별칭과 전역 별칭은 같은 우선순위라 등록을 허락하면 그 뒤로 resolve()가
+        # 전혀 다른 곡을 돌려주게 된다(finding 2, 결정 사항 6번).
+        conflict_title = self._find_global_name_conflict(alias, song_title)
+        if conflict_title is not None:
+            raise ValueError(f"'{alias}'는 이미 '{conflict_title}'에 쓰인 이름이다")
+
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
             "INSERT INTO songdb_aliases (guild_id, alias, song_title, added_by, created_at) "
-            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (guild_id, alias) DO UPDATE SET "
-            "added_by = excluded.added_by, created_at = excluded.created_at",
+            "VALUES (?, ?, ?, ?, ?)",
             (guild_id, alias, song_title, added_by, now),
         )
         await self._conn.commit()
+
+    def _find_global_name_conflict(self, alias_lower: str, song_title: str) -> str | None:
+        """alias_lower(이미 소문자)가 song_title이 아닌 다른 곡의 정식 제목이나 전역(시드)
+        별칭과 겹치면 그 다른 곡의 제목을 돌려준다(없으면 None). resolve()의 정식 제목/
+        전역 별칭 티어가 보는 것과 같은 대상(available_songs)만 본다 — 국제판에 없는 곡의
+        이름은 resolve()가 그 티어에서 아예 보지 않으므로 실제로 겹칠 위험이 없다.
+        같은 곡 자신의 제목/별칭과 겹치는 것은 충돌로 보지 않는다(허용)."""
+        for title, song in self._songs.items():
+            if title == song_title or title not in self._available_intl:
+                continue
+            if title.lower() == alias_lower or alias_lower in (a.lower() for a in song.aliases):
+                return title
+        return None
 
     async def get_alias(self, *, guild_id: str, alias: str) -> AliasRow | None:
         assert self._conn is not None

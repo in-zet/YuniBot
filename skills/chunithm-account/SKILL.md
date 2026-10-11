@@ -9,6 +9,13 @@ game: chunithm
 version: 1
 services: [chunithm_net, secrets, players, notify, records]
 listens: [chunithm.login.expired]
+defines_tags:
+  - name: chunithm-linked
+    description: CHUNITHM-NET 계정을 연결했다.
+    how_to_get: "CHUNITHM-NET에 로그인하면 자동으로 얻는다. `/로그인`을 써 보라."
+  - name: chunithm-synced
+    description: CHUNITHM-NET 기록을 한 번 동기화했다.
+    how_to_get: "CHUNITHM-NET 기록을 동기화하면 얻는다(동기화 기능은 아직 없다)."
 ---
 
 - 로그인 요청에는 `/로그인`을 안내한다. 쿠키 값을 채팅으로 보내지 말라고 함께 말한다.

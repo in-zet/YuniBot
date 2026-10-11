@@ -33,7 +33,11 @@ CORE_EMITTED_EVENTS: frozenset[str] = frozenset(
     {"players.first_seen", "chunithm.login.expired"}
 )
 
-CORE_DEFINED_TAGS: frozenset[str] = frozenset({"admin", "tester", "chunithm-linked", "chunithm-synced"})
+# admin/tester는 어떤 스킬도 defines_tags로 정의할 수 없다 — 빠졌을 때 항상 숨김
+# (describe_lock이 정의를 못 찾으면 fail-closed) 처리되어야 하는 진짜 코어 전용 태그다.
+# chunithm-linked/chunithm-synced는 여기 없다 — 상태 태그지만 설명은 chunithm-account의
+# defines_tags가 소유한다("보이되 잠긴다" 안내문을 내려면 설명이 필요하다. 00-core.md 345행).
+CORE_DEFINED_TAGS: frozenset[str] = frozenset({"admin", "tester"})
 
 
 @dataclass(slots=True, kw_only=True)

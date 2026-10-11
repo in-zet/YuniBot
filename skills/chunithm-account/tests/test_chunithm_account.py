@@ -173,3 +173,34 @@ async def test_login_expired_handler_sends_dm_once() -> None:
 
     assert len(notify.dms) == 1
     assert notify.dms[0][0] == "p1"
+
+
+async def test_logout_locked_without_chunithm_linked_shows_how_to_get_it() -> None:
+    """chunithm-linked는 chunithm-account의 defines_tags가 설명을 소유한다(finding 3).
+    실제 SkillRegistry로 manifest를 읽어야 describe_lock이 쓸 설명이 채워진다 —
+    그래서 skill.logout()을 직접 부르지 않고 core.executor.ToolExecutor를 거친다
+    (skills/chunithm-terms의 test_review_requires_admin_tag_via_executor와 같은 모양)."""
+    from core.executor import ToolExecutor
+    from core.permissions import InMemoryTagProvider
+    from core.registry import SkillRegistry
+    from core.resolvers import ResolverRegistry
+
+    registry = SkillRegistry([Path("skills/chunithm-account")])
+    registry.load()
+    assert registry.failures() == {}
+
+    [(skill, spec)] = [(s, sp) for s, sp in registry.tool_specs() if sp.name == "logout"]
+
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(),
+        tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(),
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(spec, ctx, {}, skill_tags=skill.manifest.tags, skill_name="chunithm-account")
+
+    assert outcome.result is not None
+    assert outcome.result.error is not None
+    assert outcome.result.error != "모르는 명령이에요"
+    assert "로그인" in outcome.result.error
