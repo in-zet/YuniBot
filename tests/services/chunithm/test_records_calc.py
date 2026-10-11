@@ -20,10 +20,16 @@ def test_chart_rating_below_500k_is_zero():
     assert chart_rating(100_000, 13.0) == Decimal(0)
 
 
-def test_chart_rating_none_const_treated_as_zero_internal_level():
-    # internal_level=None은 vendored 쪽에서 0으로 취급한다(il10000=0).
-    result = chart_rating(1_009_000, None)
-    assert result == Decimal("2.15")
+def test_chart_rating_none_const_is_none():
+    """상수를 모르면 "계산 불가"(None)다 — 0으로 취급해 조용히 틀린 값을 내지 않는다
+    (사용자 판단, 2026-10-11 최종 리뷰에서 이 테스트의 기존 고정값이 Review Focus의
+    "상수를 못 찾으면 None/에러로 드러나야 한다"는 요구와 충돌한다는 걸 확인하고
+    바꿨다)."""
+    assert chart_rating(1_009_000, None) is None
+
+
+def test_average_rating_with_any_unknown_is_none():
+    assert average_rating([Decimal("15.00"), None, Decimal("16.00")]) is None
 
 
 def test_average_rating_divides_by_full_length_and_truncates_to_2dp():

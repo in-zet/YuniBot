@@ -24,14 +24,22 @@ if TYPE_CHECKING:
     from services.chunithm.chunithm_net import SyncFetch
 
 _GAME = "chunithm"
+# records_pb.rating / records_sync_log.computed_rating은 TEXT NOT NULL이라 None을
+# 그대로 넣을 수 없다 — 상수를 몰라 계산하지 못한 값은 이 표시로 남긴다.
+_UNKNOWN_RATING = "계산 불가"
+
+
+def _rating_str(value: Decimal | None) -> str:
+    return str(value) if value is not None else _UNKNOWN_RATING
 
 
 @dataclass(slots=True, kw_only=True)
 class SyncResult:
     is_first_sync: bool
-    computed_rating: Decimal
-    best30_average: Decimal
-    new20_average: Decimal
+    # 상수를 모르는 채보가 하나라도 있으면 None("계산 불가")이다.
+    computed_rating: Decimal | None
+    best30_average: Decimal | None
+    new20_average: Decimal | None
     displayed_rating: Decimal | None
     rating_mismatch: bool
     session_ids: list[str]
@@ -56,13 +64,17 @@ class RecordsService:
         is_first_sync = row[0] == 0
 
         synced_at = datetime.now(UTC)
+        # 세션 날짜 경계(새벽 4시)는 로컬 벽시계 기준이다(assign_session_date 참고,
+        # core/bot.py의 cron/조용한 시간도 로컬 datetime.now()를 쓴다). 저장 타임스탬프
+        # (synced_at)는 다른 테이블들처럼 UTC로 유지한다.
+        session_date_basis = datetime.now()  # noqa: DTZ005
         session_ids: list[str] = []
 
         best30_ratings = await self._save_personal_bests(
-            player_id, fetch.best30, synced_at, session_ids
+            player_id, fetch.best30, synced_at, session_date_basis, session_ids
         )
         new20_ratings = await self._save_personal_bests(
-            player_id, fetch.new20, synced_at, session_ids
+            player_id, fetch.new20, synced_at, session_date_basis, session_ids
         )
 
         # "베스트 평균"(통과 기준)은 베스트30과 신곡20을 각각 따로 평균한 값이다 — 둘을
@@ -77,6 +89,7 @@ class RecordsService:
         displayed_rating = None
         if fetch.profile.rating_systems:
             displayed_rating = Decimal(str(fetch.profile.rating_systems[0].value))
+        # 계산 불가(None)인데 표시값이 있으면 대조할 수 없으므로 불일치로 남긴다.
         rating_mismatch = displayed_rating is not None and computed_rating != displayed_rating
 
         await self._conn.execute(
@@ -86,7 +99,7 @@ class RecordsService:
             (
                 str(uuid.uuid4()), player_id, _GAME, synced_at.isoformat(), fetch.profile.username,
                 str(displayed_rating) if displayed_rating is not None else None,
-                str(computed_rating), int(rating_mismatch), int(is_first_sync),
+                _rating_str(computed_rating), int(rating_mismatch), int(is_first_sync),
             ),
         )
         await self._conn.commit()
@@ -109,11 +122,14 @@ class RecordsService:
         player_id: str,
         records: list[PersonalBest],
         synced_at: datetime,
+        session_date_basis: datetime,
         session_ids: list[str],
-    ) -> list[Decimal]:
+    ) -> list[Decimal | None]:
         """베스트30 또는 신곡20 한 쪽을 저장하고, 그 쪽만의 레이팅 리스트를 돌려준다
-        (호출하는 쪽이 베스트/신곡 평균과 전체 평균을 각각 계산할 수 있게)."""
-        ratings: list[Decimal] = []
+        (호출하는 쪽이 베스트/신곡 평균과 전체 평균을 각각 계산할 수 있게).
+        synced_at(UTC)은 저장 타임스탬프에, session_date_basis(로컬 벽시계)는 세션
+        날짜 배정에만 쓴다."""
+        ratings: list[Decimal | None] = []
         for pb in records:
             title = pb.song.title
             difficulty = pb.chart.difficulty.name
@@ -122,10 +138,13 @@ class RecordsService:
             rating = chart_rating(pb.score, const)
             ratings.append(rating)
 
-            session_id = await self._assign_session(player_id, synced_at)
+            session_id = await self._assign_session(player_id, session_date_basis)
             if session_id not in session_ids:
                 session_ids.append(session_id)
 
+            # 점수가 실제로 올랐을 때만 행 전체(점수·랭크·램프·상수·레이팅·세션·시각)를
+            # 한 단위로 바꾼다. 개선이 없으면 아무것도 바꾸지 않는다 — "이 기록을 언제
+            # 세웠나"(session_id/updated_at)는 5단계 세션·리포트 스킬이 쓰는 정보다.
             await self._conn.execute(
                 "INSERT INTO records_pb (player_id, game, song_title, difficulty, score, rank, "
                 "clear_lamp, combo_lamp, chain_lamp, const, rating, session_id, updated_at) "
@@ -134,11 +153,12 @@ class RecordsService:
                 "score = excluded.score, rank = excluded.rank, clear_lamp = excluded.clear_lamp, "
                 "combo_lamp = excluded.combo_lamp, chain_lamp = excluded.chain_lamp, "
                 "const = excluded.const, rating = excluded.rating, session_id = excluded.session_id, "
-                "updated_at = excluded.updated_at",
+                "updated_at = excluded.updated_at "
+                "WHERE excluded.score > records_pb.score",
                 (
                     player_id, _GAME, title, difficulty_code, pb.score, str(pb.rank),
                     str(pb.clear_lamp), str(pb.combo_lamp), str(pb.chain_lamp),
-                    const, str(rating), session_id, synced_at.isoformat(),
+                    const, _rating_str(rating), session_id, synced_at.isoformat(),
                 ),
             )
         return ratings
