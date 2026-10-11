@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import http.cookiejar
+import io
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -30,8 +31,16 @@ class ChunithmNetAdapterLike(Protocol):
     async def logout(self) -> None: ...
     async def aclose(self) -> None: ...
 
+    @property
+    def lwp_cookie_jar(self) -> str: ...
+
 
 AdapterFactory = Callable[[str], ChunithmNetAdapterLike]
+# ID/비번으로 새로 로그인할 때 쓴다(기존 쿠키가 없으므로 jar 대신 username/password를
+# 받는다). 벤더링된 ChunithmNetAdapter가 이미 이 둘을 받아 SEGA 공통 인증
+# 게이트웨이와 sid+password로 로그인하는 흐름(_hooks.py의 ChunithmNetAuth)을 그대로
+# 구현해 둬서, 우리는 빈 쿠키 jar로 어댑터를 만들고 그 흐름에 맡기기만 하면 된다.
+CredentialAdapterFactory = Callable[[str, str], ChunithmNetAdapterLike]
 
 
 # clal은 CHUNITHM-NET 본 사이트(chunithm-net-eng.com)가 아니라 SEGA 공통 인증
@@ -76,6 +85,37 @@ def _default_adapter_factory(lwp_cookie_jar: str) -> ChunithmNetAdapterLike:
         raise ConnectionError("CHUNITHM-NET 어댑터를 만들 수 없다") from None
 
 
+# 쿠키가 하나도 없는 빈 jar. ID/비번으로 처음 로그인할 때 이 jar로 어댑터를 만들면,
+# 첫 요청이 바로 미인증으로 걸려 ChunithmNetAuth가 sid+password 로그인을 스스로
+# 시도한다 — 우리가 로그인 절차 자체를 다시 구현하지 않는다.
+_EMPTY_LWP_JAR = "#LWP-Cookies-2.0\n"
+
+
+def _default_credential_adapter_factory(username: str, password: str) -> ChunithmNetAdapterLike:
+    from chuni_penguin.adapters.chunithm_net import ChunithmNetAdapter
+
+    try:
+        return ChunithmNetAdapter(
+            database=None, discord_id=0, lwp_cookie_jar=_EMPTY_LWP_JAR, username=username, password=password
+        )
+    except Exception:  # noqa: BLE001 - username/password가 예외 메시지에 섞여 나가지 않게 한다
+        raise ConnectionError("CHUNITHM-NET 어댑터를 만들 수 없다") from None
+
+
+def _extract_clal(lwp_cookie_jar: str) -> str | None:
+    """로그인 성공 뒤 어댑터가 돌려주는 전체 쿠키 jar 문자열에서 clal 값만 뽑는다.
+    나머지(세션 쿠키 등)는 그대로 버린다 — 우리는 clal 하나만 저장하고, 필요할 때마다
+    _build_lwp_cookie_jar로 다시 jar를 만든다(login()이 이미 그렇게 한다)."""
+    jar = http.cookiejar.LWPCookieJar()
+    jar._really_load(  # pyright: ignore[reportAttributeAccessIssue]
+        io.StringIO(lwp_cookie_jar), "?", ignore_discard=False, ignore_expires=False
+    )
+    for cookie in jar:
+        if cookie.name == "clal" and cookie.domain == _COOKIE_DOMAIN:
+            return cookie.value
+    return None
+
+
 @dataclass(slots=True, kw_only=True)
 class LoginStatus:
     linked: bool
@@ -102,12 +142,14 @@ class ChunithmNetService:
         secrets: SecretsService,
         players: PlayersService,
         adapter_factory: AdapterFactory | None = None,
+        credential_adapter_factory: CredentialAdapterFactory | None = None,
     ) -> None:
         self._conn = conn
         self._conn.row_factory = aiosqlite.Row
         self._secrets = secrets
         self._players = players
         self._adapter_factory = adapter_factory or _default_adapter_factory
+        self._credential_adapter_factory = credential_adapter_factory or _default_credential_adapter_factory
 
     async def login(self, player_id: str, clal: str, ctx: ToolContext) -> Profile:
         """clal 값으로 프로필을 한 번 읽어 본다. 성공해야 저장하고 태그를 붙인다 —
@@ -119,6 +161,33 @@ class ChunithmNetService:
         finally:
             await adapter.aclose()
 
+        await self._store_clal(player_id, clal, profile.username)
+        return profile
+
+    async def login_with_credentials(
+        self, player_id: str, username: str, password: str, ctx: ToolContext
+    ) -> Profile:
+        """SEGA ID/비번으로 한 번만 로그인해서 clal을 뽑아 저장한다. username/password는
+        이 함수 스코프를 벗어나지 않는다 — 저장하지도, 로그에 남기지도 않는다. 성공해야
+        저장하고 태그를 붙인다(login()과 같은 규칙). 로그인에 성공했는데 clal을 못 찾으면
+        (벤더링된 어댑터의 쿠키 모양이 바뀌었다는 뜻) 아무것도 저장하지 않고 ConnectionError를
+        던진다."""
+        adapter = self._credential_adapter_factory(username, password)
+        try:
+            profile = await adapter.get_profile()
+            clal = _extract_clal(adapter.lwp_cookie_jar)
+        finally:
+            await adapter.aclose()
+
+        if clal is None:
+            raise ConnectionError("로그인에 성공했지만 clal을 찾지 못했다")
+
+        await self._store_clal(player_id, clal, profile.username)
+        return profile
+
+    async def _store_clal(self, player_id: str, clal: str, nickname: str) -> None:
+        """login()과 login_with_credentials()가 공유하는 저장 로직 — 암호화해 넣고
+        chunithm-linked 태그를 붙인다."""
         encrypted = self._secrets.encrypt(clal)
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
@@ -126,11 +195,10 @@ class ChunithmNetService:
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT (player_id) DO UPDATE SET "
             "encrypted_cookie = excluded.encrypted_cookie, linked_at = excluded.linked_at, "
             "last_checked_at = excluded.last_checked_at, nickname = excluded.nickname",
-            (player_id, encrypted, now, now, profile.username),
+            (player_id, encrypted, now, now, nickname),
         )
         await self._conn.commit()
         await self._players.set_status_tag(player_id, "chunithm-linked", source="chunithm_net:login")
-        return profile
 
     async def status(self, player_id: str) -> LoginStatus:
         """상태 조회는 DB만 읽는 가벼운 호출이어야 한다 — 네트워크를 타지 않는다.

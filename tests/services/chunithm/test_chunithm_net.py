@@ -19,6 +19,8 @@ from services.chunithm.chunithm_net import (
     SyncFetch,
     _build_lwp_cookie_jar,
     _default_adapter_factory,
+    _default_credential_adapter_factory,
+    _extract_clal,
 )
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
@@ -56,12 +58,18 @@ class _FakeAdapter:
         fails: bool = False,
         error: Exception | None = None,
         logout_fails: bool = False,
+        jar: str = "#LWP-Cookies-2.0\n",
     ) -> None:
         self.fails = fails
         # fails=True의 기본 실패는 "쿠키 만료" — 실제 어댑터가 인증 실패에서 던지는 타입이다.
         self.error = error if error is not None else AuthenticationError("쿠키 만료")
         self.logout_fails = logout_fails
         self.logged_out = False
+        self._jar = jar
+
+    @property
+    def lwp_cookie_jar(self) -> str:
+        return self._jar
 
     async def get_profile(self):
         if self.fails:
@@ -102,9 +110,22 @@ def secrets() -> SecretsService:
     return SecretsService(Fernet.generate_key())
 
 
-def _make_service(conn, secrets, *, adapter: _FakeAdapter, players: PlayersService) -> ChunithmNetService:
+def _make_service(
+    conn,
+    secrets,
+    *,
+    adapter: _FakeAdapter,
+    players: PlayersService,
+    credential_adapter: _FakeAdapter | None = None,
+) -> ChunithmNetService:
     return ChunithmNetService(
-        conn=conn, secrets=secrets, players=players, adapter_factory=lambda cookie: adapter
+        conn=conn,
+        secrets=secrets,
+        players=players,
+        adapter_factory=lambda cookie: adapter,
+        credential_adapter_factory=(
+            (lambda username, password: credential_adapter) if credential_adapter is not None else None
+        ),
     )
 
 
@@ -132,6 +153,90 @@ async def test_login_failure_does_not_store_cookie_or_grant_tag(conn, secrets) -
         await service.login(player.id, "a" * 64, ctx)
 
     assert await players.tags_for(player.id) == set()
+
+
+async def _stored_clal(conn: aiosqlite.Connection, secrets: SecretsService, player_id: str) -> str | None:
+    conn.row_factory = aiosqlite.Row
+    row = await (
+        await conn.execute("SELECT encrypted_cookie FROM chunithm_net_cookies WHERE player_id = ?", (player_id,))
+    ).fetchone()
+    if row is None:
+        return None
+    return secrets.decrypt(row["encrypted_cookie"])
+
+
+async def test_login_with_credentials_success_stores_only_clal_and_grants_linked_tag(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    bus = EventBus()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+    credential_adapter = _FakeAdapter(jar=_build_lwp_cookie_jar("c" * 64))
+    service = _make_service(
+        conn, secrets, adapter=_FakeAdapter(), players=players, credential_adapter=credential_adapter
+    )
+
+    profile = await service.login_with_credentials(player.id, "my-sega-id", "my-password", ctx)
+
+    assert profile.username
+    assert await players.tags_for(player.id) == {"chunithm-linked"}
+    assert await _stored_clal(conn, secrets, player.id) == "c" * 64
+
+
+async def test_login_with_credentials_failure_does_not_store_anything(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    bus = EventBus()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+    credential_adapter = _FakeAdapter(fails=True, error=AuthenticationError("sid/password 틀림"))
+    service = _make_service(
+        conn, secrets, adapter=_FakeAdapter(), players=players, credential_adapter=credential_adapter
+    )
+
+    with pytest.raises(AuthenticationError) as exc_info:
+        await service.login_with_credentials(player.id, "my-sega-id", "my-password", ctx)
+
+    assert "my-password" not in str(exc_info.value)
+    assert await players.tags_for(player.id) == set()
+    assert await _stored_clal(conn, secrets, player.id) is None
+
+
+async def test_login_with_credentials_missing_clal_raises_without_storing(conn, secrets) -> None:
+    # 로그인은 성공했는데(실제 어댑터가 깨진다거나) 받은 쿠키 jar에 clal이 없는 경우.
+    # 숫자를 지어내지 않는 것과 같은 생각 — 없는 걸 있는 척 저장하지 않는다.
+    players = PlayersService(conn)
+    player = await players.create_player()
+    bus = EventBus()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+    credential_adapter = _FakeAdapter(jar="#LWP-Cookies-2.0\n")
+    service = _make_service(
+        conn, secrets, adapter=_FakeAdapter(), players=players, credential_adapter=credential_adapter
+    )
+
+    with pytest.raises(ConnectionError):
+        await service.login_with_credentials(player.id, "my-sega-id", "my-password", ctx)
+
+    assert await players.tags_for(player.id) == set()
+    assert await _stored_clal(conn, secrets, player.id) is None
+
+
+def test_extract_clal_finds_matching_cookie_among_others() -> None:
+    jar = _build_lwp_cookie_jar("d" * 64)
+
+    assert _extract_clal(jar) == "d" * 64
+
+
+def test_extract_clal_returns_none_when_absent() -> None:
+    assert _extract_clal("#LWP-Cookies-2.0\n") is None
+
+
+async def test_default_credential_adapter_factory_constructs_without_network() -> None:
+    """username/password로 실제 벤더링된 어댑터를 만든다 — 생성만으로는 네트워크를
+    타지 않는다(login()용 _default_adapter_factory의 동급 테스트)."""
+    adapter = _default_credential_adapter_factory("my-sega-id", "my-password")
+    try:
+        assert adapter is not None
+    finally:
+        await adapter.aclose()
 
 
 async def test_status_reports_logged_in_after_login(conn, secrets) -> None:
