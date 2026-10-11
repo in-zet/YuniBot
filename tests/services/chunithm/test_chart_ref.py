@@ -45,3 +45,15 @@ async def test_missing_difficulty_on_song_raises(resolver: ChartRefResolver) -> 
 async def test_unknown_song_raises_not_found(resolver: ChartRefResolver) -> None:
     with pytest.raises(ResolutionError, match="찾지 못함"):
         await resolver.resolve("이세상에없는곡절대", _CTX)
+
+
+async def test_song_title_starting_with_difficulty_like_word_resolves_directly(
+    resolver: ChartRefResolver,
+) -> None:
+    # "WORLD'S END"의 별칭에 bare "WE"가 있어, "We Are Us"처럼 실제 제목이
+    # 난이도 토큰처럼 보이는 단어로 시작하는 곡이 있다. 토큰을 먼저 떼어내기
+    # 전에 원문 전체를 곡 이름으로 먼저 풀어야 이런 곡도 (난이도 없음 →
+    # MASTER 기본값으로) 올바르게 찾을 수 있다.
+    resolved = await resolver.resolve("We Are Us", _CTX)
+    assert resolved.song.title == "We Are Us"
+    assert resolved.chart.difficulty == "MAS"
