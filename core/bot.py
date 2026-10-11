@@ -274,7 +274,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     secrets_service = SecretsService(config.cookie_encryption_key) if config.cookie_encryption_key else None
 
     songdb_service = SongDbService(conn=conn)
-    terms_service = TermsService()
+    terms_service = TermsService(conn=conn)
     chunithm_net_service = (
         ChunithmNetService(conn=conn, secrets=secrets_service, players=players)
         if secrets_service is not None

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+import aiosqlite
 import yaml
 
 from core.resolvers import ResolutionError
@@ -61,6 +65,35 @@ class TermListItem:
 
 
 @dataclass(slots=True, kw_only=True)
+class ServerTermProposal:
+    id: str
+    guild_id: str
+    term: str
+    meaning: str
+    aliases: tuple[str, ...]
+    suggested_by: str
+    status: str
+    reviewed_by: str | None
+    created_at: str
+    reviewed_at: str | None
+
+
+def _row_to_proposal(row: aiosqlite.Row) -> ServerTermProposal:
+    return ServerTermProposal(
+        id=row["id"],
+        guild_id=row["guild_id"],
+        term=row["term"],
+        meaning=row["meaning"],
+        aliases=tuple(json.loads(row["aliases"])),
+        suggested_by=row["suggested_by"],
+        status=row["status"],
+        reviewed_by=row["reviewed_by"],
+        created_at=row["created_at"],
+        reviewed_at=row["reviewed_at"],
+    )
+
+
+@dataclass(slots=True, kw_only=True)
 class _Entry:
     canonical: str
     category: str
@@ -107,7 +140,7 @@ class TermsService:
     terms.yaml에 데이터로 있다 — 이 파일이 유일한 출처고, 여기서 다시 계산하거나
     vendored 코드로 되비추지 않는다(테스트가 교차 검증은 따로 한다)."""
 
-    def __init__(self, data_path: Path = _DATA_PATH) -> None:
+    def __init__(self, data_path: Path = _DATA_PATH, *, conn: aiosqlite.Connection | None = None) -> None:
         entries = _load_entries(data_path)
         self._entries = entries
         self._rank_aliases = _alias_map(entries, "rank")
@@ -115,6 +148,9 @@ class TermsService:
         self._difficulty_aliases = _alias_map(entries, "difficulty")
         self._lamp_aliases = _alias_map(entries, "lamp")
         self._lamp_values = _value_map(entries, "lamp")
+        self._conn = conn
+        if self._conn is not None:
+            self._conn.row_factory = aiosqlite.Row
 
     async def resolve_rank(self, raw: str, ctx: ToolContext) -> ResolvedRank:
         canonical = self._rank_aliases.get(raw.strip().lower())
@@ -144,7 +180,8 @@ class TermsService:
 
     async def explain(self, raw: str, ctx: ToolContext) -> TermExplanation | None:
         """값 용어든 개념/기술/판정 용어든 정식 이름이나 별칭(대소문자 무시)으로
-        찾아 뜻과 출처를 돌려준다. 없으면 None. 서버 은어는 아직 보지 않는다."""
+        찾아 뜻과 출처를 돌려준다. 전역에서 못 찾으면 이 서버의 승인된 은어도 본다.
+        둘 다 없으면 None."""
         text = raw.strip().lower()
         for entry in self._entries:
             if entry.canonical.lower() != text and text not in (a.lower() for a in entry.aliases):
@@ -161,13 +198,25 @@ class TermsService:
                 source=entry.source or "전역 정의",
                 scope="전역",
             )
+        if self._conn is not None and ctx.guild_id is not None:
+            proposal = await self._find_approved_server_term(ctx.guild_id, text)
+            if proposal is not None:
+                return TermExplanation(
+                    canonical=proposal.term,
+                    category_label="서버 은어",
+                    aliases=proposal.aliases,
+                    value=None,
+                    meaning=proposal.meaning,
+                    source="서버 사용",
+                    scope="이 서버",
+                )
         return None
 
     async def list_terms(self, category: str | None, ctx: ToolContext) -> list[TermListItem]:
         """분류(한글 라벨 "랭크"/"기술" 등, 또는 내부 키)로 거른 용어 목록.
-        category가 None이면 전부. 모르는 분류면 ValueError."""
+        category가 None이면 전부(이 서버의 승인된 은어도 함께). 모르는 분류면 ValueError."""
         key = None if category is None else _normalize_category(category)
-        return [
+        items = [
             TermListItem(
                 canonical=entry.canonical,
                 category_label=CATEGORY_LABELS.get(entry.category, entry.category),
@@ -177,6 +226,17 @@ class TermsService:
             for entry in self._entries
             if key is None or entry.category == key
         ]
+        if self._conn is not None and ctx.guild_id is not None and key is None:
+            for proposal in await self._approved_server_terms(ctx.guild_id):
+                items.append(
+                    TermListItem(
+                        canonical=proposal.term,
+                        category_label="서버 은어",
+                        aliases=proposal.aliases,
+                        value=None,
+                    )
+                )
+        return items
 
     async def resolve_score(self, raw: str, ctx: ToolContext) -> int:
         text = raw.strip()
@@ -198,6 +258,57 @@ class TermsService:
                 return min_score
 
         raise ResolutionError(message="읽을 수 없는 점수")
+
+    async def propose(
+        self, *, guild_id: str, term: str, meaning: str, aliases: list[str], suggested_by: str
+    ) -> str:
+        """이 서버의 은어 제안을 만들고(상태 "suggested") 제안 id를 돌려준다.
+        승인 전까지는 explain/list_terms에 보이지 않는다."""
+        assert self._conn is not None
+        proposal_id = str(uuid.uuid4())
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            "INSERT INTO terms_server (id, guild_id, term, meaning, aliases, suggested_by, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'suggested', ?)",
+            (proposal_id, guild_id, term, meaning, json.dumps(aliases), suggested_by, now),
+        )
+        await self._conn.commit()
+        return proposal_id
+
+    async def get_proposal(self, proposal_id: str) -> ServerTermProposal | None:
+        assert self._conn is not None
+        cursor = await self._conn.execute("SELECT * FROM terms_server WHERE id = ?", (proposal_id,))
+        row = await cursor.fetchone()
+        return _row_to_proposal(row) if row is not None else None
+
+    async def review(self, proposal_id: str, *, approve: bool, reviewed_by: str) -> ServerTermProposal | None:
+        """제안을 승인/거부한다. 제안이 없거나 이미 심사됐으면 None(다시 심사하지 않는다)."""
+        assert self._conn is not None
+        proposal = await self.get_proposal(proposal_id)
+        if proposal is None or proposal.status != "suggested":
+            return None
+        now = datetime.now(UTC).isoformat()
+        status = "approved" if approve else "rejected"
+        await self._conn.execute(
+            "UPDATE terms_server SET status = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+            (status, reviewed_by, now, proposal_id),
+        )
+        await self._conn.commit()
+        return await self.get_proposal(proposal_id)
+
+    async def _approved_server_terms(self, guild_id: str) -> list[ServerTermProposal]:
+        assert self._conn is not None
+        cursor = await self._conn.execute(
+            "SELECT * FROM terms_server WHERE guild_id = ? AND status = 'approved' ORDER BY term",
+            (guild_id,),
+        )
+        return [_row_to_proposal(row) for row in await cursor.fetchall()]
+
+    async def _find_approved_server_term(self, guild_id: str, text: str) -> ServerTermProposal | None:
+        for proposal in await self._approved_server_terms(guild_id):
+            if proposal.term.lower() == text or text in (a.lower() for a in proposal.aliases):
+                return proposal
+        return None
 
 
 def _normalize_category(raw: str) -> str:

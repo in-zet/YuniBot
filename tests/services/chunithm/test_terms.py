@@ -1,3 +1,7 @@
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import aiosqlite
 import pytest
 
 from core.resolvers import ResolutionError
@@ -6,10 +10,27 @@ from services.chunithm.terms import TermsService
 
 _CTX = ToolContext(player_id="p1", tags=frozenset(), services={})
 
+_TERMS_SERVER_MIGRATION = Path("migrations/core/009_terms_server.sql").read_text()
+_PLAYERS_MIGRATION = (
+    Path("migrations/core/001_players.sql").read_text()
+    + Path("migrations/core/002_player_tags.sql").read_text()
+)
+
 
 @pytest.fixture
 def terms() -> TermsService:
     return TermsService()
+
+
+@pytest.fixture
+async def terms_with_conn() -> AsyncIterator[TermsService]:
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(_PLAYERS_MIGRATION + _TERMS_SERVER_MIGRATION)
+    await conn.commit()
+    try:
+        yield TermsService(conn=conn)
+    finally:
+        await conn.close()
 
 
 async def test_resolve_rank_canonical_name(terms: TermsService) -> None:
@@ -152,3 +173,71 @@ async def test_list_terms_without_category_returns_everything(terms: TermsServic
     all_items = await terms.list_terms(None, _CTX)
     rank_items = await terms.list_terms("랭크", _CTX)
     assert len(all_items) > len(rank_items)
+
+
+async def test_propose_and_explain_before_approval_is_not_visible(terms_with_conn: TermsService) -> None:
+    guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
+    await terms_with_conn.propose(
+        guild_id="g1", term="테스트은어", meaning="테스트용 뜻", aliases=["테스트별칭"], suggested_by="p1"
+    )
+
+    assert await terms_with_conn.explain("테스트은어", guild_ctx) is None
+
+
+async def test_approved_server_term_is_explained_and_listed(terms_with_conn: TermsService) -> None:
+    guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
+    proposal_id = await terms_with_conn.propose(
+        guild_id="g1", term="테스트은어", meaning="테스트용 뜻", aliases=["테스트별칭"], suggested_by="p1"
+    )
+    await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
+
+    explanation = await terms_with_conn.explain("테스트별칭", guild_ctx)
+    assert explanation is not None
+    assert explanation.canonical == "테스트은어"
+    assert explanation.scope == "이 서버"
+
+    items = await terms_with_conn.list_terms(None, guild_ctx)
+    assert any(item.canonical == "테스트은어" for item in items)
+
+
+async def test_server_term_is_not_visible_in_another_guild(terms_with_conn: TermsService) -> None:
+    proposal_id = await terms_with_conn.propose(
+        guild_id="g1", term="테스트은어", meaning="테스트용 뜻", aliases=[], suggested_by="p1"
+    )
+    await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
+
+    other_guild_ctx = ToolContext(player_id="p2", tags=frozenset(), services={}, guild_id="g2")
+    assert await terms_with_conn.explain("테스트은어", other_guild_ctx) is None
+
+
+async def test_global_term_wins_over_same_named_server_term(terms_with_conn: TermsService) -> None:
+    proposal_id = await terms_with_conn.propose(
+        guild_id="g1", term="SSS+", meaning="서버에서 다르게 부르는 뜻", aliases=[], suggested_by="p1"
+    )
+    await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
+
+    guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
+    explanation = await terms_with_conn.explain("SSS+", guild_ctx)
+    assert explanation is not None
+    assert explanation.scope == "전역"  # 전역 랭크가 이긴다
+
+
+async def test_review_reject_keeps_term_invisible(terms_with_conn: TermsService) -> None:
+    guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
+    proposal_id = await terms_with_conn.propose(
+        guild_id="g1", term="테스트은어", meaning="테스트용 뜻", aliases=[], suggested_by="p1"
+    )
+    rejected = await terms_with_conn.review(proposal_id, approve=False, reviewed_by="admin1")
+
+    assert rejected is not None and rejected.status == "rejected"
+    assert await terms_with_conn.explain("테스트은어", guild_ctx) is None
+
+
+async def test_review_already_reviewed_proposal_returns_none(terms_with_conn: TermsService) -> None:
+    proposal_id = await terms_with_conn.propose(
+        guild_id="g1", term="테스트은어", meaning="뜻", aliases=[], suggested_by="p1"
+    )
+    await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
+
+    second = await terms_with_conn.review(proposal_id, approve=False, reviewed_by="admin1")
+    assert second is None
