@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 import aiosqlite
@@ -23,7 +24,22 @@ from core.scheduler import Scheduler
 from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
 from core.threads import ThreadManager
-from core.tool_types import ArcadeRef, PlayerRef, ToolContext
+from core.tool_types import (
+    ArcadeRef,
+    ChartRef,
+    DifficultyRef,
+    LampRef,
+    PlayerRef,
+    RankRef,
+    ScoreRef,
+    SongQuery,
+    ToolContext,
+)
+from services.chunithm.chart_ref import ChartRefResolver
+from services.chunithm.chunithm_net import ChunithmNetService
+from services.chunithm.records import RecordsService
+from services.chunithm.songdb import SongDbService
+from services.chunithm.terms import TermsService
 from services.common.arcades import ArcadesService
 from services.common.http import HttpService, build_http_service
 from services.common.memory import MemoryService
@@ -36,6 +52,42 @@ from services.common.yuni import YuniService
 logger = logging.getLogger(__name__)
 
 CORE_MIGRATIONS_ROOT = Path("migrations/core")
+
+
+@dataclass(slots=True, kw_only=True)
+class _RankRefAdapter:
+    """ResolverRegistry는 타입 하나에 resolve(raw, ctx) 하나만 등록받는다 — TermsService는
+    랭크/난이도/램프/점수를 이름이 다른 네 메서드로 노출하므로, 값 타입마다 이 얇은
+    어댑터로 감싸 등록한다(TermsService 자신을 네 번 등록할 수 없다)."""
+
+    terms: TermsService
+
+    async def resolve(self, raw: str, ctx: ToolContext):
+        return await self.terms.resolve_rank(raw, ctx)
+
+
+@dataclass(slots=True, kw_only=True)
+class _DifficultyRefAdapter:
+    terms: TermsService
+
+    async def resolve(self, raw: str, ctx: ToolContext):
+        return await self.terms.resolve_difficulty(raw, ctx)
+
+
+@dataclass(slots=True, kw_only=True)
+class _LampRefAdapter:
+    terms: TermsService
+
+    async def resolve(self, raw: str, ctx: ToolContext):
+        return await self.terms.resolve_lamp(raw, ctx)
+
+
+@dataclass(slots=True, kw_only=True)
+class _ScoreRefAdapter:
+    terms: TermsService
+
+    async def resolve(self, raw: str, ctx: ToolContext):
+        return await self.terms.resolve_score(raw, ctx)
 
 
 class YuniClient(discord.Client):
@@ -221,18 +273,39 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     arcades_service = ArcadesService(conn)
     secrets_service = SecretsService(config.cookie_encryption_key) if config.cookie_encryption_key else None
 
+    songdb_service = SongDbService()
+    terms_service = TermsService()
+    chunithm_net_service = (
+        ChunithmNetService(conn=conn, secrets=secrets_service, players=players)
+        if secrets_service is not None
+        else None
+    )
+    records_service = RecordsService(conn=conn, songdb=songdb_service, players=players)
+    chart_ref_resolver = ChartRefResolver(songdb=songdb_service, terms=terms_service)
+
     resolvers = ResolverRegistry()
     resolvers.register(PlayerRef, players)
     resolvers.register(ArcadeRef, arcades_service)
+    resolvers.register(SongQuery, songdb_service)
+    resolvers.register(ChartRef, chart_ref_resolver)
+    resolvers.register(RankRef, _RankRefAdapter(terms=terms_service))
+    resolvers.register(DifficultyRef, _DifficultyRefAdapter(terms=terms_service))
+    resolvers.register(LampRef, _LampRefAdapter(terms=terms_service))
+    resolvers.register(ScoreRef, _ScoreRefAdapter(terms=terms_service))
 
     services: dict[str, object] = {
         "players": players,
         "settings": settings_service,
         "memory": memory_service,
         "arcades": arcades_service,
+        "songdb": songdb_service,
+        "terms": terms_service,
+        "records": records_service,
     }
     if secrets_service is not None:
         services["secrets"] = secrets_service
+    if chunithm_net_service is not None:
+        services["chunithm_net"] = chunithm_net_service
 
     executor = ToolExecutor(
         resolvers=resolvers,
@@ -248,6 +321,10 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     # 하기 때문이다(아래 YuniClient.close() 참고). notify_service는 반대로 client가 있어야
     # (게이트웨이가 discord.Client를 감싸므로) client 다음에 만든다.
     http_service = await build_http_service(cache_db_path=config.db_path.parent / "http_cache.sqlite")
+    # 켜진 직후: 국제판 수록 여부·신곡 플래그를 Chunimaru songdb로 한 번 덧씌운다.
+    # refresh_from_chunimaru는 실패를 삼키고 로그만 남기므로, 네트워크가 안 되는
+    # 기동에서도 build_client() 전체가 죽지 않는다(Task 6).
+    await songdb_service.refresh_from_chunimaru(http_service)
 
     intents = discord.Intents.default()
     intents.message_content = True

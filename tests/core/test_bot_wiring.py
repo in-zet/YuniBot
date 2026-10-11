@@ -5,6 +5,7 @@ from pathlib import Path
 import aiosqlite
 import discord
 import pytest
+from cryptography.fernet import Fernet
 
 from core.bot import (  # pyright: ignore[reportPrivateUsage]
     _migration_roots,
@@ -16,6 +17,14 @@ from core.config import CoreConfig
 from core.decorators import ScheduleSpec, SkillCode
 from core.manifest import SkillManifest
 from core.registry import LoadedSkill
+from core.tool_types import (
+    ChartRef,
+    DifficultyRef,
+    LampRef,
+    RankRef,
+    ScoreRef,
+    SongQuery,
+)
 from services.common.players import PlayersService
 from tests.core.skill_factory import slash_tool, write_skill
 
@@ -41,9 +50,35 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
     # scheduler catch-up이 services 채우기보다 먼저 돌면 이 중 일부가 비어 있다.
     assert set(executor.services) == {
         "players", "settings", "memory", "arcades", "http", "notify", "yuni",
+        "songdb", "terms", "records",
     }
 
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_build_client_registers_chunithm_services_and_resolvers(tmp_path: Path) -> None:
+    config = CoreConfig(
+        discord_token="fake-token",
+        skills_dirs=[Path("tests/fixtures/skills_ok")],
+        db_path=tmp_path / "test.db",
+        test_guild_id=None,
+        admin_discord_ids=frozenset(),
+        quiet_hours_start=datetime.time(2, 0),
+        quiet_hours_end=datetime.time(6, 0),
+        cookie_encryption_key=Fernet.generate_key(),
+    )
+
+    client, _registry, executor = await build_client(config)
+    try:
+        assert "songdb" in executor.services
+        assert "terms" in executor.services
+        assert "records" in executor.services
+        assert "chunithm_net" in executor.services  # cookie 키가 있으므로 등록돼야 한다
+        for ref_type in (SongQuery, ChartRef, RankRef, DifficultyRef, LampRef, ScoreRef):
+            assert executor._resolvers.is_registered(ref_type)
+    finally:
+        await client.close()
 
 
 def _fake_skill(tmp_path: Path, *, name: str) -> LoadedSkill:
