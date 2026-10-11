@@ -593,39 +593,107 @@ git commit -m "migrations: add chunithm_net cookie storage and records tables"
 - Create: `tests/services/chunithm/test_terms.py`
 
 **Interfaces:**
-- Consumes: `chuni_penguin.types.Rank`, `Difficulty`, `ComboLamp`, `core.resolvers.ResolutionError`
+- Consumes: `core.resolvers.ResolutionError`(production 코드). 테스트는 교차 검증용으로 `chuni_penguin.types.Rank`도 참고한다(값이 맞는지 한 번 더 대조하는 용도일 뿐, terms.yaml이 값의 유일한 출처라는 원칙은 안 바뀐다).
 - Produces: `ResolvedRank(canonical: str, min_score: int)`, `ResolvedDifficulty(canonical: str)`, `ResolvedLamp(canonical: str, min_score: int | None)`, `TermsService`(`resolve_rank`, `resolve_difficulty`, `resolve_lamp`, `resolve_score`, `difficulty_token(text: str) -> str | None`). `resolve_rank`/`resolve_difficulty`/`resolve_lamp`는 각각 `RankRef`/`DifficultyRef`/`LampRef`의 `Resolver` 구현(`resolve(raw, ctx)`로 어댑터만 씌운다)이고, `resolve_score`가 `ScoreRef`의 `Resolver` 구현이다. Task 7(`ChartRef` 해석기)이 `difficulty_token`을 쓴다.
 
-**terms.yaml 별칭은 사용자가 확인한 것만 넣는다**(채팅에서 제안한 후보 목록 — 랭크 6개, 난이도 6개, 램프 3개 — 를 사용자가 승인한 상태로 진행한다. 실행 중 사용자가 다른 목록을 준다면 이 파일 내용만 바꾸면 되고, 코드는 안 바뀐다).
+**terms.yaml에는 정식 이름과 기준 점수를 전부 적는다, 별칭만 적는 게 아니다.** 사용자 원래 지시("정식 값은 넣는다")와 `chunithm-terms.md`의 항목 예시(`value: 1009000` 필드가 직접 있는 형태)를 따른다 — 랭크 14개(별칭이 있든 없든 전부), 난이도 6개, 램프 중 점수가 고정된 AJC 전부 `value`를 literal로 적는다. 숫자를 손으로 적긴 하지만 "코드가 계산한다"는 원칙은 안 어긴다: `tests/services/chunithm/test_terms.py`가 이 숫자 전부를 vendored `chuni_penguin.types.Rank.min_score`와 대조하는 테스트를 갖고 있어서, 값이 틀리면 그 자리에서 테스트가 깨진다(틀린 값이 조용히 쓰이는 경로가 없다). **별칭은 사용자가 확인한 것만 넣는다**(채팅에서 제안한 후보 목록 — 랭크 6개, 난이도 6개, 램프 3개 — 를 사용자가 승인했다. 실행 중 사용자가 다른 목록을 준다면 이 파일의 `aliases` 칸만 바뀌고 `value`/코드는 안 바뀐다).
 
 - [ ] **Step 1: `terms.yaml` 작성**
 
 ```yaml
 # services/chunithm/data/terms.yaml
-# 값 용어(랭크·난이도·램프)의 "값"은 여기 안 쓴다 — vendored chuni_penguin.types의
-# Rank/Difficulty/ComboLamp가 가진 값을 그대로 쓴다. 여기는 별칭만 전역으로 둔다.
-# 서버 은어는 이 파일이 아니라 terms_server 테이블(제안·승인)에 있다.
-ranks:
-  "SSS+": [트플플]
-  "SSS": [트리플, 트플]
-  "SS+": [더블플]
-  "SS": [더블]
-  "S+": [에스플]
-  "S": [에스]
-
-difficulties:
-  "MASTER": [마스]
-  "EXPERT": [엑스퍼, 엑스퍼트]
-  "ADVANCED": [어드, 어드밴스]
-  "BASIC": [베이직]
-  "ULTIMA": [울티마, 얼티마]
-  "WORLD'S END": [월드엔드, 월엔]
-
-lamps:
-  "AJC": [이론치, 만점]
-  "ALL JUSTICE": [올저, 올저스티스]
-  "FULL COMBO": [풀콤, 풀콤보]
+# 값 용어(랭크·난이도·램프)의 정식 이름과 기준 점수(value)는 이 파일이 유일한
+# 출처다. value는 vendored chuni_penguin.types.Rank.min_score와 일치해야 하고,
+# tests/services/chunithm/test_terms.py가 랭크 14개 전부를 그 값과 대조한다 —
+# 여기 숫자가 틀리면 테스트가 바로 걸린다. 서버 은어는 이 파일이 아니라
+# terms_server 테이블(제안·승인)에 있다.
+- canonical: "SSS+"
+  category: rank
+  value: 1009000
+  aliases: [트플플]
+- canonical: "SSS"
+  category: rank
+  value: 1007500
+  aliases: [트리플, 트플]
+- canonical: "SS+"
+  category: rank
+  value: 1005000
+  aliases: [더블플]
+- canonical: "SS"
+  category: rank
+  value: 1000000
+  aliases: [더블]
+- canonical: "S+"
+  category: rank
+  value: 990000
+  aliases: [에스플]
+- canonical: "S"
+  category: rank
+  value: 975000
+  aliases: [에스]
+- canonical: "AAA"
+  category: rank
+  value: 950000
+  aliases: []
+- canonical: "AA"
+  category: rank
+  value: 925000
+  aliases: []
+- canonical: "A"
+  category: rank
+  value: 900000
+  aliases: []
+- canonical: "BBB"
+  category: rank
+  value: 800000
+  aliases: []
+- canonical: "BB"
+  category: rank
+  value: 700000
+  aliases: []
+- canonical: "B"
+  category: rank
+  value: 600000
+  aliases: []
+- canonical: "C"
+  category: rank
+  value: 500000
+  aliases: []
+- canonical: "D"
+  category: rank
+  value: 0
+  aliases: []
+- canonical: "MASTER"
+  category: difficulty
+  aliases: [마스, MAS]
+- canonical: "EXPERT"
+  category: difficulty
+  aliases: [엑스퍼, 엑스퍼트, EXP]
+- canonical: "ADVANCED"
+  category: difficulty
+  aliases: [어드, 어드밴스, ADV]
+- canonical: "BASIC"
+  category: difficulty
+  aliases: [베이직, BAS]
+- canonical: "ULTIMA"
+  category: difficulty
+  aliases: [울티마, 얼티마, ULT]
+- canonical: "WORLD'S END"
+  category: difficulty
+  aliases: [월드엔드, 월엔, WE]
+- canonical: "AJC"
+  category: lamp
+  value: 1010000
+  aliases: [이론치, 만점]
+- canonical: "ALL JUSTICE"
+  category: lamp
+  aliases: [올저, 올저스티스]
+- canonical: "FULL COMBO"
+  category: lamp
+  aliases: [풀콤, 풀콤보]
 ```
+
+(랭크 8개는 별칭이 없다(`AAA`/`AA`/`A`/`BBB`/`BB`/`B`/`C`/`D`) — 사용자가 확인한 후보 목록에 없었기 때문이다. 정식 이름과 값은 그래도 전부 적는다("정식 값은 넣는다"는 지시가 별칭 유무와 무관하다). 난이도의 영문 짧은 코드(`MAS`/`EXP`/`ADV`/`BAS`/`ULT`/`WE`)도 `aliases`에 넣었다 — vendored `Difficulty` 파서에 더 이상 의존하지 않고 이 파일 하나로 "MAS"도 "마스"도 똑같이 풀리게 한다.)
 
 - [ ] **Step 2: `terms_server` 마이그레이션 작성**
 
@@ -748,6 +816,24 @@ async def test_difficulty_token_recognizes_alias_and_short_code(terms: TermsServ
     assert terms.difficulty_token("마스") == "MASTER"
     assert terms.difficulty_token("MAS") == "MASTER"
     assert terms.difficulty_token("크로노") is None
+
+
+async def test_all_rank_values_match_vendored_rank_min_score(terms: TermsService) -> None:
+    """terms.yaml에 손으로 적은 기준 점수(14개 전부, 별칭 없는 8개 포함)가
+    vendored chuni_penguin.types.Rank와 어긋나면 여기서 바로 걸린다 — terms.yaml이
+    값의 유일한 출처지만, 숫자 자체가 틀리면 레이팅·보더 계산 전체가 틀어지므로
+    한 번은 교차 검증해 둔다."""
+    from chuni_penguin.types import Rank
+
+    for rank in Rank:
+        canonical = str(rank)
+        resolved = await terms.resolve_rank(canonical, _CTX)
+        assert resolved.min_score == rank.min_score, canonical
+
+
+async def test_ajc_value_matches_max_score(terms: TermsService) -> None:
+    resolved = await terms.resolve_lamp("AJC", _CTX)
+    assert resolved.min_score == 1_010_000
 ```
 
 - [ ] **Step 4: 실패 확인**
@@ -767,32 +853,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
 
 import yaml
 
-from chuni_penguin.types import ComboLamp, Difficulty, Rank
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
 
 _DATA_PATH = Path(__file__).parent / "data" / "terms.yaml"
 
 _HANGUL_SCALE: dict[str, int] = {"만": 10_000, "천": 1_000, "백": 100, "십": 10}
-
-# ComboLamp에 "값"(score)이 붙는 건 AJC(만점)뿐이다. FC/AJ는 점수가 고정돼 있지 않다.
-_LAMP_MIN_SCORE: dict[str, int | None] = {
-    "AJC": 1_010_000,
-    "ALL JUSTICE": None,
-    "FULL COMBO": None,
-}
-
-# ComboLamp.__str__()의 "AJC"/"ALL JUSTICE"/"FULL COMBO" 표기와 terms.yaml의 canonical
-# 키를 맞춰 준다(ComboLamp.none은 값 용어가 아니라서 뺀다).
-_LAMP_CANONICALS: dict[str, ComboLamp] = {
-    str(lamp): lamp
-    for lamp in ComboLamp
-    if lamp is not ComboLamp.none
-}
 
 
 @dataclass(slots=True, kw_only=True)
@@ -812,35 +881,64 @@ class ResolvedLamp:
     min_score: int | None
 
 
-def _load_alias_map(data: dict[str, Any], key: str) -> dict[str, str]:
-    """{"SSS+": ["트플플"]} 형태를 {"트플플": "SSS+", "sss+": "SSS+"}로 뒤집는다
-    (별칭과 canonical 자기 자신 둘 다 소문자 키로 넣어 대소문자 무시 조회를 만든다)."""
-    alias_to_canonical: dict[str, str] = {}
-    for canonical, aliases in data.get(key, {}).items():
-        alias_to_canonical[canonical.lower()] = canonical
-        for alias in aliases:
-            alias_to_canonical[alias.lower()] = canonical
-    return alias_to_canonical
+@dataclass(slots=True, kw_only=True)
+class _Entry:
+    canonical: str
+    category: str
+    value: int | None
+    aliases: tuple[str, ...]
+
+
+def _load_entries(data_path: Path) -> list[_Entry]:
+    raw = yaml.safe_load(data_path.read_text(encoding="utf-8")) or []
+    return [
+        _Entry(
+            canonical=item["canonical"],
+            category=item["category"],
+            value=item.get("value"),
+            aliases=tuple(item.get("aliases") or ()),
+        )
+        for item in raw
+    ]
+
+
+def _alias_map(entries: list[_Entry], category: str) -> dict[str, str]:
+    """그 category 항목들의 (별칭 + canonical 자기 자신, 전부 소문자) -> canonical.
+    별칭과 canonical 둘 다 소문자 키로 넣어 대소문자 무시 조회를 만든다."""
+    mapping: dict[str, str] = {}
+    for entry in entries:
+        if entry.category != category:
+            continue
+        mapping[entry.canonical.lower()] = entry.canonical
+        for alias in entry.aliases:
+            mapping[alias.lower()] = entry.canonical
+    return mapping
+
+
+def _value_map(entries: list[_Entry], category: str) -> dict[str, int | None]:
+    return {entry.canonical: entry.value for entry in entries if entry.category == category}
 
 
 class TermsService:
-    """값 용어(랭크·난이도·램프·점수)의 별칭을 해석한다. 값 자체(기준 점수 등)는
-    vendored chuni_penguin.types에서 가져오고 여기서 다시 적지 않는다."""
+    """값 용어(랭크·난이도·램프·점수)의 정식 이름·기준 점수·별칭. 정식 이름과 값은
+    terms.yaml에 데이터로 있다 — 이 파일이 유일한 출처고, 여기서 다시 계산하거나
+    vendored 코드로 되비추지 않는다(테스트가 교차 검증은 따로 한다)."""
 
     def __init__(self, data_path: Path = _DATA_PATH) -> None:
-        raw = yaml.safe_load(data_path.read_text(encoding="utf-8")) or {}
-        self._rank_aliases = _load_alias_map(raw, "ranks")
-        self._difficulty_aliases = _load_alias_map(raw, "difficulties")
-        self._lamp_aliases = _load_alias_map(raw, "lamps")
+        entries = _load_entries(data_path)
+        self._rank_aliases = _alias_map(entries, "rank")
+        self._rank_values = _value_map(entries, "rank")
+        self._difficulty_aliases = _alias_map(entries, "difficulty")
+        self._lamp_aliases = _alias_map(entries, "lamp")
+        self._lamp_values = _value_map(entries, "lamp")
 
     async def resolve_rank(self, raw: str, ctx: ToolContext) -> ResolvedRank:
         canonical = self._rank_aliases.get(raw.strip().lower())
         if canonical is None:
             raise ResolutionError(message="찾지 못함")
-        for rank in Rank:
-            if str(rank) == canonical:
-                return ResolvedRank(canonical=canonical, min_score=rank.min_score)
-        raise ResolutionError(message="찾지 못함")
+        value = self._rank_values[canonical]
+        assert value is not None  # terms.yaml 불변조건: 랭크는 전부 value를 갖는다
+        return ResolvedRank(canonical=canonical, min_score=value)
 
     async def resolve_difficulty(self, raw: str, ctx: ToolContext) -> ResolvedDifficulty:
         token = self.difficulty_token(raw)
@@ -849,22 +947,16 @@ class TermsService:
         return ResolvedDifficulty(canonical=token)
 
     def difficulty_token(self, text: str) -> str | None:
-        """Korean 별칭(terms.yaml) 또는 vendored Difficulty가 아는 영문 표기/짧은
-        코드("MASTER"/"MAS")를 정식 난이도 문자열로 바꾼다. 모르면 None(ChartRef
-        해석기가 "이 토큰은 난이도가 아니라 곡 이름의 일부"로 되돌릴 수 있게)."""
-        canonical = self._difficulty_aliases.get(text.strip().lower())
-        if canonical is not None:
-            return canonical
-        try:
-            return str(Difficulty(text.strip()))
-        except ValueError:
-            return None
+        """별칭이나 짧은 코드(둘 다 terms.yaml의 aliases에 있다)를 정식 난이도
+        문자열로 바꾼다. 모르면 None(ChartRef 해석기가 "이 토큰은 난이도가 아니라
+        곡 이름의 일부"로 되돌릴 수 있게)."""
+        return self._difficulty_aliases.get(text.strip().lower())
 
     async def resolve_lamp(self, raw: str, ctx: ToolContext) -> ResolvedLamp:
         canonical = self._lamp_aliases.get(raw.strip().lower())
         if canonical is None:
             raise ResolutionError(message="모르는 램프")
-        return ResolvedLamp(canonical=canonical, min_score=_LAMP_MIN_SCORE[canonical])
+        return ResolvedLamp(canonical=canonical, min_score=self._lamp_values.get(canonical))
 
     async def resolve_score(self, raw: str, ctx: ToolContext) -> int:
         text = raw.strip()
@@ -875,12 +967,13 @@ class TermsService:
 
         rank_canonical = self._rank_aliases.get(text.lower())
         if rank_canonical is not None:
-            resolved = await self.resolve_rank(text, ctx)
-            return resolved.min_score
+            value = self._rank_values[rank_canonical]
+            assert value is not None
+            return value
 
         lamp_canonical = self._lamp_aliases.get(text.lower())
         if lamp_canonical is not None:
-            min_score = _LAMP_MIN_SCORE[lamp_canonical]
+            min_score = self._lamp_values.get(lamp_canonical)
             if min_score is not None:
                 return min_score
 
@@ -933,7 +1026,7 @@ def _parse_hangul_number(text: str) -> int | None:
 uv run pytest tests/services/chunithm/test_terms.py -v
 ```
 
-Expected: PASS (18개)
+Expected: PASS (20개)
 
 - [ ] **Step 7: 커밋**
 
@@ -1779,7 +1872,7 @@ git commit -m "services: add chunithm_net service with login, status, logout, ex
 
 **Interfaces:**
 - Consumes: `services.chunithm.records_calc.*`(Task 2), `services.chunithm.songdb.SongDbService`(Task 6), `services.common.players.PlayersService`(Task 3), `services.chunithm.chunithm_net.SyncFetch`(Task 8의 타입, import만)
-- Produces: `SyncResult(is_first_sync: bool, computed_rating: Decimal, displayed_rating: Decimal | None, rating_mismatch: bool, session_ids: list[str])`, `RecordsService`(`save_sync(player_id, fetch: SyncFetch, ctx) -> SyncResult`). 5단계 이후 스킬이 `ctx.records.save_sync(...)`로 쓴다.
+- Produces: `SyncResult(is_first_sync: bool, computed_rating: Decimal, best30_average: Decimal, new20_average: Decimal, displayed_rating: Decimal | None, rating_mismatch: bool, session_ids: list[str])`, `RecordsService`(`save_sync(player_id, fetch: SyncFetch, ctx) -> SyncResult`). 5단계 이후 스킬이 `ctx.records.save_sync(...)`로 쓴다.
 
 **이 Task의 Step 5가 이번 단계 전체의 핵심 통과 기준이다**: 저장된 CHUNITHM-NET 페이지 3장으로 계산한 전체 레이팅이 그 페이지의 표시 레이팅과 맞아야 한다.
 
@@ -1915,6 +2008,8 @@ from services.chunithm.songdb import SongDbService
 from services.common.players import PlayersService
 
 if TYPE_CHECKING:
+    from chuni_penguin.types import PersonalBest
+
     from services.chunithm.chunithm_net import SyncFetch
 
 _GAME = "chunithm"
@@ -1924,6 +2019,8 @@ _GAME = "chunithm"
 class SyncResult:
     is_first_sync: bool
     computed_rating: Decimal
+    best30_average: Decimal
+    new20_average: Decimal
     displayed_rating: Decimal | None
     rating_mismatch: bool
     session_ids: list[str]
@@ -1949,9 +2046,63 @@ class RecordsService:
         synced_at = datetime.now(UTC)
         session_ids: list[str] = []
 
-        all_records = list(fetch.best30) + list(fetch.new20)
+        best30_ratings = await self._save_personal_bests(
+            player_id, fetch.best30, synced_at, session_ids
+        )
+        new20_ratings = await self._save_personal_bests(
+            player_id, fetch.new20, synced_at, session_ids
+        )
+
+        # "베스트 평균"(통과 기준)은 베스트30과 신곡20을 각각 따로 평균한 값이다 — 둘을
+        # 합쳐 50으로 나눈 전체 레이팅과는 다른 숫자다. CHUNITHM-NET이 이 둘을 텍스트로
+        # 따로 보여주는 페이지는 없어서 저장본과 직접 대조할 수는 없지만, 평균을 공식대로
+        # (30곡/20곡 가중)다시 합치면 이미 저장본으로 검산된 computed_rating과 정확히
+        # 같아야 한다 — Task 9 Step 5의 일관성 테스트가 그걸 확인한다.
+        best30_average = average_rating(best30_ratings)
+        new20_average = average_rating(new20_ratings)
+        computed_rating = average_rating(best30_ratings + new20_ratings)
+
+        displayed_rating = None
+        if fetch.profile.rating_systems:
+            displayed_rating = Decimal(str(fetch.profile.rating_systems[0].value))
+        rating_mismatch = displayed_rating is not None and computed_rating != displayed_rating
+
+        await self._conn.execute(
+            "INSERT INTO records_sync_log (id, player_id, game, synced_at, nickname, "
+            "displayed_rating, computed_rating, rating_mismatch, is_first_sync) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()), player_id, _GAME, synced_at.isoformat(), fetch.profile.username,
+                str(displayed_rating) if displayed_rating is not None else None,
+                str(computed_rating), int(rating_mismatch), int(is_first_sync),
+            ),
+        )
+        await self._conn.commit()
+
+        if is_first_sync:
+            await self._players.set_status_tag(player_id, "chunithm-synced", source="records:first_sync")
+
+        return SyncResult(
+            is_first_sync=is_first_sync,
+            computed_rating=computed_rating,
+            best30_average=best30_average,
+            new20_average=new20_average,
+            displayed_rating=displayed_rating,
+            rating_mismatch=rating_mismatch,
+            session_ids=session_ids,
+        )
+
+    async def _save_personal_bests(
+        self,
+        player_id: str,
+        records: "list[PersonalBest]",
+        synced_at: datetime,
+        session_ids: list[str],
+    ) -> list[Decimal]:
+        """베스트30 또는 신곡20 한 쪽을 저장하고, 그 쪽만의 레이팅 리스트를 돌려준다
+        (호출하는 쪽이 베스트/신곡 평균과 전체 평균을 각각 계산할 수 있게)."""
         ratings: list[Decimal] = []
-        for pb in all_records:
+        for pb in records:
             title = pb.song.title
             difficulty = pb.chart.difficulty.name
             difficulty_code = _SHORT_CODE[difficulty] if difficulty in _SHORT_CODE else difficulty
@@ -1978,35 +2129,7 @@ class RecordsService:
                     const, str(rating), session_id, synced_at.isoformat(),
                 ),
             )
-
-        computed_rating = average_rating(ratings)  # 이미 둘째 자리에서 버린 값(records_calc.py)
-        displayed_rating = None
-        if fetch.profile.rating_systems:
-            displayed_rating = Decimal(str(fetch.profile.rating_systems[0].value))
-        rating_mismatch = displayed_rating is not None and computed_rating != displayed_rating
-
-        await self._conn.execute(
-            "INSERT INTO records_sync_log (id, player_id, game, synced_at, nickname, "
-            "displayed_rating, computed_rating, rating_mismatch, is_first_sync) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                str(uuid.uuid4()), player_id, _GAME, synced_at.isoformat(), fetch.profile.username,
-                str(displayed_rating) if displayed_rating is not None else None,
-                str(computed_rating), int(rating_mismatch), int(is_first_sync),
-            ),
-        )
-        await self._conn.commit()
-
-        if is_first_sync:
-            await self._players.set_status_tag(player_id, "chunithm-synced", source="records:first_sync")
-
-        return SyncResult(
-            is_first_sync=is_first_sync,
-            computed_rating=computed_rating,
-            displayed_rating=displayed_rating,
-            rating_mismatch=rating_mismatch,
-            session_ids=session_ids,
-        )
+        return ratings
 
     async def _assign_session(self, player_id: str, played_at: datetime) -> str:
         play_date = assign_session_date(played_at)
@@ -2049,10 +2172,18 @@ Expected: PASS (4개)
 # tests/services/chunithm/test_records.py 에 추가
 async def test_computed_rating_matches_fixture_displayed_rating(conn) -> None:
     """이번 단계 전체의 핵심 통과 기준: 저장본 베스트30+신곡20으로 계산한 전체
-    레이팅이 저장본 프로필 페이지의 표시 레이팅(숫자 이미지에서 읽은 값)과 맞아야
-    한다. 두 저장본이 같은 시점(같은 로그인 세션)에서 받은 것이어야 이 테스트가
-    의미 있다 — docs/reference/chunithm-net/README나 커밋 로그에 저장 시점을
-    남겨, 이후 누가 한쪽만 다시 저장해 어긋나면 바로 알아챌 수 있게 한다."""
+    레이팅과 베스트 평균이 저장본의 표시값과 맞아야 한다. 두 저장본이 같은
+    시점(같은 로그인 세션)에서 받은 것이어야 이 테스트가 의미 있다 — 이 계획을
+    쓰던 중 실제로 세 파일 중 하나가 다른 시점이라 어긋난 적이 있다(player_data.html을
+    베스트30/신곡20과 같은 시점으로 다시 저장해 고쳤다).
+
+    전체 레이팅(16.94)은 CHUNITHM-NET이 숫자 이미지로 보여주는 실제 표시값과
+    대조한다. 베스트30 평균(17.02)·신곡20 평균(16.83)은 CHUNITHM-NET이 텍스트로
+    따로 보여주는 페이지가 없어 저장본과 직접 대조할 수는 없지만, 공식대로
+    (30곡·20곡 가중) 다시 합쳤을 때 이미 검증된 전체 레이팅과 정확히 같아야 한다
+    — 이 일관성이 "베스트 평균"이 올바로 계산됐다는 증거다. 아래 숫자는 지금
+    저장된 두 파일(2026-10-11)로 실제로 계산해 확인한 값이다 — 저장본을 다시
+    받으면 이 상수들도 다시 계산해서 맞춰야 한다."""
     players = PlayersService(conn)
     player = await players.create_player()
     ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
@@ -2064,6 +2195,15 @@ async def test_computed_rating_matches_fixture_displayed_rating(conn) -> None:
     assert result.rating_mismatch is False, (
         f"계산값 {result.computed_rating} != 표시값 {result.displayed_rating}"
     )
+    assert result.computed_rating == Decimal("16.94")
+    assert result.best30_average == Decimal("17.02")
+    assert result.new20_average == Decimal("16.83")
+
+    # 베스트 평균 일관성: 30곡·20곡 가중 재합산이 이미 검증된 전체 레이팅과 같아야 한다.
+    recombined = ((result.best30_average * 30 + result.new20_average * 20) / 50).quantize(
+        Decimal("0.01")
+    )
+    assert recombined == result.computed_rating
 ```
 
 - [ ] **Step 6: 테스트 돌려서 실제로 맞는지 확인**
