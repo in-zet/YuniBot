@@ -65,6 +65,8 @@ class ChartRefResolver:
             song = await self._songdb.resolve(song_query, ctx)
 
         chart = song.charts.get(difficulty_code)
-        if chart is None:
+        # 곡은 국제판에 있어도 그 채보만 삭제/미수록일 수 있다(예: DRAGONLADY의 WE) —
+        # 없는 채보와 똑같이 다룬다.
+        if chart is None or not chart.is_available:
             raise ResolutionError(message="그 난이도 없음")
         return ResolvedChart(song=song, chart=chart)

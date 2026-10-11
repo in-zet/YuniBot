@@ -57,3 +57,26 @@ async def test_song_title_starting_with_difficulty_like_word_resolves_directly(
     resolved = await resolver.resolve("We Are Us", _CTX)
     assert resolved.song.title == "We Are Us"
     assert resolved.chart.difficulty == "MAS"
+
+
+async def test_unavailable_individual_chart_raises_even_when_song_itself_is_available(
+    resolver: ChartRefResolver,
+) -> None:
+    # 실제 시드: "DRAGONLADY"는 id=19(available, BAS/ADV/EXP/MAS)와
+    # id=8067(available=false, removed=true, WE)로 나뉘어 있다. 곡은 찾을 수 있지만
+    # WE 채보는 삭제된 엔트리에서만 왔으므로 고를 수 없어야 한다.
+    resolved = await resolver.resolve("DRAGONLADY 마스", _CTX)
+    assert resolved.chart.difficulty == "MAS"
+    with pytest.raises(ResolutionError, match="그 난이도 없음"):
+        await resolver.resolve("DRAGONLADY 월엔", _CTX)
+
+
+async def test_chunimaru_reported_chart_becomes_available() -> None:
+    # Chunimaru(국제판 목록)가 그 채보를 알려 주면 시드에서 삭제로 표시돼 있어도 고를 수 있다.
+    songdb = SongDbService()
+    songdb._apply_chunimaru(
+        {"songs": [{"title": "DRAGONLADY", "charts": {"WE": {"const": None, "isConstUnknown": True}}}]}
+    )
+    resolver = ChartRefResolver(songdb=songdb, terms=TermsService())
+    resolved = await resolver.resolve("DRAGONLADY 월엔", _CTX)
+    assert resolved.chart.difficulty == "WE"

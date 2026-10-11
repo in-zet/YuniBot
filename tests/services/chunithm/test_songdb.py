@@ -97,3 +97,63 @@ async def test_refresh_from_chunimaru_failure_keeps_previous_state(songdb: SongD
     await songdb.refresh_from_chunimaru(_FailingHttp())
     with pytest.raises(ResolutionError, match="찾지 못함"):
         await songdb.resolve("天体観測", _CTX)
+
+
+async def test_apply_chunimaru_rejects_empty_songs_list(songdb: SongDbService) -> None:
+    with pytest.raises(ValueError):
+        songdb._apply_chunimaru({"songs": []})
+
+
+async def test_refresh_from_chunimaru_with_empty_response_keeps_previous_state(
+    songdb: SongDbService,
+) -> None:
+    class _EmptyHttp:
+        async def get_json(self, url: str) -> dict[str, object]:
+            return {"songs": []}
+
+    await songdb.refresh_from_chunimaru(_EmptyHttp())  # 예외가 새지 않는다
+    # 빈 응답으로 가용성이 통째로 지워지면 안 된다.
+    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
+    assert song.title == "B.B.K.K.B.K.K."
+
+
+async def test_refresh_from_chunimaru_with_malformed_response_keeps_previous_state(
+    songdb: SongDbService,
+) -> None:
+    class _MalformedHttp:
+        async def get_json(self, url: str) -> dict[str, object]:
+            # 첫 엔트리는 정상, 둘째 엔트리에 title이 없다 — 중간에 KeyError가 나도
+            # 첫 엔트리 반영분까지 포함해 아무것도 바뀌면 안 된다.
+            return {
+                "songs": [
+                    {"title": "B.B.K.K.B.K.K.", "isNew": True, "charts": {"MAS": {"const": 99.9}}},
+                    {"no_title_key": True},
+                ]
+            }
+
+    await songdb.refresh_from_chunimaru(_MalformedHttp())  # must not raise
+    # 이전 상태(시드 기준)가 그대로 남아야 한다 — 天体観測은 여전히 "찾지 못함".
+    with pytest.raises(ResolutionError, match="찾지 못함"):
+        await songdb.resolve("天体観測", _CTX)
+    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
+    assert song.charts["MAS"].const == 12.5
+    assert song.is_new is False
+
+
+async def test_chunimaru_only_song_becomes_resolvable(songdb: SongDbService) -> None:
+    synthetic = {
+        "songs": [
+            {
+                "title": "__새곡_테스트전용__",
+                "artist": "test artist",
+                "isNew": True,
+                "charts": {"MAS": {"const": 13.0, "isConstUnknown": False}},
+            }
+        ]
+    }
+    songdb._apply_chunimaru(synthetic)
+    song = await songdb.resolve("__새곡_테스트전용__", _CTX)
+    assert song.charts["MAS"].const == 13.0
+    assert song.charts["MAS"].note_count is None
+    assert song.is_new is True
+    assert songdb.const_for("__새곡_테스트전용__", "MAS") == 13.0

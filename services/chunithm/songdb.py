@@ -4,7 +4,7 @@ import json
 import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
@@ -28,6 +28,9 @@ class ChartRecord:
     const: float | None
     note_count: int | None
     is_const_unknown: bool = False
+    # 국제판에서 지금 고를 수 있는 채보인가. 같은 제목의 시드 엔트리 중 일부만
+    # available이면, 곡은 찾을 수 있어도 그 채보(흔히 삭제된 WE)는 고를 수 없다.
+    is_available: bool = True
 
 
 @dataclass(slots=True, kw_only=True)
@@ -82,7 +85,8 @@ def _load_seed(seed_path: Path) -> dict[str, SongRecord]:
             ):
                 continue
             song.charts[code] = ChartRecord(
-                difficulty=code, const=c.get("const"), note_count=_note_count(c)
+                difficulty=code, const=c.get("const"), note_count=_note_count(c),
+                is_available=entry_available,
             )
             winner_is_available[key] = entry_available
     return songs
@@ -137,28 +141,73 @@ class SongDbService:
     def _apply_chunimaru(self, data: dict[str, Any]) -> None:
         """Chunimaru songdb 응답(이미 디코딩된 dict)을 로컬 시드에 덧씌운다.
         국제판 가용성은 이 목록으로 완전히 교체한다(시드보다 최신이다).
-        네트워크 호출은 refresh_from_chunimaru가 하고, 이 메서드는 순수 머지라
-        테스트가 저장된 샘플 JSON으로 직접 부른다."""
+        Chunimaru가 알려 준 채보는 국제판에서 고를 수 있는 채보로 본다(is_available=True).
+        시드에 없는 곡(벤더링된 시드 이후 추가된 신곡)은 SongRecord를 새로 만든다.
+
+        파싱이 전부 끝나기 전까지는 self._songs/self._available_intl을 건드리지
+        않는다 — 응답이 중간에 깨져도 이전 상태가 그대로 남아야 한다. songs가
+        비었거나 목록이 아니면 ValueError로 거절한다(빈 응답으로 가용성을 통째로
+        지우지 않는다). 네트워크 호출은 refresh_from_chunimaru가 하고, 이 메서드는
+        순수 머지라 테스트가 저장된 샘플 JSON으로 직접 부른다."""
+        entries = data.get("songs")
+        if not isinstance(entries, list) or not entries:
+            raise ValueError("Chunimaru 응답에 songs 목록이 없거나 비어 있다")
+
         new_available: set[str] = set()
-        for entry in data.get("songs", []):
-            title = entry["title"]
+        new_is_new: dict[str, bool] = {}
+        new_songs: dict[str, SongRecord] = {}
+        chart_updates: list[tuple[str, str, ChartRecord]] = []
+        for entry in cast("list[dict[str, Any]]", entries):
+            title: str = entry["title"]
             new_available.add(title)
+            new_is_new[title] = bool(entry.get("isNew", False))
+            charts_data: dict[str, dict[str, Any]] = entry.get("charts", {})
             song = self._songs.get(title)
             if song is None:
+                # Chunimaru에만 있는 곡 — 시드에 없어도 SongRecord를 새로 만든다.
+                # 아니면 SongQuery로 못 찾고, 베스트/신곡 목록에 떠도 상수를 못 찾는다.
+                # 별칭과 노트 수는 Chunimaru가 주지 않으므로 비워 둔다(노트 수 없음 →
+                # 허용 어택 "계산 불가").
+                new_songs[title] = SongRecord(
+                    title=title,
+                    aliases=(),
+                    artist=entry.get("artist", ""),
+                    charts={
+                        code: ChartRecord(
+                            difficulty=code,
+                            const=chart_data.get("const"),
+                            note_count=None,
+                            is_const_unknown=bool(chart_data.get("isConstUnknown", False)),
+                            is_available=True,
+                        )
+                        for code, chart_data in charts_data.items()
+                    },
+                    is_new=new_is_new[title],
+                )
                 continue
-            song.is_new = bool(entry.get("isNew", False))
-            for code, chart_data in entry.get("charts", {}).items():
+            for code, chart_data in charts_data.items():
                 existing = song.charts.get(code)
                 const = chart_data.get("const")
                 is_const_unknown = bool(chart_data.get("isConstUnknown", False))
                 if existing is not None:
-                    song.charts[code] = replace(
-                        existing, const=const, is_const_unknown=is_const_unknown
+                    updated = replace(
+                        existing, const=const, is_const_unknown=is_const_unknown, is_available=True
                     )
                 else:
-                    song.charts[code] = ChartRecord(
-                        difficulty=code, const=const, note_count=None, is_const_unknown=is_const_unknown
+                    updated = ChartRecord(
+                        difficulty=code, const=const, note_count=None,
+                        is_const_unknown=is_const_unknown, is_available=True,
                     )
+                chart_updates.append((title, code, updated))
+
+        # 여기서부터는 실패할 수 없는 대입만 한다.
+        for title, code, chart in chart_updates:
+            self._songs[title].charts[code] = chart
+        for title, is_new in new_is_new.items():
+            existing_song = self._songs.get(title)
+            if existing_song is not None:
+                existing_song.is_new = is_new
+        self._songs.update(new_songs)
         self._available_intl = new_available
 
     async def refresh_from_chunimaru(self, http: _HttpGetJson) -> None:
@@ -167,7 +216,8 @@ class SongDbService:
         남는다(00-core.md "켜진 직후" 규칙)."""
         try:
             data = await http.get_json("https://chunimaru.fuwamofu.net/api/songdb/intl")
+            self._apply_chunimaru(data)
         except Exception:
+            # 네트워크 실패뿐 아니라 응답 형식이 깨진 경우(KeyError/ValueError 등)도
+            # 여기서 삼킨다 — _apply_chunimaru는 실패하면 아무것도 바꾸지 않는다.
             logger.warning("Chunimaru songdb 갱신 실패, 이전 상태를 유지한다", exc_info=True)
-            return
-        self._apply_chunimaru(data)
