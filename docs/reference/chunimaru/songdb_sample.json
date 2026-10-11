@@ -1,0 +1,519 @@
+{
+  "format": "chunimaru-songdb",
+  "formatVersion": 1,
+  "generatedAt": "2026-10-01T05:18:49+00:00",
+  "server": "intl",
+  "gameVersion": "X-Verse-X",
+  "newSongCutoff": "2025-12-10",
+  "songCount": 1574,
+  "chartCount": 6399,
+  "difficulties": [
+    "BAS",
+    "ADV",
+    "EXP",
+    "MAS",
+    "ULT"
+  ],
+  "homepage": "https://chunimaru.fuwamofu.net",
+  "notice": "Community-maintained data, provided as is. Constants flagged isConstUnknown are estimates. Not affiliated with SEGA. CHUNITHM is a trademark of SEGA.",
+  "songs": [
+    {
+      "idx": 3,
+      "id": "6a88218b1a936bd3",
+      "title": "B.B.K.K.B.K.K.",
+      "artist": "nora2r",
+      "genre": "VARIETY",
+      "bpm": 170,
+      "release": "2015-07-17",
+      "releaseVersion": "CHUNITHM",
+      "releaseVersionValue": "0",
+      "isNew": false,
+      "img": "d739ba44da6798a0",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/d739ba44da6798a0.webp",
+      "charts": {
+        "BAS": {
+          "level": 4,
+          "levelDisplay": "4",
+          "const": 4,
+          "maxCombo": 333,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 6,
+          "levelDisplay": "6",
+          "const": 6,
+          "maxCombo": 541,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 10,
+          "levelDisplay": "10",
+          "const": 10,
+          "maxCombo": 1051,
+          "isConstUnknown": true
+        },
+        "MAS": {
+          "level": 12.5,
+          "levelDisplay": "12+",
+          "const": 12.5,
+          "maxCombo": 960,
+          "isConstUnknown": false
+        },
+        "ULT": {
+          "level": 13.5,
+          "levelDisplay": "13+",
+          "const": 13.7,
+          "maxCombo": 1626,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 2897,
+      "id": "489a12aa1b1b9ec9",
+      "title": "Ave Mujica",
+      "artist": "Ave Mujica",
+      "genre": "POPS&ANIME",
+      "bpm": 222,
+      "release": "2026-04-16",
+      "releaseVersion": "CHUNITHM X-VERSE-X",
+      "releaseVersionValue": "20",
+      "isNew": true,
+      "img": "a093f933858fe77b",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/a093f933858fe77b.webp",
+      "charts": {
+        "BAS": {
+          "level": 3,
+          "levelDisplay": "3",
+          "const": 3,
+          "maxCombo": 410,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 6,
+          "levelDisplay": "6",
+          "const": 6,
+          "maxCombo": 646,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 9.5,
+          "levelDisplay": "9+",
+          "const": 9.5,
+          "maxCombo": 1074,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 14,
+          "levelDisplay": "14",
+          "const": 14.1,
+          "maxCombo": 1547,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 820,
+      "id": "8f4d0ff1c3995543",
+      "title": "ビッグブリッヂの死闘 -シアトリズムFFAC Arrange- from FFV",
+      "artist": "SQUARE ENIX",
+      "genre": "VARIETY",
+      "bpm": 211,
+      "release": "2026-04-16",
+      "releaseVersion": "CHUNITHM X-VERSE-X",
+      "releaseVersionValue": "20",
+      "isNew": true,
+      "img": "6526fdf31b83f552",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/6526fdf31b83f552.webp",
+      "charts": {
+        "BAS": {
+          "level": 4,
+          "levelDisplay": "4",
+          "const": 4,
+          "maxCombo": 570,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 8,
+          "levelDisplay": "8",
+          "const": 8,
+          "maxCombo": 916,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 13.5,
+          "levelDisplay": "13+",
+          "const": 13.7,
+          "maxCombo": 1727,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 15,
+          "levelDisplay": "15",
+          "const": 15,
+          "maxCombo": 2372,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 2896,
+      "id": "7de7d0a1f2edd621",
+      "title": "BOW AND ARROW （アニメ・オープニングver.）",
+      "artist": "米津玄師",
+      "genre": "POPS&ANIME",
+      "bpm": 180,
+      "release": "2026-04-16",
+      "releaseVersion": "CHUNITHM X-VERSE-X",
+      "releaseVersionValue": "20",
+      "isNew": true,
+      "img": "8b1f25ededff1ff4",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/8b1f25ededff1ff4.webp",
+      "charts": {
+        "BAS": {
+          "level": 3,
+          "levelDisplay": "3",
+          "const": 3,
+          "maxCombo": 290,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 5,
+          "levelDisplay": "5",
+          "const": 5,
+          "maxCombo": 438,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 9.5,
+          "levelDisplay": "9+",
+          "const": 9.5,
+          "maxCombo": 703,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 13,
+          "levelDisplay": "13",
+          "const": 13,
+          "maxCombo": 1068,
+          "isConstUnknown": false
+        },
+        "ULT": {
+          "level": 14,
+          "levelDisplay": "14",
+          "const": 14.1,
+          "maxCombo": 1118,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 80,
+      "id": "0f3b648d4c513959",
+      "title": "Grab your sword",
+      "artist": "古代 祐三",
+      "genre": "ORIGINAL",
+      "bpm": 138,
+      "release": "2015-07-17",
+      "releaseVersion": "CHUNITHM",
+      "releaseVersionValue": "0",
+      "isNew": false,
+      "img": "8caa7737f885980f",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/8caa7737f885980f.webp",
+      "charts": {
+        "BAS": {
+          "level": 3,
+          "levelDisplay": "3",
+          "const": 3,
+          "maxCombo": 377,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 6,
+          "levelDisplay": "6",
+          "const": 6,
+          "maxCombo": 726,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 8,
+          "levelDisplay": "8",
+          "const": 8,
+          "maxCombo": 1037,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 10,
+          "levelDisplay": "10",
+          "const": 10.4,
+          "maxCombo": 1315,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 137,
+      "id": "93d80b988ecc9e5b",
+      "title": "Angel dust",
+      "artist": "LV.4",
+      "genre": "VARIETY",
+      "bpm": 170,
+      "release": "2016-09-21",
+      "releaseVersion": "CHUNITHM AIR",
+      "releaseVersionValue": "2",
+      "isNew": false,
+      "img": "13a5a9ca35a9b71b",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/13a5a9ca35a9b71b.webp",
+      "charts": {
+        "BAS": {
+          "level": 4,
+          "levelDisplay": "4",
+          "const": 4,
+          "maxCombo": 436,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 7,
+          "levelDisplay": "7",
+          "const": 7,
+          "maxCombo": 782,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 11.5,
+          "levelDisplay": "11+",
+          "const": 11.8,
+          "maxCombo": 1310,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 15,
+          "levelDisplay": "15",
+          "const": 15,
+          "maxCombo": 1925,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 193,
+      "id": "b36793567a3e0686",
+      "title": "Club Ibuki in Break All",
+      "artist": "void＋夕野ヨシミ (IOSYS) feat.藤原鞠菜",
+      "genre": "東方Project",
+      "bpm": 175,
+      "release": "2017-05-11",
+      "releaseVersion": "CHUNITHM AIR PLUS",
+      "releaseVersionValue": "3",
+      "isNew": false,
+      "img": "8d15a77198c7b841",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/8d15a77198c7b841.webp",
+      "charts": {
+        "BAS": {
+          "level": 3,
+          "levelDisplay": "3",
+          "const": 3,
+          "maxCombo": 369,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 6,
+          "levelDisplay": "6",
+          "const": 6,
+          "maxCombo": 526,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 9.5,
+          "levelDisplay": "9+",
+          "const": 9.5,
+          "maxCombo": 770,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 13,
+          "levelDisplay": "13",
+          "const": 13.2,
+          "maxCombo": 1378,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 253,
+      "id": "781d20ff0c1ed0b6",
+      "title": "Warcry",
+      "artist": "YATAGARASU",
+      "genre": "ORIGINAL",
+      "bpm": 190,
+      "release": "2017-06-22",
+      "releaseVersion": "CHUNITHM AIR PLUS",
+      "releaseVersionValue": "3",
+      "isNew": false,
+      "img": "a2f5cd53acbfc981",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/a2f5cd53acbfc981.webp",
+      "charts": {
+        "BAS": {
+          "level": 3,
+          "levelDisplay": "3",
+          "const": 3,
+          "maxCombo": 498,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 7,
+          "levelDisplay": "7",
+          "const": 7,
+          "maxCombo": 798,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 10,
+          "levelDisplay": "10",
+          "const": 10.1,
+          "maxCombo": 1331,
+          "isConstUnknown": true
+        },
+        "MAS": {
+          "level": 14,
+          "levelDisplay": "14",
+          "const": 14.3,
+          "maxCombo": 2285,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 300,
+      "id": "5e1a37f35fc21f70",
+      "title": "No Routine",
+      "artist": "A-One",
+      "genre": "東方Project",
+      "bpm": 163,
+      "release": "2016-10-06",
+      "releaseVersion": "CHUNITHM AIR",
+      "releaseVersionValue": "2",
+      "isNew": false,
+      "img": "012eb1ed09577836",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/012eb1ed09577836.webp",
+      "charts": {
+        "BAS": {
+          "level": 2,
+          "levelDisplay": "2",
+          "const": 2,
+          "maxCombo": 372,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 6,
+          "levelDisplay": "6",
+          "const": 6,
+          "maxCombo": 675,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 9,
+          "levelDisplay": "9",
+          "const": 9,
+          "maxCombo": 1229,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 12.5,
+          "levelDisplay": "12+",
+          "const": 12.8,
+          "maxCombo": 1715,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 367,
+      "id": "5236f1ee88121c5f",
+      "title": "いーあるふぁんくらぶ",
+      "artist": "みきとP",
+      "genre": "niconico",
+      "bpm": 145,
+      "release": "2017-03-09",
+      "releaseVersion": "CHUNITHM AIR PLUS",
+      "releaseVersionValue": "3",
+      "isNew": false,
+      "img": "0c6288729e80a1df",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/0c6288729e80a1df.webp",
+      "charts": {
+        "BAS": {
+          "level": 2,
+          "levelDisplay": "2",
+          "const": 2,
+          "maxCombo": 387,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 5,
+          "levelDisplay": "5",
+          "const": 5,
+          "maxCombo": 643,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 8,
+          "levelDisplay": "8",
+          "const": 8,
+          "maxCombo": 898,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 11,
+          "levelDisplay": "11",
+          "const": 11.4,
+          "maxCombo": 1487,
+          "isConstUnknown": false
+        }
+      }
+    },
+    {
+      "idx": 426,
+      "id": "7b570ebe496faf94",
+      "title": "華鳥風月",
+      "artist": "幽閉サテライト",
+      "genre": "東方Project",
+      "bpm": 123,
+      "release": "2017-08-24",
+      "releaseVersion": "CHUNITHM STAR",
+      "releaseVersionValue": "4",
+      "isNew": false,
+      "img": "6c2e56be54f35d83",
+      "jacket": "https://chunimaru.fuwamofu.net/imgs/jackets/6c2e56be54f35d83.webp",
+      "charts": {
+        "BAS": {
+          "level": 2,
+          "levelDisplay": "2",
+          "const": 2,
+          "maxCombo": 276,
+          "isConstUnknown": false
+        },
+        "ADV": {
+          "level": 5,
+          "levelDisplay": "5",
+          "const": 5,
+          "maxCombo": 609,
+          "isConstUnknown": false
+        },
+        "EXP": {
+          "level": 8.5,
+          "levelDisplay": "8+",
+          "const": 8.5,
+          "maxCombo": 986,
+          "isConstUnknown": false
+        },
+        "MAS": {
+          "level": 11.5,
+          "levelDisplay": "11+",
+          "const": 11.5,
+          "maxCombo": 1205,
+          "isConstUnknown": false
+        }
+      }
+    }
+  ]
+}
