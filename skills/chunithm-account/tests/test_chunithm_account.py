@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 from core.tool_types import ToolContext
 
@@ -19,17 +20,35 @@ def _load_skill() -> ModuleType:
 
 
 class _FakeChunithmNet:
-    def __init__(self, *, linked: bool, nickname: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        linked: bool,
+        nickname: str | None = None,
+        login_username: str = "유니상",
+        login_error: Exception | None = None,
+    ) -> None:
         from services.chunithm.chunithm_net import LoginStatus
 
         self._status = LoginStatus(linked=linked, nickname=nickname, last_checked_at="2026-10-11T00:00:00+00:00")
         self.logged_out: list[str] = []
+        self.login_calls: list[tuple[str, str]] = []
+        self._login_username = login_username
+        self._login_error = login_error
 
     async def status(self, player_id: str):
         return self._status
 
     async def logout(self, player_id: str, ctx) -> None:
         self.logged_out.append(player_id)
+
+    async def login(self, player_id: str, clal: str, ctx):
+        from types import SimpleNamespace
+
+        self.login_calls.append((player_id, clal))
+        if self._login_error is not None:
+            raise self._login_error
+        return SimpleNamespace(username=self._login_username)
 
 
 class _FakePlayers:
@@ -57,6 +76,28 @@ class _FakeRecords:
 
     async def last_sync_at(self, player_id: str):
         return self._last
+
+
+class _FakeResponse:
+    def __init__(self) -> None:
+        self.deferred: list[bool] = []
+
+    async def defer(self, *, ephemeral: bool = False) -> None:
+        self.deferred.append(ephemeral)
+
+
+class _FakeFollowup:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, bool, Any]] = []
+
+    async def send(self, content: str, *, ephemeral: bool = False, view: Any = None) -> None:
+        self.sent.append((content, ephemeral, view))
+
+
+class _FakeInteraction:
+    def __init__(self) -> None:
+        self.response = _FakeResponse()
+        self.followup = _FakeFollowup()
 
 
 class _FakeNotify:
@@ -127,40 +168,77 @@ async def test_logout_clears_cookie() -> None:
     assert chunithm_net.logged_out == ["p1"]
 
 
-async def test_login_modal_success_sends_followup() -> None:
+async def test_login_modal_not_linked_logs_in_directly() -> None:
+    """처음 로그인하는 경우(아직 연결 안 됨)는 확인 없이 바로 login()을 부른다."""
     skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=False, login_username="유니상")
 
-    class _LoginSuccessChunithmNet:
-        async def login(self, player_id: str, clal: str, ctx) -> object:
-            from types import SimpleNamespace
-
-            assert clal == "clal=abc123"
-            return SimpleNamespace(username="유니상")
-
-    class _FakeResponse:
-        async def defer(self, *, ephemeral: bool = False) -> None:
-            pass
-
-    class _FakeFollowup:
-        def __init__(self) -> None:
-            self.sent: list[tuple[str, bool]] = []
-
-        async def send(self, content: str, *, ephemeral: bool = False) -> None:
-            self.sent.append((content, ephemeral))
-
-    class _FakeInteraction:
-        def __init__(self) -> None:
-            self.response = _FakeResponse()
-            self.followup = _FakeFollowup()
-
-    modal = skill._LoginModal(ctx=_ctx(chunithm_net=_LoginSuccessChunithmNet()))
+    modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
     modal.clal_input._value = "clal=abc123"  # TextInput의 .value는 제출 후 채워지는 속성
     interaction = _FakeInteraction()
 
     await modal.on_submit(interaction)
 
+    assert chunithm_net.login_calls == [("p1", "clal=abc123")]
     assert interaction.followup.sent
     assert "유니상" in interaction.followup.sent[0][0]
+
+
+async def test_login_modal_already_linked_shows_overwrite_confirm() -> None:
+    """이미 연결돼 있으면 바로 덮어쓰지 않고, 확인 버튼이 달린 메시지를 먼저 보여준다."""
+    skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=True, nickname="기존닉")
+
+    modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
+    modal.clal_input._value = "clal=new999"
+    interaction = _FakeInteraction()
+
+    await modal.on_submit(interaction)
+
+    assert chunithm_net.login_calls == []
+    assert interaction.followup.sent
+    content, _ephemeral, view = interaction.followup.sent[0]
+    assert "기존닉" in content
+    assert "덮어쓸까" in content
+    assert view is not None
+
+
+async def test_login_modal_overwrite_button_logs_in_with_submitted_clal() -> None:
+    """"덮어쓰기"를 누르면 모달에 처음 제출됐던 clal 값으로 실제 login()을 부른다."""
+    skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=True, nickname="기존닉", login_username="새유저")
+
+    modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
+    modal.clal_input._value = "clal=new999"
+    submit_interaction = _FakeInteraction()
+    await modal.on_submit(submit_interaction)
+    _content, _ephemeral, view = submit_interaction.followup.sent[0]
+
+    click_interaction = _FakeInteraction()
+    await view.overwrite.callback(click_interaction)
+
+    assert chunithm_net.login_calls == [("p1", "clal=new999")]
+    assert click_interaction.followup.sent
+    assert "새유저" in click_interaction.followup.sent[0][0]
+
+
+async def test_login_modal_cancel_button_does_not_log_in() -> None:
+    """"취소"를 누르면 login()을 부르지 않고 취소 메시지만 보여준다."""
+    skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=True, nickname="기존닉")
+
+    modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
+    modal.clal_input._value = "clal=new999"
+    submit_interaction = _FakeInteraction()
+    await modal.on_submit(submit_interaction)
+    _content, _ephemeral, view = submit_interaction.followup.sent[0]
+
+    click_interaction = _FakeInteraction()
+    await view.cancel.callback(click_interaction)
+
+    assert chunithm_net.login_calls == []
+    assert click_interaction.followup.sent
+    assert "취소" in click_interaction.followup.sent[0][0]
 
 
 async def test_login_expired_handler_sends_dm_once() -> None:

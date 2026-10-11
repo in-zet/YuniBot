@@ -1,12 +1,49 @@
 # skills/chunithm-account/skill.py
 from __future__ import annotations
 
+from typing import Any
+
 import discord
 
 from core.decorators import on, slash_only, tool
 from core.tool_types import Display, ToolContext, ToolResult
 
 _notified_expiries: set[str] = set()
+
+
+async def _attempt_login(ctx: ToolContext, clal: str, interaction: discord.Interaction) -> None:
+    """실제 login() 호출과 성공/실패 안내를 한 곳에 모은다. 처음 로그인하는 경로와
+    "덮어쓰기" 확인 버튼 경로가 이 함수를 같이 쓴다 — try/except를 두 번 베끼지 않는다."""
+    try:
+        profile = await ctx.chunithm_net.login(ctx.player_id, clal, ctx)
+    except Exception:  # noqa: BLE001 - 어떤 예외든 같은 안내만 준다. 원인 예외를 그대로
+        # 보여주면 clal이나 응답 본문의 일부가 메시지에 섞여 나갈 수 있다(CLAUDE.md 비밀 값 규칙).
+        await interaction.followup.send(
+            "로그인에 실패했다. clal 값이 올바른지, 만료되지 않았는지 확인해 달라.", ephemeral=True
+        )
+        return
+    await interaction.followup.send(f"로그인 완료! ({profile.username})", ephemeral=True)
+
+
+class _OverwriteConfirmView(discord.ui.View):
+    """이미 다른 계정으로 연결돼 있을 때만 뜬다. 제출된 clal 값은 이 뷰 인스턴스의 메모리에만
+    있고, "덮어쓰기"를 눌렀을 때 실제 login()을 부르는 데만 쓴다 — 로그에도, 메시지 내용에도
+    절대 넣지 않는다(CLAUDE.md 비밀 값 규칙)."""
+
+    def __init__(self, *, ctx: ToolContext, clal: str) -> None:
+        super().__init__(timeout=120)
+        self._ctx = ctx
+        self._clal = clal
+
+    @discord.ui.button(label="덮어쓰기", style=discord.ButtonStyle.danger)
+    async def overwrite(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
+        await interaction.response.defer(ephemeral=True)
+        await _attempt_login(self._ctx, self._clal, interaction)
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("취소했다.", ephemeral=True)
 
 
 class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
@@ -25,17 +62,22 @@ class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         # defer 뒤 followup으로만 답한다 — 입력값은 채널에 남지 않고, 여기서도 다시 보여주지 않는다.
         await interaction.response.defer(ephemeral=True)
-        try:
-            profile = await self._ctx.chunithm_net.login(
-                self._ctx.player_id, str(self.clal_input.value), self._ctx
-            )
-        except Exception:  # noqa: BLE001 - 어떤 예외든 같은 안내만 준다. 원인 예외를 그대로
-            # 보여주면 clal이나 응답 본문의 일부가 메시지에 섞여 나갈 수 있다(CLAUDE.md 비밀 값 규칙).
+        clal = str(self.clal_input.value)
+
+        status = await self._ctx.chunithm_net.status(self._ctx.player_id)
+        if status.linked:
+            # CHUNITHM-NET 계정은 플레이어당 하나다. 다른 계정으로 다시 로그인하면 덮어쓸지
+            # 먼저 확인받는다(docs/design/skills/chunithm-account.md) — 여기서는 아직 login()을
+            # 부르지 않는다.
+            view = _OverwriteConfirmView(ctx=self._ctx, clal=clal)
             await interaction.followup.send(
-                "로그인에 실패했다. clal 값이 올바른지, 만료되지 않았는지 확인해 달라.", ephemeral=True
+                f"이미 '{status.nickname}'(으)로 로그인되어 있다. 새 계정으로 덮어쓸까?",
+                view=view,
+                ephemeral=True,
             )
             return
-        await interaction.followup.send(f"로그인 완료! ({profile.username})", ephemeral=True)
+
+        await _attempt_login(self._ctx, clal, interaction)
 
 
 @slash_only("로그인")
