@@ -282,17 +282,26 @@ class TermsService:
         return _row_to_proposal(row) if row is not None else None
 
     async def review(self, proposal_id: str, *, approve: bool, reviewed_by: str) -> ServerTermProposal | None:
-        """제안을 승인/거부한다. 제안이 없거나 이미 심사됐으면 None(다시 심사하지 않는다)."""
+        """제안을 승인/거부한다. 제안이 없거나 이미 심사됐으면 None(다시 심사하지 않는다).
+
+        UPDATE 자체에 `status = 'suggested'` 조건을 걸고 영향받은 행 수로 판단한다.
+        거의 동시에 들어온 두 번의 review() 호출이 모두 사전 조회를 통과하더라도,
+        둘 중 먼저 커밋된 UPDATE만 행을 바꾸고 나중 것은 0행으로 끝나 None을 돌려준다
+        (TOCTOU로 먼저 심사한 결과를 덮어쓰지 않는다).
+        """
         assert self._conn is not None
         proposal = await self.get_proposal(proposal_id)
-        if proposal is None or proposal.status != "suggested":
+        if proposal is None:
             return None
         now = datetime.now(UTC).isoformat()
         status = "approved" if approve else "rejected"
-        await self._conn.execute(
-            "UPDATE terms_server SET status = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+        cursor = await self._conn.execute(
+            "UPDATE terms_server SET status = ?, reviewed_by = ?, reviewed_at = ? "
+            "WHERE id = ? AND status = 'suggested'",
             (status, reviewed_by, now, proposal_id),
         )
+        if cursor.rowcount == 0:
+            return None
         await self._conn.commit()
         return await self.get_proposal(proposal_id)
 

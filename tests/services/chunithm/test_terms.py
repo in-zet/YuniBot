@@ -237,7 +237,16 @@ async def test_review_already_reviewed_proposal_returns_none(terms_with_conn: Te
     proposal_id = await terms_with_conn.propose(
         guild_id="g1", term="테스트은어", meaning="뜻", aliases=[], suggested_by="p1"
     )
-    await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
+    first = await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
+    assert first is not None and first.status == "approved"
 
-    second = await terms_with_conn.review(proposal_id, approve=False, reviewed_by="admin1")
+    # 서로 다른 결정으로 다시 심사를 시도해도(동시 승인/거절 경쟁을 흉내낸 것) 무시된다.
+    second = await terms_with_conn.review(proposal_id, approve=False, reviewed_by="admin2")
     assert second is None
+
+    # 두 번째 호출이 UPDATE의 WHERE status = 'suggested' 조건에 막혀 행 자체를 바꾸지
+    # 못했는지 확인한다(원자적 UPDATE가 실제로 경쟁을 막는지, 반환값만 보고는 알 수 없다).
+    stored = await terms_with_conn.get_proposal(proposal_id)
+    assert stored is not None
+    assert stored.status == "approved"
+    assert stored.reviewed_by == "admin1"
