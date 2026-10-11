@@ -238,6 +238,52 @@ async def test_unknown_const_surfaces_as_not_computable(conn, monkeypatch) -> No
     assert row is not None and row[0] == "계산 불가"
 
 
+async def test_best_score_returns_saved_pb(conn) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
+    service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
+    fetch = _fixture_fetch()
+    await service.save_sync(player.id, fetch, ctx)
+    target = fetch.best30[0]
+
+    score = await service.best_score(player.id, song_title=target.song.title, difficulty="MAS")
+
+    assert score == target.score
+
+
+async def test_best_score_returns_none_when_never_played(conn) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
+
+    score = await service.best_score(player.id, song_title="존재하지않는곡", difficulty="MAS")
+
+    assert score is None
+
+
+async def test_last_sync_at_returns_most_recent(conn) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
+    service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
+
+    assert await service.last_sync_at(player.id) is None
+
+    await service.save_sync(player.id, _fixture_fetch(), ctx)
+
+    assert await service.last_sync_at(player.id) is not None
+
+
+async def test_allowed_attacks_and_remaining_to_target_are_exposed_passthroughs(conn) -> None:
+    players = PlayersService(conn)
+    service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
+
+    assert service.allowed_attacks(3000, 1_007_500) is not None
+    assert service.remaining_to_target(3000, 1_000_000, 1_007_500) is not None
+    assert service.allowed_attacks(None, 1_007_500) is None
+
+
 def _freeze_now(monkeypatch: pytest.MonkeyPatch, *, utc: datetime, local: datetime) -> None:
     """records 모듈의 datetime.now를 고정한다. now(UTC)는 utc를, 인자 없는 now()는
     local의 벽시계 값(naive)을 돌려준다 — local은 tzinfo만 떼어 쓴다(벽시계 숫자를

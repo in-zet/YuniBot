@@ -11,9 +11,11 @@ import aiosqlite
 
 from core.tool_types import ToolContext
 from services.chunithm.records_calc import (
+    allowed_attacks,
     assign_session_date,
     average_rating,
     chart_rating,
+    remaining_to_target,
 )
 from services.chunithm.songdb import SongDbService
 from services.common.players import PlayersService
@@ -116,6 +118,34 @@ class RecordsService:
             rating_mismatch=rating_mismatch,
             session_ids=session_ids,
         )
+
+    async def best_score(self, player_id: str, *, song_title: str, difficulty: str) -> int | None:
+        cursor = await self._conn.execute(
+            "SELECT score FROM records_pb WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
+            (player_id, _GAME, song_title, difficulty),
+        )
+        row = await cursor.fetchone()
+        return row["score"] if row is not None else None
+
+    async def last_sync_at(self, player_id: str) -> str | None:
+        cursor = await self._conn.execute(
+            "SELECT synced_at FROM records_sync_log WHERE player_id = ? AND game = ? "
+            "ORDER BY synced_at DESC LIMIT 1",
+            (player_id, _GAME),
+        )
+        row = await cursor.fetchone()
+        return row["synced_at"] if row is not None else None
+
+    @staticmethod
+    def allowed_attacks(note_count: int | None, target_score: int) -> Decimal | None:
+        """chunithm-border 스킬이 쓰는 순수 계산 패스스루(services/chunithm/records_calc.py)."""
+        return allowed_attacks(note_count, target_score)
+
+    @staticmethod
+    def remaining_to_target(
+        note_count: int | None, current_score: int, target_score: int
+    ) -> tuple[int, Decimal] | None:
+        return remaining_to_target(note_count, current_score, target_score)
 
     async def _save_personal_bests(
         self,
