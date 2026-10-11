@@ -255,3 +255,24 @@ async def test_get_and_remove_alias(songdb_with_conn: SongDbService) -> None:
 
     await songdb_with_conn.remove_alias(guild_id="g1", alias="크로노")
     assert await songdb_with_conn.get_alias(guild_id="g1", alias="크로노") is None
+
+
+async def test_server_alias_lookup_is_case_insensitive(songdb_with_conn: SongDbService) -> None:
+    # "RFTS" 대문자로 등록해도 소문자 "rfts"로 조회/해석/삭제돼야 한다 — 전역(시드)
+    # 별칭과 같은 우선순위 묶음이므로 대소문자 무시가 일관되어야 한다.
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
+    await songdb_with_conn.add_alias(guild_id="g1", alias="RFTS", song_title="Reach For The Stars", added_by="p1")
+
+    row = await songdb_with_conn.get_alias(guild_id="g1", alias="rfts")
+    assert row is not None
+    assert row.song_title == "Reach For The Stars"
+
+    song = await songdb_with_conn.resolve("rfts", ctx)
+    assert song.title == "Reach For The Stars"
+
+    # 대문자로 다시 add_alias를 호출해도 같은 별칭으로 인식해(song_title이 같으므로)
+    # 충돌로 보지 않아야 한다.
+    await songdb_with_conn.add_alias(guild_id="g1", alias="rfts", song_title="Reach For The Stars", added_by="p2")
+
+    await songdb_with_conn.remove_alias(guild_id="g1", alias="RFTS")
+    assert await songdb_with_conn.get_alias(guild_id="g1", alias="rfts") is None

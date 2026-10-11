@@ -185,6 +185,7 @@ class SongDbService:
 
     async def add_alias(self, *, guild_id: str, alias: str, song_title: str, added_by: str) -> None:
         assert self._conn is not None
+        alias = alias.lower()
         existing = await self.get_alias(guild_id=guild_id, alias=alias)
         if existing is not None and existing.song_title != song_title:
             raise ValueError(f"'{alias}'는 이미 '{existing.song_title}'에 쓰인 별칭이다")
@@ -199,6 +200,7 @@ class SongDbService:
 
     async def get_alias(self, *, guild_id: str, alias: str) -> AliasRow | None:
         assert self._conn is not None
+        alias = alias.lower()
         cursor = await self._conn.execute(
             "SELECT guild_id, alias, song_title, added_by FROM songdb_aliases WHERE guild_id = ? AND alias = ?",
             (guild_id, alias),
@@ -210,6 +212,7 @@ class SongDbService:
 
     async def remove_alias(self, *, guild_id: str, alias: str) -> None:
         assert self._conn is not None
+        alias = alias.lower()
         await self._conn.execute("DELETE FROM songdb_aliases WHERE guild_id = ? AND alias = ?", (guild_id, alias))
         await self._conn.commit()
 
