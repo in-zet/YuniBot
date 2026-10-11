@@ -50,27 +50,41 @@ def _load_seed(seed_path: Path) -> dict[str, SongRecord]:
     title, 다른 id, 서로 겹치지 않는 난이도 코드). 그래서 title이 이미 나온 적
     있으면 새 SongRecord로 덮어쓰지 않고, 기존 SongRecord의 charts에 이번
     엔트리의 charts를 merge한다. artist/aliases는 그 title로 처음 본 엔트리
-    것을 그대로 쓴다(이후 엔트리는 chart만 보탠다)."""
+    것을 그대로 쓴다(이후 엔트리는 chart만 보탠다).
+
+    같은 title에서 같은 난이도 코드가 두 번 나오는 경우도 있다(예: 오래된/삭제된
+    WE 채보와 현재 WE 채보가 별도 엔트리로 들어있는 경우). 이때는 파일 순서로
+    마지막 것이 이기게 두지 않는다 — 이미 available=true인 엔트리가 채워 넣은
+    채보는, available=false인 더 늦은 엔트리가 덮어쓰지 못한다. 반대로
+    available=false로 먼저 채워진 채보는 이후 available=true 엔트리가 오면
+    덮어쓴다. 둘 다 available=false인 경우만 파일 순서상 먼저 나온 쪽이 남는다."""
     raw = json.loads(seed_path.read_text(encoding="utf-8"))
     songs: dict[str, SongRecord] = {}
+    # (title, difficulty) -> 현재 그 칸을 채운 엔트리가 available이었는지.
+    winner_is_available: dict[tuple[str, str], bool] = {}
     for entry in raw:
-        charts = {
-            c["difficulty"]: ChartRecord(
-                difficulty=c["difficulty"], const=c.get("const"), note_count=_note_count(c)
-            )
-            for c in entry.get("charts", [])
-        }
         title = entry["title"]
-        existing = songs.get(title)
-        if existing is None:
-            songs[title] = SongRecord(
+        entry_available = bool(entry.get("available", False))
+        song = songs.get(title)
+        if song is None:
+            song = SongRecord(
                 title=title,
                 aliases=tuple(entry.get("aliases") or ()),
                 artist=entry.get("artist", ""),
-                charts=charts,
+                charts={},
             )
-        else:
-            existing.charts.update(charts)
+            songs[title] = song
+        for c in entry.get("charts", []):
+            code = c["difficulty"]
+            key = (title, code)
+            if key in winner_is_available and not (
+                entry_available and not winner_is_available[key]
+            ):
+                continue
+            song.charts[code] = ChartRecord(
+                difficulty=code, const=c.get("const"), note_count=_note_count(c)
+            )
+            winner_is_available[key] = entry_available
     return songs
 
 

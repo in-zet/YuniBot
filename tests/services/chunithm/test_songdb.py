@@ -51,6 +51,15 @@ async def test_const_for_unknown_chart_is_none(songdb: SongDbService) -> None:
     assert songdb.const_for("前前前世", "ULT") is None
 
 
+async def test_duplicate_same_difficulty_prefers_available_entry(songdb: SongDbService) -> None:
+    # "B.B.K.K.B.K.K."의 WE 채보는 시드에 두 번 들어있다: id=8020(available=true,
+    # note_count=1051)과, 파일 순서상 더 나중인 id=8022(available=false/removed,
+    # note_count=2102). 파일 순서가 아니라 available 여부로 이겨야 하므로
+    # 1051이 맞다 — 2102(삭제된 채보)가 나오면 머지가 파일 순서로 덮어쓴 것이다.
+    note_count = songdb.note_count_for("B.B.K.K.B.K.K.", "WE")
+    assert note_count == 1051
+
+
 async def test_before_chunimaru_overlay_removed_song_is_unavailable(songdb: SongDbService) -> None:
     # "天体観測"은 로컬 시드의 available=false, removed=true라 덧씌우기 전에도 안 잡혀야 한다.
     with pytest.raises(ResolutionError, match="찾지 못함"):
