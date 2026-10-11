@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import enum
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_type_hints
 
 import aiosqlite
 import discord
@@ -12,6 +13,7 @@ from discord import app_commands
 
 from core.decorators import SlashOnlySpec, ToolSpec
 from core.executor import ToolExecutor
+from core.permissions import TagRequirement, check_tags
 from core.registry_snapshot import RegistrySnapshot
 from core.schema import ArgSpec, build_arg_schema
 from core.slash_rules import callback_arg_name_problems, slash_path_problems
@@ -281,9 +283,109 @@ async def _send_result(interaction: discord.Interaction, result: ToolResult) -> 
     await respond(interaction, **render_result(result))
 
 
+async def _player_context(
+    interaction: discord.Interaction,
+    *,
+    entry: SlashPlanEntry,
+    executor: ToolExecutor,
+    db: aiosqlite.Connection,
+    registry_snapshot: RegistrySnapshot,
+) -> tuple[ToolContext, bool]:
+    """디스코드 사용자를 플레이어로 찾거나 새로 만들고, 이 도구에 줄 ToolContext를 만든다.
+    일반 명령(_dispatch)과 모달 명령이 함께 쓴다. 두 번째 값은 방금 새로 만든 플레이어인지다."""
+    discord_id = str(interaction.user.id)
+    players: PlayersService = executor.services["players"]  # pyright: ignore[reportAssignmentType]
+
+    player = await players.player_for_discord(discord_id)
+    is_new_player = player is None
+    if player is None:
+        player = await players.create_player()
+        await players.link_account(player.id, discord_id)
+
+    tags = frozenset(await executor.tag_provider.tags_for(player.id))
+    skill_services = {
+        name: executor.services[name] for name in entry.skill_services if name in executor.services
+    }
+    # db/player_data/registry_snapshot은 ToolContext의 전용 필드지만, 다른 서비스와 똑같이
+    # manifest.services에 선언한 스킬에게만 준다(core/registry.py의 CTX_FIELD_SERVICE_NAMES).
+    # 선언하지 않은 스킬이 임의 테이블을 읽고 쓰거나 남의 데이터를 지울 수 없게 한다.
+    declared = set(entry.skill_services)
+    ctx = ToolContext(
+        player_id=player.id,
+        tags=tags,
+        services=skill_services,
+        guild_id=str(interaction.guild_id) if interaction.guild_id else None,
+        event_bus=executor.event_bus,
+        player_data=executor.player_data if "player_data" in declared else None,
+        db=db if "db" in declared else None,
+        registry_snapshot=registry_snapshot if "registry_snapshot" in declared else None,
+        discord_id=discord_id,
+    )
+    return ctx, is_new_player
+
+
+def _is_modal_tool(fn: Callable[..., Any]) -> bool:
+    """@slash_only 함수가 ToolResult 대신 discord.ui.Modal을 돌려주면, 입력창을 여는
+    명령으로 본다(core/events.py의 handler_kind와 같은 생각 — 반환 타입 힌트로 의도를
+    추론해 데코레이터에 새 옵션을 늘리지 않는다)."""
+    ret = get_type_hints(fn).get("return")
+    return isinstance(ret, type) and issubclass(ret, discord.ui.Modal)
+
+
+def _build_modal_command(
+    entry: SlashPlanEntry,
+    *,
+    executor: ToolExecutor,
+    db: aiosqlite.Connection,
+    registry_snapshot: RegistrySnapshot,
+) -> app_commands.Command[Any, Any, Any]:
+    """모달은 인터랙션의 "최초 응답"으로만 열 수 있어(디스코드 제약), 보통 명령처럼
+    먼저 defer()하면 다시는 열 수 없다 — 그래서 일반 _dispatch(먼저 defer)를 쓰지 않는다.
+    도구 실행기(invoke)도 거치지 않는다: 모달 함수는 ToolResult가 아니라 Modal을 돌려주기 때문이다.
+    대신 같은 태그 조건(도구와 스킬 각각 AND)을 같은 check_tags로 검사한다."""
+
+    async def callback(interaction: discord.Interaction) -> None:
+        if (
+            executor.settings is not None
+            and interaction.guild_id is not None
+            and not await executor.settings.is_skill_enabled(
+                guild_id=str(interaction.guild_id), skill=entry.skill_name
+            )
+        ):
+            await interaction.response.send_message("모르는 명령이에요", ephemeral=True)
+            return
+
+        ctx, is_new_player = await _player_context(
+            interaction, entry=entry, executor=executor, db=db, registry_snapshot=registry_snapshot
+        )
+        if is_new_player:
+            await executor.event_bus.emit_notify("players.first_seen", {"player_id": ctx.player_id})
+
+        player_tags = set(ctx.tags)
+        tool_ok = check_tags(
+            TagRequirement(tags=list(entry.spec.tags), tags_any=list(entry.spec.tags_any)), player_tags
+        )
+        skill_ok = check_tags(TagRequirement(tags=entry.skill_tags, tags_any=entry.skill_tags_any), player_tags)
+        if not (tool_ok and skill_ok):
+            await interaction.response.send_message("모르는 명령이에요", ephemeral=True)
+            return
+
+        modal = await entry.spec.fn(ctx)
+        await interaction.response.send_modal(modal)
+
+    return app_commands.Command(
+        name=entry.path[-1],
+        description=(entry.spec.fn.__doc__ or "").strip().splitlines()[0][:100],
+        callback=callback,
+    )
+
+
 def _build_command(
     entry: SlashPlanEntry, *, executor: ToolExecutor, db: aiosqlite.Connection, registry_snapshot: RegistrySnapshot
 ) -> app_commands.Command[Any, Any, Any]:
+    if _is_modal_tool(entry.spec.fn):
+        return _build_modal_command(entry, executor=executor, db=db, registry_snapshot=registry_snapshot)
+
     schema = build_arg_schema(entry.spec.fn)
     fn_name = f"slash_{entry.skill_name}_{entry.spec.name}".replace("-", "_")
     if not fn_name.isidentifier():
@@ -296,37 +398,12 @@ def _build_command(
         # 호출)이 디스코드의 3초 최초 응답 기한을 넘기면 "Unknown interaction"으로 조용히
         # 실패한다(실제로 재현됐다). 그래서 무슨 일을 하기도 전에 가장 먼저 defer부터 한다.
         await interaction.response.defer()
-        discord_id = str(interaction.user.id)
-        players: PlayersService = executor.services["players"]  # pyright: ignore[reportAssignmentType]
-
-        player = await players.player_for_discord(discord_id)
-        is_new_player = player is None
-        if player is None:
-            player = await players.create_player()
-            await players.link_account(player.id, discord_id)
-
-        tags = frozenset(await executor.tag_provider.tags_for(player.id))
-        skill_services = {
-            name: executor.services[name] for name in entry.skill_services if name in executor.services
-        }
-        # db/player_data/registry_snapshot은 ToolContext의 전용 필드지만, 다른 서비스와 똑같이
-        # manifest.services에 선언한 스킬에게만 준다(core/registry.py의 CTX_FIELD_SERVICE_NAMES).
-        # 선언하지 않은 스킬이 임의 테이블을 읽고 쓰거나 남의 데이터를 지울 수 없게 한다.
-        declared = set(entry.skill_services)
-        ctx = ToolContext(
-            player_id=player.id,
-            tags=tags,
-            services=skill_services,
-            guild_id=str(interaction.guild_id) if interaction.guild_id else None,
-            event_bus=executor.event_bus,
-            player_data=executor.player_data if "player_data" in declared else None,
-            db=db if "db" in declared else None,
-            registry_snapshot=registry_snapshot if "registry_snapshot" in declared else None,
-            discord_id=discord_id,
+        ctx, is_new_player = await _player_context(
+            interaction, entry=entry, executor=executor, db=db, registry_snapshot=registry_snapshot
         )
 
         if is_new_player:
-            await executor.event_bus.emit_notify("players.first_seen", {"player_id": player.id})
+            await executor.event_bus.emit_notify("players.first_seen", {"player_id": ctx.player_id})
 
         outcome = await executor.invoke(
             entry.spec,
@@ -338,7 +415,7 @@ def _build_command(
         )
 
         if outcome.needs_confirm:
-            view = ConfirmView(executor=executor, token=outcome.confirm_token or "", requester_id=player.id)
+            view = ConfirmView(executor=executor, token=outcome.confirm_token or "", requester_id=ctx.player_id)
             await respond(interaction, content="확인해 주세요.", view=view, ephemeral=True)
             return
 

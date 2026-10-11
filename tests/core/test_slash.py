@@ -8,7 +8,7 @@ import aiosqlite
 import discord
 import pytest
 
-from core.decorators import tool
+from core.decorators import slash_only, tool
 from core.executor import ToolExecutor
 from core.permissions import InMemoryTagProvider
 from core.registry import SkillRegistry
@@ -67,6 +67,16 @@ async def lookup(ctx: ToolContext, song: str, count: int = 3) -> ToolResult:
 async def arg_named_interaction(ctx: ToolContext, interaction: str) -> ToolResult:
     """도구 인자 이름이 생성한 콜백의 내부 예약 이름(`interaction`)과 고의로 겹친다."""
     return ToolResult(data={"interaction": interaction})
+
+
+class _FakeModal(discord.ui.Modal, title="테스트 모달"):
+    pass
+
+
+@slash_only("모달테스트")
+async def open_test_modal(ctx: ToolContext) -> discord.ui.Modal:
+    """테스트용 입력창을 연다."""
+    return _FakeModal()
 
 
 class _FakeSkill:
@@ -236,6 +246,9 @@ class _FakeResponse:
 
     async def send_message(self, content: str | None = None, **kwargs: Any) -> None:
         self._owner.calls.append({"content": content, **kwargs})
+
+    async def send_modal(self, modal: Any) -> None:
+        self._owner.calls.append({"modal": modal})
 
     async def defer(self, *, ephemeral: bool = False) -> None:
         self._deferred = True
@@ -641,3 +654,66 @@ async def test_real_admin_skill_receives_registry_snapshot_through_dispatch() ->
     [call] = interaction.response.calls
     assert call.get("ephemeral") is True  # 관리 계열은 전부 본인에게만 보인다
     assert "admin" in call["content"]
+
+
+async def test_modal_returning_slash_only_opens_modal_without_deferring() -> None:
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(_PLAYERS_MIGRATION)
+    await conn.commit()
+    players = PlayersService(conn)
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=players, tag_definitions={}, services={"players": players},
+    )
+    plan = build_slash_plan(
+        [(_FakeSkill("x"), open_test_modal.__yuni_slash_only__)]  # pyright: ignore[reportFunctionMemberAccess, reportArgumentType]
+    )
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(
+        discord.Client(intents=discord.Intents.none())
+    )
+    attach_to_tree(tree, plan, executor=executor, db=_NO_DB, registry_snapshot=_NO_SNAPSHOT)
+
+    try:
+        command = tree.get_command("모달테스트")
+        assert isinstance(command, discord.app_commands.Command)
+        interaction = _fake(1)
+        await command.callback(interaction)  # pyright: ignore[reportCallIssue]
+
+        [call] = interaction.calls
+        assert isinstance(call.get("modal"), _FakeModal)
+        assert interaction.response.is_done() is False  # defer를 부르지 않았다
+    finally:
+        await conn.close()  # 실패해도 닫는다 — 안 닫으면 aiosqlite 스레드 때문에 pytest가 끝나지 않는다
+
+
+async def test_modal_command_checks_the_tool_tags_and_hides_the_modal_on_denial() -> None:
+    @slash_only("잠긴모달", tags=["secret-tag"])
+    async def locked_modal(ctx: ToolContext) -> discord.ui.Modal:
+        """도구 태그가 있어야 열리는 입력창."""
+        return _FakeModal()
+
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(_PLAYERS_MIGRATION)
+    await conn.commit()
+    players = PlayersService(conn)
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=players, tag_definitions={}, services={"players": players},
+    )
+    plan = build_slash_plan(
+        [(_FakeSkill("x"), locked_modal.__yuni_slash_only__)]  # pyright: ignore[reportFunctionMemberAccess, reportArgumentType]
+    )
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(
+        discord.Client(intents=discord.Intents.none())
+    )
+    attach_to_tree(tree, plan, executor=executor, db=_NO_DB, registry_snapshot=_NO_SNAPSHOT)
+
+    try:
+        command = tree.get_command("잠긴모달")
+        assert isinstance(command, discord.app_commands.Command)
+        interaction = _fake(1)
+        await command.callback(interaction)  # pyright: ignore[reportCallIssue]
+
+        [call] = interaction.calls
+        assert "modal" not in call
+        assert call["content"] == "모르는 명령이에요"
+    finally:
+        await conn.close()

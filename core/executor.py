@@ -85,6 +85,11 @@ class ToolExecutor:
     def player_data(self) -> PlayerDataScanner | None:
         return self._player_data
 
+    @property
+    def settings(self) -> SkillToggleProvider | None:
+        """core/slash.py의 모달 콜백이 일반 _dispatch와 같은 "스킬 꺼짐" 검사를 하기 위해 쓴다."""
+        return self._settings
+
     async def invoke(
         self,
         spec: ToolSpec | SlashOnlySpec,
