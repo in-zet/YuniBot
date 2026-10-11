@@ -21,7 +21,10 @@ _PLAYERS_MIGRATION = (
     Path("migrations/core/001_players.sql").read_text()
     + Path("migrations/core/002_player_tags.sql").read_text()
 )
-_COOKIES_MIGRATION = Path("migrations/core/007_chunithm_net_cookies.sql").read_text()
+_COOKIES_MIGRATION = (
+    Path("migrations/core/007_chunithm_net_cookies.sql").read_text()
+    + Path("migrations/core/010_chunithm_net_cookies_nickname.sql").read_text()
+)
 
 _PROFILE_HTML = Path("docs/reference/chunithm-net/player_data.html").read_text(encoding="utf-8")
 _BEST_HTML = Path("docs/reference/chunithm-net/rating_detail_best.html").read_text(encoding="utf-8")
@@ -177,9 +180,13 @@ async def test_fetch_for_sync_on_connection_failure_expires_login(conn, secrets)
     service_for_sync = _make_service(conn, secrets, adapter=failing, players=players)
 
     received: list[object] = []
+
+    async def _record_expired(payload: object) -> None:
+        received.append(payload)
+
     bus = EventBus()
     bus.register_notify(
-        "chunithm.login.expired", owner_skill="test", fn=lambda payload: received.append(payload)
+        "chunithm.login.expired", owner_skill="test", fn=_record_expired
     )
     ctx_with_bus = ToolContext(
         player_id=player.id, tags=frozenset(), services={}, event_bus=bus

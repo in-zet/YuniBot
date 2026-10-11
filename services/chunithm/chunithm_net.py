@@ -1,7 +1,6 @@
 # services/chunithm/chunithm_net.py
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,8 +14,6 @@ from services.common.secrets import SecretsService
 
 if TYPE_CHECKING:
     from chuni_penguin.types import PersonalBest, Profile, RecentScore
-
-logger = logging.getLogger(__name__)
 
 
 class ChunithmNetAdapterLike(Protocol):
@@ -83,20 +80,23 @@ class ChunithmNetService:
         encrypted = self._secrets.encrypt(clal)
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
-            "INSERT INTO chunithm_net_cookies (player_id, encrypted_cookie, linked_at, last_checked_at) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT (player_id) DO UPDATE SET "
+            "INSERT INTO chunithm_net_cookies (player_id, encrypted_cookie, linked_at, last_checked_at, nickname) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (player_id) DO UPDATE SET "
             "encrypted_cookie = excluded.encrypted_cookie, linked_at = excluded.linked_at, "
-            "last_checked_at = excluded.last_checked_at",
-            (player_id, encrypted, now, now),
+            "last_checked_at = excluded.last_checked_at, nickname = excluded.nickname",
+            (player_id, encrypted, now, now, profile.username),
         )
         await self._conn.commit()
         await self._players.set_status_tag(player_id, "chunithm-linked", source="chunithm_net:login")
         return profile
 
     async def status(self, player_id: str) -> LoginStatus:
+        """상태 조회는 DB만 읽는 가벼운 호출이어야 한다 — 네트워크를 타지 않는다.
+        닉네임은 login()이 저장해 둔 값을 그대로 돌려준다."""
         row = await (
             await self._conn.execute(
-                "SELECT last_checked_at FROM chunithm_net_cookies WHERE player_id = ?", (player_id,)
+                "SELECT last_checked_at, nickname FROM chunithm_net_cookies WHERE player_id = ?",
+                (player_id,),
             )
         ).fetchone()
         if row is None:
@@ -104,26 +104,9 @@ class ChunithmNetService:
         tags = await self._players.tags_for(player_id)
         if "chunithm-linked" not in tags:
             return LoginStatus(linked=False)
-
-        nickname = await self._current_nickname(player_id)
-        return LoginStatus(linked=True, nickname=nickname, last_checked_at=row["last_checked_at"])
-
-    async def _current_nickname(self, player_id: str) -> str | None:
-        """저장해 둔 닉네임이 없으니(이 테이블은 쿠키만 들고 있다) 어댑터에 한 번
-        더 물어본다. 실패해도 상태 조회 자체는 실패시키지 않는다 — 만료 처리는
-        fetch_for_sync의 몫이다."""
-        cookie = await self._decrypted_cookie(player_id)
-        if cookie is None:
-            return None
-        adapter = self._adapter_factory(cookie)
-        try:
-            profile = await adapter.get_profile()
-        except Exception:
-            logger.warning("상태 조회 중 닉네임을 가져오지 못했다", exc_info=True)
-            return None
-        finally:
-            await adapter.aclose()
-        return profile.username
+        return LoginStatus(
+            linked=True, nickname=row["nickname"], last_checked_at=row["last_checked_at"]
+        )
 
     async def logout(self, player_id: str, ctx: ToolContext) -> None:
         cookie = await self._decrypted_cookie(player_id)
