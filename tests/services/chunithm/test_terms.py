@@ -113,3 +113,42 @@ async def test_all_rank_values_match_vendored_rank_min_score(terms: TermsService
 async def test_ajc_value_matches_max_score(terms: TermsService) -> None:
     resolved = await terms.resolve_lamp("AJC", _CTX)
     assert resolved.min_score == 1_010_000
+
+
+async def test_explain_rank_synthesizes_meaning_from_value(terms: TermsService) -> None:
+    explanation = await terms.explain("트플플", _CTX)
+    assert explanation is not None
+    assert explanation.canonical == "SSS+"
+    assert explanation.category_label == "랭크"
+    assert explanation.meaning is not None and "1,009,000" in explanation.meaning
+    assert explanation.scope == "전역"
+
+
+async def test_explain_concept_term_from_yaml(terms: TermsService) -> None:
+    explanation = await terms.explain("비비기", _CTX)
+    assert explanation is not None
+    assert explanation.canonical == "안미츠"
+    assert explanation.category_label == "기술"
+    assert "저스티스 크리티컬" in (explanation.meaning or "")
+
+
+async def test_explain_unknown_term_returns_none(terms: TermsService) -> None:
+    assert await terms.explain("이런용어는없다", _CTX) is None
+
+
+async def test_list_terms_filters_by_category(terms: TermsService) -> None:
+    items = await terms.list_terms("랭크", _CTX)
+    assert items
+    assert all(item.category_label == "랭크" for item in items)
+    assert len(items) == 14  # terms.yaml의 랭크 개수
+
+
+async def test_list_terms_unknown_category_raises(terms: TermsService) -> None:
+    with pytest.raises(ValueError, match="모르는 분류"):
+        await terms.list_terms("없는분류", _CTX)
+
+
+async def test_list_terms_without_category_returns_everything(terms: TermsService) -> None:
+    all_items = await terms.list_terms(None, _CTX)
+    rank_items = await terms.list_terms("랭크", _CTX)
+    assert len(all_items) > len(rank_items)

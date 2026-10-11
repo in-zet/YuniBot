@@ -13,6 +13,16 @@ _DATA_PATH = Path(__file__).parent / "data" / "terms.yaml"
 
 _HANGUL_SCALE: dict[str, int] = {"만": 10_000, "천": 1_000, "백": 100, "십": 10}
 
+CATEGORY_LABELS: dict[str, str] = {
+    "rank": "랭크",
+    "difficulty": "난이도",
+    "lamp": "램프",
+    "concept": "개념",
+    "technique": "기술",
+    "judgment": "판정",
+}
+_LABEL_TO_CATEGORY: dict[str, str] = {label: key for key, label in CATEGORY_LABELS.items()}
+
 
 @dataclass(slots=True, kw_only=True)
 class ResolvedRank:
@@ -32,11 +42,32 @@ class ResolvedLamp:
 
 
 @dataclass(slots=True, kw_only=True)
+class TermExplanation:
+    canonical: str
+    category_label: str
+    aliases: tuple[str, ...]
+    value: int | None
+    meaning: str | None
+    source: str
+    scope: str
+
+
+@dataclass(slots=True, kw_only=True)
+class TermListItem:
+    canonical: str
+    category_label: str
+    aliases: tuple[str, ...]
+    value: int | None
+
+
+@dataclass(slots=True, kw_only=True)
 class _Entry:
     canonical: str
     category: str
     value: int | None
     aliases: tuple[str, ...]
+    meaning: str | None = None
+    source: str | None = None
 
 
 def _load_entries(data_path: Path) -> list[_Entry]:
@@ -47,6 +78,8 @@ def _load_entries(data_path: Path) -> list[_Entry]:
             category=item["category"],
             value=item.get("value"),
             aliases=tuple(item.get("aliases") or ()),
+            meaning=item.get("meaning"),
+            source=item.get("source"),
         )
         for item in raw
     ]
@@ -76,6 +109,7 @@ class TermsService:
 
     def __init__(self, data_path: Path = _DATA_PATH) -> None:
         entries = _load_entries(data_path)
+        self._entries = entries
         self._rank_aliases = _alias_map(entries, "rank")
         self._rank_values = _value_map(entries, "rank")
         self._difficulty_aliases = _alias_map(entries, "difficulty")
@@ -108,6 +142,42 @@ class TermsService:
             raise ResolutionError(message="모르는 램프")
         return ResolvedLamp(canonical=canonical, min_score=self._lamp_values.get(canonical))
 
+    async def explain(self, raw: str, ctx: ToolContext) -> TermExplanation | None:
+        """값 용어든 개념/기술/판정 용어든 정식 이름이나 별칭(대소문자 무시)으로
+        찾아 뜻과 출처를 돌려준다. 없으면 None. 서버 은어는 아직 보지 않는다."""
+        text = raw.strip().lower()
+        for entry in self._entries:
+            if entry.canonical.lower() != text and text not in (a.lower() for a in entry.aliases):
+                continue
+            meaning = entry.meaning
+            if meaning is None and entry.category == "rank" and entry.value is not None:
+                meaning = f"{entry.value:,}점 이상"
+            return TermExplanation(
+                canonical=entry.canonical,
+                category_label=CATEGORY_LABELS.get(entry.category, entry.category),
+                aliases=entry.aliases,
+                value=entry.value,
+                meaning=meaning,
+                source=entry.source or "전역 정의",
+                scope="전역",
+            )
+        return None
+
+    async def list_terms(self, category: str | None, ctx: ToolContext) -> list[TermListItem]:
+        """분류(한글 라벨 "랭크"/"기술" 등, 또는 내부 키)로 거른 용어 목록.
+        category가 None이면 전부. 모르는 분류면 ValueError."""
+        key = None if category is None else _normalize_category(category)
+        return [
+            TermListItem(
+                canonical=entry.canonical,
+                category_label=CATEGORY_LABELS.get(entry.category, entry.category),
+                aliases=entry.aliases,
+                value=entry.value,
+            )
+            for entry in self._entries
+            if key is None or entry.category == key
+        ]
+
     async def resolve_score(self, raw: str, ctx: ToolContext) -> int:
         text = raw.strip()
 
@@ -128,6 +198,15 @@ class TermsService:
                 return min_score
 
         raise ResolutionError(message="읽을 수 없는 점수")
+
+
+def _normalize_category(raw: str) -> str:
+    text = raw.strip()
+    if text in CATEGORY_LABELS:
+        return text
+    if text in _LABEL_TO_CATEGORY:
+        return _LABEL_TO_CATEGORY[text]
+    raise ValueError(f"모르는 분류: {text}")
 
 
 def _parse_numeric_score(text: str) -> int | None:

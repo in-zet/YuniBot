@@ -88,3 +88,23 @@
 - canonical: "FULL COMBO"
   category: lamp
   aliases: [풀콤, 풀콤보]
+# --- 아래 네 항목은 2026-10-11, 5단계 구현 중 임시로 채워 넣은 개념/기술/판정 용어다.
+# 커뮤니티에서 실제로 쓰는 표현을 확인한 출처가 없어 뜻 설명은 추정이다 — 사용자가
+# 검토해 틀린 점을 고치거나 더 흔히 쓰는 표현으로 바꿔야 한다(chunithm-terms.md
+# "미확인 사항" 참고. 랭크/난이도/램프는 이미 확인된 값 용어라 손대지 않았다).
+- canonical: "저스티스 크리티컬"
+  category: judgment
+  aliases: [JC, 저크]
+  meaning: 가장 높은 단계의 판정. 만점(AJC)을 받으려면 모든 노트를 이 판정으로 쳐야 한다.
+- canonical: "안미츠"
+  category: technique
+  aliases: [비비기]
+  meaning: 타이밍이 조금 다른 두 노트를 동시에 쳐서 저스티스 크리티컬 판정 안에 넣는 기술.
+- canonical: "상수"
+  category: concept
+  aliases: []
+  meaning: 채보의 난이도를 수치로 나타낸 값. 레이팅과 보더(허용 어택) 계산에 쓰인다.
+- canonical: "오버파워"
+  category: concept
+  aliases: [오파]
+  meaning: 레이팅과는 별개로, 곡마다 낸 점수를 누적해 올리는 보조 지표.
