@@ -250,7 +250,10 @@ def render_result(result: ToolResult) -> dict[str, Any]:
             kwargs["ephemeral"] = True
         return kwargs
 
-    return {"content": _fallback_content(result.data)[:_DISCORD_CONTENT_LIMIT]}
+    kwargs = {"content": _fallback_content(result.data)[:_DISCORD_CONTENT_LIMIT]}
+    if display is not None and display.ephemeral:
+        kwargs["ephemeral"] = True
+    return kwargs
 
 
 async def respond(interaction: discord.Interaction, **kwargs: Any) -> None:
@@ -336,7 +339,7 @@ def _build_command(
 
         if outcome.needs_confirm:
             view = ConfirmView(executor=executor, token=outcome.confirm_token or "", requester_id=player.id)
-            await respond(interaction, content="확인해 주세요.", view=view)
+            await respond(interaction, content="확인해 주세요.", view=view, ephemeral=True)
             return
 
         result = outcome.result

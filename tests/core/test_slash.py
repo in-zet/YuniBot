@@ -639,5 +639,5 @@ async def test_real_admin_skill_receives_registry_snapshot_through_dispatch() ->
         await conn.close()
 
     [call] = interaction.response.calls
-    assert not call.get("ephemeral")  # 오류("스킬 현황을 아직 알 수 없다")가 아니다
+    assert call.get("ephemeral") is True  # 관리 계열은 전부 본인에게만 보인다
     assert "admin" in call["content"]

@@ -11,7 +11,7 @@ _UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
 @tool(slash="관리 사용량")
 async def usage(ctx: ToolContext) -> ToolResult:
     """기간별 LLM 호출 수, 토큰, 추정 비용을 보여준다. LLM이 아직 없어 자리만 채운다."""
-    return ToolResult(data={"calls": 0, "tokens": 0, "estimated_cost_usd": 0.0})
+    return ToolResult(data={"calls": 0, "tokens": 0, "estimated_cost_usd": 0.0}, display=Display(ephemeral=True))
 
 
 @tool(slash="관리 스킬")
@@ -24,7 +24,7 @@ async def skills(ctx: ToolContext) -> ToolResult:
     lines += [f"- {name} 등록 실패: {reason}" for name, reason in snapshot.failures.items()]
     return ToolResult(
         data={"enabled": [s.name for s in snapshot.skills], "failures": snapshot.failures},
-        display=Display(content="\n".join(lines) if lines else "등록된 스킬이 없다"),
+        display=Display(content="\n".join(lines) if lines else "등록된 스킬이 없다", ephemeral=True),
     )
 
 
@@ -46,7 +46,7 @@ async def toggle_skill(ctx: ToolContext, skill_name: str, enabled: bool) -> Tool
     await ctx.settings.set_skill_enabled(
         guild_id=ctx.guild_id, skill=skill_name, enabled=enabled, updated_by=ctx.player_id
     )
-    return ToolResult(data={"skill": skill_name, "enabled": enabled})
+    return ToolResult(data={"skill": skill_name, "enabled": enabled}, display=Display(ephemeral=True))
 
 
 @tool(slash="관리 태그부여", mutates=True, confirm="always")
@@ -57,7 +57,7 @@ async def grant_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResult
         await ctx.players.grant_tag(target.id, tag, source=f"admin:{ctx.player_id}")
     except ValueError as exc:
         return ToolResult(error=str(exc))
-    return ToolResult(data={"player_id": target.id, "granted": tag})
+    return ToolResult(data={"player_id": target.id, "granted": tag}, display=Display(ephemeral=True))
 
 
 @tool(slash="관리 태그회수", mutates=True, confirm="always")
@@ -72,7 +72,7 @@ async def revoke_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResul
         await ctx.players.revoke_tag(target.id, tag)
     except ValueError as exc:
         return ToolResult(error=str(exc))
-    return ToolResult(data={"player_id": target.id, "revoked": tag})
+    return ToolResult(data={"player_id": target.id, "revoked": tag}, display=Display(ephemeral=True))
 
 
 @tool(slash="관리 상한", mutates=True, confirm="always")
@@ -88,4 +88,7 @@ async def set_limits(ctx: ToolContext, monthly_cost_cap: float, player_cooldown_
         scope="guild", scope_id=ctx.guild_id, skill="admin", name="플레이어 쿨다운",
         value=player_cooldown_seconds, updated_by=ctx.player_id,
     )
-    return ToolResult(data={"monthly_cost_cap": monthly_cost_cap, "player_cooldown_seconds": player_cooldown_seconds})
+    return ToolResult(
+        data={"monthly_cost_cap": monthly_cost_cap, "player_cooldown_seconds": player_cooldown_seconds},
+        display=Display(ephemeral=True),
+    )

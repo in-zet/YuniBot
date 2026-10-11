@@ -99,7 +99,9 @@ async def _proceed_to_mutual_confirm(
     joiner_view = _ConfirmButtonsView(code=link_code.code, side="joiner", ctx=ctx)
     return ToolResult(
         data={"status": "pending_confirmation"},
-        display=Display(content=f"<@{link_code.issuer_discord_id}>과 연결해요. 맞나요?", view=joiner_view),
+        display=Display(
+            content=f"<@{link_code.issuer_discord_id}>과 연결해요. 맞나요?", view=joiner_view, ephemeral=True
+        ),
     )
 
 
@@ -367,7 +369,7 @@ async def list_links(ctx: ToolContext) -> ToolResult:
     lines = [f"<@{a.discord_id}>{' (대표)' if a.is_primary else ''} — {a.linked_at}" for a in accounts]
     return ToolResult(
         data={"accounts": [a.discord_id for a in accounts]},
-        display=Display(content="\n".join(lines) if lines else "연결된 계정이 없다."),
+        display=Display(content="\n".join(lines) if lines else "연결된 계정이 없다.", ephemeral=True),
     )
 
 
@@ -378,7 +380,7 @@ async def set_primary(ctx: ToolContext, discord_id: str) -> ToolResult:
         await ctx.players.set_primary(ctx.player_id, discord_id)
     except ValueError as exc:
         return ToolResult(error=str(exc))
-    return ToolResult(data={"primary": discord_id})
+    return ToolResult(data={"primary": discord_id}, display=Display(ephemeral=True))
 
 
 @slash_only("연결 해제")
@@ -398,4 +400,4 @@ async def unlink(ctx: ToolContext, discord_id: str) -> ToolResult:
 
     await ctx.players.unlink_account(discord_id)
     await ctx.emit("players.linked", {"player_id": ctx.player_id, "discord_id": discord_id, "action": "unlinked"})
-    return ToolResult(data={"unlinked": discord_id})
+    return ToolResult(data={"unlinked": discord_id}, display=Display(ephemeral=True))
