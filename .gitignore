@@ -9,7 +9,7 @@ __pycache__/
 
 # runtime data and secrets
 .env
-data/
+/data/
 
 # editors
 .vscode/

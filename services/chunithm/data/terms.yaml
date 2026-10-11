@@ -1,0 +1,90 @@
+# services/chunithm/data/terms.yaml
+# 값 용어(랭크·난이도·램프)의 정식 이름과 기준 점수(value)는 이 파일이 유일한
+# 출처다. value는 vendored chuni_penguin.types.Rank.min_score와 일치해야 하고,
+# tests/services/chunithm/test_terms.py가 랭크 14개 전부를 그 값과 대조한다 —
+# 여기 숫자가 틀리면 테스트가 바로 걸린다. 서버 은어는 이 파일이 아니라
+# terms_server 테이블(제안·승인)에 있다.
+- canonical: "SSS+"
+  category: rank
+  value: 1009000
+  aliases: [트플플]
+- canonical: "SSS"
+  category: rank
+  value: 1007500
+  aliases: [트리플, 트플]
+- canonical: "SS+"
+  category: rank
+  value: 1005000
+  aliases: [더블플]
+- canonical: "SS"
+  category: rank
+  value: 1000000
+  aliases: [더블]
+- canonical: "S+"
+  category: rank
+  value: 990000
+  aliases: [에스플]
+- canonical: "S"
+  category: rank
+  value: 975000
+  aliases: [에스]
+- canonical: "AAA"
+  category: rank
+  value: 950000
+  aliases: []
+- canonical: "AA"
+  category: rank
+  value: 925000
+  aliases: []
+- canonical: "A"
+  category: rank
+  value: 900000
+  aliases: []
+- canonical: "BBB"
+  category: rank
+  value: 800000
+  aliases: []
+- canonical: "BB"
+  category: rank
+  value: 700000
+  aliases: []
+- canonical: "B"
+  category: rank
+  value: 600000
+  aliases: []
+- canonical: "C"
+  category: rank
+  value: 500000
+  aliases: []
+- canonical: "D"
+  category: rank
+  value: 0
+  aliases: []
+- canonical: "MASTER"
+  category: difficulty
+  aliases: [마스, MAS]
+- canonical: "EXPERT"
+  category: difficulty
+  aliases: [엑스퍼, 엑스퍼트, EXP]
+- canonical: "ADVANCED"
+  category: difficulty
+  aliases: [어드, 어드밴스, ADV]
+- canonical: "BASIC"
+  category: difficulty
+  aliases: [베이직, BAS]
+- canonical: "ULTIMA"
+  category: difficulty
+  aliases: [울티마, 얼티마, ULT]
+- canonical: "WORLD'S END"
+  category: difficulty
+  aliases: [월드엔드, 월엔, WE]
+- canonical: "AJC"
+  category: lamp
+  value: 1010000
+  aliases: [이론치, 만점]
+- canonical: "ALL JUSTICE"
+  category: lamp
+  aliases: [올저, 올저스티스]
+- canonical: "FULL COMBO"
+  category: lamp
+  aliases: [풀콤, 풀콤보]
