@@ -403,8 +403,12 @@ def parse_music_for_rating(soup: LexborHTMLParser) -> list[PersonalBest]:
             chain_lamp = ChainLamp.none
 
         div = x.css_first(".w388.musiclist_box")
+        idx_elem = x.css_first("form input[name=idx]")
         song = Song(
-            id=int(str(x.css_first("form input[name=idx]").attrs["value"])),
+            # YUNIBOT PATCH: 국제판 ratingDetailBest/ratingDetailRecent 페이지에는
+            # idx 숨은 필드가 없다(사이트가 바뀜). 우리는 song.id를 안 쓰고 제목+
+            # 난이도로만 매칭하므로 0으로 둬도 안전하다.
+            id=int(str(idx_elem.attrs["value"])) if idx_elem is not None else 0,
             title=x.css_first(".music_title, .musiclist_worldsend_title").text(),
         )
         chart = Chart(difficulty=difficulty_from_imgurl(div.attrs["class"]))

@@ -1,6 +1,7 @@
 source: https://github.com/beer-psi/chuni-penguin.git
 commit: 6c926755f296476850adbb59a98651156ba7c7f7
-synced_at: 2026-10-09T12:20:51+00:00
+synced_at: 2026-10-11T08:31:09+00:00
 patches:
   - third_party/patches/0001-chunithm-net-adapter-no-local-db.patch
   - third_party/patches/0002-chunithm-net-adapter-public-httpx-aiohttp-name.patch
+  - third_party/patches/0003-chunithm-net-rating-detail-missing-idx.patch

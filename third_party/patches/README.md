@@ -47,3 +47,15 @@ SQLAlchemy DB에 묶여 있다(곡 메타데이터 보강, 레이팅 계산, PB 
 가져갈지는 4단계(`chunithm_net` 서비스, 접속 횟수 제한을 다루는 곳)에서 다시
 정한다 — 서비스 자체가 재시도/속도 제한 정책을 가지므로, 포크를 통째로 들여오는 것과
 서비스 레벨에서 재시도를 새로 짜는 것 중에 그때 고른다.
+
+## 0003-chunithm-net-rating-detail-missing-idx.patch
+
+`parse_music_for_rating`(`get_best30()`/`get_new20()`이 쓰는 파서)은 각 곡 폼 안의
+`<input name="idx">` 숨은 필드에서 `song.id`를 읽는다. 그런데 국제판
+`ratingDetailBest`/`ratingDetailRecent` 페이지의 실제 마크업에는(2026-10-11 저장본
+기준) 이 필드가 없다 — 패치 전에는 `AttributeError`로 죽는다. 이 패치는 필드가
+없으면 `song.id = 0`으로 둔다. 우리 쪽 `songdb`/`records` 서비스는 `song.id`를
+전혀 안 쓰고 제목+난이도로만 매칭하므로 안전하다(단, vendored
+`get_rating_breakdown`처럼 `song.id`로 중복을 거르는 메서드는 이 두 페이지를 통해
+호출하면 여러 곡이 `id=0`으로 뭉쳐 보일 수 있다 — 우리는 `get_best30()`/
+`get_new20()`만 직접 쓰고 `get_rating_breakdown()`은 쓰지 않는다).

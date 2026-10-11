@@ -4,10 +4,15 @@ from pathlib import Path
 from selectolax.lexbor import LexborHTMLParser
 
 from chuni_penguin.adapters.chunithm_net import ChunithmNetAdapter
-from chuni_penguin.adapters.chunithm_net.parser import parse_player_data
+from chuni_penguin.adapters.chunithm_net.parser import (
+    parse_music_for_rating,
+    parse_player_data,
+)
 
 FIXTURE = Path("docs/reference/chunithm-net/player_data.html")
 ADAPTER_SOURCE = Path("third_party/chuni_penguin/adapters/chunithm_net/adapter.py")
+BEST_FIXTURE = Path("docs/reference/chunithm-net/rating_detail_best.html")
+RECENT_FIXTURE = Path("docs/reference/chunithm-net/rating_detail_recent.html")
 
 
 def test_parses_saved_player_data_page():
@@ -48,3 +53,21 @@ def test_patched_adapter_never_reads_self_database_outside_init():
             offending.append(f"line {node.lineno}")
 
     assert offending == [], f"self.database read outside __init__: {offending}"
+
+
+def test_parses_best30_fixture_without_idx_field():
+    """국제판 ratingDetailBest 페이지에는 <input name="idx">가 없다(사이트가 바뀜).
+    패치 0003 전에는 AttributeError로 죽는다."""
+    html = BEST_FIXTURE.read_text(encoding="utf-8")
+    records = parse_music_for_rating(LexborHTMLParser(html))
+    assert len(records) == 30
+    assert all(r.song.id == 0 for r in records)
+    assert all(r.song.title for r in records)
+    assert all(r.score > 0 for r in records)
+
+
+def test_parses_new20_fixture_without_idx_field():
+    html = RECENT_FIXTURE.read_text(encoding="utf-8")
+    records = parse_music_for_rating(LexborHTMLParser(html))
+    assert len(records) == 20
+    assert all(r.song.id == 0 for r in records)
