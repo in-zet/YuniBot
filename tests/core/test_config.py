@@ -59,6 +59,7 @@ def test_load_config_parses_admin_ids_and_quiet_hours(monkeypatch: pytest.Monkey
 
 
 def test_load_config_defaults_admin_ids_and_quiet_hours(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("core.config.load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
     monkeypatch.delenv("ADMIN_DISCORD_IDS", raising=False)
     monkeypatch.delenv("QUIET_HOURS_START", raising=False)

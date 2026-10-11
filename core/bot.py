@@ -124,8 +124,17 @@ async def _sync_admin_bootstrap(players: PlayersService, admin_discord_ids: froz
 
     for player_id in await players.players_with_tag("admin", source="env_bootstrap"):
         accounts = await players.accounts_for(player_id)
-        if not any(a.discord_id in admin_discord_ids for a in accounts):
-            await players.revoke_tag(player_id, "admin")
+        if any(a.discord_id in admin_discord_ids for a in accounts):
+            continue
+        all_admins = await players.players_with_tag("admin")
+        if all_admins == [player_id]:
+            # admin.md: "마지막 관리자의 admin 태그는 뗄 수 없다" — env 동기화도 예외가 아니다.
+            logger.warning(
+                "마지막 관리자(%s)가 ADMIN_DISCORD_IDS에서 빠졌지만, 관리자가 0명이 되는 것을 "
+                "막기 위해 admin 태그를 유지한다", player_id,
+            )
+            continue
+        await players.revoke_tag(player_id, "admin")
 
 
 def _register_event_handlers(bus: EventBus, registry: SkillRegistry) -> None:

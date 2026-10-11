@@ -1,4 +1,5 @@
 import datetime
+import logging
 from pathlib import Path
 
 import aiosqlite
@@ -236,5 +237,29 @@ async def test_sync_admin_bootstrap_does_not_touch_manually_granted_admin() -> N
     await _sync_admin_bootstrap(players, frozenset())
     assert await players.tags_for(env_admin.id) == set()
     assert await players.tags_for(manual_admin.id) == {"admin"}  # 여전히 안 건드린다
+
+    await conn.close()
+
+
+async def test_sync_admin_bootstrap_keeps_the_last_admin_even_if_dropped_from_env(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(Path("migrations/core/001_players.sql").read_text())
+    await conn.executescript(Path("migrations/core/002_player_tags.sql").read_text())
+    await conn.commit()
+    players = PlayersService(conn)
+
+    only_admin = await players.create_player()
+    await players.link_account(only_admin.id, "111")
+    await _sync_admin_bootstrap(players, frozenset({"111"}))
+    assert await players.tags_for(only_admin.id) == {"admin"}
+
+    # 유일한 admin을 .env에서 뺐지만, 다른 admin이 없으므로 admin.md의
+    # "마지막 관리자는 뗄 수 없다"가 env 동기화에도 그대로 적용돼야 한다.
+    with caplog.at_level(logging.WARNING):
+        await _sync_admin_bootstrap(players, frozenset())
+    assert await players.tags_for(only_admin.id) == {"admin"}
+    assert "마지막 관리자" in caplog.text
 
     await conn.close()

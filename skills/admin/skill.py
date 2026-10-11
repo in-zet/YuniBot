@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from core.decorators import tool
-from core.tool_types import PlayerRef, ToolContext, ToolResult
+from core.tool_types import Display, PlayerRef, ToolContext, ToolResult
 from services.common.players import Player
 
 _UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
@@ -24,7 +24,7 @@ async def skills(ctx: ToolContext) -> ToolResult:
     lines += [f"- {name} 등록 실패: {reason}" for name, reason in snapshot.failures.items()]
     return ToolResult(
         data={"enabled": [s.name for s in snapshot.skills], "failures": snapshot.failures},
-        display_mode="optional",
+        display=Display(content="\n".join(lines) if lines else "등록된 스킬이 없다"),
     )
 
 
