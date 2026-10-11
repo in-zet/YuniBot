@@ -1,6 +1,8 @@
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
 
+import aiosqlite
 import pytest
 
 from core.resolvers import ResolutionError
@@ -14,6 +16,17 @@ _CHUNIMARU_SAMPLE = Path("docs/reference/chunimaru/songdb_sample.json")
 @pytest.fixture
 def songdb() -> SongDbService:
     return SongDbService()
+
+
+@pytest.fixture
+async def songdb_with_conn() -> AsyncIterator[SongDbService]:
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(Path("migrations/core/011_songdb_aliases.sql").read_text())
+    await conn.commit()
+    try:
+        yield SongDbService(conn=conn)
+    finally:
+        await conn.close()
 
 
 async def test_resolve_by_exact_title(songdb: SongDbService) -> None:
@@ -200,3 +213,45 @@ async def test_chunimaru_only_song_becomes_resolvable(songdb: SongDbService) -> 
     assert song.charts["MAS"].note_count is None
     assert song.is_new is True
     assert songdb.const_for("__새곡_테스트전용__", "MAS") == 13.0
+
+
+async def test_resolve_without_conn_ignores_server_alias(songdb: SongDbService) -> None:
+    # conn 없이 만든 서비스는(이 모듈의 대부분 테스트처럼) 서버 별칭 기능이 아예 없다 —
+    # 그래도 전역 해석은 그대로 동작해야 한다.
+    with pytest.raises(ResolutionError, match="찾지 못함"):
+        await songdb.resolve("크로노", _CTX)
+
+
+async def test_add_and_resolve_server_alias(songdb_with_conn: SongDbService) -> None:
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
+    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+
+    song = await songdb_with_conn.resolve("크로노", ctx)
+
+    assert song.title == "B.B.K.K.B.K.K."
+
+
+async def test_server_alias_is_scoped_to_guild(songdb_with_conn: SongDbService) -> None:
+    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+    other_guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g2")
+
+    with pytest.raises(ResolutionError, match="찾지 못함"):
+        await songdb_with_conn.resolve("크로노", other_guild_ctx)
+
+
+async def test_add_alias_already_used_for_different_song_raises(songdb_with_conn: SongDbService) -> None:
+    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+
+    with pytest.raises(ValueError, match="이미"):
+        await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="Reach For The Stars", added_by="p2")
+
+
+async def test_get_and_remove_alias(songdb_with_conn: SongDbService) -> None:
+    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+
+    row = await songdb_with_conn.get_alias(guild_id="g1", alias="크로노")
+    assert row is not None
+    assert row.added_by == "p1"
+
+    await songdb_with_conn.remove_alias(guild_id="g1", alias="크로노")
+    assert await songdb_with_conn.get_alias(guild_id="g1", alias="크로노") is None

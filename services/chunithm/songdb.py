@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
+
+import aiosqlite
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
@@ -71,6 +74,14 @@ class ChartLinkInfo:
     has_mapping: bool
 
 
+@dataclass(slots=True, kw_only=True)
+class AliasRow:
+    guild_id: str
+    alias: str
+    song_title: str
+    added_by: str
+
+
 def _note_count(chart: dict[str, Any]) -> int | None:
     total = sum(chart.get(key, 0) or 0 for key in ("tap", "hold", "slide", "air", "flick"))
     return total if total > 0 else None
@@ -133,12 +144,15 @@ class SongDbService:
     """곡·채보 정보, 상수, 노트 수, 별칭, 국제판 수록 여부. 시드를 메모리에 한 번
     읽고, Chunimaru songdb로 국제판 가용성·신곡 여부·추정 상수 플래그를 덧씌운다."""
 
-    def __init__(self, seed_path: Path = _SEED_PATH) -> None:
+    def __init__(self, seed_path: Path = _SEED_PATH, *, conn: aiosqlite.Connection | None = None) -> None:
         self._songs = _load_seed(seed_path)
         # Chunimaru가 아직 한 번도 안 덧씌워졌으면 시드 자신의 available 플래그로
         # 근사한다(완벽하지 않지만 기동 중 네트워크 장애에도 안 죽게 하는 하한선이다).
         raw = json.loads(seed_path.read_text(encoding="utf-8"))
         self._available_intl = {e["title"] for e in raw if e.get("available")}
+        self._conn = conn
+        if self._conn is not None:
+            self._conn.row_factory = aiosqlite.Row
 
     async def resolve(self, raw: str, ctx: ToolContext) -> SongRecord:
         text = raw.strip()
@@ -147,6 +161,14 @@ class SongDbService:
         for song in available_songs:
             if song.title == text:
                 return song
+
+        if self._conn is not None and ctx.guild_id is not None:
+            server_alias = await self.get_alias(guild_id=ctx.guild_id, alias=text)
+            if server_alias is not None:
+                song = self._songs.get(server_alias.song_title)
+                if song is not None and song.title in self._available_intl:
+                    return song
+
         for song in available_songs:
             if text.lower() in (a.lower() for a in song.aliases):
                 return song
@@ -160,6 +182,36 @@ class SongDbService:
         if candidates:
             raise ResolutionError(candidates=candidates[:_MAX_CANDIDATES])
         raise ResolutionError(message="찾지 못함")
+
+    async def add_alias(self, *, guild_id: str, alias: str, song_title: str, added_by: str) -> None:
+        assert self._conn is not None
+        existing = await self.get_alias(guild_id=guild_id, alias=alias)
+        if existing is not None and existing.song_title != song_title:
+            raise ValueError(f"'{alias}'는 이미 '{existing.song_title}'에 쓰인 별칭이다")
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            "INSERT INTO songdb_aliases (guild_id, alias, song_title, added_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (guild_id, alias) DO UPDATE SET "
+            "added_by = excluded.added_by, created_at = excluded.created_at",
+            (guild_id, alias, song_title, added_by, now),
+        )
+        await self._conn.commit()
+
+    async def get_alias(self, *, guild_id: str, alias: str) -> AliasRow | None:
+        assert self._conn is not None
+        cursor = await self._conn.execute(
+            "SELECT guild_id, alias, song_title, added_by FROM songdb_aliases WHERE guild_id = ? AND alias = ?",
+            (guild_id, alias),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return AliasRow(guild_id=row["guild_id"], alias=row["alias"], song_title=row["song_title"], added_by=row["added_by"])
+
+    async def remove_alias(self, *, guild_id: str, alias: str) -> None:
+        assert self._conn is not None
+        await self._conn.execute("DELETE FROM songdb_aliases WHERE guild_id = ? AND alias = ?", (guild_id, alias))
+        await self._conn.commit()
 
     def const_for(self, title: str, difficulty: str) -> float | None:
         song = self._songs.get(title)
