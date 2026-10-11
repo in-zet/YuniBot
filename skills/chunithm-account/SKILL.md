@@ -1,0 +1,16 @@
+---
+name: chunithm-account
+description: CHUNITHM-NET 로그인 상태 확인, 로그인 방법 안내, 기록 공개 설정을 다룬다.
+examples:
+  - 나 로그인 돼 있어?
+  - 내 기록 다른 사람도 볼 수 있게 해 줘
+category: 계정 연결
+game: chunithm
+version: 1
+services: [chunithm_net, secrets, players, notify, records]
+listens: [chunithm.login.expired]
+---
+
+- 로그인 요청에는 `/로그인`을 안내한다. 쿠키 값을 채팅으로 보내지 말라고 함께 말한다.
+- 플레이어가 채팅에 쿠키처럼 보이는 값을 붙였으면, 그 값을 다시 말하지 말고 `/로그인`으로 다시 넣어 달라고 한다.
+- 공개 설정을 바꾸기 전에 무엇이 남에게 보이게 되는지 한 줄로 알려 준다.
