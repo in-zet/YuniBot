@@ -35,17 +35,53 @@ def _load_skill() -> ModuleType:
 
 
 class _FakeResponse:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
+    """실제 discord.py의 InteractionResponse를 흉내 낸다.
+
+    core.slash.respond()는 defer() 뒤에는 send_message 대신 interaction.followup.send나
+    interaction.edit_original_response로 응답한다(실제 디스코드의 "최초 응답은 한 번뿐"
+    제약과 같다) — 그래서 이 가짜도 같은 분기를 흉내 내되, 어느 경로로 가든 같은
+    `_FakeInteraction.calls` 리스트에 쌓아서 기존 테스트의 `interaction.response.calls`
+    단언이 그대로 통하게 한다."""
+
+    def __init__(self, owner: _FakeInteraction) -> None:
+        self._owner = owner
+        self._deferred = False
+
+    @property
+    def calls(self) -> list[dict[str, Any]]:
+        return self._owner.calls
 
     async def send_message(self, content: str | None = None, **kwargs: Any) -> None:
-        self.calls.append({"content": content, **kwargs})
+        self._owner.calls.append({"content": content, **kwargs})
+
+    async def defer(self, *, ephemeral: bool = False) -> None:
+        self._deferred = True
+
+    def is_done(self) -> bool:
+        return self._deferred
+
+
+class _FakeFollowup:
+    def __init__(self, owner: _FakeInteraction) -> None:
+        self._owner = owner
+
+    async def send(self, content: str | None = None, **kwargs: Any) -> None:
+        self._owner.calls.append({"content": content, **kwargs})
 
 
 class _FakeInteraction:
     def __init__(self, discord_id: str) -> None:
         self.user = SimpleNamespace(id=int(discord_id))
-        self.response = _FakeResponse()
+        self.calls: list[dict[str, Any]] = []
+        self.response = _FakeResponse(self)
+        self.followup = _FakeFollowup(self)
+        self.deleted_original = False
+
+    async def edit_original_response(self, **kwargs: Any) -> None:
+        self.calls.append(kwargs)
+
+    async def delete_original_response(self) -> None:
+        self.deleted_original = True
 
 
 class _FakeNotify:
@@ -115,6 +151,51 @@ async def test_full_link_flow_resolves_to_same_player(link_env) -> None:
 
     assert await players.player_for_discord("111") == await players.player_for_discord("222")
     assert (await players.player_for_discord("222")).id == issuer.id  # pyright: ignore[reportOptionalMemberAccess]
+
+
+async def test_confirm_button_defers_before_the_dm_round_trip(link_env) -> None:
+    """양쪽이 다 확인하는 순간의 마무리 분기는 DB 쓰기 여러 번 끝에 notify.dm으로 디스코드
+    API를 한 번 더 왕복한다 — defer 없이 그 왕복을 기다리면 디스코드의 3초 최초 응답 기한을
+    넘겨 "Unknown interaction"으로 조용히 실패한다(실제로 재현된 적이 있다). 마지막(=마무리를
+    가져가는) 확인 클릭에서 defer가 dm보다 먼저 끝나 있어야 한다."""
+    skill, players, notify, make_ctx = link_env
+
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    started = await skill.start_link(make_ctx(issuer.id, "111"))
+    code = started.data["code"]
+
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=code)
+    joiner_view = joined.display.view
+    issuer_view = notify.dms[-1][2]
+
+    # 발급자가 먼저 확인한다 — 아직 양쪽 다 확인된 게 아니라 마무리(dm 포함)로 가지 않는다.
+    await issuer_view.confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+
+    order: list[str] = []
+    original_dm = notify.dm
+
+    async def tracking_dm(*args: Any, **kwargs: Any) -> None:
+        order.append("dm")
+        await original_dm(*args, **kwargs)
+
+    notify.dm = tracking_dm  # type: ignore[method-assign]
+
+    # 참여자가 두 번째로 확인한다 — 이 클릭이 마무리(데이터 재배치 + notify.dm)를 가져간다.
+    joiner_interaction = _FakeInteraction("222")
+    original_defer = joiner_interaction.response.defer
+
+    async def tracking_defer(**kwargs: Any) -> None:
+        order.append("defer")
+        await original_defer(**kwargs)
+
+    joiner_interaction.response.defer = tracking_defer  # type: ignore[method-assign]
+
+    await joiner_view.confirm.callback(joiner_interaction)  # pyright: ignore[reportCallIssue]
+
+    assert order == ["defer", "dm"]
 
 
 async def test_expired_code_is_rejected(link_env) -> None:

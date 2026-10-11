@@ -253,8 +253,29 @@ def render_result(result: ToolResult) -> dict[str, Any]:
     return {"content": _fallback_content(result.data)[:_DISCORD_CONTENT_LIMIT]}
 
 
+async def respond(interaction: discord.Interaction, **kwargs: Any) -> None:
+    """interaction에 첫 응답을 보낸다.
+
+    디스코드는 최초 응답을 3초 안에 받아야 한다. 느릴 수 있는 일(서비스 호출, 특히
+    `notify.dm`처럼 디스코드 API를 한 번 더 왕복하는 일) 전에 호출자가 이미 `defer()`를
+    불러 뒀다는 전제로 동작한다 — defer 없이 느린 일을 기다리다 보내면 "Unknown
+    interaction"(10062)으로 조용히 실패한다(실제로 재현됐다). defer가 이미 끝났으면 그 뒤로는
+    `edit_original_response`/`followup`만 쓸 수 있는데, ephemeral 여부는 defer 시점에 고정돼
+    나중에 못 바꾸므로, ephemeral 결과는 그 자리(공개로 떠 있는 "생각 중...")를 지우고 새
+    비공개 팔로업으로 보낸다."""
+    ephemeral = kwargs.pop("ephemeral", False)
+    if not interaction.response.is_done():
+        await interaction.response.send_message(**kwargs, ephemeral=ephemeral)
+        return
+    if ephemeral:
+        await interaction.delete_original_response()
+        await interaction.followup.send(**kwargs, ephemeral=True)
+    else:
+        await interaction.edit_original_response(**kwargs)
+
+
 async def _send_result(interaction: discord.Interaction, result: ToolResult) -> None:
-    await interaction.response.send_message(**render_result(result))
+    await respond(interaction, **render_result(result))
 
 
 def _build_command(
@@ -268,6 +289,10 @@ def _build_command(
         raise SlashPlanError(f"스킬 이름 '{entry.skill_name}'은 슬래시 콜백 이름으로 쓸 수 없다")
 
     async def _dispatch(interaction: discord.Interaction, options: dict[str, Any]) -> None:
+        # 아래로 이어지는 일(도구 본문 — 특히 notify.dm처럼 디스코드 API를 한 번 더 왕복하는
+        # 호출)이 디스코드의 3초 최초 응답 기한을 넘기면 "Unknown interaction"으로 조용히
+        # 실패한다(실제로 재현됐다). 그래서 무슨 일을 하기도 전에 가장 먼저 defer부터 한다.
+        await interaction.response.defer()
         discord_id = str(interaction.user.id)
         players: PlayersService = executor.services["players"]  # pyright: ignore[reportAssignmentType]
 
@@ -311,7 +336,7 @@ def _build_command(
 
         if outcome.needs_confirm:
             view = ConfirmView(executor=executor, token=outcome.confirm_token or "", requester_id=player.id)
-            await interaction.response.send_message("확인해 주세요.", view=view)
+            await respond(interaction, content="확인해 주세요.", view=view)
             return
 
         result = outcome.result
@@ -367,6 +392,7 @@ class ConfirmView(discord.ui.View):
         return False
 
     async def _finish(self, interaction: discord.Interaction, *, confirmed: bool) -> None:
+        await interaction.response.defer()  # _dispatch와 같은 이유 — 도구 본문이 느릴 수 있다.
         player_id = await self._player_id_for(interaction)
         result = await self._executor.confirm(self._token, confirmed=confirmed, player_id=player_id)
         await _send_result(interaction, result)

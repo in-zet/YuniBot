@@ -12,7 +12,7 @@ from typing import Any
 import discord
 
 from core.decorators import slash_only
-from core.slash import render_result
+from core.slash import render_result, respond
 from core.tool_types import Display, ToolContext, ToolResult
 
 # 스킬 폴더 이름("account-link")에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다
@@ -184,20 +184,26 @@ class _DiscardConfirmView(discord.ui.View):
 
     @discord.ui.button(label="버리고 연결", style=discord.ButtonStyle.danger)
     async def discard_and_continue(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
+        # _proceed_to_mutual_confirm이 notify.dm으로 디스코드 API를 한 번 더 왕복한다 — 디스코드의
+        # 3초 최초 응답 기한을 넘기면 "Unknown interaction"으로 조용히 실패한다(실제로 재현됐다).
+        # 항상 공개로 defer한다 — ephemeral 여부는 아래 respond()가 최종 결과에 맞춰
+        # 정한다(respond의 docstring 참고. defer를 ephemeral로 고정하면, 결과가 공개
+        # 메시지일 때 edit_original_response로는 비공개 꼬리표를 뗄 수 없다).
+        await interaction.response.defer()
         if not self._is_requester(interaction):
-            await interaction.response.send_message("이건 당신의 확인 요청이 아니다", ephemeral=True)
+            await respond(interaction, content="이건 당신의 확인 요청이 아니다", ephemeral=True)
             return
 
         assert self._ctx.db is not None
         link_code = await models.get_code(self._ctx.db, self._code)
         if link_code is None or link_code.expires_at <= datetime.now(UTC).isoformat():
-            await interaction.response.send_message("코드가 만료됐다", ephemeral=True)
+            await respond(interaction, content="코드가 만료됐다", ephemeral=True)
             return
         if link_code.status != "pending":
             # 이 버튼이 뜬 뒤 — 같은 코드로 다른 사람이 먼저 참여를 끝냈을 수 있다
             # (join_link은 아직 mark_joined를 부르지 않았으므로, 이 상태가 바뀌었다면
             # 그건 다른 참여자다).
-            await interaction.response.send_message("이미 다른 사람이 참여한 코드다", ephemeral=True)
+            await respond(interaction, content="이미 다른 사람이 참여한 코드다", ephemeral=True)
             return
 
         # 아직 아무것도 지우지 않는다 — "버리는 데 동의했다"는 표시는 아래 _proceed_to_mutual_confirm이
@@ -207,14 +213,15 @@ class _DiscardConfirmView(discord.ui.View):
         result = await _proceed_to_mutual_confirm(
             self._ctx, link_code, self._joiner_discord_id, discard_agreed=True
         )
-        await interaction.response.send_message(**render_result(result))
+        await respond(interaction, **render_result(result))
 
     @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
+        await interaction.response.defer()
         if not self._is_requester(interaction):
-            await interaction.response.send_message("이건 당신의 확인 요청이 아니다", ephemeral=True)
+            await respond(interaction, content="이건 당신의 확인 요청이 아니다", ephemeral=True)
             return
-        await interaction.response.send_message("취소했다. 아무것도 바뀌지 않았다.", ephemeral=True)
+        await respond(interaction, content="취소했다. 아무것도 바뀌지 않았다.", ephemeral=True)
 
 
 class _ConfirmButtonsView(discord.ui.View):
@@ -228,17 +235,21 @@ class _ConfirmButtonsView(discord.ui.View):
 
     @discord.ui.button(label="확인", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
+        # 마무리 분기는 DB 쓰기를 여러 번 거치고 끝에 notify.dm으로 디스코드 API를 한 번 더
+        # 왕복한다 — 디스코드의 3초 최초 응답 기한을 쉽게 넘긴다(실제로 재현됐다). 항상 공개로
+        # defer하는 이유는 위 discard_and_continue 주석 참고.
+        await interaction.response.defer()
         assert self._ctx.db is not None
         link_code = await models.get_code(self._ctx.db, self._code)
         if link_code is None or link_code.expires_at <= datetime.now(UTC).isoformat():
-            await interaction.response.send_message("만료된 요청이다", ephemeral=True)
+            await respond(interaction, content="만료된 요청이다", ephemeral=True)
             return
         if link_code.status in ("completed", "finalizing"):
             # 이미 끝났거나(두 번 클릭 등) 다른 클릭이 지금 막 마무리하고 있다 — 조용히
             # 안내만 한다. (이 검사는 사용자 경험을 위한 빠른 길일 뿐, 진짜 방어선은 아래
             # mark_finalizing의 원자적 UPDATE다 — 이 검사와 그 UPDATE 사이에도 다른 클릭이
             # 끼어들 수 있기 때문이다.)
-            await interaction.response.send_message("이미 연결이 끝났다", ephemeral=True)
+            await respond(interaction, content="이미 연결이 끝났다", ephemeral=True)
             return
 
         # 본인 확인은 "누른 계정이 속한 플레이어"로 한다 — 설계서: "확인 버튼은 연결된 계정이면
@@ -257,7 +268,7 @@ class _ConfirmButtonsView(discord.ui.View):
             )
             expected_player_id = joiner_player.id if joiner_player is not None else None
         if presser is None or expected_player_id is None or presser.id != expected_player_id:
-            await interaction.response.send_message("이건 당신의 확인 요청이 아니다", ephemeral=True)
+            await respond(interaction, content="이건 당신의 확인 요청이 아니다", ephemeral=True)
             return
 
         await models.set_confirmed(self._ctx.db, self._code, side=self._side)
@@ -278,7 +289,7 @@ class _ConfirmButtonsView(discord.ui.View):
             # 이 호출에서 실패(False)하면 다른 클릭이 이미 가져갔거나 끝냈다는 뜻이니 아무것도
             # 하지 않고 멈춘다.
             if not await models.mark_finalizing(self._ctx.db, self._code):
-                await interaction.response.send_message("이미 처리되고 있다", ephemeral=True)
+                await respond(interaction, content="이미 처리되고 있다", ephemeral=True)
                 return
 
             # 참여자 계정은 아직 자기 자신의(옛) 플레이어에 연결되어 있다 —
@@ -302,8 +313,9 @@ class _ConfirmButtonsView(discord.ui.View):
                     # 버릴 데이터가 어느 계정 것인지 모호해졌다 — 지우지 않고 멈춘다. 여기서
                     # 멈추면 status는 'finalizing'에 남는다(이 드문 경우의 복구는 다루지 않는다).
                     if not single_account:
-                        await interaction.response.send_message(
-                            "참여자 계정 상태가 바뀌어 더 이상 안전하게 처리할 수 없다. "
+                        await respond(
+                            interaction,
+                            content="참여자 계정 상태가 바뀌어 더 이상 안전하게 처리할 수 없다. "
                             "처음부터 다시 시도해 달라",
                             ephemeral=True,
                         )
@@ -335,7 +347,7 @@ class _ConfirmButtonsView(discord.ui.View):
                 },
             )
             await self._ctx.notify.dm(refreshed.issuer_player_id, "연결이 완료됐다.")
-            await interaction.response.send_message("연결이 완료됐다!", ephemeral=True)
+            await respond(interaction, content="연결이 완료됐다!", ephemeral=True)
         else:
             # status는 여기서 건드리지 않는다 — issuer_confirmed/joiner_confirmed 두 불리언
             # 컬럼이 "누가 지금까지 확인했는가"를 이미 완전히 담고 있다. 예전에는 여기서
@@ -345,7 +357,7 @@ class _ConfirmButtonsView(discord.ui.View):
             # 되돌려 마무리를 한 번 더 돌게 만들 수 있었다(실제로 재현됐다). status의 전이는
             # pending → joined → finalizing → completed 뿐이고, 그 바깥 어떤 쓰기도 이
             # 분기에서는 하지 않는다.
-            await interaction.response.send_message("확인했다. 상대의 확인을 기다리는 중이다.", ephemeral=True)
+            await respond(interaction, content="확인했다. 상대의 확인을 기다리는 중이다.", ephemeral=True)
 
 
 @slash_only("연결 목록")

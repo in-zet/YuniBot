@@ -222,11 +222,34 @@ def test_build_callback_source_rejects_dunder_prefixed_arg_names() -> None:
 
 
 class _FakeResponse:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
+    """core.slash.respond()가 defer() 뒤 쓰는 followup.send/edit_original_response까지
+    흉내 낸다 — 실제 디스코드처럼 defer 이후엔 send_message를 다시 못 쓴다. 어느 경로로
+    가든 같은 `_FakeInteraction.calls`에 쌓여 기존 단언이 그대로 통한다."""
+
+    def __init__(self, owner: _FakeInteraction) -> None:
+        self._owner = owner
+        self._deferred = False
+
+    @property
+    def calls(self) -> list[dict[str, Any]]:
+        return self._owner.calls
 
     async def send_message(self, content: str | None = None, **kwargs: Any) -> None:
-        self.calls.append({"content": content, **kwargs})
+        self._owner.calls.append({"content": content, **kwargs})
+
+    async def defer(self, *, ephemeral: bool = False) -> None:
+        self._deferred = True
+
+    def is_done(self) -> bool:
+        return self._deferred
+
+
+class _FakeFollowup:
+    def __init__(self, owner: _FakeInteraction) -> None:
+        self._owner = owner
+
+    async def send(self, content: str | None = None, **kwargs: Any) -> None:
+        self._owner.calls.append({"content": content, **kwargs})
 
 
 class _FakeInteraction:
@@ -235,7 +258,15 @@ class _FakeInteraction:
     def __init__(self, user_id: int, *, guild_id: int | None = None) -> None:
         self.user = SimpleNamespace(id=user_id)
         self.guild_id = guild_id
-        self.response = _FakeResponse()
+        self.calls: list[dict[str, Any]] = []
+        self.response = _FakeResponse(self)
+        self.followup = _FakeFollowup(self)
+
+    async def edit_original_response(self, **kwargs: Any) -> None:
+        self.calls.append(kwargs)
+
+    async def delete_original_response(self) -> None:
+        pass
 
 
 def _fake(user_id: int) -> Any:
@@ -331,6 +362,27 @@ async def test_data_only_tool_reply_has_content(
     [call] = interaction.response.calls
     assert call["content"]
     assert not call.get("ephemeral")
+
+
+async def test_dispatch_defers_the_interaction_before_responding(
+    practice_tree: tuple[discord.app_commands.CommandTree[Any], ToolExecutor, PlayersService],
+) -> None:
+    """디스코드는 최초 응답을 3초 안에 받아야 한다. 도구 본문(특히 notify.dm처럼 디스코드 API를
+    한 번 더 왕복하는 호출)이 그 기한을 넘기면, defer 없이는 "Unknown interaction"(10062)으로
+    조용히 실패한다(실제로 재현됐다) — 그래서 _dispatch는 도구를 부르기 전에 반드시 먼저
+    defer부터 한다. 이 테스트는 defer가 실제로 불렸는지, 그리고 defer 뒤에도 최종 응답이
+    (followup/edit_original_response 경로로) 정확히 한 번 도착하는지를 함께 확인한다."""
+    tree, _, players = practice_tree
+    player = await players.create_player()
+    await players.link_account(player.id, "1")
+    await players.grant_tag(player.id, "practice-unlocked", source="test")
+    interaction = _fake(1)
+
+    await _practice_command(tree, "보기").callback(interaction)  # pyright: ignore[reportCallIssue]
+
+    assert interaction.response.is_done()
+    [call] = interaction.response.calls
+    assert call["content"]
 
 
 async def test_start_demo_grants_practice_unlocked_tag_and_unlocks_view(
