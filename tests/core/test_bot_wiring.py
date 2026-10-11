@@ -40,6 +40,7 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
         quiet_hours_start=datetime.time(2, 0),
         quiet_hours_end=datetime.time(6, 0),
         cookie_encryption_key=b"",
+        fetch_chunimaru_on_startup=False,
     )
 
     client, registry, executor = await build_client(config)
@@ -67,6 +68,7 @@ async def test_build_client_registers_chunithm_services_and_resolvers(tmp_path: 
         quiet_hours_start=datetime.time(2, 0),
         quiet_hours_end=datetime.time(6, 0),
         cookie_encryption_key=Fernet.generate_key(),
+        fetch_chunimaru_on_startup=False,
     )
 
     client, _registry, executor = await build_client(config)
@@ -77,6 +79,26 @@ async def test_build_client_registers_chunithm_services_and_resolvers(tmp_path: 
         assert "chunithm_net" in executor.services  # cookie 키가 있으므로 등록돼야 한다
         for ref_type in (SongQuery, ChartRef, RankRef, DifficultyRef, LampRef, ScoreRef):
             assert executor._resolvers.is_registered(ref_type)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_build_client_skips_chunimaru_fetch_when_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 테스트는 실제 사이트에 접속하지 않는다 — 스위치를 끄면 갱신 자체를 부르지 않아야 한다.
+    from services.chunithm.songdb import SongDbService
+
+    calls: list[object] = []
+
+    async def _record(self: SongDbService, http: object) -> None:
+        calls.append(http)
+
+    monkeypatch.setattr(SongDbService, "refresh_from_chunimaru", _record)
+    client, _registry, _executor = await build_client(_config(tmp_path))
+    try:
+        assert calls == []
     finally:
         await client.close()
 
@@ -123,6 +145,7 @@ def _config(tmp_path: Path, *skill_roots: Path) -> CoreConfig:
         quiet_hours_start=datetime.time(2, 0),
         quiet_hours_end=datetime.time(6, 0),
         cookie_encryption_key=b"",
+        fetch_chunimaru_on_startup=False,
     )
 
 

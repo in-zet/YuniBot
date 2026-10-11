@@ -324,7 +324,8 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     # 켜진 직후: 국제판 수록 여부·신곡 플래그를 Chunimaru songdb로 한 번 덧씌운다.
     # refresh_from_chunimaru는 실패를 삼키고 로그만 남기므로, 네트워크가 안 되는
     # 기동에서도 build_client() 전체가 죽지 않는다(Task 6).
-    await songdb_service.refresh_from_chunimaru(http_service)
+    if config.fetch_chunimaru_on_startup:
+        await songdb_service.refresh_from_chunimaru(http_service)
 
     intents = discord.Intents.default()
     intents.message_content = True

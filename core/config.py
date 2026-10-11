@@ -19,6 +19,9 @@ class CoreConfig:
     quiet_hours_start: datetime.time
     quiet_hours_end: datetime.time
     cookie_encryption_key: bytes
+    # 기동 시 Chunimaru songdb를 받아 덧씌울지. 테스트가 실제 사이트에 접속하지 않도록
+    # 끌 수 있게 둔 스위치다(운영 기본값은 켬).
+    fetch_chunimaru_on_startup: bool = True
 
 
 def _parse_time(raw: str, default: datetime.time) -> datetime.time:
