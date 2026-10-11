@@ -212,3 +212,27 @@ async def test_resolve_player_ref_free_text_fails(conn: aiosqlite.Connection) ->
 
     with pytest.raises(ResolutionError, match="모름"):
         await service.resolve("크로노", ctx)
+
+
+async def test_set_status_tag_allows_only_status_tags(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    player = await service.create_player()
+
+    await service.set_status_tag(player.id, "chunithm-linked", source="chunithm_net:login")
+    assert await service.tags_for(player.id) == {"chunithm-linked"}
+    assert await service.tag_source(player.id, "chunithm-linked") == "chunithm_net:login"
+
+    with pytest.raises(ValueError, match="상태 태그가 아니다"):
+        await service.set_status_tag(player.id, "admin", source="x")
+
+
+async def test_revoke_status_tag_allows_only_status_tags(conn: aiosqlite.Connection) -> None:
+    service = PlayersService(conn)
+    player = await service.create_player()
+    await service.set_status_tag(player.id, "chunithm-synced", source="records:first_sync")
+
+    await service.revoke_status_tag(player.id, "chunithm-synced")
+    assert await service.tags_for(player.id) == set()
+
+    with pytest.raises(ValueError, match="상태 태그가 아니다"):
+        await service.revoke_status_tag(player.id, "tester")

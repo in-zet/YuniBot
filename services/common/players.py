@@ -261,3 +261,25 @@ class PlayersService:
         if player is None:
             raise ResolutionError(message="누구인지 모름")
         return player
+
+    async def set_status_tag(self, player_id: str, tag: str, *, source: str) -> None:
+        """grant_tag와 반대 방향의 가드: STATUS_ONLY_TAGS **밖**의 태그는 거부한다.
+        chunithm_net/records 서비스가 로그인·첫 동기화를 감지했을 때만 쓴다."""
+        if tag not in STATUS_ONLY_TAGS:
+            raise ValueError(f"'{tag}'는 상태 태그가 아니다: {sorted(STATUS_ONLY_TAGS)}")
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            "INSERT INTO player_tags (player_id, tag, source, granted_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (player_id, tag) DO UPDATE SET source = excluded.source, "
+            "granted_at = excluded.granted_at",
+            (player_id, tag, source, now),
+        )
+        await self._conn.commit()
+
+    async def revoke_status_tag(self, player_id: str, tag: str) -> None:
+        if tag not in STATUS_ONLY_TAGS:
+            raise ValueError(f"'{tag}'는 상태 태그가 아니다: {sorted(STATUS_ONLY_TAGS)}")
+        await self._conn.execute(
+            "DELETE FROM player_tags WHERE player_id = ? AND tag = ?", (player_id, tag)
+        )
+        await self._conn.commit()
