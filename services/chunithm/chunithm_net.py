@@ -151,7 +151,12 @@ class ChunithmNetService:
         )
 
     async def logout(self, player_id: str, ctx: ToolContext) -> None:
-        cookie = await self._decrypted_cookie(player_id)
+        try:
+            cookie = await self._decrypted_cookie(player_id)
+        except Exception:
+            # 복호화가 안 되는 쿠키(키 교체 등)도 로컬에서는 끊을 수 있어야 한다.
+            logger.warning("저장된 쿠키를 읽지 못해 원격 로그아웃은 건너뛴다", exc_info=True)
+            cookie = None
         if cookie is not None:
             adapter = self._adapter_factory(cookie)
             try:
