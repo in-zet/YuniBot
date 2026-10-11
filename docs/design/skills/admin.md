@@ -17,7 +17,20 @@ game: common
 version: 1
 services: [players, settings, registry_snapshot]
 tags: [admin]
+settings:
+  - name: 월 비용 상한
+    kind: float
+    default: 10.0
+    description: 이 서버의 월 LLM 비용 상한(달러 추정)
+    scope: guild
+  - name: 플레이어 쿨다운
+    kind: int
+    default: 10
+    description: 플레이어별 도구 호출 쿨다운(초)
+    scope: guild
 ```
+
+이 두 설정값은 `set_limits`(확인 버튼 경유) 말고도, 코어의 공통 `/설정 바꾸기` 명령으로도 바로 바꿀 수 있다 — 이 경로는 `admin` 태그만 확인하고 확인 버튼은 없다(다른 스킬의 guild 범위 설정과 동일하게 취급된다).
 
 ## 첫 관리자
 
@@ -31,7 +44,7 @@ tags: [admin]
 | --- | --- | --- | --- | --- |
 | `usage` | 기간별 LLM 호출 수, 토큰, 추정 비용, 검색 횟수. 플레이어별·스킬별로 나눔 | `/관리 사용량` | required | never |
 | `skills` | 등록된 스킬, 켜짐 여부, 등록 실패한 스킬과 이유 | `/관리 스킬` | required | never |
-| `toggle_skill` | 이 서버에서 스킬 켜기·끄기 | `/관리 스킬설정` | optional | always |
+| `toggle_skill` | 이 서버에서 스킬 켜기·끄기. `admin`과 `account-link` 자신은 끌 수 없다(끄면 되돌릴 길이 `/관리`나 `/연결` 밖에 없어진다) | `/관리 스킬설정` | optional | always |
 | `grant_tag` / `revoke_tag` | 부여 태그와 스킬 태그 붙이기·떼기. 상태 태그는 여기서 바꿀 수 없음 | `/관리 태그부여`, `/관리 태그회수` | optional | always |
 | `set_limits` | 월 비용 상한, 플레이어별 쿨다운 | `/관리 상한` | optional | always |
 

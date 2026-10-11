@@ -333,7 +333,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - 다른 사람의 기록은 그 사람이 공개한 경우만 보인다. 메모와 목표는 기본 비공개, 동기화 리포트는 플레이어별 설정이고 기본은 채널 공개다. 본인이 채널에서 자기 기록을 요청하면 공개 설정과 상관없이 그 채널에 답한다.
 - 바꾸는 도구는 요청한 플레이어 본인의 데이터만 바꾼다(서버 공유 데이터는 mutates 설명의 예외를 따른다). 여러 건을 바꾸거나 지우면 확인 버튼을 거친다.
 - 디스코드 계정 연결과 해제는 account-link 스킬의 슬래시 명령과 버튼으로만 한다. 도구로 만들지 않는다.
-- 스킬은 manifest의 `services`에 적은 서비스만 `ctx`로 받는다. 자기 스킬의 설정(manifest의 `settings`)은 선언 없이 `ctx.settings`로 읽고, 다른 스킬의 설정은 읽지 않는다.
+- 스킬은 manifest의 `services`에 적은 서비스만 `ctx`로 받는다. 자기 스킬이 정의한 설정(manifest의 `settings`)을 읽을 때도 `settings`를 다른 서비스와 똑같이 `services`에 선언해야 `ctx.settings`를 받는다. 다른 스킬의 설정은 읽지 않는다.
 
 **권한 태그**
 
