@@ -148,6 +148,19 @@ async def test_status_reports_never_synced() -> None:
     assert result.display is not None and "아직" in (result.display.content or "")
 
 
+async def test_status_is_ephemeral() -> None:
+    # 로그인 상태, 닉네임, 기록 공개 여부는 본인만 봐야 한다 — 채널에 공개로 뜨면 안 된다.
+    skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=True, nickname="유니상")
+    players = _FakePlayers(records_public=False)
+    records = _FakeRecords(None)
+
+    result = await skill.status(_ctx(chunithm_net=chunithm_net, players=players, records=records))
+
+    assert result.display is not None
+    assert result.display.ephemeral is True
+
+
 async def test_set_privacy_updates_visibility() -> None:
     skill = _load_skill()
     players = _FakePlayers(records_public=False)

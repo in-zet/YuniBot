@@ -106,7 +106,9 @@ async def status(ctx: ToolContext) -> ToolResult:
         f"마지막 동기화: {last_synced_at or '아직 동기화한 적 없음'}",
         f"기록 공개: {'공개' if player.records_public else '비공개'}",
     ]
-    return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
+    return ToolResult(
+        data=data, display=Display(content="\n".join(lines), ephemeral=True), display_mode="optional"
+    )
 
 
 @tool(slash="기록공개", tags=["chunithm-linked"], mutates=True)
