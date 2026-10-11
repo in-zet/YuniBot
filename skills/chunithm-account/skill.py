@@ -11,34 +11,38 @@ from core.tool_types import Display, ToolContext, ToolResult
 _notified_expiries: set[str] = set()
 
 
-async def _attempt_login(ctx: ToolContext, clal: str, interaction: discord.Interaction) -> None:
-    """실제 login() 호출과 성공/실패 안내를 한 곳에 모은다. 처음 로그인하는 경로와
-    "덮어쓰기" 확인 버튼 경로가 이 함수를 같이 쓴다 — try/except를 두 번 베끼지 않는다."""
+async def _attempt_login(ctx: ToolContext, username: str, password: str, interaction: discord.Interaction) -> None:
+    """실제 login_with_credentials() 호출과 성공/실패 안내를 한 곳에 모은다. 처음
+    로그인하는 경로와 "덮어쓰기" 확인 버튼 경로가 이 함수를 같이 쓴다 — try/except를
+    두 번 베끼지 않는다."""
     try:
-        profile = await ctx.chunithm_net.login(ctx.player_id, clal, ctx)
+        profile = await ctx.chunithm_net.login_with_credentials(ctx.player_id, username, password, ctx)
     except Exception:  # noqa: BLE001 - 어떤 예외든 같은 안내만 준다. 원인 예외를 그대로
-        # 보여주면 clal이나 응답 본문의 일부가 메시지에 섞여 나갈 수 있다(CLAUDE.md 비밀 값 규칙).
+        # 보여주면 비밀번호나 응답 본문의 일부가 메시지에 섞여 나갈 수 있다(CLAUDE.md 비밀 값 규칙).
         await interaction.followup.send(
-            "로그인에 실패했다. clal 값이 올바른지, 만료되지 않았는지 확인해 달라.", ephemeral=True
+            "로그인에 실패했다. ID/비밀번호가 올바른지 확인해 달라"
+            "(OTP(2단계 인증)를 쓰는 계정은 아직 이 방법으로 로그인할 수 없다).",
+            ephemeral=True,
         )
         return
     await interaction.followup.send(f"로그인 완료! ({profile.username})", ephemeral=True)
 
 
 class _OverwriteConfirmView(discord.ui.View):
-    """이미 다른 계정으로 연결돼 있을 때만 뜬다. 제출된 clal 값은 이 뷰 인스턴스의 메모리에만
-    있고, "덮어쓰기"를 눌렀을 때 실제 login()을 부르는 데만 쓴다 — 로그에도, 메시지 내용에도
-    절대 넣지 않는다(CLAUDE.md 비밀 값 규칙)."""
+    """이미 다른 계정으로 연결돼 있을 때만 뜬다. 제출된 ID/비밀번호는 이 뷰 인스턴스의
+    메모리에만 있고, "덮어쓰기"를 눌렀을 때 실제 로그인에만 쓴다 — 로그에도, 메시지
+    내용에도 절대 넣지 않는다(CLAUDE.md 비밀 값 규칙)."""
 
-    def __init__(self, *, ctx: ToolContext, clal: str) -> None:
+    def __init__(self, *, ctx: ToolContext, username: str, password: str) -> None:
         super().__init__(timeout=120)
         self._ctx = ctx
-        self._clal = clal
+        self._username = username
+        self._password = password
 
     @discord.ui.button(label="덮어쓰기", style=discord.ButtonStyle.danger)
     async def overwrite(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
         await interaction.response.defer(ephemeral=True)
-        await _attempt_login(self._ctx, self._clal, interaction)
+        await _attempt_login(self._ctx, self._username, self._password, interaction)
 
     @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
@@ -47,12 +51,17 @@ class _OverwriteConfirmView(discord.ui.View):
 
 
 class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
-    clal_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="clal 쿠키 값",
-        style=discord.TextStyle.paragraph,
-        placeholder="chunithm-net-eng.com에 로그인한 뒤 개발자 도구에서 복사한 clal=... 값",
+    username_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
+        label="SEGA ID",
+        placeholder="CHUNITHM-NET에 로그인하는 SEGA ID",
         required=True,
-        max_length=4000,
+        max_length=64,
+    )
+    password_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
+        label="비밀번호",
+        placeholder="OTP(2단계 인증)를 쓰는 계정은 아직 지원하지 않는다",
+        required=True,
+        max_length=128,
     )
 
     def __init__(self, *, ctx: ToolContext) -> None:
@@ -62,14 +71,15 @@ class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         # defer 뒤 followup으로만 답한다 — 입력값은 채널에 남지 않고, 여기서도 다시 보여주지 않는다.
         await interaction.response.defer(ephemeral=True)
-        clal = str(self.clal_input.value)
+        username = str(self.username_input.value)
+        password = str(self.password_input.value)
 
         status = await self._ctx.chunithm_net.status(self._ctx.player_id)
         if status.linked:
             # CHUNITHM-NET 계정은 플레이어당 하나다. 다른 계정으로 다시 로그인하면 덮어쓸지
-            # 먼저 확인받는다(docs/design/skills/chunithm-account.md) — 여기서는 아직 login()을
+            # 먼저 확인받는다(docs/design/skills/chunithm-account.md) — 여기서는 아직 로그인을
             # 부르지 않는다.
-            view = _OverwriteConfirmView(ctx=self._ctx, clal=clal)
+            view = _OverwriteConfirmView(ctx=self._ctx, username=username, password=password)
             await interaction.followup.send(
                 f"이미 '{status.nickname}'(으)로 로그인되어 있다. 새 계정으로 덮어쓸까?",
                 view=view,
@@ -77,12 +87,13 @@ class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
             )
             return
 
-        await _attempt_login(self._ctx, clal, interaction)
+        await _attempt_login(self._ctx, username, password, interaction)
 
 
 @slash_only("로그인")
 async def start_login(ctx: ToolContext) -> discord.ui.Modal:
-    """clal 쿠키를 입력하는 창을 연다. 입력값은 채널에 남지 않는다."""
+    """SEGA ID/비밀번호를 입력하는 창을 연다. 입력값은 채널에 남지 않고, 로그인에
+    성공하면 거기서 나온 clal 쿠키만 저장한다 — ID/비밀번호는 저장하지 않는다."""
     return _LoginModal(ctx=ctx)
 
 

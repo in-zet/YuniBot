@@ -32,7 +32,7 @@ class _FakeChunithmNet:
 
         self._status = LoginStatus(linked=linked, nickname=nickname, last_checked_at="2026-10-11T00:00:00+00:00")
         self.logged_out: list[str] = []
-        self.login_calls: list[tuple[str, str]] = []
+        self.login_calls: list[tuple[str, str, str]] = []
         self._login_username = login_username
         self._login_error = login_error
 
@@ -42,10 +42,10 @@ class _FakeChunithmNet:
     async def logout(self, player_id: str, ctx) -> None:
         self.logged_out.append(player_id)
 
-    async def login(self, player_id: str, clal: str, ctx):
+    async def login_with_credentials(self, player_id: str, username: str, password: str, ctx):
         from types import SimpleNamespace
 
-        self.login_calls.append((player_id, clal))
+        self.login_calls.append((player_id, username, password))
         if self._login_error is not None:
             raise self._login_error
         return SimpleNamespace(username=self._login_username)
@@ -182,17 +182,18 @@ async def test_logout_clears_cookie() -> None:
 
 
 async def test_login_modal_not_linked_logs_in_directly() -> None:
-    """처음 로그인하는 경우(아직 연결 안 됨)는 확인 없이 바로 login()을 부른다."""
+    """처음 로그인하는 경우(아직 연결 안 됨)는 확인 없이 바로 login_with_credentials()를 부른다."""
     skill = _load_skill()
     chunithm_net = _FakeChunithmNet(linked=False, login_username="유니상")
 
     modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
-    modal.clal_input._value = "clal=abc123"  # TextInput의 .value는 제출 후 채워지는 속성
+    modal.username_input._value = "my-sega-id"  # TextInput의 .value는 제출 후 채워지는 속성
+    modal.password_input._value = "my-password"
     interaction = _FakeInteraction()
 
     await modal.on_submit(interaction)
 
-    assert chunithm_net.login_calls == [("p1", "clal=abc123")]
+    assert chunithm_net.login_calls == [("p1", "my-sega-id", "my-password")]
     assert interaction.followup.sent
     assert "유니상" in interaction.followup.sent[0][0]
 
@@ -203,7 +204,8 @@ async def test_login_modal_already_linked_shows_overwrite_confirm() -> None:
     chunithm_net = _FakeChunithmNet(linked=True, nickname="기존닉")
 
     modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
-    modal.clal_input._value = "clal=new999"
+    modal.username_input._value = "my-sega-id"
+    modal.password_input._value = "my-password"
     interaction = _FakeInteraction()
 
     await modal.on_submit(interaction)
@@ -216,13 +218,14 @@ async def test_login_modal_already_linked_shows_overwrite_confirm() -> None:
     assert view is not None
 
 
-async def test_login_modal_overwrite_button_logs_in_with_submitted_clal() -> None:
-    """"덮어쓰기"를 누르면 모달에 처음 제출됐던 clal 값으로 실제 login()을 부른다."""
+async def test_login_modal_overwrite_button_logs_in_with_submitted_credentials() -> None:
+    """"덮어쓰기"를 누르면 모달에 처음 제출됐던 ID/비번으로 실제 login_with_credentials()를 부른다."""
     skill = _load_skill()
     chunithm_net = _FakeChunithmNet(linked=True, nickname="기존닉", login_username="새유저")
 
     modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
-    modal.clal_input._value = "clal=new999"
+    modal.username_input._value = "my-sega-id"
+    modal.password_input._value = "my-password"
     submit_interaction = _FakeInteraction()
     await modal.on_submit(submit_interaction)
     _content, _ephemeral, view = submit_interaction.followup.sent[0]
@@ -230,18 +233,19 @@ async def test_login_modal_overwrite_button_logs_in_with_submitted_clal() -> Non
     click_interaction = _FakeInteraction()
     await view.overwrite.callback(click_interaction)
 
-    assert chunithm_net.login_calls == [("p1", "clal=new999")]
+    assert chunithm_net.login_calls == [("p1", "my-sega-id", "my-password")]
     assert click_interaction.followup.sent
     assert "새유저" in click_interaction.followup.sent[0][0]
 
 
 async def test_login_modal_cancel_button_does_not_log_in() -> None:
-    """"취소"를 누르면 login()을 부르지 않고 취소 메시지만 보여준다."""
+    """"취소"를 누르면 login_with_credentials()를 부르지 않고 취소 메시지만 보여준다."""
     skill = _load_skill()
     chunithm_net = _FakeChunithmNet(linked=True, nickname="기존닉")
 
     modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
-    modal.clal_input._value = "clal=new999"
+    modal.username_input._value = "my-sega-id"
+    modal.password_input._value = "my-password"
     submit_interaction = _FakeInteraction()
     await modal.on_submit(submit_interaction)
     _content, _ephemeral, view = submit_interaction.followup.sent[0]
@@ -252,6 +256,24 @@ async def test_login_modal_cancel_button_does_not_log_in() -> None:
     assert chunithm_net.login_calls == []
     assert click_interaction.followup.sent
     assert "취소" in click_interaction.followup.sent[0][0]
+
+
+async def test_login_modal_failure_shows_generic_message_without_leaking_password() -> None:
+    """로그인이 실패해도 비밀번호나 원인 예외를 그대로 보여주지 않는다(CLAUDE.md 비밀 값 규칙)."""
+    skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=False, login_error=RuntimeError("my-password가 틀렸다"))
+
+    modal = skill._LoginModal(ctx=_ctx(chunithm_net=chunithm_net))
+    modal.username_input._value = "my-sega-id"
+    modal.password_input._value = "my-password"
+    interaction = _FakeInteraction()
+
+    await modal.on_submit(interaction)
+
+    assert interaction.followup.sent
+    message = interaction.followup.sent[0][0]
+    assert "my-password" not in message
+    assert "실패" in message
 
 
 async def test_login_expired_handler_sends_dm_once() -> None:
