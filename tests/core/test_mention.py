@@ -134,6 +134,7 @@ async def test_mention_entry_sends_assembled_text() -> None:
         players=_FakePlayers(), notify=NotifyService.__new__(NotifyService),  # notify 미사용 경로만 테스트
         cooldown=CooldownTracker(), settings=_FakeSettings(), usage=_FakeUsage(),
         bot_discord_id="bot",
+        known_skill_names={"chunithm-border"}, skill_loading_mode="instructions",
     )
     sent: list[str] = []
 
@@ -160,6 +161,7 @@ async def test_mention_entry_cooldown_blocks_without_calling_llm() -> None:
     entry = MentionEntry(
         agent=agent, players=_FakePlayers(), notify=NotifyService.__new__(NotifyService),
         cooldown=CooldownTracker(), settings=_FakeSettings(), usage=_FakeUsage(), bot_discord_id="bot",
+        known_skill_names={"chunithm-border"}, skill_loading_mode="instructions",
     )
     sent: list[str] = []
 

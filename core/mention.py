@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, cast
 
 from core.agent import AgentLoop
 from core.cooldown import CooldownTracker, check_monthly_cap
@@ -16,7 +16,7 @@ from core.fallback_messages import (
     TOOL_CALL_CAP_MESSAGE,
 )
 from core.response_assembly import assemble_response
-from core.skill_loading import SkillLoadState
+from core.skill_loading import Mode, SkillLoadState
 from core.tool_types import ToolContext
 from services.common.notify import NotifyService
 from services.common.players import DiscordAccount, Player
@@ -98,6 +98,8 @@ class MentionEntry:
         settings,
         usage,
         bot_discord_id: str,
+        known_skill_names: set[str],
+        skill_loading_mode: str,
     ) -> None:
         self._agent = agent
         self._players = players
@@ -106,6 +108,8 @@ class MentionEntry:
         self._settings = settings
         self._usage = usage
         self._bot_discord_id = bot_discord_id
+        self._known_skill_names = known_skill_names
+        self._skill_loading_mode = skill_loading_mode
 
     async def handle(
         self,
@@ -156,7 +160,13 @@ class MentionEntry:
 
         tags = await self._players.tags_for(player.id)
         ctx = ToolContext(player_id=player.id, tags=frozenset(tags), services={}, guild_id=guild_id, usage=self._usage)
-        skill_state = SkillLoadState(mode="instructions", known_skills=set())  # core/bot.py가 실제 known_skills를 넣어 재구성(Task 15)
+        # self._skill_loading_mode는 생성자에서 str로 받는다(core/config.py의 CoreConfig는
+        # Literal["instructions", "full"]이지만, MentionEntry의 공개 인터페이스를 core/skill_loading에
+        # 묶어 두지 않으려고 여기서만 좁혀 쓴다 — 잘못된 문자열은 SkillLoadState.level_for가
+        # "instructions"가 아닌 모든 값을 "card"로 접어 안전하게 처리한다).
+        skill_state = SkillLoadState(
+            mode=cast("Mode", self._skill_loading_mode), known_skills=self._known_skill_names
+        )
 
         async with typing:
             try:

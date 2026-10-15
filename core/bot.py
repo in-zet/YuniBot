@@ -3,20 +3,28 @@ from __future__ import annotations
 
 import datetime
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import aiosqlite
 import discord
 from discord import app_commands
 
+from core.agent import AgentLoop
 from core.config import CoreConfig, load_config
 from core.contract_checks import run_all_contract_checks
+from core.cooldown import CooldownTracker
 from core.decorators import ScheduleSpec
 from core.events import EventBus, handler_kind
 from core.executor import ToolExecutor
+from core.help_slash import build_help_command
+from core.llm_gemini import GeminiLlmAdapter
+from core.mention import ChannelMessage, MentionEntry, is_mention_eligible
 from core.migrations import run_migrations
 from core.player_data import PlayerDataScanner, discover_skill_tables
+from core.prompt import PromptAssembler
 from core.registry import LoadedSkill, SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
@@ -35,6 +43,7 @@ from core.tool_types import (
     SongQuery,
     ToolContext,
 )
+from core.usage import UsageService
 from services.chunithm.chart_ref import ChartRefResolver
 from services.chunithm.chunithm_net import ChunithmNetService
 from services.chunithm.records import RecordsService
@@ -98,14 +107,22 @@ class YuniClient(discord.Client):
         test_guild_id: int | None,
         conn: aiosqlite.Connection,
         http_service: HttpService,
+        mention_entry: MentionEntry,
+        known_skill_names: set[str],
+        skill_loading_mode: str,
     ) -> None:
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self.conn = conn
         self.http_service = http_service
         self._test_guild_id = test_guild_id
+        self._mention_entry = mention_entry
+        self._known_skill_names = known_skill_names
+        self._skill_loading_mode = skill_loading_mode
 
     async def setup_hook(self) -> None:
+        assert self.user is not None  # setup_hook은 로그인 뒤에만 불린다(discord.py의 보장)
+        self._mention_entry._bot_discord_id = str(self.user.id)
         if self._test_guild_id:
             guild = discord.Object(id=self._test_guild_id)
             self.tree.copy_global_to(guild=guild)
@@ -113,29 +130,74 @@ class YuniClient(discord.Client):
         else:
             await self.tree.sync()
 
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.id == (self.user.id if self.user else None):
+            return
+        trigger = ChannelMessage(
+            message_id=str(message.id), author_discord_id=str(message.author.id), is_bot=message.author.bot,
+            content=message.content, reference_id=str(message.reference.message_id) if message.reference else None,
+            mentions_bot=self.user in message.mentions if self.user else False,
+        )
+        if not is_mention_eligible(trigger=trigger, bot_discord_id=str(self.user.id) if self.user else ""):
+            return
+
+        history_messages = [
+            msg async for msg in message.channel.history(limit=20, before=message)
+        ]
+        history = [
+            ChannelMessage(
+                message_id=str(m.id), author_discord_id=str(m.author.id), is_bot=m.author.bot, content=m.content,
+                reference_id=str(m.reference.message_id) if m.reference else None,
+                mentions_bot=self.user in m.mentions if self.user else False,
+            )
+            for m in reversed(history_messages)
+        ] + [trigger]
+
+        async def _send(text: str) -> None:
+            await message.reply(text, mention_author=False)
+
+        await self._mention_entry.handle(
+            trigger=trigger, history=history,
+            guild_id=str(message.guild.id) if message.guild else None,
+            now=datetime.datetime.now(),  # noqa: DTZ005 - 쿨다운/정지 시간대와 같은 서버 로컬 시간 기준
+            send=_send, typing=message.channel.typing(),
+        )
+
     async def close(self) -> None:
         # http_service.aclose()는 hishel의 AsyncCacheTransport.aclose()를 거쳐 캐시용
         # SQLite 연결(anysqlite)까지 닫는다 — 코어 DB 연결을 닫는 아래 줄과 같은 역할이다.
         await self.http_service.aclose()
+        # LlmAdapter 프로토콜(core/llm.py)은 aclose()를 선언하지 않는다 — 테스트용
+        # FakeLlmAdapter 등 다른 구현에는 없을 수 있는 메서드이기 때문이다. build_client가
+        # 실제로 넣는 것은 항상 GeminiLlmAdapter이므로 여기서만 구체 타입으로 좁혀 닫는다.
+        llm_adapter = cast("GeminiLlmAdapter", self._mention_entry._agent._llm)
+        await llm_adapter.aclose()
         await self.conn.close()
         await super().close()
 
 
 class _BotDiscordGateway:
-    """NotifyService가 쓰는 DiscordGateway 프로토콜의 유일한 구현. discord API는 여기서만 안다."""
+    """NotifyService가 쓰는 DiscordGateway 프로토콜의 유일한 구현. discord API는 여기서만 안다.
 
-    def __init__(self, discord_client: discord.Client) -> None:
-        self._client = discord_client
+    client를 생성자에서 바로 쥐지 않고 get_client 콜러블로 늦게 묶는다(Task 15 전에는
+    client를 먼저 만들고 notify_service를 그 다음에 만들 수 있었지만, Task 15에서
+    YuniClient.__init__이 mention_entry를 요구하게 되면서 client → mention_entry →
+    notify_service → 이 게이트웨이 → client로 이어지는 순환 의존이 생겼다. get_client는
+    실제로 메시지를 보낼 때(런타임, build_client()가 끝나고 client가 이미 만들어진
+    뒤)만 불리므로 안전하다)."""
+
+    def __init__(self, get_client: Callable[[], discord.Client]) -> None:
+        self._get_client = get_client
 
     async def send_channel_message(self, channel_id: str, content: str) -> None:
-        channel = self._client.get_channel(int(channel_id))
+        channel = self._get_client().get_channel(int(channel_id))
         # get_channel()의 반환형은 카테고리/포럼 채널도 포함한다 — 그런 채널에는 보낼 수
         # 없으므로(런타임에도 실패한다), Messageable로 좁혀진 것만 보낸다.
         if isinstance(channel, discord.abc.Messageable):
             await channel.send(content)
 
     async def send_dm(self, discord_id: str, content: str, *, view: discord.ui.View | None = None) -> None:
-        user = await self._client.fetch_user(int(discord_id))
+        user = await self._get_client().fetch_user(int(discord_id))
         if view is not None:
             await user.send(content, view=view)
         else:
@@ -318,8 +380,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     )
 
     # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야
-    # 하기 때문이다(아래 YuniClient.close() 참고). notify_service는 반대로 client가 있어야
-    # (게이트웨이가 discord.Client를 감싸므로) client 다음에 만든다.
+    # 하기 때문이다(아래 YuniClient.close() 참고).
     http_service = await build_http_service(cache_db_path=config.db_path.parent / "http_cache.sqlite")
     # 켜진 직후: 국제판 수록 여부·신곡 플래그를 Chunimaru songdb로 한 번 덧씌운다.
     # refresh_from_chunimaru는 실패를 삼키고 로그만 남기므로, 네트워크가 안 되는
@@ -327,14 +388,12 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     if config.fetch_chunimaru_on_startup:
         await songdb_service.refresh_from_chunimaru(http_service)
 
-    intents = discord.Intents.default()
-    intents.message_content = True
-    client = YuniClient(
-        intents=intents, test_guild_id=config.test_guild_id, conn=conn, http_service=http_service
-    )
-
+    # client → mention_entry → notify_service → _BotDiscordGateway → client로 이어지는
+    # 순환을 끊으려고, notify_service의 게이트웨이는 client를 바로 쥐지 않고 아래
+    # client_holder(런타임에만 채워지는 한 칸짜리 상자)를 통해 늦게 참조한다.
+    client_holder: list[YuniClient] = []
     notify_service = NotifyService(
-        gateway=_BotDiscordGateway(client),
+        gateway=_BotDiscordGateway(lambda: client_holder[0]),
         players=players,
         settings=settings_service,
         threads=ThreadManager(),
@@ -344,6 +403,41 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     services["http"] = http_service
     services["notify"] = notify_service
     services["yuni"] = yuni_service
+
+    usage_service = UsageService(conn)
+    services["usage"] = usage_service
+
+    prompt_assembler = PromptAssembler(
+        rules_text=Path("prompts/rules.md").read_text(),
+        persona_text=Path("prompts/persona.md").read_text(),
+        registry=registry,
+    )
+    # google-genai의 Client(api_key="")는 "네트워크 없이 어댑터 객체만 만든다"가 아니라,
+    # 생성 시점에 키가 비어 있으면(환경변수 GOOGLE_API_KEY/GEMINI_API_KEY도 없으면) 바로
+    # ValueError를 던진다 — 테스트처럼 키 없이 build_client를 띄우는 경로를 막아서는 안
+    # 되므로(실제 호출은 멘션 경로에서 어차피 try/except로 LLM_FAILURE_MESSAGE로 감싼다),
+    # 빈 키는 더미 값으로 바꿔 구성만 통과시킨다.
+    llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
+    agent_loop = AgentLoop(
+        llm=llm_adapter, executor=executor, prompt=prompt_assembler,
+        model=config.agent_model, thinking_level=config.thinking_level,
+        max_tool_calls=config.max_tool_calls_per_turn, max_tokens=config.max_tokens_per_turn,
+    )
+    known_skill_names = {s.manifest.name for s in registry.enabled_skills()}
+    mention_entry = MentionEntry(
+        agent=agent_loop, players=players, notify=notify_service, cooldown=CooldownTracker(),
+        settings=settings_service, usage=usage_service, bot_discord_id="",  # client.user가 생기기 전이라 setup_hook에서 채운다
+        known_skill_names=known_skill_names, skill_loading_mode=config.skill_loading_mode,
+    )
+
+    intents = discord.Intents.default()
+    intents.message_content = True
+    client = YuniClient(
+        intents=intents, test_guild_id=config.test_guild_id, conn=conn, http_service=http_service,
+        mention_entry=mention_entry, known_skill_names=known_skill_names,
+        skill_loading_mode=config.skill_loading_mode,
+    )
+    client_holder.append(client)
 
     # 기동 시 한 번: 스킬의 @schedule을 DB와 맞추고, 꺼져 있던 동안 밀린 "오늘" 몫만 돌린다.
     # 평상시 실시간 폴링 루프는 @schedule을 쓰는 스킬이 생기는 단계에서 더한다(지금은 없다).
@@ -378,6 +472,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     client.tree.add_command(
         build_settings_group(registry=registry, settings=settings_service, players=players)
     )
+    client.tree.add_command(build_help_command(registry=registry, tag_provider=players))
 
     return client, registry, executor
 

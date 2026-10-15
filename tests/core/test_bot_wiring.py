@@ -49,9 +49,10 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
     assert client.tree.get_command("연습") is not None  # 그룹: "연습 보기" 등
     # 이 단계(18단계)에서 와이어링한 여섯 서비스가 전부 실행기까지 도달해야 한다 —
     # scheduler catch-up이 services 채우기보다 먼저 돌면 이 중 일부가 비어 있다.
+    # usage는 Task 15에서 추가로 와이어링됐다(admin.usage 등이 ctx.usage로 쓴다).
     assert set(executor.services) == {
         "players", "settings", "memory", "arcades", "http", "notify", "yuni",
-        "songdb", "terms", "records",
+        "songdb", "terms", "records", "usage",
     }
 
     await client.close()
@@ -321,3 +322,17 @@ async def test_sync_admin_bootstrap_keeps_the_last_admin_even_if_dropped_from_en
     assert "마지막 관리자" in caplog.text
 
     await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_build_client_registers_usage_service(tmp_path: Path) -> None:
+    # gemini_api_key가 비어 있어도 build_client는 떠야 한다(실제 LLM 호출 없이 어댑터
+    # 객체만 만들기 때문이다 — genai.Client(api_key="")는 생성 시점에 네트워크를 안 쓴다).
+    config = _config(tmp_path)
+
+    client, _registry, executor = await build_client(config)
+    try:
+        assert "usage" in executor.services
+        assert client.tree.get_command("도움말") is not None
+    finally:
+        await client.close()
