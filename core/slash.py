@@ -306,7 +306,7 @@ async def _player_context(
     skill_services = {
         name: executor.services[name] for name in entry.skill_services if name in executor.services
     }
-    # db/player_data/registry_snapshot은 ToolContext의 전용 필드지만, 다른 서비스와 똑같이
+    # db/player_data/registry_snapshot/usage는 ToolContext의 전용 필드지만, 다른 서비스와 똑같이
     # manifest.services에 선언한 스킬에게만 준다(core/registry.py의 CTX_FIELD_SERVICE_NAMES).
     # 선언하지 않은 스킬이 임의 테이블을 읽고 쓰거나 남의 데이터를 지울 수 없게 한다.
     declared = set(entry.skill_services)
