@@ -145,3 +145,43 @@ async def test_agent_loop_surfaces_tag_error_from_executor_as_function_response(
     result = await loop.run(ctx=_ctx(), skill_state=_state(registry, mode="full"), user_text="질문", prompt_context_snippets=[])
     assert result.text == "막혔다"
     assert "error" in seen_function_responses[0]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_rejects_confirm_always_tool_without_crashing() -> None:
+    registry = _registry()
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(
+            call_id="1", name="admin_set_limits",
+            args={"monthly_cost_cap": 20.0, "player_cooldown_seconds": 5},
+        )],
+        usage=UsageInfo(input_tokens=10, output_tokens=1),
+    )
+    seen_function_responses: list[dict[str, object]] = []
+
+    def script(
+        model: str, system: str, contents: list[LlmContent], tools: list[ToolDeclaration]
+    ) -> GenerationTurn:
+        if len(contents) == 1:
+            return call_turn
+        last_content = contents[-1]
+        for part in last_content.parts:
+            if part.function_response is not None:
+                seen_function_responses.append(part.function_response.response)
+        return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="알겠다")]), text="알겠다")
+
+    loop = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    # admin 스킬은 tags=[admin]을 요구한다. admin_set_limits는 confirm="always"라
+    # ToolExecutor.invoke가 result=None, needs_confirm=True를 돌려주는 경로를 탄다 —
+    # AgentLoop._invoke의 assert outcome.result is not None 바로 앞 분기다.
+    ctx = ToolContext(player_id="p1", tags=frozenset({"admin"}), services={})
+    result = await loop.run(ctx=ctx, skill_state=_state(registry, mode="full"), user_text="월 비용 상한 20불로 바꿔줘", prompt_context_snippets=[])
+    assert result.text == "알겠다"
+    error_value = seen_function_responses[0].get("error")
+    assert isinstance(error_value, str)
+    assert "슬래시 명령으로만 확인할 수 있다" in error_value
