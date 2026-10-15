@@ -72,3 +72,46 @@ def test_load_config_defaults_admin_ids_and_quiet_hours(monkeypatch: pytest.Monk
     assert config.quiet_hours_start == datetime.time(2, 0)
     assert config.quiet_hours_end == datetime.time(6, 0)
     assert config.cookie_encryption_key == b""
+
+
+def test_load_config_llm_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("core.config.load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("AGENT_MODEL", raising=False)
+    monkeypatch.delenv("SUMMARY_MODEL", raising=False)
+    monkeypatch.delenv("THINKING_LEVEL", raising=False)
+    monkeypatch.delenv("SKILL_LOADING_MODE", raising=False)
+    monkeypatch.delenv("MAX_TOOL_CALLS_PER_TURN", raising=False)
+    monkeypatch.delenv("MAX_TOKENS_PER_TURN", raising=False)
+
+    config = load_config()
+
+    assert config.gemini_api_key == ""
+    assert config.agent_model == "gemini-3.8-flash"
+    assert config.summary_model == "gemini-3.5-flash-lite"
+    assert config.thinking_level == "low"
+    assert config.skill_loading_mode == "instructions"
+    assert config.max_tool_calls_per_turn == 5
+    assert config.max_tokens_per_turn == 50000
+
+
+def test_load_config_llm_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+    monkeypatch.setenv("AGENT_MODEL", "gemini-3.5-flash-lite")
+    monkeypatch.setenv("SUMMARY_MODEL", "gemini-3.1-flash-lite")
+    monkeypatch.setenv("THINKING_LEVEL", "high")
+    monkeypatch.setenv("SKILL_LOADING_MODE", "full")
+    monkeypatch.setenv("MAX_TOOL_CALLS_PER_TURN", "3")
+    monkeypatch.setenv("MAX_TOKENS_PER_TURN", "20000")
+
+    config = load_config()
+
+    assert config.gemini_api_key == "fake-key"
+    assert config.agent_model == "gemini-3.5-flash-lite"
+    assert config.summary_model == "gemini-3.1-flash-lite"
+    assert config.thinking_level == "high"
+    assert config.skill_loading_mode == "full"
+    assert config.max_tool_calls_per_turn == 3
+    assert config.max_tokens_per_turn == 20000

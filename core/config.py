@@ -5,6 +5,7 @@ import datetime
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 
 from dotenv import load_dotenv
 
@@ -22,6 +23,13 @@ class CoreConfig:
     # 기동 시 Chunimaru songdb를 받아 덧씌울지. 테스트가 실제 사이트에 접속하지 않도록
     # 끌 수 있게 둔 스위치다(운영 기본값은 켬).
     fetch_chunimaru_on_startup: bool = True
+    gemini_api_key: str = ""
+    agent_model: str = "gemini-3.8-flash"
+    summary_model: str = "gemini-3.5-flash-lite"
+    thinking_level: Literal["low", "medium", "high"] = "low"
+    skill_loading_mode: Literal["instructions", "full"] = "instructions"
+    max_tool_calls_per_turn: int = 5
+    max_tokens_per_turn: int = 50000
 
 
 def _parse_time(raw: str, default: datetime.time) -> datetime.time:
@@ -57,6 +65,14 @@ def load_config() -> CoreConfig:
 
     cookie_key = os.environ.get("COOKIE_ENCRYPTION_KEY", "").encode()
 
+    gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+    agent_model = os.environ.get("AGENT_MODEL", "gemini-3.8-flash")
+    summary_model = os.environ.get("SUMMARY_MODEL", "gemini-3.5-flash-lite")
+    thinking_level_raw = os.environ.get("THINKING_LEVEL", "low")
+    skill_loading_mode_raw = os.environ.get("SKILL_LOADING_MODE", "instructions")
+    max_tool_calls_per_turn = int(os.environ.get("MAX_TOOL_CALLS_PER_TURN", "5"))
+    max_tokens_per_turn = int(os.environ.get("MAX_TOKENS_PER_TURN", "50000"))
+
     return CoreConfig(
         discord_token=token,
         skills_dirs=skills_dirs,
@@ -66,4 +82,11 @@ def load_config() -> CoreConfig:
         quiet_hours_start=quiet_start,
         quiet_hours_end=quiet_end,
         cookie_encryption_key=cookie_key,
+        gemini_api_key=gemini_api_key,
+        agent_model=agent_model,
+        summary_model=summary_model,
+        thinking_level=cast("Literal['low', 'medium', 'high']", thinking_level_raw),
+        skill_loading_mode=cast("Literal['instructions', 'full']", skill_loading_mode_raw),
+        max_tool_calls_per_turn=max_tool_calls_per_turn,
+        max_tokens_per_turn=max_tokens_per_turn,
     )
