@@ -161,6 +161,16 @@ class AgentLoop:
             contents.append(LlmContent(role="user", parts=response_parts))
 
     async def _invoke(self, ctx: ToolContext, tool_name: str, args: dict[str, Any]) -> ToolResult:
+        if tool_name == "list_capabilities":
+            from core.capabilities import build_capabilities_text
+
+            text = build_capabilities_text(
+                registry=self._prompt._registry,
+                player_tags=set(ctx.tags), tag_definitions=self._prompt._registry.tag_definitions(),
+                category=args.get("category"),
+            )
+            return ToolResult(data={"capabilities": text}, display=Display(content=text, ephemeral=True))
+
         found = self._find_spec(tool_name)
         if found is None:
             return ToolResult(error=f"'{tool_name}'이라는 도구가 없다")

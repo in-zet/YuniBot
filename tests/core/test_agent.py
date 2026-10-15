@@ -185,3 +185,20 @@ async def test_agent_loop_rejects_confirm_always_tool_without_crashing() -> None
     error_value = seen_function_responses[0].get("error")
     assert isinstance(error_value, str)
     assert "슬래시 명령으로만 확인할 수 있다" in error_value
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_handles_list_capabilities_directly() -> None:
+    registry = _registry()
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="list_capabilities", args={})],
+    )
+    answer_turn = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="안내함")]), text="안내함")
+    loop = AgentLoop(
+        llm=FakeLlmAdapter([call_turn, answer_turn]), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    result = await loop.run(ctx=_ctx(), skill_state=_state(registry), user_text="뭐 할 수 있어?", prompt_context_snippets=[])
+    assert result.text == "안내함"

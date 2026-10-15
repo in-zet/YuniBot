@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import aiosqlite
 import pytest
@@ -12,8 +13,22 @@ from core.registry import SkillRegistry
 from core.registry_snapshot import RegistrySnapshot, SkillSummary
 from core.resolvers import ResolverRegistry
 from core.tool_types import PlayerRef, ToolContext
+from core.usage import UsageService, UsageSummary
 from services.common.players import PlayersService
 from services.common.settings import SettingsService
+
+
+class _FakeUsageService:
+    """admin.usage 테스트용 UsageService 더블 — 미리 정한 요약을 그대로 돌려준다.
+    실제 UsageService를 상속하지 않아(aiosqlite 연결이 필요 없다) ToolContext.usage에 넣을 때는
+    cast로 타입을 맞춘다(tests/core/test_slash.py의 _NO_DB와 같은 패턴)."""
+
+    def __init__(self, summary: UsageSummary) -> None:
+        self._summary = summary
+
+    async def month_summary(self, *, guild_id: str, year_month: str) -> UsageSummary:
+        return self._summary
+
 
 _CORE_MIGRATIONS = [
     Path("migrations/core/001_players.sql").read_text(),
@@ -51,10 +66,10 @@ async def admin_env():
         failures={},
     )
 
-    def make_ctx(player_id: str, *, guild_id: str | None = "g1") -> ToolContext:
+    def make_ctx(player_id: str, *, guild_id: str | None = "g1", usage: UsageService | None = None) -> ToolContext:
         return ToolContext(
             player_id=player_id, tags=frozenset(), services={"players": players, "settings": settings},
-            guild_id=guild_id, registry_snapshot=snapshot,
+            guild_id=guild_id, registry_snapshot=snapshot, usage=usage,
         )
 
     try:
@@ -166,12 +181,36 @@ async def test_set_limits_stores_guild_scoped_values(admin_env) -> None:
     ) == 5
 
 
-async def test_usage_returns_empty_placeholder(admin_env) -> None:
+async def test_usage_returns_zero_when_no_calls_recorded(admin_env) -> None:
     skill, _, _, make_ctx = admin_env
-    result = await skill.usage(make_ctx("admin1"))
+    ctx = make_ctx("admin1", usage=cast(UsageService, cast(object, _FakeUsageService(UsageSummary(total_usd=0.0)))))
+
+    result = await skill.usage(ctx)
 
     assert result.error is None
     assert result.data["calls"] == 0
+
+
+async def test_usage_reports_real_totals_from_usage_service(admin_env) -> None:
+    skill, _, _, make_ctx = admin_env
+    summary = UsageSummary(
+        total_usd=1.23, by_player={"p1": 1.23}, calls=4, total_input_tokens=100, total_output_tokens=20,
+    )
+    ctx = make_ctx("admin1", usage=cast(UsageService, cast(object, _FakeUsageService(summary))))
+
+    result = await skill.usage(ctx)
+
+    assert result.data["estimated_cost_usd"] == 1.23
+    assert result.data["calls"] == 4
+
+
+async def test_usage_requires_guild(admin_env) -> None:
+    skill, _, _, make_ctx = admin_env
+    ctx = make_ctx("admin1", guild_id=None)
+
+    result = await skill.usage(ctx)
+
+    assert result.error is not None
 
 
 async def test_admin_skill_blocked_without_admin_tag() -> None:
@@ -201,7 +240,10 @@ async def test_admin_skill_blocked_without_admin_tag() -> None:
     assert outcome.result.error == "모르는 명령이에요"
 
     await players.grant_tag(player.id, "admin", source="test")
-    ctx2 = ToolContext(player_id=player.id, tags=frozenset(await players.tags_for(player.id)), services={})
+    ctx2 = ToolContext(
+        player_id=player.id, tags=frozenset(await players.tags_for(player.id)), services={},
+        guild_id="g1", usage=cast(UsageService, cast(object, _FakeUsageService(UsageSummary(total_usd=0.0)))),
+    )
     outcome2 = await executor.invoke(spec, ctx2, {}, skill_tags=skill.manifest.tags, skill_name="admin")
     assert outcome2.result is not None
     assert outcome2.result.error is None

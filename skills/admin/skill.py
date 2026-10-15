@@ -10,8 +10,24 @@ _UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
 
 @tool(slash="관리 사용량")
 async def usage(ctx: ToolContext) -> ToolResult:
-    """기간별 LLM 호출 수, 토큰, 추정 비용을 보여준다. LLM이 아직 없어 자리만 채운다."""
-    return ToolResult(data={"calls": 0, "tokens": 0, "estimated_cost_usd": 0.0}, display=Display(ephemeral=True))
+    """이번 달 LLM 호출 수, 토큰, 추정 비용을 플레이어별로 보여준다."""
+    if ctx.guild_id is None:
+        return ToolResult(error="서버 안에서만 쓸 수 있다")
+    if ctx.usage is None:
+        return ToolResult(error="사용량 서비스를 아직 쓸 수 없다")
+    import datetime
+
+    year_month = datetime.datetime.now(datetime.UTC).strftime("%Y-%m")
+    summary = await ctx.usage.month_summary(guild_id=ctx.guild_id, year_month=year_month)
+    lines = [f"이번 달({year_month}) LLM 사용량", f"호출 {summary.calls}회, 추정 비용 ${summary.total_usd:.2f}"]
+    lines += [f"- {player_id}: ${cost:.2f}" for player_id, cost in summary.by_player.items()]
+    return ToolResult(
+        data={
+            "calls": summary.calls, "tokens": summary.total_input_tokens + summary.total_output_tokens,
+            "estimated_cost_usd": round(summary.total_usd, 2),
+        },
+        display=Display(content="\n".join(lines), ephemeral=True),
+    )
 
 
 @tool(slash="관리 스킬")

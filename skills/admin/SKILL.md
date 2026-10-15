@@ -7,7 +7,7 @@ examples:
 category: 관리
 game: common
 version: 1
-services: [players, settings, registry_snapshot]
+services: [players, settings, registry_snapshot, usage]
 tags: [admin]
 settings:
   - name: 월 비용 상한
