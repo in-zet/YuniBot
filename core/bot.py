@@ -417,6 +417,10 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     # ValueError를 던진다 — 테스트처럼 키 없이 build_client를 띄우는 경로를 막아서는 안
     # 되므로(실제 호출은 멘션 경로에서 어차피 try/except로 LLM_FAILURE_MESSAGE로 감싼다),
     # 빈 키는 더미 값으로 바꿔 구성만 통과시킨다.
+    if not config.gemini_api_key:
+        logger.warning(
+            "GEMINI_API_KEY가 비어 있다 - 설정 전까지 모든 멘션이 실패한다"
+        )
     llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
     agent_loop = AgentLoop(
         llm=llm_adapter, executor=executor, prompt=prompt_assembler,

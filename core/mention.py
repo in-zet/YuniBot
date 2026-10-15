@@ -1,6 +1,7 @@
 # core/mention.py
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ from services.common.notify import NotifyService
 from services.common.players import DiscordAccount, Player
 
 MAX_CONTEXT_MESSAGES = 6
+
+logger = logging.getLogger(__name__)
 
 
 class _PlayersLike(Protocol):
@@ -174,7 +177,8 @@ class MentionEntry:
                     ctx=ctx, skill_state=skill_state, user_text=user_text,
                     prompt_context_snippets=prompt_context_snippets,
                 )
-            except Exception:  # noqa: BLE001 - LLM/네트워크 어떤 실패든 디스코드 핸들러를 죽이지 않고 고정 문구로 돌린다
+            except Exception:  # LLM/네트워크 어떤 실패든 디스코드 핸들러를 죽이지 않고 고정 문구로 돌린다
+                logger.warning("플레이어 %s의 멘션 처리 실패, 고정 문구로 응답한다", player.id, exc_info=True)
                 await send(LLM_FAILURE_MESSAGE)
                 return
 
