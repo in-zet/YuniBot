@@ -32,7 +32,7 @@ class FakeLlmAdapter:
         tools: list[ToolDeclaration],
         thinking_level: str,
     ) -> GenerationTurn:
-        self.calls.append((model, system_instruction, contents, tools))
+        self.calls.append((model, system_instruction, list(contents), list(tools)))
         if callable(self._script):
             return self._script(model, system_instruction, contents, tools)
         turn = self._script[self._index]
