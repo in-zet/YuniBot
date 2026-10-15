@@ -319,6 +319,7 @@ async def _player_context(
         player_data=executor.player_data if "player_data" in declared else None,
         db=db if "db" in declared else None,
         registry_snapshot=registry_snapshot if "registry_snapshot" in declared else None,
+        usage=executor.services.get("usage") if "usage" in declared else None,  # pyright: ignore[reportArgumentType]
         discord_id=discord_id,
     )
     return ctx, is_new_player

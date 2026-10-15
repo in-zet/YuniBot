@@ -10,6 +10,7 @@ import aiosqlite
 from core.events import EventBus
 from core.player_data import PlayerDataScanner
 from core.registry_snapshot import RegistrySnapshot
+from core.usage import UsageService
 
 
 class UndeclaredServiceError(AttributeError):
@@ -32,6 +33,7 @@ class ToolContext:
     player_data: PlayerDataScanner | None = None
     db: aiosqlite.Connection | None = None
     registry_snapshot: RegistrySnapshot | None = None
+    usage: UsageService | None = None
     discord_id: str | None = None
 
     def __getattr__(self, name: str) -> Any:
