@@ -432,10 +432,17 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
             "GEMINI_API_KEY가 비어 있다 - 설정 전까지 모든 멘션이 실패한다"
         )
     llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
+    # registry_snapshot은 슬래시 쪽(아래 attach_to_tree)보다 먼저 만든다 — AgentLoop도 같은
+    # 스냅샷을 쥐고 있어야 멘션 경로의 admin_skills 같은 도구가 ctx.registry_snapshot을 쓸 수
+    # 있다(core/slash.py의 _player_context와 같은 배선). registry는 이 시점 이후로
+    # enabled_skills/failures가 바뀌지 않는다(계약 검사/이벤트 핸들러 등록에서 비활성화가 이미
+    # 끝났다) — 여기서 한 번만 만들어 두 경로가 같은 스냅샷을 공유해도 안전하다.
+    snapshot = build_snapshot(registry)
     agent_loop = AgentLoop(
         llm=llm_adapter, executor=executor, prompt=prompt_assembler,
         model=config.agent_model, thinking_level=config.thinking_level,
         max_tool_calls=config.max_tool_calls_per_turn, max_tokens=config.max_tokens_per_turn,
+        db=conn, registry_snapshot=snapshot,
     )
     known_skill_names = {s.manifest.name for s in registry.enabled_skills()}
     mention_entry = MentionEntry(
@@ -481,7 +488,6 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         await event_bus.emit_notify(once.event_name, once.payload)
 
     plan = build_slash_plan(registry.tool_specs())
-    snapshot = build_snapshot(registry)
     attach_to_tree(client.tree, plan, executor=executor, db=conn, registry_snapshot=snapshot)
     client.tree.add_command(
         build_settings_group(registry=registry, settings=settings_service, players=players)

@@ -17,6 +17,7 @@ from core.llm import (
 from core.permissions import InMemoryTagProvider
 from core.prompt import PromptAssembler
 from core.registry import SkillRegistry
+from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
 from core.skill_loading import Mode, SkillLoadState
 from core.tool_types import ToolContext
@@ -202,3 +203,188 @@ async def test_agent_loop_handles_list_capabilities_directly() -> None:
     )
     result = await loop.run(ctx=_ctx(), skill_state=_state(registry), user_text="뭐 할 수 있어?", prompt_context_snippets=[])
     assert result.text == "안내함"
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_scopes_registry_snapshot_to_declared_skill_tool() -> None:
+    # Task 17 리뷰에서 드러난 결함의 핵심 회귀 테스트: core/mention.py가 만드는 ToolContext는
+    # services={}이고, AgentLoop가 그걸 그대로 돌려쓰면 admin_skills처럼 manifest.services에
+    # registry_snapshot을 선언한 스킬 도구가 멘션 경로에서는 항상 "스킬 현황을 아직 알 수
+    # 없다"로 실패했다(슬래시 경로는 core/slash.py._player_context가 따로 채워 줘서 멀쩡했다).
+    # AgentLoop(registry_snapshot=...)로 넘긴 스냅샷이 실제로 admin 스킬 도구까지 도달하는지 본다.
+    registry = _registry()
+    snapshot = build_snapshot(registry)
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="admin_skills", args={})],
+        usage=UsageInfo(input_tokens=10, output_tokens=1),
+    )
+    seen_function_responses: list[dict[str, object]] = []
+
+    def script(
+        model: str, system: str, contents: list[LlmContent], tools: list[ToolDeclaration]
+    ) -> GenerationTurn:
+        if len(contents) == 1:
+            return call_turn
+        for part in contents[-1].parts:
+            if part.function_response is not None:
+                seen_function_responses.append(part.function_response.response)
+        return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="봤다")]), text="봤다")
+
+    loop = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+        registry_snapshot=snapshot,
+    )
+    # admin 스킬은 tags=[admin]을 요구한다 — admin 태그를 준다.
+    ctx = ToolContext(player_id="p1", tags=frozenset({"admin"}), services={})
+    result = await loop.run(
+        ctx=ctx, skill_state=_state(registry, mode="full"), user_text="스킬 현황 보여줘", prompt_context_snippets=[]
+    )
+
+    assert result.text == "봤다"
+    response = seen_function_responses[0]
+    assert "error" not in response  # 이전 버그에서는 "스킬 현황을 아직 알 수 없다"로 막혔다
+    enabled = response["enabled"]
+    assert isinstance(enabled, list)
+    assert "chunithm-border" in enabled  # registry_snapshot이 실제 등록 현황을 담고 왔다는 증거
+
+
+class _FakeMemoryService:
+    def __init__(self) -> None:
+        self.saved: dict[str, str] = {}
+
+    async def get(self, player_id: str) -> str:
+        return self.saved.get(player_id, "")
+
+    async def set(self, player_id: str, content: str) -> None:
+        self.saved[player_id] = content
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_core_tool_remember_resolves_memory_service() -> None:
+    # remember는 core 도구(skill_name=None)라 manifest 선언 범위에 걸리지 않고, executor에
+    # 등록된 실제 "memory" 서비스(core/bot.py.build_client가 쓰는 바로 그 키 이름)를 받아야
+    # 한다. 이전 버그에서는 core/mention.py의 빈 services={}가 그대로 내려와 ctx.memory 접근이
+    # UndeclaredServiceError로 터졌다(에러가 함수 응답의 "error" 키로 모델에 전달됐다).
+    registry = _registry()
+    memory = _FakeMemoryService()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(), services={"memory": memory},
+    )
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="remember", args={"content": "민트초코 좋아함"})],
+        usage=UsageInfo(input_tokens=10, output_tokens=1),
+    )
+    seen_function_responses: list[dict[str, object]] = []
+
+    def script(
+        model: str, system: str, contents: list[LlmContent], tools: list[ToolDeclaration]
+    ) -> GenerationTurn:
+        if len(contents) == 1:
+            return call_turn
+        for part in contents[-1].parts:
+            if part.function_response is not None:
+                seen_function_responses.append(part.function_response.response)
+        return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="기억했다")]), text="기억했다")
+
+    loop = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=executor,
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    result = await loop.run(
+        ctx=_ctx(), skill_state=_state(registry), user_text="민트초코 좋아하는 거 기억해줘", prompt_context_snippets=[]
+    )
+
+    assert result.text == "기억했다"
+    response = seen_function_responses[0]
+    assert "error" not in response
+    assert response["saved"] == "민트초코 좋아함"
+    assert memory.saved["p1"] == "민트초코 좋아함"
+
+
+def _write_scope_probe_skill(root: Path, name: str, *, services: list[str]) -> Path:
+    """manifest.services에 적은 이름만 ctx.services 딕셔너리에 실제로 들어오는지 보는
+    테스트 전용 스킬. tests/core/skill_factory.write_skill은 services: []를 고정해 두므로
+    (스코프 자체를 시험하는 이 테스트에는 안 맞는다) 여기서 manifest를 직접 만든다."""
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True)
+    services_yaml = "[" + ", ".join(services) + "]"
+    (skill_dir / "SKILL.md").write_text(
+        f"""---
+name: {name}
+description: 테스트용 서비스 스코프 확인 스킬
+examples:
+  - 예시
+category: 메모
+game: common
+version: 1
+services: {services_yaml}
+---
+
+테스트용.
+"""
+    )
+    (skill_dir / "skill.py").write_text(
+        "from core.decorators import tool\n"
+        "from core.tool_types import ToolContext, ToolResult\n\n\n"
+        "@tool()\n"
+        "async def check_scope(ctx: ToolContext) -> ToolResult:\n"
+        '    """테스트용: ctx.services에 실제로 들어온 키만 그대로 보여준다."""\n'
+        "    return ToolResult(data={\"services\": sorted(ctx.services.keys())})\n"
+    )
+    return skill_dir
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_does_not_leak_undeclared_services_into_skill_tool_ctx(tmp_path: Path) -> None:
+    # 보안 회귀 테스트: executor.services에는 "terms"/"players"/"settings" 셋 다 등록돼 있지만,
+    # 이 스킬은 manifest.services에 "terms"만 선언했다 — 스킬 도구에 실제로 전달되는 scoped
+    # ToolContext.services 딕셔너리 내용물이 선언한 것 하나만 담고 있어야 한다(신뢰로 때우지
+    # 않고 실제 딕셔너리 내용을 직접 확인한다).
+    skills_root = tmp_path / "skills"
+    _write_scope_probe_skill(skills_root, "scope-check", services=["terms"])
+
+    registry = SkillRegistry([Path("skills"), skills_root])
+    registry.load()
+    assert "scope-check" in {s.manifest.name for s in registry.enabled_skills()}, registry.failures()
+
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(),
+        services={"terms": object(), "players": object(), "settings": object()},
+    )
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="scope-check_check_scope", args={})],
+        usage=UsageInfo(input_tokens=10, output_tokens=1),
+    )
+    seen_function_responses: list[dict[str, object]] = []
+
+    def script(
+        model: str, system: str, contents: list[LlmContent], tools: list[ToolDeclaration]
+    ) -> GenerationTurn:
+        if len(contents) == 1:
+            return call_turn
+        for part in contents[-1].parts:
+            if part.function_response is not None:
+                seen_function_responses.append(part.function_response.response)
+        return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="봤다")]), text="봤다")
+
+    loop = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=executor,
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    result = await loop.run(
+        ctx=_ctx(), skill_state=_state(registry, mode="full"), user_text="테스트", prompt_context_snippets=[]
+    )
+
+    assert result.text == "봤다"
+    response = seen_function_responses[0]
+    assert "error" not in response
+    assert response["services"] == ["terms"]  # "players"/"settings"는 선언 안 했으니 안 보여야 한다

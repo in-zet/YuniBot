@@ -1,8 +1,11 @@
 # core/agent.py
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
+
+import aiosqlite
 
 from core.core_tools import CORE_TOOL_SPECS
 from core.decorators import ToolSpec
@@ -16,6 +19,7 @@ from core.llm import (
 )
 from core.prompt import PromptAssembler
 from core.registry import LoadedSkill
+from core.registry_snapshot import RegistrySnapshot
 from core.skill_loading import SkillLoadState
 from core.tool_types import Display, ToolContext, ToolResult
 
@@ -49,6 +53,8 @@ class AgentLoop:
         thinking_level: str,
         max_tool_calls: int,
         max_tokens: int,
+        db: aiosqlite.Connection | None = None,
+        registry_snapshot: RegistrySnapshot | None = None,
     ) -> None:
         self._llm = llm
         self._executor = executor
@@ -57,6 +63,8 @@ class AgentLoop:
         self._thinking_level = thinking_level
         self._max_tool_calls = max_tool_calls
         self._max_tokens = max_tokens
+        self._db = db
+        self._registry_snapshot = registry_snapshot
 
     def _registry_skills(self) -> list[LoadedSkill]:
         # PromptAssembler는 registry를 공개 속성으로 내지 않는다. 같은 core/ 패키지 안의
@@ -178,15 +186,19 @@ class AgentLoop:
 
         skill_tags: list[str] = []
         skill_tags_any: list[str] = []
+        declared_services: list[str] = []
         if skill_name is not None:
             for skill in self._registry_skills():
                 if skill.manifest.name == skill_name:
                     skill_tags = list(skill.manifest.tags)
                     skill_tags_any = list(skill.manifest.tags_any)
+                    declared_services = list(skill.manifest.services)
                     break
 
+        scoped_ctx = self._scoped_ctx(ctx, skill_name=skill_name, declared_services=declared_services)
+
         outcome = await self._executor.invoke(
-            spec, ctx, args, skill_tags=skill_tags, skill_tags_any=skill_tags_any, skill_name=skill_name,
+            spec, scoped_ctx, args, skill_tags=skill_tags, skill_tags_any=skill_tags_any, skill_name=skill_name,
         )
         if outcome.needs_confirm:
             # 멘션 경로에서 confirm="always" 도구는 디스코드 버튼을 낼 인터랙션이 없다
@@ -194,3 +206,45 @@ class AgentLoop:
             return ToolResult(error="이 작업은 슬래시 명령으로만 확인할 수 있다")
         assert outcome.result is not None
         return outcome.result
+
+    def _scoped_ctx(
+        self, ctx: ToolContext, *, skill_name: str | None, declared_services: list[str]
+    ) -> ToolContext:
+        """도구 호출 하나마다 scope를 좁힌 ToolContext를 새로 만든다.
+
+        core 도구(open_skill/remember — list_capabilities는 이 메서드 전에 이미 처리된다)는
+        스킬이 아니라 신뢰하는 코어 자신이므로 manifest 선언 범위를 적용하지 않고 전체
+        레지스트리 서비스를 그대로 준다. 스킬 도구는 core/slash.py의 _player_context와 같은
+        규칙으로, manifest.services에 선언한 것만 준다(선언하지 않은 서비스/필드는 접근 자체가
+        막힌다 — ToolContext.__getattr__ 참고)."""
+        if skill_name is None:
+            services: Mapping[str, object] = {**self._executor.services, **ctx.services}
+            return ToolContext(
+                player_id=ctx.player_id,
+                tags=ctx.tags,
+                services=services,
+                guild_id=ctx.guild_id,
+                event_bus=ctx.event_bus,
+                player_data=ctx.player_data,
+                db=ctx.db,
+                registry_snapshot=ctx.registry_snapshot,
+                usage=ctx.usage,
+                discord_id=ctx.discord_id,
+            )
+
+        declared = set(declared_services)
+        services = {
+            name: self._executor.services[name] for name in declared if name in self._executor.services
+        }
+        return ToolContext(
+            player_id=ctx.player_id,
+            tags=ctx.tags,
+            services=services,
+            guild_id=ctx.guild_id,
+            event_bus=ctx.event_bus,
+            player_data=self._executor.player_data if "player_data" in declared else None,
+            db=self._db if "db" in declared else None,
+            registry_snapshot=self._registry_snapshot if "registry_snapshot" in declared else None,
+            usage=self._executor.services.get("usage") if "usage" in declared else None,  # pyright: ignore[reportArgumentType]
+            discord_id=ctx.discord_id,
+        )
