@@ -251,6 +251,36 @@ async def test_agent_loop_scopes_registry_snapshot_to_declared_skill_tool() -> N
     assert "chunithm-border" in enabled  # registry_snapshot이 실제 등록 현황을 담고 왔다는 증거
 
 
+@pytest.mark.asyncio
+async def test_agent_loop_run_surfaces_required_mode_display_in_result() -> None:
+    # C1 회귀: admin_skills(display_mode="required", 기본값)를 실제로 멘션 경로와 같은
+    # AgentLoop.run()으로 불러, AgentTurnResult.required_displays에 그 표시물이 실제로
+    # 담기는지 본다(이전에는 required 표시물을 담을 자리 자체가 없어 통째로 버려졌다).
+    registry = _registry()
+    snapshot = build_snapshot(registry)
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="admin_skills", args={})],
+        usage=UsageInfo(input_tokens=10, output_tokens=1),
+    )
+    answer_turn = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="봤다")]), text="봤다")
+    loop = AgentLoop(
+        llm=FakeLlmAdapter([call_turn, answer_turn]), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+        registry_snapshot=snapshot,
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset({"admin"}), services={})
+    result = await loop.run(
+        ctx=ctx, skill_state=_state(registry, mode="full"), user_text="스킬 현황 보여줘", prompt_context_snippets=[]
+    )
+
+    assert result.text == "봤다"
+    assert len(result.required_displays) == 1
+    assert result.required_displays[0].content is not None
+    assert "chunithm-border" in result.required_displays[0].content
+
+
 class _FakeMemoryService:
     def __init__(self) -> None:
         self.saved: dict[str, str] = {}

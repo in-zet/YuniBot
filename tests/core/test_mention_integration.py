@@ -1,19 +1,24 @@
 # tests/core/test_mention_integration.py
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
 from core.agent import AgentLoop
 from core.cooldown import CooldownTracker
+from core.events import EventBus
 from core.executor import ToolExecutor
+from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGE
 from core.llm import FunctionCallRequest, GenerationTurn, LlmContent, LlmPart, UsageInfo
 from core.mention import ChannelMessage, MentionEntry
 from core.permissions import InMemoryTagProvider
 from core.prompt import PromptAssembler
 from core.registry import SkillRegistry
+from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
 from core.tool_types import Display
 from services.common.notify import NotifyService
@@ -40,6 +45,54 @@ class _FakePlayers:
     async def tags_for(self, player_id: str) -> set[str]:
         return self.tags
 
+    async def create_player(self):
+        raise AssertionError("이 가짜는 이미 아는 플레이어(p1)만 다룬다 — _FakeNewPlayers를 써라")
+
+    async def link_account(self, player_id: str, discord_id: str) -> None:
+        raise AssertionError("이 가짜는 이미 아는 플레이어(p1)만 다룬다 — _FakeNewPlayers를 써라")
+
+
+class _FakeNewPlayers:
+    """C2 회귀: 처음 보는 discord_id("newbie")는 player_for_discord가 None을 돌려주고,
+    MentionEntry.handle()이 create_player + link_account로 실제 플레이어를 만들어야 한다."""
+
+    def __init__(self) -> None:
+        self.created: list[str] = []
+        self.linked: list[tuple[str, str]] = []
+
+    async def player_for_discord(self, discord_id: str):
+        return None
+
+    async def create_player(self):
+        from services.common.players import Player
+        self.created.append("new-p1")
+        return Player(
+            id="new-p1", primary_discord_id=None, records_public=False, memos_public=False,
+            goals_public=False, arcade_public=False, reviews_public=False, sync_report_public=True,
+            first_seen_at="2026-01-01T00:00:00+00:00",
+        )
+
+    async def link_account(self, player_id: str, discord_id: str) -> None:
+        self.linked.append((player_id, discord_id))
+
+    async def accounts_for(self, player_id: str):
+        from services.common.players import DiscordAccount
+        return [DiscordAccount(discord_id="newbie", player_id=player_id, is_primary=True, linked_at="2026-01-01T00:00:00+00:00")]
+
+    async def tags_for(self, player_id: str) -> set[str]:
+        return set()
+
+
+class _FakeMemory:
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def get(self, player_id: str) -> str:
+        return self.store.get(player_id, "")
+
+    async def set(self, player_id: str, content: str) -> None:
+        self.store[player_id] = content
+
 
 class _FakeUsage:
     def __init__(self) -> None:
@@ -51,6 +104,14 @@ class _FakeUsage:
     async def record(self, **kwargs) -> float:
         self.recorded.append(kwargs)
         return 0.0
+
+
+class _CapExceededUsage(_FakeUsage):
+    """I4 회귀: 월 상한을 항상 넘긴 것으로 돌려준다 — guild 멘션이면 바로 막혀야 하고,
+    DM 멘션이면 guild_id가 없어 이 검사 자체를 안 타야 한다."""
+
+    async def month_total_usd(self, *, guild_id: str, year_month: str) -> float:
+        return 999999.0
 
 
 class _FakeSettings:
@@ -66,6 +127,10 @@ class _NoopTyping:
     async def __aexit__(self, *exc): return None
 
 
+async def _ignore(text: str, displays: list[Display]) -> None:
+    return None
+
+
 def _registry(*extra_skill_dirs: Path) -> SkillRegistry:
     registry = SkillRegistry([Path("skills"), *extra_skill_dirs])
     registry.load()
@@ -73,21 +138,40 @@ def _registry(*extra_skill_dirs: Path) -> SkillRegistry:
 
 
 def _mention_entry(
-    script, *, player_tags: set[str] | None = None, extra_skill_dirs: tuple[Path, ...] = ()
+    script,
+    *,
+    player_tags: set[str] | None = None,
+    extra_skill_dirs: tuple[Path, ...] = (),
+    agent_model: str = "gemini-3.8-flash",
+    memory: _FakeMemory | None = None,
+    event_bus: EventBus | None = None,
+    players: Any | None = None,
+    usage: _FakeUsage | None = None,
+    registry_snapshot_enabled: bool = False,
 ) -> tuple[MentionEntry, _FakeUsage]:
     registry = _registry(*extra_skill_dirs)
-    executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions=registry.tag_definitions())
+    bus = event_bus if event_bus is not None else EventBus()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(), event_bus=bus,
+    )
     prompt = PromptAssembler(rules_text=Path("prompts/rules.md").read_text(), persona_text=Path("prompts/persona.md").read_text(), registry=registry)
-    agent = AgentLoop(llm=FakeLlmAdapter(script), executor=executor, prompt=prompt, model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000)
-    players = _FakePlayers()
-    players.tags = player_tags if player_tags is not None else set()
-    usage = _FakeUsage()
+    snapshot = build_snapshot(registry) if registry_snapshot_enabled else None
+    agent = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=executor, prompt=prompt, model=agent_model,
+        thinking_level="low", max_tool_calls=5, max_tokens=50000, registry_snapshot=snapshot,
+    )
+    players_obj = players if players is not None else _FakePlayers()
+    if player_tags is not None:
+        players_obj.tags = player_tags
+    usage_obj = usage if usage is not None else _FakeUsage()
     entry = MentionEntry(
-        agent=agent, players=players, notify=NotifyService.__new__(NotifyService), cooldown=CooldownTracker(),
-        settings=_FakeSettings(), usage=usage, bot_discord_id="bot",
+        agent=agent, players=players_obj, notify=NotifyService.__new__(NotifyService), cooldown=CooldownTracker(),
+        settings=_FakeSettings(), usage=usage_obj, bot_discord_id="bot", agent_model=agent_model,
+        memory=memory if memory is not None else _FakeMemory(), event_bus=bus,
         known_skill_names={s.manifest.name for s in registry.enabled_skills()}, skill_loading_mode="instructions",
     )
-    return entry, usage
+    return entry, usage_obj
 
 
 _DISPLAY_TOOL_BODY = (
@@ -179,3 +263,161 @@ async def test_full_flow_admin_tool_blocked_without_admin_tag() -> None:
 
     assert relay_error is not None  # admin 태그 없는 플레이어 — "모르는 명령이에요" 류 오류가 모델에 전달됨
     assert sent == ["막혔다고 전달함"]
+
+
+@pytest.mark.asyncio
+async def test_full_flow_required_display_from_real_skill_tool_reaches_send() -> None:
+    # C1 회귀: admin_skills(display_mode="required", 기본값)를 실제 멘션 경로(MentionEntry.handle
+    # → AgentLoop.run → assemble_response → send)로 끝까지 불러서, 표시물이 실제로 send의
+    # 두 번째 인자까지 도달하는지 본다. 이전 버그에서는 required 표시물을 담을 자리 자체가
+    # 없어서 여기까지 올 방법이 없었다.
+    call_admin = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="admin_skills", args={})],
+        usage=UsageInfo(input_tokens=10, output_tokens=1),
+    )
+    answer = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="스킬 목록을 봤다.")]), text="스킬 목록을 봤다.")
+    entry, _usage = _mention_entry(
+        [call_admin, answer], player_tags={"admin"}, registry_snapshot_enabled=True,
+    )
+    sent: list[str] = []
+    sent_displays: list[list[Display]] = []
+
+    async def _collect(text: str, displays: list[Display]) -> None:
+        sent.append(text)
+        sent_displays.append(displays)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="관리 스킬 보여줘", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_collect, typing=_NoopTyping())
+
+    assert sent == ["스킬 목록을 봤다."]
+    assert len(sent_displays) == 1
+    [displays] = sent_displays
+    assert len(displays) == 1
+    assert displays[0].content is not None
+    assert "chunithm-border" in displays[0].content
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_creates_player_for_unknown_discord_user() -> None:
+    # C2 회귀: 처음 보는 discord_id로 멘션하면 예전에는 그냥 return해 아무 응답도 안 갔다.
+    # 이제는 create_player+link_account로 플레이어를 만들고 정상 흐름(에이전트 호출,
+    # 응답 전송)이 그대로 이어져야 한다.
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="반갑다")]), text="반갑다")]
+    players = _FakeNewPlayers()
+    entry, _usage = _mention_entry(script, players=players)
+
+    sent: list[str] = []
+
+    async def _collect(text: str, displays: list[Display]) -> None:
+        sent.append(text)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="newbie", is_bot=False, content="안녕", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_collect, typing=_NoopTyping())
+
+    assert players.created == ["new-p1"]
+    assert players.linked == [("new-p1", "newbie")]
+    assert sent == ["반갑다"]  # 이전 버그에서는 응답이 전혀 안 갔다(그냥 return)
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_records_usage_with_configured_agent_model_not_hardcoded() -> None:
+    # I1 회귀: usage.record에 들어가는 model이 core/mention.py에 박아 둔 문자열이 아니라
+    # MentionEntry에 실제로 설정된 agent_model을 그대로 써야 한다.
+    script = [
+        GenerationTurn(
+            content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답",
+            usage=UsageInfo(input_tokens=5, output_tokens=2),
+        )
+    ]
+    entry, usage = _mention_entry(script, agent_model="gemini-9.9-custom")
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_ignore, typing=_NoopTyping())
+
+    assert usage.recorded[0]["model"] == "gemini-9.9-custom"
+
+
+@pytest.mark.asyncio
+async def test_dm_mention_gets_cooldown_and_usage_but_skips_monthly_cap() -> None:
+    # I4 회귀: DM(guild_id=None)도 쿨다운/사용량 기록은 받아야 하고, 월상한 검사만 건너뛴다.
+    # _CapExceededUsage는 month_total_usd를 항상 터무니없이 큰 값으로 돌려준다 — guild
+    # 멘션이었다면 바로 막혔을 상황인데, DM이라 guild_id가 없어 이 검사 자체를 안 탄다.
+    script = [
+        GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답1")]), text="답1"),
+        GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답2")]), text="답2"),
+    ]
+    entry, usage = _mention_entry(script, usage=_CapExceededUsage())
+    sent: list[str] = []
+
+    async def _collect(text: str, displays: list[Display]) -> None:
+        sent.append(text)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    now = datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id=None, now=now, send=_collect, typing=_NoopTyping())
+    await entry.handle(trigger=trigger, history=[trigger], guild_id=None, now=now, send=_collect, typing=_NoopTyping())
+
+    assert sent[0] == "답1"  # 월상한이 999999여도 DM이라 상한 검사 자체를 안 타서 막히지 않는다
+    assert COOLDOWN_ACTIVE_MESSAGE in sent[1]  # 두 번째는 DM도 쿨다운에 걸려야 한다
+    assert len(usage.recorded) == 1  # 쿨다운에 막힌 두 번째는 기록되지 않는다
+    assert usage.recorded[0]["guild_id"] == "dm"
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_injects_player_memory_into_system_instruction() -> None:
+    # I5 회귀: remember로 저장된 메모리가 다음 멘션의 system_instruction(prompt_context_snippets
+    # 경유)에 실제로 들어가야 한다. 이전에는 저장만 되고 다시 읽히는 곳이 없었다.
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+    memory = _FakeMemory()
+    memory.store["p1"] = "민트초코를 좋아한다"
+    entry, _usage = _mention_entry(script, memory=memory)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_ignore, typing=_NoopTyping())
+
+    llm = cast("FakeLlmAdapter", entry._agent._llm)  # pyright: ignore[reportPrivateUsage]
+    assert llm.calls
+    system_instruction = llm.calls[0][1]
+    assert "민트초코를 좋아한다" in system_instruction
+
+
+_EMIT_TOOL_BODY = (
+    "@tool()\n"
+    "async def emit_test_event(ctx: ToolContext) -> ToolResult:\n"
+    '    """테스트용: 이벤트를 하나 낸다."""\n'
+    "    await ctx.emit(\"test.mention_event\", {\"player_id\": ctx.player_id})\n"
+    "    return ToolResult(data={})\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_mention_tool_call_event_reaches_executors_shared_event_bus(tmp_path: Path) -> None:
+    # M1 회귀: core/mention.py가 만드는 ToolContext는 executor와 같은 공유 EventBus를 써야
+    # 한다. 이전에는 ToolContext가 기본값으로 매번 새 일회용 EventBus를 만들어, 도구가 낸
+    # 이벤트가 executor에 등록된 진짜 핸들러에 닿지 않았다.
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "test-emit", _EMIT_TOOL_BODY)
+
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="test-emit_emit_test_event", args={})],
+    )
+    answer_turn = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="냈다")]), text="냈다")
+
+    bus = EventBus()
+    received: list[dict[str, object]] = []
+
+    async def _handler(payload: dict[str, object]) -> None:
+        received.append(payload)
+
+    bus.register_notify("test.mention_event", owner_skill="test-emit", fn=_handler)
+
+    entry, _usage = _mention_entry([call_turn, answer_turn], extra_skill_dirs=(skills_root,), event_bus=bus)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="이벤트 내줘", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_ignore, typing=_NoopTyping())
+
+    for _ in range(5):  # emit_notify는 백그라운드 태스크로 돈다 — 돌 기회를 준다.
+        await asyncio.sleep(0)
+
+    assert received == [{"player_id": "p1"}]

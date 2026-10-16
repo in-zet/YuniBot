@@ -31,6 +31,7 @@ class AgentTurnResult:
     text: str | None = None
     collected_data: list[dict[str, Any]] = field(default_factory=list)
     optional_displays: dict[str, Display] = field(default_factory=dict)
+    required_displays: list[Display] = field(default_factory=list)
     usage: UsageInfo = field(default_factory=lambda: UsageInfo(input_tokens=0, output_tokens=0))
     hit_tool_call_cap: bool = False
     hit_token_cap: bool = False
@@ -156,6 +157,10 @@ class AgentLoop:
                     display_id = f"d{len(result.optional_displays) + 1}"
                     result.optional_displays[display_id] = tool_result.display
                     tool_result.data["_display_id"] = display_id
+                elif tool_result.display is not None and tool_result.display_mode == "required":
+                    # required는 00-core.md의 기본 표시 모드다 — 숫자 위반 검사와 무관하게
+                    # 항상 붙는다(assemble_response가 이 리스트를 조건 없이 그대로 포함한다).
+                    result.required_displays.append(tool_result.display)
                 response_parts.append(
                     LlmPart(
                         function_response=FunctionResultPart(

@@ -67,8 +67,13 @@ def assemble_response(result: AgentTurnResult) -> AssembledResponse:
     clean_text = _SHOW_TAG_RE.sub("", text).strip()
 
     if violation:
-        displays = list(result.optional_displays.values())
+        optional = list(result.optional_displays.values())
     else:
-        displays = [result.optional_displays[i] for i in requested_ids if i in result.optional_displays]
+        optional = [result.optional_displays[i] for i in requested_ids if i in result.optional_displays]
+
+    # required 표시물은 숫자 위반 여부와 무관하게 항상 붙는다(도구의 정상적인 주 출력이지,
+    # 위반의 "증거"가 아니다) — 그래서 위반 게이트를 거치지 않고, 강제로 보여줄 것들보다
+    # 먼저 온다.
+    displays = result.required_displays + optional
 
     return AssembledResponse(text=clean_text, displays=displays, numeric_violation=violation)

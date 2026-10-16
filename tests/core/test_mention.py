@@ -7,6 +7,7 @@ import pytest
 
 from core.agent import AgentLoop
 from core.cooldown import CooldownTracker
+from core.events import EventBus
 from core.executor import ToolExecutor
 from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGE
 from core.llm import GenerationTurn, LlmContent, LlmPart
@@ -95,6 +96,20 @@ class _FakePlayers:
     async def tags_for(self, player_id: str) -> set[str]:
         return set()
 
+    async def create_player(self):
+        raise AssertionError("이 테스트에서는 player_for_discord가 항상 찾아내야 한다")
+
+    async def link_account(self, player_id: str, discord_id: str) -> None:
+        raise AssertionError("이 테스트에서는 link_account가 불릴 일이 없다")
+
+
+class _FakeMemory:
+    async def get(self, player_id: str) -> str:
+        return ""
+
+    async def set(self, player_id: str, content: str) -> None:
+        return None
+
 
 class _FakeUsage:
     async def month_total_usd(self, *, guild_id: str, year_month: str) -> float:
@@ -133,7 +148,7 @@ async def test_mention_entry_sends_assembled_text() -> None:
         agent=_agent(script),
         players=_FakePlayers(), notify=NotifyService.__new__(NotifyService),  # notify 미사용 경로만 테스트
         cooldown=CooldownTracker(), settings=_FakeSettings(), usage=_FakeUsage(),
-        bot_discord_id="bot",
+        bot_discord_id="bot", agent_model="gemini-3.8-flash", memory=_FakeMemory(), event_bus=EventBus(),
         known_skill_names={"chunithm-border"}, skill_loading_mode="instructions",
     )
     sent: list[str] = []
@@ -161,6 +176,7 @@ async def test_mention_entry_cooldown_blocks_without_calling_llm() -> None:
     entry = MentionEntry(
         agent=agent, players=_FakePlayers(), notify=NotifyService.__new__(NotifyService),
         cooldown=CooldownTracker(), settings=_FakeSettings(), usage=_FakeUsage(), bot_discord_id="bot",
+        agent_model="gemini-3.8-flash", memory=_FakeMemory(), event_bus=EventBus(),
         known_skill_names={"chunithm-border"}, skill_loading_mode="instructions",
     )
     sent: list[str] = []

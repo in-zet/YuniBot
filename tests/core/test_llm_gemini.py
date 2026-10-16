@@ -87,6 +87,32 @@ async def test_generate_converts_function_call_and_preserves_thought_signature()
     assert raw_parts[0].thought_signature == b"sig-bytes"
 
 
+@pytest.mark.asyncio
+async def test_generate_folds_thinking_tokens_into_output_tokens() -> None:
+    # I2 회귀: 설계서 "비용과 운영"은 사고 토큰이 출력 가격에 포함된다고 적는다.
+    # thoughts_token_count를 무시하면 비용/월상한 집행이 실제보다 낮게 잡힌다.
+    adapter = GeminiLlmAdapter(api_key="fake")
+    content = types.Content(role="model", parts=[types.Part(text="답")])
+    candidate = types.Candidate(content=content)
+    usage = types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=10, candidates_token_count=4, thoughts_token_count=7,
+    )
+    response = types.GenerateContentResponse(candidates=[candidate], usage_metadata=usage)
+    fake_models = _FakeModelsApi(response=response)
+    adapter._client.aio._models = fake_models  # pyright: ignore[reportAttributeAccessIssue]
+
+    turn = await adapter.generate(
+        model="gemini-3.8-flash",
+        system_instruction="규칙",
+        contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])],
+        tools=[],
+        thinking_level="low",
+    )
+
+    assert turn.usage.input_tokens == 10
+    assert turn.usage.output_tokens == 4 + 7  # candidates + thoughts
+
+
 def test_to_provider_content_builds_function_response_part() -> None:
     from core.llm import FunctionResultPart
     from core.llm_gemini import to_provider_content

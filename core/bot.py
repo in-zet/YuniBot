@@ -448,6 +448,10 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     mention_entry = MentionEntry(
         agent=agent_loop, players=players, notify=notify_service, cooldown=CooldownTracker(),
         settings=settings_service, usage=usage_service, bot_discord_id="",  # client.user가 생기기 전이라 setup_hook에서 채운다
+        agent_model=config.agent_model, memory=memory_service,
+        # executor와 같은 EventBus를 줘야 멘션으로 부른 도구가 낸 이벤트가 실제 등록된
+        # 핸들러에 닿는다(M1) — executor도 이 event_bus 변수로 만들어졌으니 같은 객체다.
+        event_bus=event_bus,
         known_skill_names=known_skill_names, skill_loading_mode=config.skill_loading_mode,
     )
 
@@ -492,7 +496,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     client.tree.add_command(
         build_settings_group(registry=registry, settings=settings_service, players=players)
     )
-    client.tree.add_command(build_help_command(registry=registry, tag_provider=players))
+    client.tree.add_command(build_help_command(registry=registry, players=players))
 
     return client, registry, executor
 

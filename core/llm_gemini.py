@@ -57,7 +57,12 @@ def _from_provider_response(response: types.GenerateContentResponse) -> Generati
         text="\n".join(text_parts) if text_parts else None,
         usage=UsageInfo(
             input_tokens=usage.prompt_token_count or 0 if usage else 0,
-            output_tokens=usage.candidates_token_count or 0 if usage else 0,
+            # 사고(thinking) 토큰은 출력 가격에 포함된다(00-core.md "비용과 운영") —
+            # 보이는 출력 텍스트보다 많은 경우가 흔해, 빼면 비용/월상한 집행이 실제보다
+            # 낮게 잡힌다. 새 필드를 만들지 않고 output_tokens에 바로 더한다.
+            output_tokens=(
+                (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0) if usage else 0
+            ),
         ),
     )
 

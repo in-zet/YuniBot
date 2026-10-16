@@ -10,6 +10,7 @@ from typing import Protocol, cast
 
 from core.agent import AgentLoop
 from core.cooldown import CooldownTracker, check_monthly_cap
+from core.events import EventBus
 from core.fallback_messages import (
     COOLDOWN_ACTIVE_MESSAGE,
     LLM_FAILURE_MESSAGE,
@@ -21,6 +22,11 @@ from core.skill_loading import Mode, SkillLoadState
 from core.tool_types import Display, ToolContext
 from services.common.notify import NotifyService
 from services.common.players import DiscordAccount, Player
+
+# DM(guild_id=None)의 쿨다운/사용량 기록에 guild_id 대신 쓰는 고정 스코프 값. 월 상한만
+# 서버별 설정(/관리 상한)이라 DM에는 적용할 상한 자체가 없다 — 쿨다운/사용량 기록은
+# guild/DM을 가리지 않고 걸어야 하므로(I4) 이 문자열로 "서버가 아닌 대화"를 표시한다.
+_DM_SCOPE = "dm"
 
 MAX_CONTEXT_MESSAGES = 6
 
@@ -34,6 +40,15 @@ class _PlayersLike(Protocol):
     async def player_for_discord(self, discord_id: str) -> Player | None: ...
     async def accounts_for(self, player_id: str) -> list[DiscordAccount]: ...
     async def tags_for(self, player_id: str) -> set[str]: ...
+    async def create_player(self) -> Player: ...
+    async def link_account(self, player_id: str, discord_id: str) -> None: ...
+
+
+class _MemoryLike(Protocol):
+    """MemoryService가 구조적으로 맞추는 부분 집합 — 플레이어 메모리를 읽어 프롬프트에
+    넣는 데만 쓴다(core.remember 도구가 쓰는 set은 ctx.memory를 통해 직접 부른다)."""
+
+    async def get(self, player_id: str) -> str: ...
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -101,6 +116,9 @@ class MentionEntry:
         settings,
         usage,
         bot_discord_id: str,
+        agent_model: str,
+        memory: _MemoryLike,
+        event_bus: EventBus,
         known_skill_names: set[str],
         skill_loading_mode: str,
     ) -> None:
@@ -111,6 +129,16 @@ class MentionEntry:
         self._settings = settings
         self._usage = usage
         self._bot_discord_id = bot_discord_id
+        # usage.record에 쓸 모델 이름은 설정값을 그대로 받는다(CLAUDE.md: "모델 이름은
+        # 설정값이다. 코드에 박지 않는다", I1) — AgentLoop에 실제로 설정된 모델과 다른
+        # 문자열을 기록하면 비용 추정이 틀어지고, 요금표에 없는 모델명이면 월상한 집행
+        # 자체가 조용히 멈춘다.
+        self._agent_model = agent_model
+        self._memory = memory
+        # 멘션으로 부른 도구가 낸 이벤트가 executor에 등록된 진짜 핸들러에 닿으려면
+        # ToolContext.event_bus가 그 executor와 같은 객체여야 한다(M1) — 기본값(매번 새
+        # EventBus())을 그대로 두면 이벤트가 조용히 사라진다.
+        self._event_bus = event_bus
         self._known_skill_names = known_skill_names
         self._skill_loading_mode = skill_loading_mode
 
@@ -130,23 +158,31 @@ class MentionEntry:
         player = await self._players.player_for_discord(trigger.author_discord_id)
         is_new_player = player is None
         if player is None:
-            # core/bot.py의 on_message 핸들러가 호출 전에 플레이어를 만들어 둔다
-            # (core/slash.py의 _player_context와 같은 흐름). 여기서는 있다고 가정하지 않고
-            # 방어적으로 다시 조회만 한다 — 생성 책임은 Task 15.
-            return
+            # 슬래시 경로(core/slash.py의 _player_context)와 같은 흐름 — 처음 보는
+            # 디스코드 계정이면 플레이어를 바로 만들고 연결한다(C2: 예전에는 여기서 그냥
+            # return해 첫 멘션이 무응답이었다).
+            player = await self._players.create_player()
+            await self._players.link_account(player.id, trigger.author_discord_id)
 
+        # 쿨다운은 guild/DM을 가리지 않고 건다(I4) — DM에는 서버 설정이 없으니 admin 스킬의
+        # "플레이어 쿨다운" 기본값(10초)을 그대로 쓴다. 월 상한은 서버별 설정(/관리 상한)뿐이라
+        # DM에는 적용할 상한이 없다 — guild_id가 있을 때만 검사한다.
+        cooldown_scope = guild_id if guild_id is not None else _DM_SCOPE
         if guild_id is not None:
             cooldown_seconds = int(
                 await self._settings.get_value(
                     scope="guild", scope_id=guild_id, skill="admin", name="플레이어 쿨다운", default=10
                 )
             )
-            if not self._cooldown.check(
-                guild_id=guild_id, player_id=player.id, cooldown_seconds=cooldown_seconds, now=now
-            ):
-                await send(COOLDOWN_ACTIVE_MESSAGE, [])
-                return
+        else:
+            cooldown_seconds = 10
+        if not self._cooldown.check(
+            guild_id=cooldown_scope, player_id=player.id, cooldown_seconds=cooldown_seconds, now=now
+        ):
+            await send(COOLDOWN_ACTIVE_MESSAGE, [])
+            return
 
+        if guild_id is not None:
             cap_status = await check_monthly_cap(usage=self._usage, settings=self._settings, guild_id=guild_id, now=now)
             if cap_status.exceeded:
                 await send(MONTHLY_CAP_REACHED_MESSAGE, [])
@@ -161,8 +197,18 @@ class MentionEntry:
         if is_new_player:
             prompt_context_snippets.append("이 플레이어는 유니를 처음 멘션했다.")
 
+        # 저장된 플레이어 메모리를 읽어 프롬프트에 넣는다(I5) — remember 도구는 저장만
+        # 하고, 이 지점 전까지는 다시 읽는 곳이 없어 완전히 죽은 경로였다. 00-core.md
+        # "주입 범위: 요청한 본인의 메모리만 프롬프트에 넣는다"를 그대로 따른다.
+        memory_text = await self._memory.get(player.id)
+        if memory_text:
+            prompt_context_snippets.append(f"[참고: 이 플레이어가 기억해 달라고 한 내용]\n{memory_text}")
+
         tags = await self._players.tags_for(player.id)
-        ctx = ToolContext(player_id=player.id, tags=frozenset(tags), services={}, guild_id=guild_id, usage=self._usage)
+        ctx = ToolContext(
+            player_id=player.id, tags=frozenset(tags), services={}, guild_id=guild_id, usage=self._usage,
+            event_bus=self._event_bus,
+        )
         # self._skill_loading_mode는 생성자에서 str로 받는다(core/config.py의 CoreConfig는
         # Literal["instructions", "full"]이지만, MentionEntry의 공개 인터페이스를 core/skill_loading에
         # 묶어 두지 않으려고 여기서만 좁혀 쓴다 — 잘못된 문자열은 SkillLoadState.level_for가
@@ -182,11 +228,12 @@ class MentionEntry:
                 await send(LLM_FAILURE_MESSAGE, [])
                 return
 
-        if guild_id is not None:
-            await self._usage.record(
-                guild_id=guild_id, player_id=player.id, model="gemini-3.8-flash", kind="agent",
-                input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
-            )
+        # 사용량 기록도 guild/DM을 가리지 않는다(I4) — DM 멘션은 guild_id가 없어 쿨다운
+        # 스코프와 같은 고정값을 쓴다.
+        await self._usage.record(
+            guild_id=cooldown_scope, player_id=player.id, model=self._agent_model, kind="agent",
+            input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
+        )
 
         if result.hit_tool_call_cap and result.text is None:
             await send(TOOL_CALL_CAP_MESSAGE, [])
