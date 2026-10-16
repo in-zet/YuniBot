@@ -321,6 +321,52 @@ async def test_mention_entry_creates_player_for_unknown_discord_user() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mention_entry_emits_first_seen_event_for_new_player() -> None:
+    # C2 재검토: core/slash.py의 _player_context 호출부(두 곳)는 is_new_player일 때
+    # executor.event_bus.emit_notify("players.first_seen", {"player_id": ...})를 낸다.
+    # MentionEntry.handle()도 같은 생명주기 이벤트를 같은 모양으로 내야 한다 — 안 그러면
+    # 나중에 이 이벤트를 구독하는 스킬이 멘션으로 처음 온 플레이어만 조용히 놓친다.
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="반갑다")]), text="반갑다")]
+    players = _FakeNewPlayers()
+    bus = EventBus()
+    received: list[dict[str, object]] = []
+
+    async def _handler(payload: dict[str, object]) -> None:
+        received.append(payload)
+
+    bus.register_notify("players.first_seen", owner_skill="test-first-seen", fn=_handler)
+    entry, _usage = _mention_entry(script, players=players, event_bus=bus)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="newbie", is_bot=False, content="안녕", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_ignore, typing=_NoopTyping())
+    await bus.drain()
+
+    assert received == [{"player_id": "new-p1"}]
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_does_not_emit_first_seen_event_for_returning_player() -> None:
+    # 위 테스트의 반대 축: 이미 아는 플레이어(p1)의 멘션에서는 players.first_seen이
+    # 나가면 안 된다 — _FakePlayers.create_player/link_account는 불리면 바로 예외를
+    # 던지므로, 이 테스트가 통과한다는 것 자체가 신규 플레이어 분기를 타지 않았다는 뜻이다.
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="또 왔네")]), text="또 왔네")]
+    bus = EventBus()
+    received: list[dict[str, object]] = []
+
+    async def _handler(payload: dict[str, object]) -> None:
+        received.append(payload)
+
+    bus.register_notify("players.first_seen", owner_skill="test-first-seen", fn=_handler)
+    entry, _usage = _mention_entry(script, event_bus=bus)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="안녕", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_ignore, typing=_NoopTyping())
+    await bus.drain()
+
+    assert received == []
+
+
+@pytest.mark.asyncio
 async def test_mention_entry_records_usage_with_configured_agent_model_not_hardcoded() -> None:
     # I1 회귀: usage.record에 들어가는 model이 core/mention.py에 박아 둔 문자열이 아니라
     # MentionEntry에 실제로 설정된 agent_model을 그대로 써야 한다.

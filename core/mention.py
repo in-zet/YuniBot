@@ -163,6 +163,11 @@ class MentionEntry:
             # return해 첫 멘션이 무응답이었다).
             player = await self._players.create_player()
             await self._players.link_account(player.id, trigger.author_discord_id)
+            # 슬래시 경로(core/slash.py의 두 _dispatch/_build_modal_command 호출부)와 같은
+            # 모양으로 생명주기 이벤트를 낸다(C2 재검토) — 아직 구독자는 없지만, 슬래시와
+            # 멘션 모두 같은 "새 플레이어" 이벤트를 내야 나중에 붙는 구독자가 경로를
+            # 가리지 않고 받는다.
+            await self._event_bus.emit_notify("players.first_seen", {"player_id": player.id})
 
         # 쿨다운은 guild/DM을 가리지 않고 건다(I4) — DM에는 서버 설정이 없으니 admin 스킬의
         # "플레이어 쿨다운" 기본값(10초)을 그대로 쓴다. 월 상한은 서버별 설정(/관리 상한)뿐이라
