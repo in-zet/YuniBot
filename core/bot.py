@@ -36,6 +36,7 @@ from core.tool_types import (
     ArcadeRef,
     ChartRef,
     DifficultyRef,
+    Display,
     LampRef,
     PlayerRef,
     RankRef,
@@ -153,8 +154,17 @@ class YuniClient(discord.Client):
             for m in reversed(history_messages)
         ] + [trigger]
 
-        async def _send(text: str) -> None:
-            await message.reply(text, mention_author=False)
+        async def _send(text: str, displays: list[Display]) -> None:
+            # 강제 표시물(숫자 규칙 위반 시 Task 10이 모은 전체 표시물, 또는 모델이 [[show:id]]로
+            # 직접 고른 표시물)을 실제 디스코드 메시지에 붙인다 — assemble_response가 계산만
+            # 하고 버려지던 자리(Task 17 리뷰에서 드러난 결함)를 고친다. 멘션 경로는 인터랙션
+            # 응답이 아니라 메시지 답장이라 ephemeral 개념이 없고(Display.ephemeral은 무시),
+            # view는 이 경로로 올 일이 없어(confirm="always" 도구는 core/agent.py의
+            # AgentLoop._invoke가 needs_confirm에서 이미 걸러 display 자체를 못 만든다) 스킵한다.
+            embeds = [embed for display in displays for embed in display.embeds]
+            extra_content = [display.content for display in displays if display.content is not None]
+            full_text = "\n\n".join([text, *extra_content])
+            await message.reply(full_text, embeds=embeds, mention_author=False)
 
         await self._mention_entry.handle(
             trigger=trigger, history=history,

@@ -15,7 +15,9 @@ from core.permissions import InMemoryTagProvider
 from core.prompt import PromptAssembler
 from core.registry import SkillRegistry
 from core.resolvers import ResolverRegistry
+from core.tool_types import Display
 from services.common.notify import NotifyService
+from tests.core.skill_factory import write_skill
 from tests.support.fake_llm import FakeLlmAdapter
 
 
@@ -64,14 +66,16 @@ class _NoopTyping:
     async def __aexit__(self, *exc): return None
 
 
-def _registry() -> SkillRegistry:
-    registry = SkillRegistry([Path("skills")])
+def _registry(*extra_skill_dirs: Path) -> SkillRegistry:
+    registry = SkillRegistry([Path("skills"), *extra_skill_dirs])
     registry.load()
     return registry
 
 
-def _mention_entry(script, *, player_tags: set[str] | None = None) -> tuple[MentionEntry, _FakeUsage]:
-    registry = _registry()
+def _mention_entry(
+    script, *, player_tags: set[str] | None = None, extra_skill_dirs: tuple[Path, ...] = ()
+) -> tuple[MentionEntry, _FakeUsage]:
+    registry = _registry(*extra_skill_dirs)
     executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions=registry.tag_definitions())
     prompt = PromptAssembler(rules_text=Path("prompts/rules.md").read_text(), persona_text=Path("prompts/persona.md").read_text(), registry=registry)
     agent = AgentLoop(llm=FakeLlmAdapter(script), executor=executor, prompt=prompt, model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000)
@@ -86,11 +90,32 @@ def _mention_entry(script, *, player_tags: set[str] | None = None) -> tuple[Ment
     return entry, usage
 
 
+_DISPLAY_TOOL_BODY = (
+    "from core.tool_types import Display\n\n\n"
+    "@tool()\n"
+    "async def show_border(ctx: ToolContext) -> ToolResult:\n"
+    '    """테스트용: data에 숫자가 있고 optional 표시물도 있는 도구."""\n'
+    "    return ToolResult(\n"
+    "        data={\"borders\": {\"SSS+\": 7}},\n"
+    "        display=Display(content=\"크로노 MAS 보더: SSS+ 7어택\"),\n"
+    "        display_mode=\"optional\",\n"
+    "    )\n"
+)
+
+
 @pytest.mark.asyncio
-async def test_full_flow_open_skill_then_tool_call_and_display_shown_on_numeric_violation() -> None:
+async def test_full_flow_open_skill_then_tool_call_and_display_shown_on_numeric_violation(tmp_path: Path) -> None:
+    # chunithm-border_lookup은 ChartRef 해석기와 ctx.records가 있어야 실제로 성공하는데,
+    # 이 통합 테스트의 ToolExecutor/ToolContext는 (다른 AgentLoop 테스트들처럼) 그 둘을
+    # 비워 둔다 — 그 둘을 채우는 것은 이 결함(표시물이 send까지 안 간다) 수정과 무관한
+    # 별개의 배선 범위다. 그래서 여기서는 인자 없이 바로 data+표시물을 돌려주는 테스트
+    # 전용 도구를 하나 꽂아, "도구가 실제로 표시물을 냈을 때 그게 send까지 가는지"만 본다.
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "test-display", _DISPLAY_TOOL_BODY)
+
     call_lookup = GenerationTurn(
         content=LlmContent(role="model", parts=[]),
-        function_calls=[FunctionCallRequest(call_id="1", name="chunithm-border_lookup", args={"chart": "크로노 MAS"})],
+        function_calls=[FunctionCallRequest(call_id="1", name="test-display_show_border", args={})],
         usage=UsageInfo(input_tokens=100, output_tokens=5),
     )
     bad_answer = GenerationTurn(
@@ -98,11 +123,13 @@ async def test_full_flow_open_skill_then_tool_call_and_display_shown_on_numeric_
         text="12345어택이다.",
         usage=UsageInfo(input_tokens=50, output_tokens=5),
     )
-    entry, usage = _mention_entry([call_lookup, bad_answer])
+    entry, usage = _mention_entry([call_lookup, bad_answer], extra_skill_dirs=(skills_root,))
     sent: list[str] = []
+    sent_displays: list[list[Display]] = []
 
-    async def _collect(text: str) -> None:
+    async def _collect(text: str, displays: list[Display]) -> None:
         sent.append(text)
+        sent_displays.append(displays)
 
     trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="크로노 마스 보더", mentions_bot=True)
     await entry.handle(
@@ -113,6 +140,15 @@ async def test_full_flow_open_skill_then_tool_call_and_display_shown_on_numeric_
     assert sent == ["12345어택이다."]
     assert usage.recorded[0]["input_tokens"] == 150
     assert usage.recorded[0]["output_tokens"] == 10
+    # 핵심 회귀 검증: 숫자 규칙 위반(모델이 data에 없는 "12345어택"을 말함) 시
+    # assemble_response가 강제로 모은 표시물이 실제로 send의 두 번째 인자까지 도달해야 한다
+    # (core/mention.py가 계산만 하고 버리던 결함의 수정 대상).
+    assert len(sent_displays) == 1
+    [displays] = sent_displays
+    assert len(displays) == 1
+    assert displays[0].content is not None
+    assert "크로노" in displays[0].content
+    assert "보더" in displays[0].content
 
 
 @pytest.mark.asyncio
@@ -135,7 +171,7 @@ async def test_full_flow_admin_tool_blocked_without_admin_tag() -> None:
     entry, _usage = _mention_entry(script, player_tags=set())
     sent: list[str] = []
 
-    async def _collect(text: str) -> None:
+    async def _collect(text: str, displays: list[Display]) -> None:
         sent.append(text)
 
     trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="관리 스킬 보여줘", mentions_bot=True)

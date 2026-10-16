@@ -18,7 +18,7 @@ from core.fallback_messages import (
 )
 from core.response_assembly import assemble_response
 from core.skill_loading import Mode, SkillLoadState
-from core.tool_types import ToolContext
+from core.tool_types import Display, ToolContext
 from services.common.notify import NotifyService
 from services.common.players import DiscordAccount, Player
 
@@ -121,7 +121,7 @@ class MentionEntry:
         history: list[ChannelMessage],
         guild_id: str | None,
         now: datetime,
-        send: Callable[[str], Awaitable[None]],
+        send: Callable[[str, list[Display]], Awaitable[None]],
         typing: AbstractAsyncContextManager[None],
     ) -> None:
         if not is_mention_eligible(trigger=trigger, bot_discord_id=self._bot_discord_id):
@@ -144,12 +144,12 @@ class MentionEntry:
             if not self._cooldown.check(
                 guild_id=guild_id, player_id=player.id, cooldown_seconds=cooldown_seconds, now=now
             ):
-                await send(COOLDOWN_ACTIVE_MESSAGE)
+                await send(COOLDOWN_ACTIVE_MESSAGE, [])
                 return
 
             cap_status = await check_monthly_cap(usage=self._usage, settings=self._settings, guild_id=guild_id, now=now)
             if cap_status.exceeded:
-                await send(MONTHLY_CAP_REACHED_MESSAGE)
+                await send(MONTHLY_CAP_REACHED_MESSAGE, [])
                 return
 
         accounts = await self._players.accounts_for(player.id)
@@ -179,7 +179,7 @@ class MentionEntry:
                 )
             except Exception:  # LLM/네트워크 어떤 실패든 디스코드 핸들러를 죽이지 않고 고정 문구로 돌린다
                 logger.warning("플레이어 %s의 멘션 처리 실패, 고정 문구로 응답한다", player.id, exc_info=True)
-                await send(LLM_FAILURE_MESSAGE)
+                await send(LLM_FAILURE_MESSAGE, [])
                 return
 
         if guild_id is not None:
@@ -189,8 +189,8 @@ class MentionEntry:
             )
 
         if result.hit_tool_call_cap and result.text is None:
-            await send(TOOL_CALL_CAP_MESSAGE)
+            await send(TOOL_CALL_CAP_MESSAGE, [])
             return
 
         assembled = assemble_response(result)
-        await send(assembled.text or LLM_FAILURE_MESSAGE)
+        await send(assembled.text or LLM_FAILURE_MESSAGE, assembled.displays)

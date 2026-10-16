@@ -145,7 +145,7 @@ async def test_mention_entry_sends_assembled_text() -> None:
     trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
     await entry.handle(
         trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC),
-        send=lambda text: sent.append(text) or _noop(), typing=_NoopTyping(),
+        send=lambda text, displays: sent.append(text) or _noop(), typing=_NoopTyping(),
     )
     assert sent == ["답이다"]
 
@@ -171,8 +171,8 @@ async def test_mention_entry_cooldown_blocks_without_calling_llm() -> None:
 
     trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
     now = datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC)
-    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=now, send=lambda t: sent.append(t) or _noop(), typing=_NoopTyping())
-    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=now, send=lambda t: sent.append(t) or _noop(), typing=_NoopTyping())
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=now, send=lambda t, d: sent.append(t) or _noop(), typing=_NoopTyping())
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=now, send=lambda t, d: sent.append(t) or _noop(), typing=_NoopTyping())
 
     assert sent[0] == "호출됨"
     assert COOLDOWN_ACTIVE_MESSAGE in sent[1]
