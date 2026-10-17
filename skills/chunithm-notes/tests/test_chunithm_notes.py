@@ -194,6 +194,39 @@ async def test_list_notes_returns_only_own_notes(skill: ModuleType, db: aiosqlit
     assert result.data["notes"][0]["body"] == "메모1"
 
 
+async def test_whole_song_note_and_per_difficulty_note_coexist(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """같은 곡에 난이도 없는(곡 전체) 메모와 특정 난이도(MAS) 메모를 따로 남겨도 서로
+    덮어쓰지 않고 둘 다 남는지, list_notes/get_note가 둘을 구분해 보여주는지(설계서
+    "테스트" 절: "난이도 없는 메모와 난이도별 메모가 함께 있을 때의 표시")."""
+    songdb = SongDbService()
+    ctx = _ctx(db=db, player_id="p1", songdb=songdb)
+    song = await _song(songdb, "B.B.K.K.B.K.K.", ctx)
+
+    whole_song = await skill.set_note(ctx, song, "곡 전체 메모")
+    per_difficulty = await skill.set_note(ctx, song, "마스 전용 메모", difficulty=_mas())
+    assert whole_song.error is None
+    assert per_difficulty.error is None
+
+    # list_notes: 같은 곡이라도 난이도가 다른 두 행이 각각 남아 있어야 한다(한쪽이
+    # 다른 쪽을 덮어쓰지 않음).
+    listed = await skill.list_notes(ctx)
+    assert listed.error is None
+    by_difficulty = {n["difficulty"]: n["body"] for n in listed.data["notes"]}
+    assert by_difficulty == {None: "곡 전체 메모", "MAS": "마스 전용 메모"}
+
+    # get_note: 난이도를 비우고 물으면 곡 전체 메모만, MAS로 물으면 MAS 메모만 나온다
+    # (서로 섞이거나 한쪽이 안 보이면 안 된다).
+    whole_result = await skill.get_note(ctx, song)
+    assert whole_result.error is None
+    assert whole_result.data["mine"]["body"] == "곡 전체 메모"
+
+    mas_result = await skill.get_note(ctx, song, difficulty=_mas())
+    assert mas_result.error is None
+    assert mas_result.data["mine"]["body"] == "마스 전용 메모"
+
+
 async def test_delete_removes_own_note(skill: ModuleType, db: aiosqlite.Connection) -> None:
     songdb = SongDbService()
     ctx = _ctx(db=db, player_id="p1", songdb=songdb)
