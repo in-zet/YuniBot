@@ -153,6 +153,19 @@ class SyncLogSummary:
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
+class RatingDeltas:
+    """최근 두 동기화 시점의 세 지표(records_sync_log 스냅샷). 변화량은 부르는 쪽이 뺀다."""
+
+    computed_rating: Decimal | None
+    best30_average: Decimal | None
+    new20_average: Decimal | None
+    has_previous: bool  # 직전 동기화가 있었나(없으면 previous_*는 전부 None)
+    previous_computed_rating: Decimal | None
+    previous_best30_average: Decimal | None
+    previous_new20_average: Decimal | None
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
 class CandidateHit:
     song_title: str
     difficulty: str
@@ -266,13 +279,15 @@ class RecordsService:
             await self._conn.execute(
                 "INSERT INTO records_sync_log (id, player_id, game, synced_at, nickname, "
                 "displayed_rating, computed_rating, rating_mismatch, is_first_sync, "
-                "overpower_value, overpower_percentage) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "overpower_value, overpower_percentage, best30_average_snapshot, new20_average_snapshot) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     sync_id, player_id, _GAME, synced_at.isoformat(), fetch.profile.username,
                     str(displayed_rating) if displayed_rating is not None else None,
                     _rating_str(computed_rating), int(rating_mismatch), int(is_first_sync),
                     overpower_value, overpower_percentage,
+                    # 첫 동기화도 남긴다 — 다음 동기화가 비교할 기준점이다.
+                    _rating_str(best30_average), _rating_str(new20_average),
                 ),
             )
             await self._conn.commit()
@@ -479,6 +494,30 @@ class RecordsService:
             best30_average=average_rating([r.rating for r in best]),
             new20_average=average_rating([r.rating for r in new]),
             last_synced_at=row["synced_at"],
+        )
+
+    async def rating_deltas(self, player_id: str) -> RatingDeltas | None:
+        """가장 최근 두 동기화 로그의 레이팅·베스트30 평균·신곡20 평균(동기화 시점 스냅샷).
+        동기화한 적이 없으면 None. 한 번뿐이면 has_previous=False이고 previous_*는 None이다.
+        "계산 불가"(와 스냅샷 열이 생기기 전 행의 NULL)는 None으로 돌려준다."""
+        cursor = await self._conn.execute(
+            "SELECT computed_rating, best30_average_snapshot, new20_average_snapshot FROM records_sync_log "
+            "WHERE player_id = ? AND game = ? ORDER BY synced_at DESC LIMIT 2",
+            (player_id, _GAME),
+        )
+        rows = list(await cursor.fetchall())
+        if not rows:
+            return None
+        latest = rows[0]
+        previous = rows[1] if len(rows) > 1 else None
+        return RatingDeltas(
+            computed_rating=_rating_from_str(latest["computed_rating"]),
+            best30_average=_rating_from_str(latest["best30_average_snapshot"]),
+            new20_average=_rating_from_str(latest["new20_average_snapshot"]),
+            has_previous=previous is not None,
+            previous_computed_rating=_rating_from_str(previous["computed_rating"]) if previous else None,
+            previous_best30_average=_rating_from_str(previous["best30_average_snapshot"]) if previous else None,
+            previous_new20_average=_rating_from_str(previous["new20_average_snapshot"]) if previous else None,
         )
 
     async def pb_row(self, player_id: str, *, song_title: str, difficulty: str) -> PbRow | None:

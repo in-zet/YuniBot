@@ -13,7 +13,13 @@ from core.decorators import on, tool
 from core.events import Section, Stage
 from core.tool_types import ChartRef, Display, PlayerRef, ToolContext, ToolResult
 from services.chunithm.chart_ref import ResolvedChart
-from services.chunithm.records import ChartUpdate, PbRow, SyncDiff, SyncLogSummary
+from services.chunithm.records import (
+    ChartUpdate,
+    PbRow,
+    RatingDeltas,
+    SyncDiff,
+    SyncLogSummary,
+)
 from services.common.players import Player
 
 # 판정 수(상세 판정)는 CHUNITHM-NET 플레이 상세 페이지를 한 곡씩 따로 열어야 붙는다.
@@ -90,32 +96,59 @@ def _pb_data(row: PbRow) -> dict[str, Any]:
     }
 
 
+_METRIC_LABELS = {"computed_rating": "레이팅    ", "best30_average": "베스트 30 ", "new20_average": "신곡 20   "}
+_NO_PREVIOUS = "비교할 직전 기록 없음"
+
+
+def _snapshot_metrics(deltas: RatingDeltas) -> dict[str, dict[str, str | None]]:
+    """세 지표의 현재값·직전값·변화량(문자열). 직전 동기화가 없으면 previous/change는 None."""
+    pairs = {
+        "computed_rating": (deltas.computed_rating, deltas.previous_computed_rating),
+        "best30_average": (deltas.best30_average, deltas.previous_best30_average),
+        "new20_average": (deltas.new20_average, deltas.previous_new20_average),
+    }
+    return {
+        key: {
+            "current": _num(current),
+            "previous": _num(previous) if deltas.has_previous else None,
+            "change": _delta(current, previous) if deltas.has_previous else None,
+        }
+        for key, (current, previous) in pairs.items()
+    }
+
+
+def _metric_text(metric: dict[str, str | None]) -> str:
+    """"16.94 (+0.04)" — 직전 동기화가 없으면 "16.94 (비교할 직전 기록 없음)"."""
+    return f"{metric['current']} ({metric['change'] if metric['change'] is not None else _NO_PREVIOUS})"
+
+
 # ---------------------------------------------------------------- 도구
 
 
 @tool(slash="프로필")
 async def profile(ctx: ToolContext, player: PlayerRef | None = None) -> ToolResult:
-    """닉네임, 현재 레이팅, 베스트 30 평균, 신곡 20 평균, 마지막 동기화 시각을 보여준다. player를 비우면 본인이다."""
+    """닉네임, 레이팅·베스트 30 평균·신곡 20 평균(직전 동기화 대비 변화량 포함), 마지막 동기화 시각을 보여준다. player를 비우면 본인이다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
     summary = await ctx.records.latest_sync_summary(target.id)
-    if summary is None:
+    deltas: RatingDeltas | None = await ctx.records.rating_deltas(target.id)
+    if summary is None or deltas is None:
         return ToolResult(error=_NOT_SYNCED_ERROR)
 
-    data = {
+    metrics = _snapshot_metrics(deltas)
+    data: dict[str, Any] = {
         "player_id": target.id,
         "nickname": summary.nickname,
-        "computed_rating": _num(summary.computed_rating),
-        "best30_average": _num(summary.best30_average),
-        "new20_average": _num(summary.new20_average),
+        **{key: m["current"] for key, m in metrics.items()},
+        "previous": {key: m["previous"] for key, m in metrics.items()},
+        "change": {key: m["change"] for key, m in metrics.items()},
+        "has_previous": deltas.has_previous,
         "last_synced_at": summary.last_synced_at,
     }
     lines = [
         f"{summary.nickname or '(닉네임 없음)'}",
-        f"레이팅      {data['computed_rating']}",
-        f"베스트 30   {data['best30_average']}",
-        f"신곡 20     {data['new20_average']}",
+        *(f"{_METRIC_LABELS[key]}  {_metric_text(m)}" for key, m in metrics.items()),
         f"마지막 동기화  {summary.last_synced_at}",
     ]
     return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
@@ -134,20 +167,28 @@ async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind
     best_rows, new_rows = await ctx.records.current_frames(target.id)
     if not best_rows and not new_rows:
         return ToolResult(error=_NOT_SYNCED_ERROR)
-    summary: SyncLogSummary | None = await ctx.records.latest_sync_summary(target.id)
+    deltas: RatingDeltas | None = await ctx.records.rating_deltas(target.id)
+    if deltas is None:
+        return ToolResult(error=_NOT_SYNCED_ERROR)
+    metrics = _snapshot_metrics(deltas)
 
-    data: dict[str, Any] = {"player_id": target.id, "kind": kind.value}
-    blocks: list[str] = []
-    frames: list[tuple[str, str, list[PbRow], Decimal | None]] = []
+    data: dict[str, Any] = {
+        "player_id": target.id,
+        "kind": kind.value,
+        "computed_rating": metrics["computed_rating"],
+        "has_previous": deltas.has_previous,
+    }
+    blocks: list[str] = [f"레이팅  {_metric_text(metrics['computed_rating'])}"]
+    frames: list[tuple[str, str, list[PbRow], dict[str, str | None]]] = []
     if kind in (BestKind.BEST, BestKind.BOTH):
-        frames.append(("best", "베스트 30", best_rows, summary.best30_average if summary else None))
+        frames.append(("best", "베스트 30", best_rows, metrics["best30_average"]))
     if kind in (BestKind.NEW, BestKind.BOTH):
-        frames.append(("new", "신곡 20", new_rows, summary.new20_average if summary else None))
+        frames.append(("new", "신곡 20", new_rows, metrics["new20_average"]))
 
     for key, title, rows, average in frames:
         data[key] = [{**_pb_data(r), "contribution": _contribution(r.rating)} for r in rows]
-        data[f"{key}_average"] = _num(average)
-        lines = [f"{title}  평균 {_num(average)}"]
+        data[f"{key}_average"] = average
+        lines = [f"{title}  평균 {_metric_text(average)}"]
         lines += [
             f"{i}. {r.song_title} {r.difficulty}{_const_text(r.const)}  {_score(r.score)} {r.rank}  "
             f"곡 레이팅 {_num(r.rating)}  기여 {_contribution(r.rating)}"

@@ -46,6 +46,7 @@ _PLAYERS_MIGRATION = (
 _RECORDS_MIGRATION = (
     Path("migrations/core/008_records.sql").read_text()
     + Path("migrations/core/013_records_overpower.sql").read_text()
+    + Path("migrations/core/014_records_sync_log_snapshot_averages.sql").read_text()
 )
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -821,3 +822,68 @@ async def test_current_frames_empty_when_never_synced(conn) -> None:
     _, player_id, _, service = await _setup(conn)
 
     assert await service.current_frames(player_id) == ([], [])
+
+
+async def test_rating_deltas_none_before_any_sync(conn) -> None:
+    _, player_id, _, service = await _setup(conn)
+
+    assert await service.rating_deltas(player_id) is None
+
+
+async def test_rating_deltas_first_sync_has_no_previous(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    await _baseline(service, player_id, ctx, monkeypatch)
+
+    deltas = await service.rating_deltas(player_id)
+
+    assert deltas is not None
+    assert deltas.has_previous is False
+    assert (deltas.computed_rating, deltas.best30_average, deltas.new20_average) == (
+        Decimal("16.94"), Decimal("17.02"), Decimal("16.83"),
+    )
+    assert (deltas.previous_computed_rating, deltas.previous_best30_average, deltas.previous_new20_average) == (
+        None, None, None,
+    )
+
+
+async def test_rating_deltas_second_sync_compares_with_previous_snapshot(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    await _baseline(service, player_id, ctx, monkeypatch)
+    fetch = _fixture_fetch()
+    lowest = min(fetch.best30, key=lambda pb: pb.score)
+    fetch.best30 = _replace_in(fetch.best30, lowest.song.title, 1_010_000)
+
+    result = await service.save_sync(player_id, fetch, ctx)
+    deltas = await service.rating_deltas(player_id)
+
+    assert deltas is not None and deltas.has_previous is True
+    assert (deltas.previous_computed_rating, deltas.previous_best30_average, deltas.previous_new20_average) == (
+        Decimal("16.94"), Decimal("17.02"), Decimal("16.83"),
+    )
+    assert deltas.computed_rating == result.computed_rating
+    assert deltas.best30_average == result.best30_average
+    assert deltas.new20_average == Decimal("16.83")
+    assert deltas.best30_average is not None and deltas.best30_average > Decimal("17.02")
+
+
+async def test_snapshot_averages_store_unknown_as_not_computable(conn, monkeypatch) -> None:
+    songdb = _songdb_with_fixture_new20(monkeypatch)
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+    fetch = _fixture_fetch()
+    unknown_title = fetch.new20[0].song.title
+    real_const_for = songdb.const_for
+    monkeypatch.setattr(
+        songdb, "const_for",
+        lambda title, difficulty: None if title == unknown_title else real_const_for(title, difficulty),
+    )
+    await service.save_sync(player_id, fetch, ctx)
+
+    cursor = await conn.execute(
+        "SELECT best30_average_snapshot, new20_average_snapshot FROM records_sync_log WHERE player_id = ?",
+        (player_id,),
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    assert (row[0], row[1]) == ("17.02", "계산 불가")
+    deltas = await service.rating_deltas(player_id)
+    assert deltas is not None and deltas.new20_average is None

@@ -24,6 +24,7 @@ from services.chunithm.records import (
     ChartUpdate,
     FrameExit,
     PbRow,
+    RatingDeltas,
     SessionInfo,
     SyncDiff,
     SyncLogSummary,
@@ -77,6 +78,17 @@ def _pb(title: str, difficulty: str, score: int, rank: str, const: float | None,
     )
 
 
+_DELTAS_FIRST = RatingDeltas(
+    computed_rating=Decimal("16.94"), best30_average=Decimal("17.02"), new20_average=Decimal("16.83"),
+    has_previous=False, previous_computed_rating=None, previous_best30_average=None,
+    previous_new20_average=None,
+)
+_DELTAS_SECOND = RatingDeltas(
+    computed_rating=Decimal("16.94"), best30_average=Decimal("17.02"), new20_average=Decimal("16.83"),
+    has_previous=True, previous_computed_rating=Decimal("16.90"), previous_best30_average=Decimal("17.00"),
+    previous_new20_average=Decimal("16.83"),
+)
+
 _SUMMARY = SyncLogSummary(
     nickname="펭귄", computed_rating=Decimal("16.94"), best30_average=Decimal("17.02"),
     new20_average=Decimal("16.83"), last_synced_at="2026-10-17T03:00:00+00:00",
@@ -86,6 +98,7 @@ _SUMMARY = SyncLogSummary(
 @dataclass(slots=True, kw_only=True)
 class _FakeRecords:
     summaries: dict[str, SyncLogSummary] = field(default_factory=dict)
+    deltas: dict[str, RatingDeltas] = field(default_factory=dict)
     pbs: dict[str, list[PbRow]] = field(default_factory=dict)
     frames: dict[str, tuple[list[PbRow], list[PbRow]]] = field(default_factory=dict)
     hits: list[CandidateHit] = field(default_factory=list)
@@ -94,6 +107,9 @@ class _FakeRecords:
 
     async def latest_sync_summary(self, player_id: str) -> SyncLogSummary | None:
         return self.summaries.get(player_id)
+
+    async def rating_deltas(self, player_id: str) -> RatingDeltas | None:
+        return self.deltas.get(player_id)
 
     async def pb_row(self, player_id: str, *, song_title: str, difficulty: str) -> PbRow | None:
         for row in self.pbs.get(player_id, []):
@@ -203,7 +219,7 @@ def _chart(title: str = "Chronomia", difficulty: str = "MAS") -> ResolvedChart:
 
 
 async def test_profile_self_ignores_privacy_setting(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}), players=[_player("me", public=False)])
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}), players=[_player("me", public=False)])
 
     result = await skill.profile(f.ctx)
 
@@ -219,7 +235,7 @@ async def test_profile_self_ignores_privacy_setting(skill: ModuleType) -> None:
 
 async def test_profile_self_resolved_explicitly_also_ignores_privacy(skill: ModuleType) -> None:
     me = _player("me", public=False)
-    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}), players=[me])
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}), players=[me])
 
     result = await skill.profile(f.ctx, player=me)
 
@@ -228,7 +244,7 @@ async def test_profile_self_resolved_explicitly_also_ignores_privacy(skill: Modu
 
 async def test_profile_of_private_other_player_is_refused(skill: ModuleType) -> None:
     other = _player("other", public=False)
-    f = _ctx(records=_FakeRecords(summaries={"other": _SUMMARY}), players=[_player("me"), other])
+    f = _ctx(records=_FakeRecords(summaries={"other": _SUMMARY}, deltas={"other": _DELTAS_SECOND}), players=[_player("me"), other])
 
     result = await skill.profile(f.ctx, player=other)
 
@@ -238,12 +254,33 @@ async def test_profile_of_private_other_player_is_refused(skill: ModuleType) -> 
 
 async def test_profile_of_public_other_player(skill: ModuleType) -> None:
     other = _player("other", public=True)
-    f = _ctx(records=_FakeRecords(summaries={"other": _SUMMARY}), players=[_player("me"), other])
+    f = _ctx(records=_FakeRecords(summaries={"other": _SUMMARY}, deltas={"other": _DELTAS_SECOND}), players=[_player("me"), other])
 
     result = await skill.profile(f.ctx, player=other)
 
     assert result.error is None
     assert result.data["player_id"] == "other"
+
+
+async def test_profile_shows_change_since_previous_sync(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
+
+    result = await skill.profile(f.ctx)
+
+    assert result.data["change"] == {"computed_rating": "+0.04", "best30_average": "+0.02", "new20_average": "+0.00"}
+    assert result.data["previous"]["computed_rating"] == "16.90"
+    content = _content(result)
+    assert "16.94 (+0.04)" in content and "17.02 (+0.02)" in content and "16.83 (+0.00)" in content
+
+
+async def test_profile_after_first_sync_has_no_previous(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_FIRST}))
+
+    result = await skill.profile(f.ctx)
+
+    assert result.data["has_previous"] is False
+    assert result.data["change"] == {"computed_rating": None, "best30_average": None, "new20_average": None}
+    assert "16.94 (비교할 직전 기록 없음)" in _content(result)
 
 
 async def test_profile_never_synced(skill: ModuleType) -> None:
@@ -272,7 +309,7 @@ async def test_best_never_synced(skill: ModuleType) -> None:
 
 
 async def test_best_both_lists_rows_and_contribution(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}))
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.best(f.ctx)
 
@@ -286,8 +323,30 @@ async def test_best_both_lists_rows_and_contribution(skill: ModuleType) -> None:
     assert "곡 A" in content and "신곡 C" in content and "1,007,620" in content and "0.3462" in content
 
 
+async def test_best_shows_average_changes(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, deltas={"me": _DELTAS_SECOND}))
+
+    result = await skill.best(f.ctx)
+
+    assert result.data["best_average"] == {"current": "17.02", "previous": "17.00", "change": "+0.02"}
+    assert result.data["computed_rating"]["change"] == "+0.04"
+    content = _content(result)
+    assert "레이팅  16.94 (+0.04)" in content
+    assert "베스트 30  평균 17.02 (+0.02)" in content
+    assert "신곡 20  평균 16.83 (+0.00)" in content
+
+
+async def test_best_after_first_sync_has_no_previous(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, deltas={"me": _DELTAS_FIRST}))
+
+    result = await skill.best(f.ctx)
+
+    assert result.data["best_average"]["change"] is None
+    assert "베스트 30  평균 17.02 (비교할 직전 기록 없음)" in _content(result)
+
+
 async def test_best_kind_new_only(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(frames={"me": _frames()}))
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.best(f.ctx, kind="new")
 
@@ -297,7 +356,7 @@ async def test_best_kind_new_only(skill: ModuleType) -> None:
 
 
 async def test_best_invalid_kind_is_error(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(frames={"me": _frames()}))
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.best(f.ctx, kind="전부")
 
@@ -306,7 +365,7 @@ async def test_best_invalid_kind_is_error(skill: ModuleType) -> None:
 
 async def test_best_of_private_other_is_refused(skill: ModuleType) -> None:
     other = _player("other", public=False)
-    f = _ctx(records=_FakeRecords(frames={"other": _frames()}), players=[_player("me"), other])
+    f = _ctx(records=_FakeRecords(frames={"other": _frames()}, deltas={"other": _DELTAS_SECOND}), players=[_player("me"), other])
 
     result = await skill.best(f.ctx, player=other)
 
@@ -548,9 +607,9 @@ def _section_content(section: Section) -> str:
     return section.display.content or ""
 
 
-async def test_sync_report_no_change_shows_current_values_only(skill: ModuleType) -> None:
+async def test_sync_report_no_change_shows_current_values_with_change(skill: ModuleType) -> None:
     diff = _sync_diff(sessions=[])
-    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}))
+    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     section = await skill.on_sync_completed(f.ctx, _payload(has_new_plays=False))
 
@@ -580,7 +639,7 @@ async def test_sync_report_with_updates_has_summary_list_and_great_stage(skill: 
     ]
     diff = _sync_diff(updates=updates, exits=[FrameExit(song_title="곡 X", difficulty="MAS", old_rating=Decimal("16.50"))])
     f = _ctx(
-        records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}),
+        records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}),
         consts={("곡 A", "MAS"): 15.3, ("곡 B", "MAS"): 14.9},
     )
 
@@ -609,7 +668,7 @@ async def test_sync_report_good_stage_without_sss(skill: ModuleType) -> None:
         _update("곡 A", old=1_000_000, new=1_003_000, old_rank="SS", new_rank="SS",
                 old_rating="16.00", new_rating="16.20"),
     ])
-    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}))
+    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     section = await skill.on_sync_completed(f.ctx, _payload(has_new_plays=True))
 
@@ -621,7 +680,7 @@ async def test_sync_report_close_stage_when_played_without_update(skill: ModuleT
     diff = _sync_diff(unchanged=[
         UnchangedPlay(song_title="곡 A", difficulty="MAS", play_count=3, current_score=1_005_000, session_id="s1"),
     ])
-    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}))
+    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     section = await skill.on_sync_completed(f.ctx, _payload(has_new_plays=True))
 
@@ -639,7 +698,7 @@ async def test_sync_report_splits_update_list_by_date(skill: ModuleType) -> None
                     old_rating="16.00", new_rating="16.30", session="s2", estimated=True),
         ],
     )
-    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}))
+    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     section = await skill.on_sync_completed(f.ctx, _payload(has_new_plays=True))
 
@@ -659,7 +718,7 @@ async def test_sync_report_focus_filters_update_list_but_keeps_summary(skill: Mo
                 old_rating="16.00", new_rating="16.20"),
     ]
     diff = _sync_diff(updates=updates)
-    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}))
+    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     section = await skill.on_sync_completed(
         f.ctx, _payload(has_new_plays=True, focus=[{"song_title": "Chronomia", "difficulty": "MAS"}])
@@ -675,7 +734,7 @@ async def test_sync_report_focus_filters_update_list_but_keeps_summary(skill: Mo
 
 
 async def test_sync_report_without_diff_falls_back_to_current_values(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}))
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     section = await skill.on_sync_completed(f.ctx, _payload(has_new_plays=True))
 
