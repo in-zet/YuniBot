@@ -168,9 +168,15 @@ async def update_goal(conn: aiosqlite.Connection, goal_id: str, **fields: Any) -
 
 
 async def delete_goals(conn: aiosqlite.Connection, goal_ids: list[str]) -> int:
+    """목표를 지우고, 같은 트랜잭션에서 그 진행 기록도 지우며, 하위 목표의 상위 연결을 끊는다
+    (하위 목표 자체는 남는다)."""
     if not goal_ids:
         return 0
     placeholders = ",".join("?" for _ in goal_ids)
+    await conn.execute(f"DELETE FROM goals_progress WHERE goal_id IN ({placeholders})", goal_ids)
+    await conn.execute(
+        f"UPDATE goals_goals SET parent_goal_id = NULL WHERE parent_goal_id IN ({placeholders})", goal_ids
+    )
     cursor = await conn.execute(f"DELETE FROM goals_goals WHERE id IN ({placeholders})", goal_ids)
     await conn.commit()
     return cursor.rowcount

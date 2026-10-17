@@ -40,3 +40,8 @@ emits: [chunithm.goal.completed]
 - 오버파워 목표는 전체(overall)만 지원한다. 폴더별 오버파워 퍼센트는 이번 단계 범위 밖이다 —
   요청받으면 아직 안 된다고 분명히 말한다.
 - `due_at`/`notify_offsets`는 데이터로만 저장한다. 기한 알림을 실제로 쏘는 예약은 다음 단계다.
+  `due_at`은 YYYY-MM-DD 날짜만 받고, 꼬리표를 안 주면 기한으로 단기/중기/장기를 정한다.
+- 레이팅·오버파워 목표는 지금 값보다 높아야 만들 수 있다(이미 달성했거나 내려가야 닿는 목표는 거절).
+- 남의 목표는 목표마다 고른 공개 여부(`public`)로만 거른다. 플레이어 단위 공개 설정은 보지 않는다.
+- `list_goals`/`todo_list`/`progress`는 목표 id를 함께 보여 준다. `update`/`progress`/`todo_done`/
+  `delete`에는 그 id를 넘긴다.
