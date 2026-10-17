@@ -271,9 +271,7 @@ class ChunithmNetService:
             for code in _PERSONAL_BEST_DIFFICULTY_CODES:
                 all_personal_bests[code] = await adapter.get_personal_bests(difficulty=Difficulty(code))
         except AuthenticationError:
-            await self._players.revoke_status_tag(player_id, "chunithm-linked")
-            if ctx is not None:
-                await ctx.emit("chunithm.login.expired", {"player_id": player_id})
+            await self._expire_login(player_id, ctx)
             raise
         finally:
             await adapter.aclose()
@@ -286,8 +284,11 @@ class ChunithmNetService:
             all_personal_bests=all_personal_bests,
         )
 
-    async def get_recent_scores(self, player_id: str) -> list[RecentScore]:
-        """최근 플레이 이력만 따로 가져온다(동기화와 달리 판정 상세 없이 목록만)."""
+    async def get_recent_scores(
+        self, player_id: str, *, ctx: ToolContext | None = None
+    ) -> list[RecentScore]:
+        """최근 플레이 이력만 따로 가져온다(동기화와 달리 판정 상세 없이 목록만).
+        인증 실패는 fetch_for_sync와 똑같이 만료로 처리하고 예외를 다시 던진다."""
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
             raise ConnectionError("로그인되어 있지 않다")
@@ -295,14 +296,18 @@ class ChunithmNetService:
         adapter = self._adapter_factory(cookie)
         try:
             return await adapter.get_recent_scores()
+        except AuthenticationError:
+            await self._expire_login(player_id, ctx)
+            raise
         finally:
             await adapter.aclose()
 
     async def enrich_recent_with_detail(
-        self, player_id: str, scores: list[RecentScore], *, limit: int
+        self, player_id: str, scores: list[RecentScore], *, limit: int, ctx: ToolContext | None = None
     ) -> list[RecentScore]:
         """앞 `limit`개만 상세 판정이 붙은 버전으로 바꿔 끼운 새 리스트를 돌려준다.
-        나머지는 받은 그대로 둔다. 넘겨받은 `scores` 리스트 자체는 건드리지 않는다."""
+        나머지는 받은 그대로 둔다. 넘겨받은 `scores` 리스트 자체는 건드리지 않는다.
+        인증 실패는 fetch_for_sync와 똑같이 만료로 처리하고 예외를 다시 던진다."""
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
             raise ConnectionError("로그인되어 있지 않다")
@@ -310,10 +315,24 @@ class ChunithmNetService:
         adapter = self._adapter_factory(cookie)
         try:
             detailed = [await adapter.get_detailed_recent_score(score) for score in scores[:limit]]
+        except AuthenticationError:
+            await self._expire_login(player_id, ctx)
+            raise
         finally:
             await adapter.aclose()
 
         return detailed + scores[limit:]
+
+    async def _expire_login(self, player_id: str, ctx: ToolContext | None) -> None:
+        """인증 실패(쿠키 만료) 처리: chunithm-linked를 떼고 chunithm.login.expired를 낸다.
+        이벤트의 대상은 쿠키 주인(player_id)이다 — /최근처럼 요청한 사람과 쿠키 주인이 다를
+        수 있으므로 ctx.emit(요청한 사람 기준) 대신 버스에 대상 플레이어를 직접 넘긴다."""
+        await self._players.revoke_status_tag(player_id, "chunithm-linked")
+        if ctx is not None:
+            await ctx.event_bus.emit_notify(
+                "chunithm.login.expired", {"player_id": player_id},
+                player_id=player_id, guild_id=ctx.guild_id,
+            )
 
     async def _decrypted_cookie(self, player_id: str) -> str | None:
         """평문은 이 메서드를 부른 호출자 스코프에만 잠깐 존재한다 — 반환값을

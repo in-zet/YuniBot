@@ -111,6 +111,8 @@ class _FakeAdapter:
         return _fixture_new20()
 
     async def get_recent_scores(self):
+        if self.fails:
+            raise self.error
         return self._recent_scores
 
     async def get_personal_bests(self, *, difficulty: Difficulty) -> list[PersonalBest]:
@@ -119,6 +121,8 @@ class _FakeAdapter:
     async def get_detailed_recent_score(self, score: RecentScore) -> RecentScore:
         # 실제 어댑터는 상세 페이지를 다시 읽어 judgements를 채운다 — 가짜에서는
         # 상세 조회가 다녀갔다는 것만 알 수 있으면 충분하다.
+        if self.fails:
+            raise self.error
         return replace(
             score, judgements=Judgements(justice_critical=0, justice=0, attack=0, miss=0)
         )
@@ -537,3 +541,77 @@ async def test_enrich_recent_with_detail_without_login_raises_connection_error(c
 
     with pytest.raises(ConnectionError):
         await service.enrich_recent_with_detail(player.id, [_make_recent_score(1)], limit=1)
+
+
+async def _linked_player_with_expiry_bus(conn, secrets):
+    """로그인된 플레이어와, chunithm.login.expired를 (이벤트 대상 player_id, payload)로 기록하는 버스."""
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    await _make_service(conn, secrets, adapter=_FakeAdapter(), players=players).login(player.id, "a" * 64, ctx)
+
+    received: list[tuple[str, object]] = []
+
+    async def _record_expired(ctx: ToolContext, payload: object) -> None:
+        received.append((ctx.player_id, payload))
+
+    bus = EventBus()
+    bus.register_notify("chunithm.login.expired", owner_skill="test", fn=_record_expired, skill_services=[])
+    return players, player, bus, received
+
+
+async def test_get_recent_scores_on_auth_failure_expires_login(conn, secrets) -> None:
+    players, player, bus, received = await _linked_player_with_expiry_bus(conn, secrets)
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(fails=True), players=players)
+    ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+
+    with pytest.raises(AuthenticationError):
+        await service.get_recent_scores(player.id, ctx=ctx_with_bus)
+    await bus.drain()
+
+    assert received == [(player.id, {"player_id": player.id})]
+    assert await players.tags_for(player.id) == set()
+
+
+async def test_enrich_recent_with_detail_on_auth_failure_expires_login(conn, secrets) -> None:
+    players, player, bus, received = await _linked_player_with_expiry_bus(conn, secrets)
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(fails=True), players=players)
+    ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+
+    with pytest.raises(AuthenticationError):
+        await service.enrich_recent_with_detail(player.id, [_make_recent_score(1)], limit=1, ctx=ctx_with_bus)
+    await bus.drain()
+
+    assert received == [(player.id, {"player_id": player.id})]
+    assert await players.tags_for(player.id) == set()
+
+
+async def test_recent_auth_failure_for_other_player_expires_the_cookie_owner(conn, secrets) -> None:
+    """/최근은 공개된 남의 기록도 본다 — 만료 처리와 이벤트 대상은 요청한 사람이 아니라 쿠키 주인이다."""
+    players, owner, bus, received = await _linked_player_with_expiry_bus(conn, secrets)
+    requester = await players.create_player()
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(fails=True), players=players)
+    requester_ctx = ToolContext(player_id=requester.id, tags=frozenset(), services={}, event_bus=bus)
+
+    with pytest.raises(AuthenticationError):
+        await service.get_recent_scores(owner.id, ctx=requester_ctx)
+    await bus.drain()
+
+    assert received == [(owner.id, {"player_id": owner.id})]
+    assert await players.tags_for(owner.id) == set()
+
+
+async def test_recent_on_non_auth_failure_keeps_login(conn, secrets) -> None:
+    players, player, bus, received = await _linked_player_with_expiry_bus(conn, secrets)
+    ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+
+    for error in (MaintenanceError(), ConnectionError("네트워크 끊김")):
+        service = _make_service(conn, secrets, adapter=_FakeAdapter(fails=True, error=error), players=players)
+        with pytest.raises(type(error)):
+            await service.get_recent_scores(player.id, ctx=ctx_with_bus)
+        with pytest.raises(type(error)):
+            await service.enrich_recent_with_detail(player.id, [_make_recent_score(1)], limit=1, ctx=ctx_with_bus)
+    await bus.drain()
+
+    assert received == []
+    assert await players.tags_for(player.id) == {"chunithm-linked"}

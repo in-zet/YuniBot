@@ -18,7 +18,6 @@ from services.chunithm.records import (
     PbRow,
     RatingDeltas,
     SyncDiff,
-    SyncLogSummary,
 )
 from services.common.players import Player
 
@@ -223,9 +222,11 @@ async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int =
         return target
     count = max(1, count)
     try:
-        scores = await ctx.chunithm_net.get_recent_scores(target.id)
+        scores = await ctx.chunithm_net.get_recent_scores(target.id, ctx=ctx)
         # 보여 줄 만큼만 넘긴다 — 상세 판정은 곡마다 따로 요청하므로, 안 보여 줄 곡까지 열지 않는다.
-        scores = await ctx.chunithm_net.enrich_recent_with_detail(target.id, scores[:count], limit=_DETAIL_LIMIT)
+        scores = await ctx.chunithm_net.enrich_recent_with_detail(
+            target.id, scores[:count], limit=_DETAIL_LIMIT, ctx=ctx
+        )
     except MaintenanceError:
         return ToolResult(error="CHUNITHM-NET이 점검 중이야. 점검이 끝나면 다시 해 줘.")
     except (AuthenticationError, ConnectionError):
@@ -387,26 +388,26 @@ async def candidates(
 # ---------------------------------------------------------------- 동기화 리포트 조각
 
 
-def _metric_lines(summary: SyncLogSummary | None, diff: SyncDiff | None) -> tuple[list[str], dict[str, Any]]:
-    """레이팅·베스트30 평균·신곡20 평균의 (이전 →) 현재 (변화량) 줄과 data. 숫자는 현재값(지금
-    records 기준)과 diff에 담긴 동기화 직전 값의 차이다 — 세션별로 나누지 않는다."""
-    current = {
-        "computed_rating": summary.computed_rating if summary else None,
-        "best30_average": summary.best30_average if summary else None,
-        "new20_average": summary.new20_average if summary else None,
+def _metric_lines(deltas: RatingDeltas | None) -> tuple[list[str], dict[str, Any]]:
+    """레이팅·베스트30 평균·신곡20 평균의 (직전 →) 현재 (변화량) 줄과 data. 숫자 출처는
+    /프로필·/베스트와 같은 records.rating_deltas(동기화 시점 스냅샷)다 — 같은 시점에 리포트와
+    프로필이 다른 숫자를 보이지 않게 한다. 세션별로 나누지 않는다."""
+    current: dict[str, Decimal | None] = {
+        "computed_rating": deltas.computed_rating if deltas else None,
+        "best30_average": deltas.best30_average if deltas else None,
+        "new20_average": deltas.new20_average if deltas else None,
     }
-    previous = (
+    previous: dict[str, Decimal | None] | None = (
         {
-            "computed_rating": diff.previous_computed_rating,
-            "best30_average": diff.previous_best30_average,
-            "new20_average": diff.previous_new20_average,
+            "computed_rating": deltas.previous_computed_rating,
+            "best30_average": deltas.previous_best30_average,
+            "new20_average": deltas.previous_new20_average,
         }
-        if diff is not None
+        if deltas is not None and deltas.has_previous
         else None
     )
-    labels = {"computed_rating": "레이팅    ", "best30_average": "베스트 30 ", "new20_average": "신곡 20   "}
     lines: list[str] = []
-    for key, label in labels.items():
+    for key, label in _METRIC_LABELS.items():
         if previous is None:
             lines.append(f"{label}  {_num(current[key])}")
         else:
@@ -477,19 +478,19 @@ def _focus_keys(payload: dict[str, Any]) -> set[tuple[str, str]] | None:
 async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section:
     """동기화 리포트의 본문 조각(order 10): 세션 요약, 갱신 목록, 반응 단계."""
     player_id: str = payload["player_id"]
-    summary = await ctx.records.latest_sync_summary(player_id)
+    deltas: RatingDeltas | None = await ctx.records.rating_deltas(player_id)
     if payload.get("is_first_sync"):
         # chunithm-sync는 첫 동기화에 이 이벤트를 내지 않는다. 오면 기준점만 알린다.
         return Section(
             order=_REPORT_ORDER,
-            display=Display(content=f"기준점을 잡았어. 현재 레이팅 {_num(summary.computed_rating if summary else None)}"),
+            display=Display(content=f"기준점을 잡았어. 현재 레이팅 {_num(deltas.computed_rating if deltas else None)}"),
             data={"kind": "sync_report", "is_first_sync": True},
         )
 
     diff = await ctx.records.sync_diff(payload["sync_id"])
     if diff is None or not payload.get("has_new_plays"):
         # 변화 없음, 또는 비교 데이터가 캐시에서 밀려난 경우: 현재값(+있으면 변화량)만.
-        metric_lines, metric_data = _metric_lines(summary, diff)
+        metric_lines, metric_data = _metric_lines(deltas)
         heading = "변화 없음" if not payload.get("has_new_plays") else "현재 기록"
         return Section(
             order=_REPORT_ORDER,
@@ -508,7 +509,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         s = session_by_id[s_id]
         return _short_date(s.play_date) + (" (추정)" if s.estimated else "")
 
-    metric_lines, metric_data = _metric_lines(summary, diff)
+    metric_lines, metric_data = _metric_lines(deltas)
     dates = ", ".join(session_label(s.id) for s in sessions) or "날짜 미상"
     blocks: list[str] = [
         "\n".join([f"세션 요약  {dates}", *metric_lines, f"갱신 {len(diff.chart_updates)}채보"])

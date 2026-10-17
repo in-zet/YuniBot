@@ -162,15 +162,18 @@ class _FakeChunithmNet:
         self._scores = scores
         self._error = error
         self.enrich_calls: list[tuple[str, int, int]] = []  # (player_id, 넘긴 개수, limit)
+        self.ctx_passed: list[ToolContext | None] = []  # 만료 처리를 위해 ctx를 넘겼는지
 
-    async def get_recent_scores(self, player_id: str) -> list[RecentScore]:
+    async def get_recent_scores(self, player_id: str, *, ctx: ToolContext | None = None) -> list[RecentScore]:
+        self.ctx_passed.append(ctx)
         if self._error is not None:
             raise self._error
         return list(self._scores)
 
     async def enrich_recent_with_detail(
-        self, player_id: str, scores: list[RecentScore], *, limit: int
+        self, player_id: str, scores: list[RecentScore], *, limit: int, ctx: ToolContext | None = None
     ) -> list[RecentScore]:
+        self.ctx_passed.append(ctx)
         self.enrich_calls.append((player_id, len(scores), limit))
         detailed = [_recent(s.song.title, s.score, detailed=True) for s in scores[:limit]]
         return detailed + scores[limit:]
@@ -390,6 +393,8 @@ async def test_recent_enriches_only_first_twenty_with_judgements(skill: ModuleTy
     assert all(p["judgements"] is None for p in plays[20:])
     assert plays[0]["judgements"] == {"justice_critical": 1990, "justice": 8, "attack": 2, "miss": 0}
     assert "20" in _content(result)  # 판정 수가 앞 20개에만 있다는 안내
+    # 두 호출 모두 ctx를 넘긴다 — 서비스가 인증 실패 때 만료 처리(태그 해제·이벤트)를 할 수 있게.
+    assert f.net.ctx_passed == [f.ctx, f.ctx]
 
 
 async def test_recent_count_limits_shown_plays(skill: ModuleType) -> None:
@@ -583,9 +588,11 @@ def _sync_diff(
         chart_updates=updates or [],
         unchanged_plays=unchanged or [],
         frame_exits=exits or [],
-        previous_computed_rating=Decimal("16.90"),
-        previous_best30_average=Decimal("17.00"),
-        previous_new20_average=Decimal("16.75"),
+        # 리포트는 이 필드들 대신 records.rating_deltas(/프로필·/베스트와 같은 출처)를 쓴다 —
+        # 일부러 _DELTAS_SECOND와 다른 값을 둬서, 숫자가 이쪽에서 새어 나오면 테스트가 잡게 한다.
+        previous_computed_rating=Decimal("15.00"),
+        previous_best30_average=Decimal("15.10"),
+        previous_new20_average=Decimal("15.20"),
     )
 
 
@@ -622,7 +629,7 @@ async def test_sync_report_no_change_shows_current_values_with_change(skill: Mod
     assert "세션 요약" not in content and "갱신" not in content
     assert "16.94" in content and "17.02" in content and "16.83" in content
     # 지표는 현재값과 변화량을 함께
-    assert "+0.04" in content and "+0.02" in content and "+0.08" in content
+    assert "+0.04" in content and "+0.02" in content and "+0.00" in content
     assert section.data["has_new_plays"] is False
     assert section.data["current"]["computed_rating"] == "16.94"
     assert section.data["change"]["computed_rating"] == "+0.04"
@@ -743,3 +750,64 @@ async def test_sync_report_without_diff_falls_back_to_current_values(skill: Modu
     content = _section_content(section)
     assert "16.94" in content
     assert "갱신" not in content
+
+
+async def test_sync_report_metrics_match_rating_deltas_exactly(skill: ModuleType) -> None:
+    """리포트의 세 지표 현재·직전 값은 /프로필·/베스트와 같은 rating_deltas(동기화 시점 스냅샷)에서
+    온다 — 재계산 쪽(latest_sync_summary, diff.previous_*)과 달라도 rating_deltas를 따른다
+    (예: Chunimaru 덧씌우기 전이라 재계산 신곡20이 비어 있는 경우)."""
+    deltas = RatingDeltas(
+        computed_rating=Decimal("16.94"), best30_average=Decimal("17.02"), new20_average=Decimal("16.83"),
+        has_previous=True, previous_computed_rating=Decimal("16.90"),
+        previous_best30_average=Decimal("17.00"), previous_new20_average=Decimal("16.79"),
+    )
+    recomputed = SyncLogSummary(
+        nickname="펭귄", computed_rating=Decimal("16.94"), best30_average=Decimal("17.02"),
+        new20_average=None, last_synced_at="2026-10-17T03:00:00+00:00",
+    )
+    diff = _sync_diff(updates=[
+        _update("곡 A", old=1_000_000, new=1_003_000, old_rank="SS", new_rank="SS",
+                old_rating="16.00", new_rating="16.20"),
+    ])
+    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": recomputed}, deltas={"me": deltas}))
+
+    for has_new_plays in (True, False):
+        section = await skill.on_sync_completed(f.ctx, _payload(has_new_plays=has_new_plays))
+        assert section.data["current"] == {
+            "computed_rating": "16.94", "best30_average": "17.02", "new20_average": "16.83",
+        }
+        assert section.data["previous"] == {
+            "computed_rating": "16.90", "best30_average": "17.00", "new20_average": "16.79",
+        }
+        assert section.data["change"] == {
+            "computed_rating": "+0.04", "best30_average": "+0.02", "new20_average": "+0.04",
+        }
+        content = _section_content(section)
+        assert "16.79 → 16.83" in content
+        assert "15.20" not in content and "계산 불가" not in content
+
+
+async def test_sync_report_shows_pb_missing_from_recent_history_as_estimated(skill: ModuleType) -> None:
+    """크레딧 직후 동기화로 최근 이력엔 안 보이지만 PB가 오른 경우: records가 has_new_plays=True로
+    올려 주므로(I-1) 리포트는 "변화 없음"으로 숨지 않고 추정 세션의 갱신으로 보여 준다."""
+    estimated_today = SessionInfo(id="s-est", play_date="2026-10-17", estimated=True)
+    diff = _sync_diff(
+        sessions=[estimated_today],
+        updates=[
+            _update("곡 A", old=1_000_000, new=1_003_000, old_rank="SS", new_rank="SS",
+                    old_rating="16.00", new_rating="16.20", session="s-est", estimated=True),
+        ],
+    )
+    f = _ctx(records=_FakeRecords(diffs={"sync-1": diff}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
+
+    section = await skill.on_sync_completed(f.ctx, _payload(has_new_plays=True))
+
+    content = _section_content(section)
+    assert "변화 없음" not in content
+    assert "세션 요약  10/17 (추정)" in content
+    assert "갱신 1채보" in content
+    assert "곡 A MAS" in content and "1,000,000 → 1,003,000" in content
+    assert section.stage == "good"
+    assert section.data["has_new_plays"] is True
+    assert section.data["chart_updates"][0]["estimated_session"] is True
+    assert section.data["sessions"][0]["estimated"] is True

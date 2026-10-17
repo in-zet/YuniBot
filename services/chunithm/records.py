@@ -454,7 +454,10 @@ class RecordsService:
             previous_best30_average=average_rating([r.rating for r in previous_best]),
             previous_new20_average=average_rating([r.rating for r in previous_new]),
         )
-        return diff, bool(recent_times)
+        # "새 플레이가 있었다"의 정의는 여기 한 곳뿐이다: 직전 동기화 이후 최근 이력에 새 항목이
+        # 있거나, 최근 이력엔 아직 안 보여도 PB가 실제로 올랐다(크레딧 직후 동기화하면 최근
+        # 이력 반영이 늦을 수 있다 — PB가 오른 것 자체가 플레이가 있었다는 증거다).
+        return diff, bool(recent_times) or bool(chart_updates)
 
     async def sync_diff(self, sync_id: str) -> SyncDiff | None:
         """save_sync가 만든 비교 데이터. 첫 동기화였거나 캐시에서 밀려났으면(재시작 포함) None."""

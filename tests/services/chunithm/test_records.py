@@ -527,12 +527,34 @@ async def test_improved_pb_without_any_new_play_gets_estimated_today_session(con
 
     result = await service.save_sync(player_id, fetch, ctx)
 
-    assert result.has_new_plays is False
+    # PB가 올랐으면 최근 이력이 비어 있어도 새 플레이가 있었던 것이다(리포트가 "변화 없음"으로 숨지 않게).
+    assert result.has_new_plays is True
     diff = await service.sync_diff(result.sync_id)
     assert diff is not None
     assert diff.sessions == [SessionInfo(id=diff.sessions[0].id, play_date="2026-10-13", estimated=True)]
     assert diff.chart_updates[0].session_id == diff.sessions[0].id
     assert diff.chart_updates[0].estimated_session is True
+
+
+async def test_improved_pb_not_yet_in_recent_history_counts_as_new_play(conn, monkeypatch) -> None:
+    """크레딧 직후 동기화: 최근 이력에는 직전 동기화 이전 플레이만 보이고(이번 크레딧은 아직
+    반영 전) PB는 올랐다. 이때도 has_new_plays=True여야 리포트가 갱신을 보여 준다."""
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    target = next(pb for pb in _fixture_fetch().best30 if pb.song.title == "Odin")
+    fetch = _fixture_fetch()
+    fetch.best30 = _replace_in(fetch.best30, "Odin", 1_008_000)
+    # 직전 동기화(10일 21:00 JST)보다 이른 플레이뿐이다 — "새 최근 플레이"는 0건.
+    fetch.recent_scores = [_recent("Odin", "MAS", target.score, datetime(2026, 10, 10, 20, 0, tzinfo=_JST))]
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    assert result.has_new_plays is True
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert [(u.song_title, u.new_score) for u in diff.chart_updates] == [("Odin", 1_008_000)]
+    assert diff.chart_updates[0].estimated_session is True
+    assert diff.unchanged_plays == []
 
 
 async def test_played_but_not_improved_goes_to_unchanged_plays(conn, monkeypatch) -> None:
