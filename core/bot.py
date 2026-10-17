@@ -399,7 +399,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     # services는 이 시점에 아직 notify/yuni/usage/http가 없지만, 같은 dict 객체를 그대로
     # 들고 있는다 — build_client()가 뒤에서 그 dict를 더 채우면(아래) EventBus도 같은
     # 참조를 보므로 최신 상태를 보게 된다(services 프로퍼티의 주석과 같은 이유).
-    event_bus.bind_dispatch(services=services, tag_provider=players, settings=settings_service)
+    event_bus.bind_dispatch(services=services, tag_provider=players, settings=settings_service, db=conn)
 
     # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야
     # 하기 때문이다(아래 YuniClient.close() 참고).
