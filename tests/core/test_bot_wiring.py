@@ -190,6 +190,43 @@ async def test_register_event_handlers_drops_handler_when_player_lacks_tag() -> 
 
 
 @pytest.mark.asyncio
+async def test_register_event_handlers_applies_skill_manifest_tags() -> None:
+    # _register_event_handlers가 스킬 manifest의 tags도 EventBus에 넘기는지 — 핸들러 자신은 태그
+    # 조건이 없어도, 스킬이 chunithm-synced를 요구하면 그 태그가 없는 플레이어에겐 핸들러가 안
+    # 불린다(00-core.md: 이벤트 대상 플레이어가 그 스킬의 태그 조건을 갖췄는지).
+    received: list[str] = []
+
+    async def handle(ctx: ToolContext, payload: dict[str, object]) -> None:
+        received.append(ctx.player_id)
+
+    code = SkillCode(event_handlers=[EventHandlerSpec(fn=handle, event_name="players.first_seen")])
+    skill = LoadedSkill(
+        manifest=SkillManifest(
+            name="notif-skill", description="테스트용", examples=["예시"], category="메모",
+            game="common", version=1, services=[], tags=["chunithm-synced"],
+        ),
+        path=Path("."),
+        code=code,
+    )
+    registry = SkillRegistry([])
+    registry._loaded = {"notif-skill": skill}  # pyright: ignore[reportPrivateUsage]
+
+    bus = EventBus()
+    _register_event_handlers(bus, registry)
+    bus.bind_dispatch(
+        services={},
+        tag_provider=_FakeTagProvider({"p1": set(), "p2": {"chunithm-synced"}}),
+        settings=None,
+    )
+
+    await bus.emit_notify("players.first_seen", {}, player_id="p1", guild_id=None)
+    await bus.emit_notify("players.first_seen", {}, player_id="p2", guild_id=None)
+    await bus.drain()
+
+    assert received == ["p2"]
+
+
+@pytest.mark.asyncio
 async def test_build_client_binds_event_bus_dispatch_to_live_services(tmp_path: Path) -> None:
     # build_client()가 event_bus.bind_dispatch(services=services, ...)를 실제로 불러야
     # @on 핸들러가 받는 ctx가 services 전체가 아니라 자기 manifest.services만 보게 된다.

@@ -293,3 +293,62 @@ async def test_notify_handler_tags_any_requires_at_least_one() -> None:
     await bus.drain()
 
     assert called == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_handler_skipped_when_player_lacks_skill_level_tags() -> None:
+    # 핸들러 자신의 조건(chunithm-linked)은 갖췄지만 그 스킬의 manifest 조건(chunithm-synced)은
+    # 없는 플레이어: 알림은 안 불리고 모으기 조각은 빠진다. 두 조건은 따로 검사한다.
+    bus = EventBus()
+    bus.bind_dispatch(
+        services={}, tag_provider=_FakeTagProvider({"p1": {"chunithm-linked"}}), settings=None
+    )
+    notified: list[str] = []
+
+    async def notify_handler(ctx: ToolContext, payload: object) -> None:
+        notified.append("called")
+
+    async def gather_handler(ctx: ToolContext, payload: object) -> Section | None:
+        return Section(data={"from": "gated"})
+
+    async def other_gather(ctx: ToolContext, payload: object) -> Section | None:
+        return Section(data={"from": "open"})
+
+    bus.register_notify(
+        "evt", owner_skill="s", fn=notify_handler, skill_services=[],
+        tags=["chunithm-linked"], skill_tags=["chunithm-synced"],
+    )
+    bus.register_gather(
+        "evt", owner_skill="s", fn=gather_handler, skill_services=[],
+        tags=["chunithm-linked"], skill_tags=["chunithm-synced"],
+    )
+    bus.register_gather("evt", owner_skill="other", fn=other_gather, skill_services=[])
+
+    await bus.emit_notify("evt", {}, player_id="p1", guild_id=None)
+    await bus.drain()
+    sections = await bus.emit_gather("evt", {}, player_id="p1", guild_id=None)
+
+    assert notified == []
+    assert [s.data["from"] for s in sections] == ["open"]
+
+
+@pytest.mark.asyncio
+async def test_skill_level_tags_any_checked_separately_from_handler_tags_any() -> None:
+    # 핸들러의 tags_any(vip)만 맞고 스킬의 tags_any(admin, mod)는 하나도 안 맞는다 — 둘을 합쳐
+    # 한 번에 검사하면 통과해 버리므로, 따로 검사해서 걸러져야 한다.
+    bus = EventBus()
+    bus.bind_dispatch(services={}, tag_provider=_FakeTagProvider({"p1": {"vip"}}), settings=None)
+
+    async def gather_handler(ctx: ToolContext, payload: object) -> Section | None:
+        return Section(data={"from": "gated"})
+
+    bus.register_gather(
+        "evt", owner_skill="s", fn=gather_handler, skill_services=[],
+        tags_any=["vip"], skill_tags_any=["admin", "mod"],
+    )
+
+    assert await bus.emit_gather("evt", {}, player_id="p1", guild_id=None) == []
+
+    bus.bind_dispatch(services={}, tag_provider=_FakeTagProvider({"p1": {"vip", "mod"}}), settings=None)
+    sections = await bus.emit_gather("evt", {}, player_id="p1", guild_id=None)
+    assert [s.data["from"] for s in sections] == ["gated"]

@@ -286,6 +286,9 @@ def _register_event_handlers(bus: EventBus, registry: SkillRegistry) -> None:
                     skill_services=list(skill.manifest.services),
                     tags=handler.tags,
                     tags_any=handler.tags_any,
+                    # 스킬 manifest 레벨 조건도 넘긴다 — EventBus가 핸들러 조건과 따로 검사한다.
+                    skill_tags=list(skill.manifest.tags),
+                    skill_tags_any=list(skill.manifest.tags_any),
                 )
         except Exception as exc:  # noqa: BLE001 - 한 스킬의 어떤 실패도 코어 전체를 죽이면 안 된다
             registry.disable(skill.manifest.name, f"이벤트 핸들러 등록 실패: {exc}")

@@ -49,6 +49,10 @@ class _Handler:
     fn: _HandlerFn
     skill_services: list[str] = field(default_factory=list)
     tags: TagRequirement = field(default_factory=TagRequirement)
+    # 핸들러가 속한 스킬의 manifest 레벨 태그 조건. 핸들러 자신의 조건(tags)과 합치지 않고
+    # 따로 검사한다 — 각각의 tags_any를 하나로 합치면 "둘 중 하나만 맞아도 통과"로 느슨해진다
+    # (core/executor.py의 ToolExecutor.invoke가 tool_requirement/skill_requirement를 따로 보는 이유와 같다).
+    skill_tags: TagRequirement = field(default_factory=TagRequirement)
 
 
 class EventBus:
@@ -90,6 +94,8 @@ class EventBus:
         skill_services: list[str],
         tags: list[str] | None = None,
         tags_any: list[str] | None = None,
+        skill_tags: list[str] | None = None,
+        skill_tags_any: list[str] | None = None,
     ) -> None:
         self._notify_handlers.setdefault(event_name, []).append(
             _Handler(
@@ -97,6 +103,7 @@ class EventBus:
                 fn=fn,
                 skill_services=skill_services,
                 tags=TagRequirement(tags=tags or [], tags_any=tags_any or []),
+                skill_tags=TagRequirement(tags=skill_tags or [], tags_any=skill_tags_any or []),
             )
         )
 
@@ -109,6 +116,8 @@ class EventBus:
         skill_services: list[str],
         tags: list[str] | None = None,
         tags_any: list[str] | None = None,
+        skill_tags: list[str] | None = None,
+        skill_tags_any: list[str] | None = None,
     ) -> None:
         self._gather_handlers.setdefault(event_name, []).append(
             _Handler(
@@ -116,6 +125,7 @@ class EventBus:
                 fn=fn,
                 skill_services=skill_services,
                 tags=TagRequirement(tags=tags or [], tags_any=tags_any or []),
+                skill_tags=TagRequirement(tags=skill_tags or [], tags_any=skill_tags_any or []),
             )
         )
 
@@ -131,7 +141,9 @@ class EventBus:
         player_tags: set[str] = (
             await self._tag_provider.tags_for(player_id) if self._tag_provider is not None else set()
         )
-        if not check_tags(handler.tags, player_tags):
+        # 이벤트 대상 플레이어가 핸들러 자신의 조건과 그 스킬의 조건을 둘 다 갖춰야 한다
+        # (00-core.md). 어느 한쪽이라도 안 맞으면 건너뛴다 — 모으기는 그 조각만 빠지고 알림은 안 불린다.
+        if not check_tags(handler.tags, player_tags) or not check_tags(handler.skill_tags, player_tags):
             return None
         scoped_services = {
             name: self._services[name] for name in handler.skill_services if name in self._services
