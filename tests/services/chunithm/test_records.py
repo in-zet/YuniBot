@@ -1,8 +1,10 @@
 # tests/services/chunithm/test_records.py
+import dataclasses
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import aiosqlite
 import pytest
@@ -10,14 +12,30 @@ from chuni_penguin.adapters.chunithm_net.parser import (
     parse_music_for_rating,
     parse_player_data,
 )
+from chuni_penguin.types import Chart, Difficulty, PersonalBest, Song
+from chuni_penguin.types.lamp import ClearLamp, ComboLamp
+from chuni_penguin.types.score import Rank, RecentScore
 from selectolax.lexbor import LexborHTMLParser
 
 from core.events import EventBus
 from core.tool_types import ToolContext
 from services.chunithm import records as records_module
 from services.chunithm.chunithm_net import SyncFetch
-from services.chunithm.records import RecordsService
-from services.chunithm.records_calc import allowed_attacks, remaining_to_target
+from services.chunithm.records import (
+    FrameExit,
+    PbRow,
+    RecordsService,
+    SessionInfo,
+    UnchangedPlay,
+)
+from services.chunithm.records_calc import (
+    allowed_attacks,
+    assign_session_date,
+    average_rating,
+    candidate_upside,
+    chart_rating,
+    remaining_to_target,
+)
 from services.chunithm.songdb import SongDbService
 from services.common.players import PlayersService
 
@@ -25,7 +43,11 @@ _PLAYERS_MIGRATION = (
     Path("migrations/core/001_players.sql").read_text()
     + Path("migrations/core/002_player_tags.sql").read_text()
 )
-_RECORDS_MIGRATION = Path("migrations/core/008_records.sql").read_text()
+_RECORDS_MIGRATION = (
+    Path("migrations/core/008_records.sql").read_text()
+    + Path("migrations/core/013_records_overpower.sql").read_text()
+)
+_JST = ZoneInfo("Asia/Tokyo")
 
 _PROFILE_HTML = Path("docs/reference/chunithm-net/player_data.html").read_text(encoding="utf-8")
 _BEST_HTML = Path("docs/reference/chunithm-net/rating_detail_best.html").read_text(encoding="utf-8")
@@ -190,22 +212,36 @@ async def test_improved_score_updates_row_as_a_unit(conn) -> None:
 
 
 async def test_session_date_uses_local_wall_clock_not_utc(conn, monkeypatch) -> None:
-    """UTC로는 아직 10일이지만 로컬(예: KST)로는 11일 오전 5시(경계 4시 이후)인
-    순간의 동기화는 11일 세션이어야 한다 — UTC를 넘기면 10일로 잘못 배정된다."""
-    players = PlayersService(conn)
-    player = await players.create_player()
-    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
-    service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
+    """세션 날짜는 동기화 시각(UTC)이 아니라 그 플레이의 achieved_at(CHUNITHM-NET이 주는
+    일본/한국 벽시계, +09:00)으로 정한다. UTC로는 아직 10일 20시지만 벽시계로는 11일
+    오전 5시(경계 4시 이후)인 플레이는 11일 세션이어야 한다 — UTC 날짜를 쓰면 10일로
+    잘못 배정된다.
 
-    _freeze_now(monkeypatch, utc=datetime(2026, 10, 10, 20, 0, tzinfo=UTC), local=datetime(2026, 10, 11, 5, 0, tzinfo=UTC))
-    await service.save_sync(player.id, _fixture_fetch(), ctx)
+    첫 동기화는 기준점만 만들고 세션을 만들지 않으므로(결정 사항 F, Task 4 Step 12),
+    둘째 동기화의 최근 플레이 이력으로 확인한다."""
+    _, player_id, ctx, service = await _setup(conn)
+    _freeze_now(monkeypatch, utc=datetime(2026, 10, 10, 12, 0, tzinfo=UTC), local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
 
-    cursor = await conn.execute("SELECT play_date FROM records_sessions WHERE player_id = ?", (player.id,))
-    rows = await cursor.fetchall()
-    assert [r[0] for r in rows] == ["2026-10-11"]
-    cursor = await conn.execute("SELECT synced_at FROM records_sync_log WHERE player_id = ?", (player.id,))
+    target = _fixture_fetch().best30[4]
+    achieved_at = datetime(2026, 10, 11, 5, 0, tzinfo=_JST)  # = 2026-10-10T20:00Z
+    fetch = _fixture_fetch()
+    fetch.recent_scores = [_recent(target.song.title, "MAS", target.score - 1000, achieved_at)]
+    _freeze_now(monkeypatch, utc=datetime(2026, 10, 10, 21, 0, tzinfo=UTC), local=datetime(2026, 10, 11, 6, 0, tzinfo=UTC))
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert [s.play_date for s in diff.sessions] == [assign_session_date(achieved_at).isoformat()]
+    assert diff.sessions[0].play_date == "2026-10-11"
+    assert diff.unchanged_plays[0].session_id == diff.sessions[0].id
+    cursor = await conn.execute("SELECT play_date FROM records_sessions WHERE player_id = ?", (player_id,))
+    assert [r[0] for r in await cursor.fetchall()] == ["2026-10-11"]
+    cursor = await conn.execute(
+        "SELECT synced_at FROM records_sync_log WHERE player_id = ? ORDER BY synced_at DESC LIMIT 1", (player_id,)
+    )
     row = await cursor.fetchone()
-    assert row is not None and row[0] == "2026-10-10T20:00:00+00:00"  # 저장 시각은 UTC 그대로
+    assert row is not None and row[0] == "2026-10-10T21:00:00+00:00"  # 저장 시각은 UTC 그대로
 
 
 async def test_unknown_const_surfaces_as_not_computable(conn, monkeypatch) -> None:
@@ -320,3 +356,411 @@ async def _pb_rows(conn: aiosqlite.Connection, player_id: str) -> list[tuple[obj
         (player_id,),
     )
     return [tuple(r) for r in await cursor.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# 7단계 Task 4: 전체 PB 저장, 동기화 비교 데이터(diff), diff 캐시
+# ---------------------------------------------------------------------------
+
+_T1_UTC = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)  # 첫 동기화 시각(= 10일 21:00 JST)
+_T2_UTC = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)  # 둘째 동기화 시각
+
+
+async def _setup(
+    conn: aiosqlite.Connection, *, songdb: SongDbService | None = None
+) -> tuple[PlayersService, str, ToolContext, RecordsService]:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
+    service = RecordsService(conn=conn, songdb=songdb or SongDbService(), players=players)
+    return players, player.id, ctx, service
+
+
+def _songdb_with_fixture_new20(monkeypatch: pytest.MonkeyPatch) -> SongDbService:
+    """저장본 신곡20 곡들만 신곡으로 보는 songdb. Chunimaru 덧씌우기 없이도 "이전
+    프레임"(records_pb에서 다시 계산한 베스트30/신곡20)이 저장본과 같아지게 한다."""
+    songdb = SongDbService()
+    new_titles = {pb.song.title for pb in _fixture_fetch().new20}
+    monkeypatch.setattr(songdb, "is_new_for", lambda title: title in new_titles)
+    return songdb
+
+
+def _recent(title: str, difficulty: str, score: int, achieved_at: datetime) -> RecentScore:
+    return RecentScore(
+        song=Song(id=0, title=title),
+        chart=Chart(difficulty=Difficulty(difficulty)),
+        score=score,
+        clear_lamp=ClearLamp.clear,
+        combo_lamp=ComboLamp.none,
+        achieved_at=achieved_at,
+    )
+
+
+def _personal_best(title: str, difficulty: str, score: int) -> PersonalBest:
+    return PersonalBest(
+        song=Song(id=0, title=title),
+        chart=Chart(difficulty=Difficulty(difficulty)),
+        score=score,
+        clear_lamp=ClearLamp.clear,
+        combo_lamp=ComboLamp.none,
+    )
+
+
+def _with_score(pb: PersonalBest, score: int) -> PersonalBest:
+    return dataclasses.replace(pb, score=score, rank=Rank.from_score(score))
+
+
+def _replace_in(records: list[PersonalBest], title: str, score: int) -> list[PersonalBest]:
+    return [_with_score(pb, score) if pb.song.title == title else pb for pb in records]
+
+
+async def _baseline(service: RecordsService, player_id: str, ctx: ToolContext, monkeypatch) -> None:
+    _freeze_now(monkeypatch, utc=_T1_UTC, local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
+    _freeze_now(monkeypatch, utc=_T2_UTC, local=datetime(2026, 10, 13, 21, 0, tzinfo=UTC))
+
+
+async def test_first_sync_saves_baseline_without_sessions(conn) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+
+    result = await service.save_sync(player_id, _fixture_fetch(), ctx)
+
+    assert result.is_first_sync is True
+    assert result.has_new_plays is False
+    assert await service.sync_diff(result.sync_id) is None  # 첫 동기화는 리포트를 안 내므로 diff도 없다
+    cursor = await conn.execute("SELECT COUNT(*) FROM records_sessions WHERE player_id = ?", (player_id,))
+    row = await cursor.fetchone()
+    assert row is not None and row[0] == 0
+    cursor = await conn.execute("SELECT id FROM records_sync_log WHERE player_id = ?", (player_id,))
+    row = await cursor.fetchone()
+    assert row is not None and row[0] == result.sync_id
+
+
+async def test_second_sync_with_no_recent_plays_reports_no_new_plays(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    fetch = _fixture_fetch()
+    # 최근 이력은 있지만 전부 직전 동기화(10일 12:00Z = 21:00 JST) 이전의 플레이다.
+    target = fetch.best30[0]
+    fetch.recent_scores = [_recent(target.song.title, "MAS", target.score, datetime(2026, 10, 10, 20, 0, tzinfo=_JST))]
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    assert result.is_first_sync is False
+    assert result.has_new_plays is False
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert diff.sync_id == result.sync_id
+    assert diff.chart_updates == []
+    assert diff.sessions == []
+    assert diff.unchanged_plays == []
+    assert diff.frame_exits == []
+
+
+async def test_improved_pb_matched_in_recent_history_uses_play_date(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    target = next(pb for pb in _fixture_fetch().best30 if pb.song.title == "I Wanna")
+    new_score = 1_008_500
+    fetch = _fixture_fetch()
+    fetch.best30 = _replace_in(fetch.best30, "I Wanna", new_score)
+    # 12일 01:30(벽시계)은 새벽 4시 경계 전이라 11일 세션이다.
+    achieved_at = datetime(2026, 10, 12, 1, 30, tzinfo=_JST)
+    fetch.recent_scores = [_recent("I Wanna", "MAS", new_score, achieved_at)]
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    assert result.has_new_plays is True
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert len(diff.sessions) == 1
+    session = diff.sessions[0]
+    assert session == SessionInfo(id=session.id, play_date="2026-10-11", estimated=False)
+    assert len(diff.chart_updates) == 1
+    update = diff.chart_updates[0]
+    assert (update.song_title, update.difficulty) == ("I Wanna", "MAS")
+    assert (update.old_score, update.new_score) == (target.score, new_score)
+    assert (update.old_rank, update.new_rank) == ("SS+", "SSS")
+    assert update.old_rating == chart_rating(target.score, 15.2)
+    assert update.new_rating == chart_rating(new_score, 15.2)
+    assert update.session_id == session.id
+    assert update.estimated_session is False
+    assert update.entered_frame is False  # 원래 베스트30 안에 있던 채보다
+    pb = await service.pb_row(player_id, song_title="I Wanna", difficulty="MAS")
+    assert pb is not None and pb.score == new_score and pb.session_id == session.id
+
+
+async def test_improved_pb_missing_from_recent_history_is_estimated(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    fetch = _fixture_fetch()
+    fetch.best30 = _replace_in(fetch.best30, "I Wanna", 1_008_500)  # 최근 이력에 있음
+    fetch.best30 = _replace_in(fetch.best30, "Odin", 1_008_000)  # 최근 이력에 없음(보관 한도 밖)
+    other = fetch.best30[0]
+    fetch.recent_scores = [
+        _recent(other.song.title, "MAS", other.score - 5000, datetime(2026, 10, 12, 21, 0, tzinfo=_JST)),
+        _recent("I Wanna", "MAS", 1_008_500, datetime(2026, 10, 11, 20, 0, tzinfo=_JST)),
+    ]
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert [s.play_date for s in diff.sessions] == ["2026-10-11", "2026-10-12"]
+    by_title = {u.song_title: u for u in diff.chart_updates}
+    assert set(by_title) == {"I Wanna", "Odin"}
+    assert by_title["I Wanna"].session_id == diff.sessions[0].id
+    assert by_title["I Wanna"].estimated_session is False
+    # 못 찾은 갱신은 이번 동기화에서 만든 세션 중 가장 늦은 날짜에 붙는다.
+    assert by_title["Odin"].session_id == diff.sessions[1].id
+    assert by_title["Odin"].estimated_session is True
+
+
+async def test_improved_pb_without_any_new_play_gets_estimated_today_session(conn, monkeypatch) -> None:
+    """플레이 없이 PB가 오르는 일은 이론상 없지만, 생기면 오늘(로컬) 날짜 세션을
+    estimated로 만들어 붙인다(결정 사항 F 마지막 문장)."""
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    fetch = _fixture_fetch()
+    fetch.best30 = _replace_in(fetch.best30, "Odin", 1_008_000)
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    assert result.has_new_plays is False
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert diff.sessions == [SessionInfo(id=diff.sessions[0].id, play_date="2026-10-13", estimated=True)]
+    assert diff.chart_updates[0].session_id == diff.sessions[0].id
+    assert diff.chart_updates[0].estimated_session is True
+
+
+async def test_played_but_not_improved_goes_to_unchanged_plays(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    target = next(pb for pb in _fixture_fetch().best30 if pb.song.title == "Odin")
+    fetch = _fixture_fetch()
+    fetch.recent_scores = [
+        _recent("Odin", "MAS", target.score - 3000, datetime(2026, 10, 12, 20, 0, tzinfo=_JST)),
+        _recent("Odin", "MAS", target.score - 2000, datetime(2026, 10, 12, 20, 10, tzinfo=_JST)),
+        _recent("Odin", "MAS", target.score - 1000, datetime(2026, 10, 12, 20, 20, tzinfo=_JST)),
+    ]
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    assert result.has_new_plays is True
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert diff.chart_updates == []
+    assert diff.unchanged_plays == [
+        UnchangedPlay(
+            song_title="Odin", difficulty="MAS", play_count=3, current_score=target.score,
+            session_id=diff.sessions[0].id,
+        )
+    ]
+
+
+async def test_frame_entry_and_exit(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    await _baseline(service, player_id, ctx, monkeypatch)
+    # 동기화 전 records_pb에 베스트30 최저(16.91 동점 둘)보다 높은 채보 둘을 심어 둔다 —
+    # "이전 프레임"(records_pb 재계산)에서는 이 둘이 들어가고 16.91 둘이 밀려나 있다.
+    for title in ("심어둔곡A", "심어둔곡B"):
+        await conn.execute(
+            "INSERT INTO records_pb (player_id, game, song_title, difficulty, score, rank, clear_lamp, "
+            "combo_lamp, chain_lamp, const, rating, session_id, updated_at) "
+            "VALUES (?, 'chunithm', ?, 'MAS', 1010000, 'SSS+', 'CLEAR', 'AJC', 'NONE', 15.0, '99.00', NULL, 'x')",
+            (player_id, title),
+        )
+    await conn.commit()
+    fetch = _fixture_fetch()
+    fetch.best30 = _replace_in(fetch.best30, "幻想ロードオブキング", 1_008_000)
+    fetch.best30 = _replace_in(fetch.best30, "I Wanna", 1_008_500)
+    fetch.recent_scores = [
+        _recent("幻想ロードオブキング", "MAS", 1_008_000, datetime(2026, 10, 12, 20, 0, tzinfo=_JST)),
+        _recent("I Wanna", "MAS", 1_008_500, datetime(2026, 10, 12, 20, 5, tzinfo=_JST)),
+    ]
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    # 이번 베스트30(저장본)에는 심어 둔 채보가 없으니 이탈이다.
+    assert diff.frame_exits == [
+        FrameExit(song_title="심어둔곡A", difficulty="MAS", old_rating=Decimal("99.00")),
+        FrameExit(song_title="심어둔곡B", difficulty="MAS", old_rating=Decimal("99.00")),
+    ]
+    by_title = {u.song_title: u for u in diff.chart_updates}
+    assert by_title["幻想ロードオブキング"].entered_frame is True
+    assert by_title["I Wanna"].entered_frame is False
+
+
+async def test_previous_ratings_come_from_previous_log_and_pb_frames(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    await _baseline(service, player_id, ctx, monkeypatch)
+    fetch = _fixture_fetch()
+    fetch.best30 = _replace_in(fetch.best30, "幻想ロードオブキング", 1_009_500)
+    fetch.recent_scores = [
+        _recent("幻想ロードオブキング", "MAS", 1_009_500, datetime(2026, 10, 12, 20, 0, tzinfo=_JST)),
+    ]
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert diff.previous_computed_rating == Decimal("16.94")
+    assert diff.previous_best30_average == Decimal("17.02")
+    assert diff.previous_new20_average == Decimal("16.83")
+    # 지금값은 이번 저장본(갱신된 베스트30) 기준이다 — 이전값과 따로 계산된다.
+    songdb = SongDbService()
+    expected = average_rating(
+        [chart_rating(pb.score, songdb.const_for(pb.song.title, pb.chart.difficulty.short())) for pb in fetch.best30]
+    )
+    assert result.best30_average == expected
+    assert result.new20_average == Decimal("16.83")
+
+
+async def test_all_personal_bests_outside_frames_are_saved(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    fetch = _fixture_fetch()
+    fetch.all_personal_bests = {
+        "MAS": [_personal_best("B.B.K.K.B.K.K.", "MAS", 1_000_000), fetch.best30[0]],
+        "EXP": [],
+    }
+    _freeze_now(monkeypatch, utc=_T1_UTC, local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+
+    await service.save_sync(player_id, fetch, ctx)
+
+    rows = await service.all_pb_rows(player_id)
+    assert len(rows) == 51  # 베스트30 + 신곡20 + 프레임 밖 1(겹치는 best30[0]은 한 번만)
+    pb = await service.pb_row(player_id, song_title="B.B.K.K.B.K.K.", difficulty="MAS")
+    assert pb is not None
+    assert pb == PbRow(
+        song_title="B.B.K.K.B.K.K.", difficulty="MAS", score=1_000_000, rank="SS",
+        clear_lamp=pb.clear_lamp, combo_lamp=pb.combo_lamp, chain_lamp=pb.chain_lamp,
+        const=12.5, rating=chart_rating(1_000_000, 12.5), session_id=None,
+        updated_at=_T1_UTC.isoformat(),
+    )
+
+
+async def test_newly_seen_chart_outside_recent_history_is_backfilled_silently(conn, monkeypatch) -> None:
+    """전체 PB 목록에 처음 보이는 채보가 최근 이력에도 없으면, "이번에 쳤다"는 증거가
+    없는 채보다(예: 전체 PB를 저장하기 전의 동기화로 만든 records_pb에 빠져 있던 채보).
+    저장은 하되 갱신 목록에는 넣지 않는다 — 안 그러면 처음 한 번 수백 곡이 "갱신"으로 뜬다."""
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    fetch = _fixture_fetch()
+    fetch.all_personal_bests = {"MAS": [_personal_best("B.B.K.K.B.K.K.", "MAS", 1_000_000)]}
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None and diff.chart_updates == [] and diff.sessions == []
+    assert await service.best_score(player_id, song_title="B.B.K.K.B.K.K.", difficulty="MAS") == 1_000_000
+
+
+async def test_newly_seen_chart_in_recent_history_is_reported_as_update(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    fetch = _fixture_fetch()
+    fetch.all_personal_bests = {"MAS": [_personal_best("B.B.K.K.B.K.K.", "MAS", 1_000_000)]}
+    fetch.recent_scores = [_recent("B.B.K.K.B.K.K.", "MAS", 1_000_000, datetime(2026, 10, 12, 20, 0, tzinfo=_JST))]
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert len(diff.chart_updates) == 1
+    update = diff.chart_updates[0]
+    assert (update.old_score, update.old_rank, update.old_rating) == (None, None, None)
+    assert update.new_score == 1_000_000
+    assert update.estimated_session is False
+
+
+async def test_pb_row_unknown_rating_is_none(conn, monkeypatch) -> None:
+    songdb = SongDbService()
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+    fetch = _fixture_fetch()
+    unknown_title = fetch.new20[0].song.title
+    real_const_for = songdb.const_for
+    monkeypatch.setattr(
+        songdb, "const_for",
+        lambda title, difficulty: None if title == unknown_title else real_const_for(title, difficulty),
+    )
+    await service.save_sync(player_id, fetch, ctx)
+
+    pb = await service.pb_row(player_id, song_title=unknown_title, difficulty="MAS")
+
+    assert pb is not None and pb.rating is None and pb.const is None
+    assert await service.pb_row(player_id, song_title="존재하지않는곡", difficulty="MAS") is None
+
+
+async def test_latest_overpower(conn) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    assert await service.latest_overpower(player_id) is None
+
+    result = await service.save_sync(player_id, _fixture_fetch(), ctx)
+    assert (result.overpower_value, result.overpower_percentage) == (46854.55, 35.86)
+    assert await service.latest_overpower(player_id) == (46854.55, 35.86)
+
+    fetch = _fixture_fetch()
+    fetch.profile = dataclasses.replace(fetch.profile, over_power=None)
+    result = await service.save_sync(player_id, fetch, ctx)
+    assert result.overpower_value is None and result.overpower_percentage is None
+    assert await service.latest_overpower(player_id) == (None, None)
+
+
+async def test_latest_sync_summary(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    assert await service.latest_sync_summary(player_id) is None
+    _freeze_now(monkeypatch, utc=_T1_UTC, local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+    fetch = _fixture_fetch()
+    await service.save_sync(player_id, fetch, ctx)
+
+    summary = await service.latest_sync_summary(player_id)
+
+    assert summary is not None
+    assert summary.nickname == fetch.profile.username
+    assert summary.computed_rating == Decimal("16.94")
+    assert summary.best30_average == Decimal("17.02")
+    assert summary.new20_average == Decimal("16.83")
+    assert summary.last_synced_at == _T1_UTC.isoformat()
+
+
+async def test_candidates_exclude_frame_and_sort_by_upside(conn) -> None:
+    songdb = SongDbService()
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
+    rows = await service.all_pb_rows(player_id)
+    # Chunimaru 덧씌우기 없는 songdb라 신곡이 없다 → 베스트 프레임 = records_pb 레이팅 상위 30.
+    known = sorted((r for r in rows if r.rating is not None), key=lambda r: r.rating or Decimal(0), reverse=True)
+    frame_keys = {(r.song_title, r.difficulty) for r in known[:30]}
+    floor = known[29].rating
+    assert floor is not None
+
+    hits = await service.candidates(player_id, min_const=14.0, max_const=15.5, count=10)
+
+    assert 0 < len(hits) <= 10
+    hit_keys = {(h.song_title, h.difficulty) for h in hits}
+    assert not hit_keys & frame_keys
+    assert ("Wizdomiot", "MAS") not in hit_keys  # 상수 15.0, 프레임 안
+    upsides = [h.upside for h in hits]
+    assert upsides == sorted(upsides, reverse=True)
+    for hit in hits:
+        assert 14.0 <= hit.const <= 15.5
+        assert hit.upside == candidate_upside(hit.const, floor)
+        assert hit.upside > 0
+        assert hit.current_score == 0
+        expected = remaining_to_target(songdb.note_count_for(hit.song_title, hit.difficulty), 0, 1_007_500)
+        assert (hit.remaining_score, hit.remaining_attacks) == (expected if expected else (None, None))
+
+
+async def test_diff_cache_keeps_only_newest(conn, monkeypatch) -> None:
+    monkeypatch.setattr(records_module, "_DIFF_CACHE_LIMIT", 2)
+    _, player_id, ctx, service = await _setup(conn)
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
+    sync_ids = [(await service.save_sync(player_id, _fixture_fetch(), ctx)).sync_id for _ in range(3)]
+
+    assert await service.sync_diff(sync_ids[0]) is None
+    assert await service.sync_diff(sync_ids[1]) is not None
+    assert await service.sync_diff(sync_ids[2]) is not None
+    assert await service.sync_diff("없는-id") is None
