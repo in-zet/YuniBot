@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -16,7 +16,8 @@ from core.events import EventBus
 from core.executor import ToolExecutor
 from core.permissions import InMemoryTagProvider
 from core.resolvers import ResolverRegistry
-from core.tool_types import ToolContext
+from core.tool_types import DifficultyRef, RankRef, ScoreRef, ToolContext
+from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import (
     ChartUpdate,
     PbRow,
@@ -25,6 +26,8 @@ from services.chunithm.records import (
     SyncDiff,
 )
 from services.chunithm.records_calc import remaining_to_target
+from services.chunithm.songdb import ChartRecord, SongRecord
+from services.chunithm.terms import ResolvedDifficulty, ResolvedRank, TermsService
 from services.common.players import PlayersService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -152,6 +155,17 @@ def _ctx(
 
 
 _SYNCED = frozenset({"chunithm-synced"})
+_MAS = ResolvedDifficulty(canonical="MASTER")
+_SSS = ResolvedRank(canonical="SSS", min_score=1_007_500)
+
+
+def _chart(title: str, difficulty: str = "MAS", *, note_count: int | None = None, const: float | None = None) -> ResolvedChart:
+    """ChartRef 해석 결과. 테스트는 해석기를 거치지 않고 해석된 값을 바로 넘긴다
+    (chunithm-border/chunithm-song 테스트와 같은 방식)."""
+    return ResolvedChart(
+        song=SongRecord(title=title, aliases=(), artist=""),
+        chart=ChartRecord(difficulty=difficulty, const=const, note_count=note_count),
+    )
 
 
 # ---------------------------------------------------------------- Step 2: set() 실패/성공
@@ -167,7 +181,7 @@ async def test_set_rating_requires_synced_tag(skill: ModuleType, db: aiosqlite.C
 async def test_set_song_goal_allowed_without_sync(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
     result = await skill.set_goal(
-        ctx, skill.GoalKind.SONG, song_title="곡A", difficulty="MAS", target_value=1_007_500
+        ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_007_500
     )
     assert result.error is None
     assert result.data["kind"] == "song"
@@ -222,8 +236,8 @@ async def test_set_folder_goal_succeeds_and_counts_total(skill: ModuleType, db: 
     songdb = _FakeSongDb(const_range_hits=["곡A", "곡B", "곡C"])
     ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
     result = await skill.set_goal(
-        ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3, folder_difficulty="MAS",
-        folder_condition=skill.FolderCondition.RANK, folder_rank="SSS",
+        ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3, folder_difficulty=_MAS,
+        folder_condition=skill.FolderCondition.RANK, folder_rank=_SSS,
     )
     assert result.error is None
     assert result.data["target_value"] == 3.0
@@ -232,7 +246,7 @@ async def test_set_folder_goal_succeeds_and_counts_total(skill: ModuleType, db: 
 async def test_set_folder_goal_no_matching_charts_errors(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=_SYNCED, songdb=_FakeSongDb())
     result = await skill.set_goal(
-        ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3, folder_difficulty="MAS",
+        ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3, folder_difficulty=_MAS,
     )
     assert result.error is not None
 
@@ -241,13 +255,14 @@ async def test_set_folder_goal_by_level_succeeds_and_counts_total(skill: ModuleT
     songdb = _FakeSongDb(level_hits=["곡A", "곡B"])
     ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
     result = await skill.set_goal(
-        ctx, skill.GoalKind.FOLDER, folder_level="14+", folder_difficulty="MAS",
+        ctx, skill.GoalKind.FOLDER, folder_level="14+", folder_difficulty=_MAS,
         folder_condition=skill.FolderCondition.CLEARED,
     )
     assert result.error is None
     assert result.data["target_value"] == 2.0
     assert result.data["target_ref"] == {
         "selector": "level", "level": "14+", "difficulty": "MAS", "condition": "cleared", "rank": None,
+        "rank_min_score": None,
     }
 
 
@@ -255,7 +270,7 @@ async def test_set_folder_goal_by_version_succeeds_and_counts_total(skill: Modul
     songdb = _FakeSongDb(version_hits=["곡A", "곡B", "곡C"])
     ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
     result = await skill.set_goal(
-        ctx, skill.GoalKind.FOLDER, folder_version="LUMINOUS", folder_difficulty="MAS",
+        ctx, skill.GoalKind.FOLDER, folder_version="LUMINOUS", folder_difficulty=_MAS,
         folder_condition=skill.FolderCondition.CLEARED,
     )
     assert result.error is None
@@ -269,14 +284,14 @@ async def test_set_folder_goal_rejects_more_than_one_selector(skill: ModuleType,
     ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
     result = await skill.set_goal(
         ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3, folder_level="14+",
-        folder_difficulty="MAS",
+        folder_difficulty=_MAS,
     )
     assert result.error is not None
 
 
 async def test_set_folder_goal_rejects_no_selector(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=_SYNCED, songdb=_FakeSongDb())
-    result = await skill.set_goal(ctx, skill.GoalKind.FOLDER, folder_difficulty="MAS")
+    result = await skill.set_goal(ctx, skill.GoalKind.FOLDER, folder_difficulty=_MAS)
     assert result.error is not None
 
 
@@ -284,7 +299,7 @@ async def test_on_sync_completed_folder_goal_by_level_progress(skill: ModuleType
     songdb = _FakeSongDb(level_hits=["곡A", "곡B"])
     ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
     created = await skill.set_goal(
-        ctx, skill.GoalKind.FOLDER, folder_level="14+", folder_difficulty="MAS",
+        ctx, skill.GoalKind.FOLDER, folder_level="14+", folder_difficulty=_MAS,
         folder_condition=skill.FolderCondition.CLEARED,
     )
     goal_id = created.data["goal_id"]
@@ -302,7 +317,7 @@ async def test_on_sync_completed_folder_goal_by_version_progress(skill: ModuleTy
     songdb = _FakeSongDb(version_hits=["곡A", "곡B"])
     ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
     created = await skill.set_goal(
-        ctx, skill.GoalKind.FOLDER, folder_version="LUMINOUS", folder_difficulty="MAS",
+        ctx, skill.GoalKind.FOLDER, folder_version="LUMINOUS", folder_difficulty=_MAS,
         folder_condition=skill.FolderCondition.CLEARED,
     )
     goal_id = created.data["goal_id"]
@@ -321,9 +336,9 @@ async def test_on_sync_completed_folder_goal_by_version_progress(skill: ModuleTy
 
 async def test_set_song_goal_only_one_per_chart(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    first = await skill.set_goal(ctx, skill.GoalKind.SONG, song_title="곡A", difficulty="MAS", target_value=1_000_000)
+    first = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
     assert first.error is None
-    second = await skill.set_goal(ctx, skill.GoalKind.SONG, song_title="곡A", difficulty="MAS", target_value=1_005_000)
+    second = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_005_000)
     assert second.error is not None
 
 
@@ -334,7 +349,7 @@ async def test_list_returns_own_goals(skill: ModuleType, db: aiosqlite.Connectio
     players = PlayersService(db)
     me = await players.create_player()
     ctx = _ctx(db=db, player_id=me.id, tags=frozenset(), players=players)
-    await skill.set_goal(ctx, skill.GoalKind.SONG, song_title="곡A", difficulty="MAS", target_value=1_000_000)
+    await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
     result = await skill.list_goals(ctx)
     assert result.error is None
     assert len(result.data["goals"]) == 1
@@ -348,8 +363,8 @@ async def test_list_for_other_player_only_shows_public_goals(skill: ModuleType, 
     assert other is not None
 
     other_ctx = _ctx(db=db, player_id=other.id, tags=frozenset(), players=players)
-    await skill.set_goal(other_ctx, skill.GoalKind.SONG, song_title="곡A", difficulty="MAS", target_value=1_000_000, public=False)
-    await skill.set_goal(other_ctx, skill.GoalKind.SONG, song_title="곡B", difficulty="MAS", target_value=1_000_000, public=True)
+    await skill.set_goal(other_ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000, public=False)
+    await skill.set_goal(other_ctx, skill.GoalKind.SONG, chart=_chart("곡B"), target_score=1_000_000, public=True)
 
     me = await players.create_player()
     me_ctx = _ctx(db=db, player_id=me.id, tags=frozenset(), players=players)
@@ -392,7 +407,7 @@ async def test_update_rejects_other_players_goal(skill: ModuleType, db: aiosqlit
 
 async def test_progress_shows_history(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    created = await skill.set_goal(ctx, skill.GoalKind.SONG, song_title="곡A", difficulty="MAS", target_value=1_000_000)
+    created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
     goal_id = created.data["goal_id"]
     await skill.models.insert_progress(
         db, id="prog1", goal_id=goal_id, sync_id="sync1", recorded_at="2026-10-17T00:00:00+00:00",
@@ -422,7 +437,7 @@ async def test_delete_removes_own_goals_only(skill: ModuleType, db: aiosqlite.Co
 
 async def test_todo_add_creates_song_goal(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    result = await skill.todo_add(ctx, "곡A", "MAS", 1_007_500)
+    result = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     assert result.error is None
     assert result.data["kind"] == "song"
 
@@ -430,7 +445,7 @@ async def test_todo_add_creates_song_goal(skill: ModuleType, db: aiosqlite.Conne
 async def test_todo_add_rejects_already_met_target(skill: ModuleType, db: aiosqlite.Connection) -> None:
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_008_000, "SSS", 15.0, "15.0")]})
     ctx = _ctx(db=db, tags=frozenset(), records=records)
-    result = await skill.todo_add(ctx, "곡A", "MAS", 1_007_500)
+    result = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     assert result.error is not None
     rows = await skill.models.list_goals_for_player(db, "p1", kind="song")
     assert rows == []
@@ -440,7 +455,7 @@ async def test_set_goal_song_rejects_already_met_target(skill: ModuleType, db: a
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_008_000, "SSS", 15.0, "15.0")]})
     ctx = _ctx(db=db, tags=frozenset(), records=records)
     result = await skill.set_goal(
-        ctx, skill.GoalKind.SONG, song_title="곡A", difficulty="MAS", target_value=1_007_500
+        ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_007_500
     )
     assert result.error is not None
 
@@ -448,13 +463,13 @@ async def test_set_goal_song_rejects_already_met_target(skill: ModuleType, db: a
 async def test_todo_add_allows_not_yet_met_target(skill: ModuleType, db: aiosqlite.Connection) -> None:
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0")]})
     ctx = _ctx(db=db, tags=frozenset(), records=records)
-    result = await skill.todo_add(ctx, "곡A", "MAS", 1_007_500)
+    result = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     assert result.error is None
 
 
 async def test_todo_bulk_requires_sync_for_rank_condition(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    result = await skill.todo_bulk(ctx, 15.0, 15.3, "MAS", 1_007_500, rank="SSS")
+    result = await skill.todo_bulk(ctx, 15.0, 15.3, _MAS, 1_007_500, rank=_SSS)
     assert result.error is not None
 
 
@@ -463,15 +478,84 @@ async def test_todo_bulk_counts_targets_and_skips_already_met(skill: ModuleType,
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_009_000, "SSS+", 15.1, "15.1")]})
     ctx = _ctx(db=db, tags=_SYNCED, records=records, songdb=songdb)
 
-    result = await skill.todo_bulk(ctx, 15.0, 15.3, "MAS", 1_007_500, condition=skill.FolderCondition.RANK, rank="SSS")
+    result = await skill.todo_bulk(ctx, 15.0, 15.3, _MAS, 1_007_500, condition=skill.FolderCondition.RANK, rank=_SSS)
     assert result.error is None
     # 곡A는 이미 SSS를 넘었으니 빠지고, 곡B/곡C만 투두로 들어간다 — confirm="bulk"로 보여줄 개수다.
     assert result.data["count"] == 2
     assert "곡A" not in result.data["song_titles"]
 
 
+@dataclass(slots=True)
+class _TermsAdapter:
+    """core/bot.py의 _RankRefAdapter 등과 같은 일 — 진짜 TermsService 메서드 하나를 해석기로 감싼다."""
+
+    fn: Callable[[str, ToolContext], Awaitable[Any]]
+
+    async def resolve(self, raw: str, ctx: ToolContext) -> Any:
+        return await self.fn(raw, ctx)
+
+
 def _executor() -> ToolExecutor:
-    return ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
+    terms = TermsService()
+    resolvers = ResolverRegistry()
+    resolvers.register(DifficultyRef, _TermsAdapter(terms.resolve_difficulty))
+    resolvers.register(RankRef, _TermsAdapter(terms.resolve_rank))
+    resolvers.register(ScoreRef, _TermsAdapter(terms.resolve_score))
+    return ToolExecutor(resolvers=resolvers, tag_provider=InMemoryTagProvider(), tag_definitions={})
+
+
+async def test_todo_bulk_via_executor_resolves_lowercase_rank_and_skips_already_met(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """C2: rank="sss"(소문자 은어)도 해석기가 SSS로 바꿔, 이미 SSS인 곡A는 빠진다."""
+    songdb = _FakeSongDb(const_range_hits=["곡A", "곡B"])
+    records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_008_000, "SSS", 15.1, "15.1")]})
+    ctx = _ctx(db=db, tags=_SYNCED, records=records, songdb=songdb)
+    outcome = await _executor().invoke(
+        skill.todo_bulk.__yuni_tool__, ctx,
+        {"min_const": 15.0, "max_const": 15.3, "difficulty": "마스", "target_score": "SSS+", "rank": "sss"},
+    )
+    assert outcome.result is not None and outcome.result.error is None
+    assert outcome.result.data["song_titles"] == ["곡B"]
+    rows = await skill.models.list_goals_for_player(db, "p1", kind="song")
+    assert [r.target_ref for r in rows] == [{"song_title": "곡B", "difficulty": "MAS"}]
+    assert rows[0].target_value == 1_009_000.0  # "SSS+"를 해석기가 점수로 바꿨다
+
+
+def test_all_justice_condition_checks_combo_lamp_not_chain_lamp(skill: ModuleType) -> None:
+    """I1: 올 저스티스는 combo_lamp(ALL JUSTICE/AJC)다. FULL CHAIN(chain_lamp)은 AJ가 아니다."""
+    full_chain_only = _pb("곡A", "MAS", 1_005_000, "SS+", 15.0, "15.0", combo="FULL COMBO", chain="FULL CHAIN")
+    aj = _pb("곡B", "MAS", 1_009_000, "SSS+", 15.0, "15.0", combo="ALL JUSTICE")
+    ajc = _pb("곡C", "MAS", 1_010_000, "SSS+", 15.0, "15.0", combo="AJC")
+    cond = skill.FolderCondition.ALL_JUSTICE
+    assert skill._row_matches_condition(full_chain_only, cond, None) is False
+    assert skill._row_matches_condition(aj, cond, None) is True
+    assert skill._row_matches_condition(ajc, cond, None) is True
+
+
+async def test_todo_bulk_excludes_chart_that_already_meets_target_score(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """I7: 조건(풀콤보)은 못 채웠어도 이미 목표 점수(SSS)를 넘긴 채보는 투두로 넣지 않는다."""
+    songdb = _FakeSongDb(const_range_hits=["곡A", "곡B"])
+    records = _FakeRecords(pbs={"p1": [
+        _pb("곡A", "MAS", 1_008_000, "SSS", 15.1, "15.1", combo="NONE"),
+        _pb("곡B", "MAS", 1_000_000, "SS", 15.1, "14.1", combo="NONE"),
+    ]})
+    ctx = _ctx(db=db, tags=_SYNCED, records=records, songdb=songdb)
+    result = await skill.todo_bulk(
+        ctx, 15.0, 15.3, _MAS, 1_007_500, condition=skill.FolderCondition.FULL_COMBO
+    )
+    assert result.error is None
+    assert result.data["song_titles"] == ["곡B"]
+
+
+async def test_todo_add_stores_canonical_chart_identity(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    """C2: 해석된 채보의 정식 제목·난이도 코드로 저장한다(원문 "크로노 마스"가 아니라)."""
+    ctx = _ctx(db=db, tags=frozenset())
+    result = await skill.todo_add(ctx, _chart("Chrono Diver -PENDULUMs-", "MAS"), 1_007_500)
+    assert result.error is None
+    assert result.data["target_ref"] == {"song_title": "Chrono Diver -PENDULUMs-", "difficulty": "MAS"}
 
 
 async def test_todo_bulk_via_executor_with_one_target_runs_without_confirm(
@@ -481,7 +565,7 @@ async def test_todo_bulk_via_executor_with_one_target_runs_without_confirm(
     ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
     outcome = await _executor().invoke(
         skill.todo_bulk.__yuni_tool__, ctx,
-        {"min_const": 15.0, "max_const": 15.3, "difficulty": "MAS", "target_score": 1_007_500, "rank": "SSS"},
+        {"min_const": 15.0, "max_const": 15.3, "difficulty": "마스", "target_score": "SSS", "rank": "sss"},
     )
     assert outcome.needs_confirm is False
     assert outcome.result is not None and outcome.result.error is None
@@ -497,7 +581,7 @@ async def test_todo_bulk_via_executor_with_many_targets_needs_confirm_before_wri
     executor = _executor()
     outcome = await executor.invoke(
         skill.todo_bulk.__yuni_tool__, ctx,
-        {"min_const": 15.0, "max_const": 15.3, "difficulty": "MAS", "target_score": 1_007_500, "rank": "SSS"},
+        {"min_const": 15.0, "max_const": 15.3, "difficulty": "마스", "target_score": "SSS", "rank": "sss"},
     )
     assert outcome.needs_confirm is True
     assert outcome.confirm_token is not None
@@ -543,7 +627,7 @@ async def test_todo_list_sorts_by_remaining(skill: ModuleType, db: aiosqlite.Con
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0")]})
     songdb = _FakeSongDb(note_counts={("곡A", "MAS"): 1000}, consts={("곡A", "MAS"): 15.0})
     ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
-    await skill.todo_add(ctx, "곡A", "MAS", 1_007_500)
+    await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
 
     result = await skill.todo_list(ctx, sort="remaining")
     assert result.error is None
@@ -553,7 +637,7 @@ async def test_todo_list_sorts_by_remaining(skill: ModuleType, db: aiosqlite.Con
 
 async def test_todo_done_marks_achieved_and_emits_event(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    created = await skill.todo_add(ctx, "곡A", "MAS", 1_007_500)
+    created = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     goal_id = created.data["goal_id"]
 
     received: list[dict[str, Any]] = []
@@ -576,7 +660,7 @@ async def test_todo_done_marks_achieved_and_emits_event(skill: ModuleType, db: a
 
 async def test_on_sync_completed_auto_completes_song_goal(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    created = await skill.todo_add(ctx, "곡A", "MAS", 1_007_500)
+    created = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     goal_id = created.data["goal_id"]
 
     diff = SyncDiff(
@@ -649,7 +733,7 @@ async def test_on_sync_completed_folder_goal_progress(skill: ModuleType, db: aio
     songdb = _FakeSongDb(const_range_hits=["곡A", "곡B"])
     ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
     created = await skill.set_goal(
-        ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3, folder_difficulty="MAS",
+        ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3, folder_difficulty=_MAS,
         folder_condition=skill.FolderCondition.CLEARED,
     )
     goal_id = created.data["goal_id"]
@@ -670,7 +754,7 @@ async def test_on_song_viewed_returns_todo_status(skill: ModuleType, db: aiosqli
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0")]})
     songdb = _FakeSongDb(note_counts={("곡A", "MAS"): 1000})
     ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
-    await skill.todo_add(ctx, "곡A", "MAS", 1_007_500)
+    await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
 
     section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": "곡A", "difficulty": "MAS"})
     assert section is not None
@@ -694,8 +778,8 @@ async def test_on_plan_requested_returns_nearest_todos_via_event_bus(skill: Modu
     ]})
     songdb = _FakeSongDb(note_counts={("곡A", "MAS"): 1000, ("곡B", "MAS"): 1000})
     setup_ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
-    await skill.todo_add(setup_ctx, "곡A", "MAS", 1_007_500)
-    await skill.todo_add(setup_ctx, "곡B", "MAS", 1_007_500)
+    await skill.todo_add(setup_ctx, _chart("곡A"), 1_007_500)
+    await skill.todo_add(setup_ctx, _chart("곡B"), 1_007_500)
 
     bus.register_gather(
         "chunithm.plan.requested", owner_skill="chunithm-goals", fn=skill.on_plan_requested,
@@ -726,7 +810,7 @@ async def test_progress_projects_rating_with_todos(skill: ModuleType, db: aiosql
     ctx = _ctx(db=db, tags=_SYNCED, records=records, songdb=songdb)
 
     rating_goal = await skill.set_goal(ctx, skill.GoalKind.RATING, target_value=17.0)
-    await skill.set_goal(ctx, skill.GoalKind.SONG, song_title="투두곡", difficulty="MAS", target_value=1_009_000)
+    await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("투두곡"), target_score=1_009_000)
 
     result = await skill.progress(ctx, rating_goal.data["goal_id"])
     assert result.error is None

@@ -12,9 +12,21 @@ from typing import Any
 
 from core.decorators import on, tool
 from core.events import Section
-from core.tool_types import Display, PlayerRef, ToolContext, ToolResult
+from core.tool_types import (
+    ChartRef,
+    DifficultyRef,
+    Display,
+    PlayerRef,
+    RankRef,
+    ScoreRef,
+    ToolContext,
+    ToolResult,
+)
+from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import PbRow, RatingDeltas
 from services.chunithm.records_calc import chart_rating
+from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
+from services.chunithm.terms import ResolvedDifficulty, ResolvedRank
 from services.common.players import Player
 
 # skills/chunithm-goals는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다
@@ -40,10 +52,6 @@ _SYNC_SECTION_ORDER = 30
 _SONG_VIEW_ORDER = 10
 _PLAN_ORDER = 10
 _PLAN_LIMIT = 5
-# 높은 랭크부터. 폴더 조건(rank)과 투두 일괄 추가의 "이미 달성" 판정에 쓴다.
-_RANK_ORDER: tuple[str, ...] = (
-    "SSS+", "SSS", "SS+", "SS", "S+", "S", "AAA", "AA", "A", "BBB", "BB", "B", "C", "D",
-)
 
 
 class GoalKind(StrEnum):
@@ -104,6 +112,26 @@ async def _target_player(ctx: ToolContext, player: PlayerRef | None) -> Player |
     return player
 
 
+def _difficulty_code(difficulty: DifficultyRef) -> str:
+    """해석된 난이도(정식 이름, 예: MASTER)를 records/songdb가 쓰는 짧은 코드(MAS)로 바꾼다."""
+    assert isinstance(difficulty, ResolvedDifficulty)
+    return LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
+
+
+def _rank(rank: RankRef | None) -> ResolvedRank | None:
+    assert rank is None or isinstance(rank, ResolvedRank)
+    return rank
+
+
+def _score(score: ScoreRef | None) -> int | None:
+    """ScoreRef 해석기(terms.resolve_score)는 숫자·랭크 이름·점수가 고정된 램프 이름을 0~1,010,000
+    정수 점수로 바꿔 준다."""
+    if score is None:
+        return None
+    assert isinstance(score, int)
+    return int(score)
+
+
 def _metric_value(deltas: RatingDeltas, metric: RatingMetric) -> Decimal | None:
     return {
         RatingMetric.COMPUTED: deltas.computed_rating,
@@ -140,7 +168,13 @@ def _goal_label(goal: Any) -> str:
     return ref.get("description", "자유 목표")
 
 
-def _row_matches_condition(row: PbRow, condition: FolderCondition, rank_floor: str | None) -> bool:
+# records_pb.combo_lamp 값(vendored ComboLamp의 str): NONE / FULL COMBO / ALL JUSTICE / AJC.
+# 풀콤보 조건은 올 저스티스 이상도 채운 것으로 본다. chain_lamp(FULL CHAIN 등)는 다른 램프다.
+_ALL_JUSTICE_LAMPS = frozenset({"ALL JUSTICE", "AJC"})
+
+
+def _row_matches_condition(row: PbRow, condition: FolderCondition, rank_min_score: int | None) -> bool:
+    """rank_min_score는 RankRef 해석기가 준 그 랭크의 기준 점수다(랭크 이름을 여기서 비교하지 않는다)."""
     if condition == FolderCondition.PLAYED:
         return True
     if condition == FolderCondition.CLEARED:
@@ -148,11 +182,9 @@ def _row_matches_condition(row: PbRow, condition: FolderCondition, rank_floor: s
     if condition == FolderCondition.FULL_COMBO:
         return row.combo_lamp not in ("", "NONE")
     if condition == FolderCondition.ALL_JUSTICE:
-        return row.chain_lamp not in ("", "NONE")
+        return row.combo_lamp in _ALL_JUSTICE_LAMPS
     if condition == FolderCondition.RANK:
-        if rank_floor is None or row.rank not in _RANK_ORDER or rank_floor not in _RANK_ORDER:
-            return False
-        return _RANK_ORDER.index(row.rank) <= _RANK_ORDER.index(rank_floor)
+        return rank_min_score is not None and row.score >= rank_min_score
     return False
 
 
@@ -180,12 +212,12 @@ async def _folder_counts(ctx: ToolContext, target_ref: dict[str, Any], *, player
     rows = await ctx.records.all_pb_rows(player_id)
     rows_by_key = {(r.song_title, r.difficulty): r for r in rows}
     condition = FolderCondition(target_ref["condition"])
-    rank_floor = target_ref.get("rank")
+    rank_min_score: int | None = target_ref.get("rank_min_score")
     matched = sum(
         1
         for hit in hits
         if (row := rows_by_key.get((hit.song.title, target_ref["difficulty"]))) is not None
-        and _row_matches_condition(row, condition, rank_floor)
+        and _row_matches_condition(row, condition, rank_min_score)
     )
     return total, matched
 
@@ -250,15 +282,15 @@ async def set_goal(
     *,
     metric: RatingMetric = RatingMetric.COMPUTED,
     target_value: float | None = None,
-    song_title: str | None = None,
-    difficulty: str | None = None,
+    chart: ChartRef | None = None,
+    target_score: ScoreRef | None = None,
     folder_min_const: float | None = None,
     folder_max_const: float | None = None,
     folder_level: str | None = None,
     folder_version: str | None = None,
-    folder_difficulty: str | None = None,
+    folder_difficulty: DifficultyRef | None = None,
     folder_condition: FolderCondition = FolderCondition.CLEARED,
-    folder_rank: str | None = None,
+    folder_rank: RankRef | None = None,
     overpower_mode: OverpowerMode = OverpowerMode.PERCENTAGE,
     overpower_scope: OverpowerScope = OverpowerScope.OVERALL,
     description: str | None = None,
@@ -267,12 +299,13 @@ async def set_goal(
     parent_goal_id: str | None = None,
     public: bool = False,
 ) -> ToolResult:
-    """목표를 만든다. kind별로 필요한 인자: rating은 metric+target_value, overpower는
-    overpower_mode+target_value(전체만 지원, overpower_scope=folder는 아직 안 됨), folder는
-    folder_difficulty + (folder_min_const와 folder_max_const) 또는 folder_level 또는
-    folder_version 중 하나(+folder_condition, rank 조건이면 folder_rank), song은
-    song_title+difficulty+target_value(목표 점수, 이미 그 점수를 넘겼으면 에러), freeform은
-    description. 레이팅·오버파워·폴더 목표는 CHUNITHM-NET 동기화(chunithm-synced)가 있어야
+    """목표를 만든다. kind별로 필요한 인자: rating은 metric+target_value(현재값보다 커야 한다),
+    overpower는 overpower_mode+target_value(전체만 지원, overpower_scope=folder는 아직 안 됨,
+    현재값보다 커야 한다), folder는 folder_difficulty + (folder_min_const와 folder_max_const) 또는
+    folder_level 또는 folder_version 중 하나(+folder_condition, rank 조건이면 folder_rank), song은
+    chart(곡+난이도 원문 그대로, 예: "크로노 마스")+target_score(점수 숫자나 랭크 이름을 원문
+    그대로 — 점수 환산은 해석기가 한다, 이미 그 점수를 넘겼으면 에러), freeform은 description.
+    due_at은 ISO 날짜(YYYY-MM-DD)다. 레이팅·오버파워·폴더 목표는 CHUNITHM-NET 동기화(chunithm-synced)가 있어야
     만들 수 있다. 레이팅 최종 목표는 플레이어당 하나뿐이다 — 이미 있으면 새로 만들지 않고
     에러를 돌려주고 `update`를 쓰라고 안내한다(설계서에 없던 세부, SKILL.md 본문 참고)."""
     if kind in (GoalKind.RATING, GoalKind.OVERPOWER, GoalKind.FOLDER) and _SYNCED_TAG not in ctx.tags:
@@ -311,6 +344,13 @@ async def set_goal(
     elif kind == GoalKind.FOLDER:
         if folder_difficulty is None:
             return ToolResult(error="폴더는 난이도(folder_difficulty)가 필요해.")
+        difficulty_code = _difficulty_code(folder_difficulty)
+        rank = _rank(folder_rank)
+        rank_fields: dict[str, Any] = {
+            "condition": folder_condition.value,
+            "rank": rank.canonical if rank is not None else None,
+            "rank_min_score": rank.min_score if rank is not None else None,
+        }
         selectors_given = [
             s for s in (folder_min_const is not None or folder_max_const is not None, folder_level is not None,
                         folder_version is not None)
@@ -326,20 +366,16 @@ async def set_goal(
                 return ToolResult(error="상수 범위는 folder_min_const와 folder_max_const를 같이 줘야 해.")
             target_ref = {
                 "selector": "const", "min_const": folder_min_const, "max_const": folder_max_const,
-                "difficulty": folder_difficulty, "condition": folder_condition.value, "rank": folder_rank,
+                "difficulty": difficulty_code, **rank_fields,
             }
         elif folder_level is not None:
-            target_ref = {
-                "selector": "level", "level": folder_level, "difficulty": folder_difficulty,
-                "condition": folder_condition.value, "rank": folder_rank,
-            }
+            target_ref = {"selector": "level", "level": folder_level, "difficulty": difficulty_code, **rank_fields}
         else:
             assert folder_version is not None
             target_ref = {
-                "selector": "version", "version": folder_version, "difficulty": folder_difficulty,
-                "condition": folder_condition.value, "rank": folder_rank,
+                "selector": "version", "version": folder_version, "difficulty": difficulty_code, **rank_fields,
             }
-        if folder_condition == FolderCondition.RANK and folder_rank is None:
+        if folder_condition == FolderCondition.RANK and rank is None:
             return ToolResult(error="랭크 조건이면 목표 랭크(folder_rank)를 알려 줘.")
         total, matched = await _folder_counts(ctx, target_ref, player_id=ctx.player_id)
         if total == 0:
@@ -347,14 +383,18 @@ async def set_goal(
         baseline_value = float(matched)
         target_value = float(total)
     elif kind == GoalKind.SONG:
-        if song_title is None or difficulty is None or target_value is None:
-            return ToolResult(error="곡, 난이도, 목표 점수가 필요해.")
+        score = _score(target_score)
+        if chart is None or score is None:
+            return ToolResult(error="곡과 난이도(chart), 목표 점수(target_score)가 필요해.")
+        assert isinstance(chart, ResolvedChart)
+        song_title, difficulty = chart.song.title, chart.chart.difficulty
         if await models.find_song_goal(ctx.db, ctx.player_id, song_title=song_title, difficulty=difficulty):
             return ToolResult(error="그 채보에는 이미 진행 중인 투두가 있어.")
         row = await ctx.records.pb_row(ctx.player_id, song_title=song_title, difficulty=difficulty)
-        if row is not None and row.score >= target_value:
+        if row is not None and row.score >= score:
             return ToolResult(error="이미 그 목표를 달성했어.")
         target_ref = {"song_title": song_title, "difficulty": difficulty}
+        target_value = float(score)
         baseline_value = float(row.score) if row is not None else 0.0
     else:
         if description is None:
@@ -506,14 +546,14 @@ async def delete(ctx: ToolContext, goal_ids: str, *, dry_run: bool = False) -> T
 
 @tool(slash="투두 추가", mutates=True)
 async def todo_add(
-    ctx: ToolContext, song_title: str, difficulty: str, target_score: int, *, public: bool = False,
+    ctx: ToolContext, chart: ChartRef, target_score: ScoreRef, *, public: bool = False,
     due_at: str | None = None,
 ) -> ToolResult:
-    """곡별 목표(To-Do) 한 건을 추가한다. target_score는 목표 점수(랭크·램프·곡 레이팅은 호출
-    전에 점수로 환산해 넘긴다)."""
+    """곡별 목표(To-Do) 한 건을 추가한다. chart는 곡+난이도 원문(예: "크로노 마스"), target_score는
+    점수 숫자나 랭크 이름(SSS, SSS+ 등)을 플레이어가 말한 그대로 넘긴다 — 점수 환산은 해석기가
+    하므로 직접 계산하지 않는다. 이미 그 점수를 넘긴 채보면 에러다."""
     return await set_goal(
-        ctx, GoalKind.SONG, song_title=song_title, difficulty=difficulty, target_value=float(target_score),
-        public=public, due_at=due_at,
+        ctx, GoalKind.SONG, chart=chart, target_score=target_score, public=public, due_at=due_at,
     )
 
 
@@ -522,33 +562,42 @@ async def todo_bulk(
     ctx: ToolContext,
     min_const: float,
     max_const: float,
-    difficulty: str,
-    target_score: int,
+    difficulty: DifficultyRef,
+    target_score: ScoreRef,
     *,
     condition: FolderCondition = FolderCondition.RANK,
-    rank: str | None = None,
+    rank: RankRef | None = None,
     public: bool = False,
     dry_run: bool = False,
 ) -> ToolResult:
-    """상수 범위·난이도·현재 랭크(또는 클리어/풀콤보/올저스티스) 조건에 맞는 채보를 모아
-    To-Do로 일괄 추가한다. 조건이 played가 아니면 CHUNITHM-NET 동기화(chunithm-synced)가
-    있어야 한다. 대상이 2개 이상이면 실행기가 먼저 대상 개수를 보여 주고 확인 버튼을 받은
-    뒤에 추가한다(0~1개면 바로 추가한다)."""
+    """상수 범위·난이도·현재 랭크(또는 클리어/풀콤보/올저스티스) 조건을 아직 못 채운 채보를 모아
+    To-Do로 일괄 추가한다. difficulty·rank·target_score는 플레이어가 말한 그대로(예: "마스",
+    "SSS") 넘긴다 — 해석기가 정식 값과 점수로 바꾼다. 이미 target_score를 넘긴 채보도 뺀다.
+    조건이 played가 아니면 CHUNITHM-NET 동기화(chunithm-synced)가 있어야 한다. 대상이 2개
+    이상이면 실행기가 먼저 대상 개수를 보여 주고 확인 버튼을 받은 뒤에 추가한다(0~1개면 바로
+    추가한다)."""
     if condition != FolderCondition.PLAYED and _SYNCED_TAG not in ctx.tags:
         return ToolResult(error="그 조건을 쓰려면 CHUNITHM-NET 동기화가 돼 있어야 해.")
-    if condition == FolderCondition.RANK and rank is None:
+    resolved_rank = _rank(rank)
+    if condition == FolderCondition.RANK and resolved_rank is None:
         return ToolResult(error="랭크 조건이면 목표 랭크(rank)를 알려 줘.")
+    score = _score(target_score)
+    assert score is not None
+    rank_min_score = resolved_rank.min_score if resolved_rank is not None else None
+    difficulty_code = _difficulty_code(difficulty)
 
-    hits = ctx.songdb.find_by_const(min_const=min_const, max_const=max_const, difficulty=difficulty)
+    hits = ctx.songdb.find_by_const(min_const=min_const, max_const=max_const, difficulty=difficulty_code)
     rows = await ctx.records.all_pb_rows(ctx.player_id)
     rows_by_key = {(r.song_title, r.difficulty): r for r in rows}
 
     targets: list[str] = []
     for hit in hits:
-        row = rows_by_key.get((hit.song.title, difficulty))
-        if row is not None and _row_matches_condition(row, condition, rank):
+        row = rows_by_key.get((hit.song.title, difficulty_code))
+        if row is not None and _row_matches_condition(row, condition, rank_min_score):
             continue  # 이미 조건을 채웠다
-        if await models.find_song_goal(ctx.db, ctx.player_id, song_title=hit.song.title, difficulty=difficulty):
+        if row is not None and row.score >= score:
+            continue  # 조건은 못 채웠어도 목표 점수는 이미 넘겼다
+        if await models.find_song_goal(ctx.db, ctx.player_id, song_title=hit.song.title, difficulty=difficulty_code):
             continue  # 이미 투두가 있다
         targets.append(hit.song.title)
 
@@ -569,10 +618,10 @@ async def todo_bulk(
     created: list[str] = []
     for title in targets:
         goal_id = str(uuid.uuid4())
-        row = rows_by_key.get((title, difficulty))
+        row = rows_by_key.get((title, difficulty_code))
         await models.insert_goal(
             ctx.db, id=goal_id, player_id=ctx.player_id, kind=GoalKind.SONG.value,
-            target_ref={"song_title": title, "difficulty": difficulty}, target_value=float(target_score),
+            target_ref={"song_title": title, "difficulty": difficulty_code}, target_value=float(score),
             baseline_value=float(row.score) if row is not None else 0.0, created_at=now, due_at=None,
             duration_tag=None, parent_goal_id=None, public=public, notify_offsets=_default_notify_offsets(None),
         )
