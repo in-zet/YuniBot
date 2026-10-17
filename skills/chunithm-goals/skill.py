@@ -93,6 +93,16 @@ class FolderCondition(StrEnum):
     ALL_JUSTICE = "all_justice"
 
 
+class SongLamp(StrEnum):
+    """점수로 바꾸지 않는 곡 목표(램프). 값은 FolderCondition의 같은 이름과 같아 판정을 함께 쓴다."""
+
+    FULL_COMBO = "full_combo"
+    ALL_JUSTICE = "all_justice"
+
+
+_LAMP_LABELS: dict[str, str] = {SongLamp.FULL_COMBO.value: "풀콤보", SongLamp.ALL_JUSTICE.value: "올 저스티스"}
+
+
 class DurationTag(StrEnum):
     SHORT = "short"
     MID = "mid"
@@ -168,6 +178,7 @@ _STATUS_LABELS: dict[str, str] = {
 }
 _PACE_LABELS: dict[str, str] = {"ahead": "앞섬", "on_track": "맞음", "behind": "뒤처짐"}
 _NO_PREVIOUS = "비교할 직전 기록 없음"
+_PROGRESS_HIDDEN = "진행 상황은 비공개야"
 
 
 def _dec(value: float) -> Decimal:
@@ -175,11 +186,28 @@ def _dec(value: float) -> Decimal:
     return Decimal(str(value))
 
 
+def _song_lamp(goal: Any) -> str | None:
+    """곡 목표가 램프 목표면 그 램프("full_combo"/"all_justice"), 점수 목표면 None."""
+    return goal.target_ref.get("lamp")
+
+
+def _lamp_met(row: PbRow | None, lamp: str) -> bool:
+    """램프 목표 판정. 폴더 조건과 같은 _row_matches_condition(combo_lamp 기준)을 쓴다."""
+    return row is not None and _row_matches_condition(row, FolderCondition(lamp), None)
+
+
+def _song_target_text(goal: Any) -> str:
+    lamp = _song_lamp(goal)
+    if lamp is not None:
+        return _LAMP_LABELS.get(lamp, lamp)
+    target = int(goal.target_value) if goal.target_value is not None else 0
+    return f"{target:,}점"
+
+
 def _goal_label(goal: Any) -> str:
     ref = goal.target_ref
     if goal.kind == "song":
-        target = int(goal.target_value) if goal.target_value is not None else 0
-        return f"{ref['song_title']} {ref['difficulty']}  {target:,}점"
+        return f"{ref['song_title']} {ref['difficulty']}  {_song_target_text(goal)}"
     if goal.kind == "rating":
         target_text = calc.truncate2(_dec(goal.target_value)) if goal.target_value is not None else "?"
         return f"레이팅 {target_text}"
@@ -332,6 +360,12 @@ async def _goal_summary(ctx: ToolContext, goal: Any) -> dict[str, Any]:
     """목표 하나의 지금 상태: 현재값, 달성률, 남은 양. 진행 기록(goals_progress)이 아직 없어도
     지금 기록으로 바로 계산한다(만든 직후의 레이팅 목표도 달성률이 나온다)."""
     summary: dict[str, Any] = {"current_value": None, "achievement_ratio": None}
+    lamp = _song_lamp(goal) if goal.kind == GoalKind.SONG.value else None
+    if lamp is not None:
+        ref = goal.target_ref
+        pb = await ctx.records.pb_row(goal.player_id, song_title=ref["song_title"], difficulty=ref["difficulty"])
+        summary.update(current_lamp=pb.combo_lamp if pb is not None else None, lamp_met=_lamp_met(pb, lamp))
+        return summary
     if goal.kind == GoalKind.FOLDER.value:
         total, matched = await _folder_counts(ctx, goal.target_ref, player_id=goal.player_id)
         ratio = calc.folder_progress(total, matched)
@@ -364,8 +398,26 @@ async def _goal_summary(ctx: ToolContext, goal: Any) -> dict[str, Any]:
     return summary
 
 
+async def _progress_visible(ctx: ToolContext, owner_id: str) -> bool:
+    """남의 목표에서 진행값(현재값·달성률·남은 양·진행 기록·예상 레이팅)을 보여 줘도 되나.
+    목표의 public은 목표 정의만 공개한다 — 진행값은 그 사람의 기록이라 records_public을 따른다
+    (chunithm-report의 _target_player와 같은 규칙)."""
+    if owner_id == ctx.player_id:
+        return True
+    owner = await ctx.players.get_player(owner_id)
+    return owner is not None and owner.records_public
+
+
+def _hidden_summary() -> dict[str, Any]:
+    return {"current_value": None, "achievement_ratio": None, "progress_hidden": True}
+
+
 def _summary_text(goal: Any, summary: dict[str, Any]) -> str:
     """요약을 한 줄로. 숫자는 표시용으로 소수 둘째 자리에서 버린다(data는 그대로)."""
+    if summary.get("progress_hidden"):
+        return _PROGRESS_HIDDEN
+    if "current_lamp" in summary:
+        return f"현재 램프 {summary['current_lamp'] or '기록 없음'}"
     parts: list[str] = []
     ratio = summary.get("achievement_ratio")
     if ratio is not None:
@@ -424,6 +476,7 @@ async def set_goal(
     target_value: float | None = None,
     chart: ChartRef | None = None,
     target_score: ScoreRef | None = None,
+    lamp: SongLamp | None = None,
     folder_min_const: float | None = None,
     folder_max_const: float | None = None,
     folder_level: str | None = None,
@@ -443,8 +496,9 @@ async def set_goal(
     overpower는 overpower_mode+target_value(전체만 지원, overpower_scope=folder는 아직 안 됨,
     현재값보다 커야 한다), folder는 folder_difficulty + (folder_min_const와 folder_max_const) 또는
     folder_level 또는 folder_version 중 하나(+folder_condition, rank 조건이면 folder_rank), song은
-    chart(곡+난이도 원문 그대로, 예: "크로노 마스")+target_score(점수 숫자나 랭크 이름을 원문
-    그대로 — 점수 환산은 해석기가 한다, 이미 그 점수를 넘겼으면 에러), freeform은 description.
+    chart(곡+난이도 원문 그대로, 예: "크로노 마스")에 target_score(점수 숫자나 랭크 이름을 원문
+    그대로 — 점수 환산은 해석기가 한다) 또는 lamp(full_combo/all_justice) 중 하나(이미 달성했으면
+    에러), freeform은 description.
     due_at은 ISO 날짜(YYYY-MM-DD)다. 레이팅·오버파워·폴더 목표는 CHUNITHM-NET 동기화(chunithm-synced)가 있어야
     만들 수 있다. 레이팅 최종 목표는 플레이어당 하나뿐이다 — 이미 있으면 새로 만들지 않고
     에러를 돌려주고 `update`를 쓰라고 안내한다(설계서에 없던 세부, SKILL.md 본문 참고)."""
@@ -531,18 +585,29 @@ async def set_goal(
         target_value = float(total)
     elif kind == GoalKind.SONG:
         score = _score(target_score)
-        if chart is None or score is None:
-            return ToolResult(error="곡과 난이도(chart), 목표 점수(target_score)가 필요해.")
+        if chart is None:
+            return ToolResult(error="곡과 난이도(chart)가 필요해.")
+        if (score is None) == (lamp is None):
+            return ToolResult(error="목표는 점수(target_score)나 램프(lamp: 풀콤보/올 저스티스) 중 하나만 줘.")
         assert isinstance(chart, ResolvedChart)
         song_title, difficulty = chart.song.title, chart.chart.difficulty
         if await models.find_song_goal(ctx.db, ctx.player_id, song_title=song_title, difficulty=difficulty):
             return ToolResult(error="그 채보에는 이미 진행 중인 투두가 있어.")
         row = await ctx.records.pb_row(ctx.player_id, song_title=song_title, difficulty=difficulty)
-        if row is not None and row.score >= score:
-            return ToolResult(error="이미 그 목표를 달성했어.")
-        target_ref = {"song_title": song_title, "difficulty": difficulty}
-        target_value = float(score)
-        baseline_value = float(row.score) if row is not None else 0.0
+        if lamp is not None:
+            # 램프 목표는 점수로 바꾸지 않는다 — target_ref에 램프를 싣고 target_value는 비운다.
+            if _lamp_met(row, lamp.value):
+                return ToolResult(error="이미 그 목표를 달성했어.")
+            target_ref = {"song_title": song_title, "difficulty": difficulty, "lamp": lamp.value}
+            target_value = None
+            baseline_value = None
+        else:
+            assert score is not None
+            if row is not None and row.score >= score:
+                return ToolResult(error="이미 그 목표를 달성했어.")
+            target_ref = {"song_title": song_title, "difficulty": difficulty}
+            target_value = float(score)
+            baseline_value = float(row.score) if row is not None else 0.0
     else:
         if description is None:
             return ToolResult(error="자유 목표는 설명이 필요해.")
@@ -569,7 +634,8 @@ async def set_goal(
 @tool(slash="목표 목록")
 async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: GoalKind | None = None) -> ToolResult:
     """목표 목록과 달성률·남은 양을 보여준다. 각 목표의 id(수정/진행/삭제에 쓴다)도 함께
-    보여준다. player를 주면 그 사람의 공개 목표만(본인이면 전체)."""
+    보여준다. player를 주면 그 사람의 공개 목표만(본인이면 전체). 그 사람이 기록을 비공개로 해
+    두었으면 목표 정의만 보이고 진행값은 빠진다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
@@ -577,14 +643,16 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
     if target.id != ctx.player_id:
         rows = [r for r in rows if r.public]  # 남의 목표는 목표마다 고른 공개 여부를 따른다
 
+    # 목표의 public은 목표 정의만 공개한다. 진행값은 그 사람의 records_public을 따른다.
+    show_progress = await _progress_visible(ctx, target.id)
     items: list[dict[str, Any]] = []
     lines: list[str] = []
     for r in rows:
-        summary = await _goal_summary(ctx, r)
+        summary = await _goal_summary(ctx, r) if show_progress else _hidden_summary()
         items.append(
             {
                 "goal_id": r.id, "kind": r.kind, "target_ref": r.target_ref, "target_value": r.target_value,
-                "baseline_value": r.baseline_value, "status": r.status, "due_at": r.due_at,
+                "baseline_value": r.baseline_value if show_progress else None, "status": r.status, "due_at": r.due_at,
                 "duration_tag": r.duration_tag, "public": r.public, **summary,
             }
         )
@@ -660,15 +728,17 @@ async def update(
 async def progress(ctx: ToolContext, goal_id: str) -> ToolResult:
     """목표 하나의 지금 달성률·남은 양, 진행 기록과 페이스(기한이 있을 때)를 보여준다. 레이팅
     목표면 곡별 목표(To-Do)를 모두 달성했을 때의 예상 레이팅도 함께 보여준다. goal_id는
-    `/목표 목록`에 나오는 id다. 남의 목표는 공개한 것만 볼 수 있다."""
+    `/목표 목록`에 나오는 id다. 남의 목표는 공개한 것만 볼 수 있고, 그 사람이 기록을
+    비공개로 해 두었으면 진행값(현재값·달성률·남은 양·기록·예상 레이팅)은 빼고 보여준다."""
     goal = await models.fetch_goal(ctx.db, goal_id)
     if goal is None:
         return ToolResult(error="그 목표를 찾지 못했어.")
     if goal.player_id != ctx.player_id and not goal.public:
         return ToolResult(error="그 목표는 비공개야.")
 
-    history = await models.list_progress(ctx.db, goal_id)
-    summary = await _goal_summary(ctx, goal)
+    show_progress = await _progress_visible(ctx, goal.player_id)
+    history = await models.list_progress(ctx.db, goal_id) if show_progress else []
+    summary = await _goal_summary(ctx, goal) if show_progress else _hidden_summary()
     data: dict[str, Any] = {
         "goal_id": goal.id, "kind": goal.kind, "status": goal.status, "due_at": goal.due_at, **summary,
         "history": [
@@ -695,7 +765,7 @@ async def progress(ctx: ToolContext, goal_id: str) -> ToolResult:
     if history:
         lines.append(f"진행 기록 {len(history)}건 (마지막 {history[-1].recorded_at[:10]})")
 
-    if goal.kind == GoalKind.RATING.value:
+    if goal.kind == GoalKind.RATING.value and show_progress:
         projected = await _project_rating_for(ctx, goal.player_id)
         data["projected_rating"] = str(projected) if projected is not None else None
         if projected is not None:
@@ -733,14 +803,15 @@ async def delete(ctx: ToolContext, goal_ids: str, *, dry_run: bool = False) -> T
 
 @tool(slash="투두 추가", mutates=True)
 async def todo_add(
-    ctx: ToolContext, chart: ChartRef, target_score: ScoreRef, *, public: bool = False,
-    due_at: str | None = None,
+    ctx: ToolContext, chart: ChartRef, target_score: ScoreRef | None = None, lamp: SongLamp | None = None,
+    *, public: bool = False, due_at: str | None = None,
 ) -> ToolResult:
-    """곡별 목표(To-Do) 한 건을 추가한다. chart는 곡+난이도 원문(예: "크로노 마스"), target_score는
-    점수 숫자나 랭크 이름(SSS, SSS+ 등)을 플레이어가 말한 그대로 넘긴다 — 점수 환산은 해석기가
-    하므로 직접 계산하지 않는다. 이미 그 점수를 넘긴 채보면 에러다."""
+    """곡별 목표(To-Do) 한 건을 추가한다. chart는 곡+난이도 원문(예: "크로노 마스"). 목표는 둘 중
+    하나만 준다: target_score(점수 숫자나 랭크 이름 SSS, SSS+ 등을 플레이어가 말한 그대로 — 점수
+    환산은 해석기가 하므로 직접 계산하지 않는다) 또는 lamp(풀콤보면 full_combo, 올 저스티스면
+    all_justice — 점수와 상관없는 램프 목표). 이미 달성한 채보면 에러다."""
     return await set_goal(
-        ctx, GoalKind.SONG, chart=chart, target_score=target_score, public=public, due_at=due_at,
+        ctx, GoalKind.SONG, chart=chart, target_score=target_score, lamp=lamp, public=public, due_at=due_at,
     )
 
 
@@ -834,13 +905,24 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
         pb = await ctx.records.pb_row(ctx.player_id, song_title=title, difficulty=dif)
         current = pb.score if pb is not None else 0
         const = ctx.songdb.const_for(title, dif)
+        lamp = _song_lamp(g)
+        if lamp is not None:
+            items.append(
+                {
+                    "goal_id": g.id, "song_title": title, "difficulty": dif, "const": const,
+                    "current_score": current, "target_score": None, "lamp": lamp,
+                    "current_lamp": pb.combo_lamp if pb is not None else None,
+                    "remaining_score": None, "remaining_attacks": None,
+                }
+            )
+            continue
         note_count = ctx.songdb.note_count_for(title, dif)
         target = int(g.target_value) if g.target_value is not None else 0
         remaining = ctx.records.remaining_to_target(note_count, current, target)
         items.append(
             {
                 "goal_id": g.id, "song_title": title, "difficulty": dif, "const": const,
-                "current_score": current, "target_score": target,
+                "current_score": current, "target_score": target, "lamp": None,
                 "remaining_score": remaining[0] if remaining is not None else None,
                 "remaining_attacks": str(remaining[1]) if remaining is not None else None,
             }
@@ -853,6 +935,11 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
 
     def _todo_line(i: dict[str, Any]) -> str:
         const_text = "" if i["const"] is None else f" {i['const']}"
+        if i["lamp"] is not None:
+            return (
+                f"{i['song_title']} {i['difficulty']}{const_text}  {_LAMP_LABELS.get(i['lamp'], i['lamp'])} 목표  "
+                f"(현재 램프 {i['current_lamp'] or '기록 없음'})\n  id {i['goal_id']}"
+            )
         attacks_text = (
             "계산 불가" if i["remaining_attacks"] is None
             else f"남은 {i['remaining_score']:,}점, {i['remaining_attacks']}어택"
@@ -949,9 +1036,23 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
     unchanged: list[dict[str, Any]] = []
     for g in (g for g in active if g.kind == GoalKind.SONG.value):
         title, dif = g.target_ref["song_title"], g.target_ref["difficulty"]
-        target = int(g.target_value) if g.target_value is not None else 0
         chart_update = update_by_key.get((title, dif))
         unchanged_play = unchanged_by_key.get((title, dif))
+        lamp = _song_lamp(g)
+        if lamp is not None:
+            # 램프 목표: 동기화 diff(ChartUpdate)에는 램프가 없으므로, 동기화가 갱신한 records_pb의
+            # combo_lamp로 판정한다(점수 비교는 쓰지 않는다).
+            pb = await ctx.records.pb_row(player_id, song_title=title, difficulty=dif)
+            lamp_text = _LAMP_LABELS.get(lamp, lamp)
+            if _lamp_met(pb, lamp):
+                completed.append(await _complete_goal(ctx, g))
+                song_lines.append(f"달성  {title} {dif}  {lamp_text}")
+            elif chart_update is not None or unchanged_play is not None:
+                song_lines.append(
+                    f"미갱신  {title} {dif}  {lamp_text} 아직 (현재 램프 {pb.combo_lamp if pb is not None else '기록 없음'})"
+                )
+            continue
+        target = int(g.target_value) if g.target_value is not None else 0
         if chart_update is not None and chart_update.new_score >= target:
             completed.append(await _complete_goal(ctx, g))
             song_lines.append(f"달성  {title} {dif}  {target:,}점  (현재 {chart_update.new_score:,})")
@@ -1046,6 +1147,19 @@ async def on_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section |
         goal_dif: str = goal.target_ref["difficulty"]
         pb = await ctx.records.pb_row(player_id, song_title=title, difficulty=goal_dif)
         current = pb.score if pb is not None else 0
+        lamp = _song_lamp(goal)
+        if lamp is not None:
+            current_lamp = pb.combo_lamp if pb is not None else None
+            lines.append(
+                f"투두 {goal_dif} 목표 {_LAMP_LABELS.get(lamp, lamp)}  (현재 램프 {current_lamp or '기록 없음'})"
+            )
+            todos.append(
+                {
+                    "goal_id": goal.id, "difficulty": goal_dif, "current_score": current, "target_score": None,
+                    "lamp": lamp, "current_lamp": current_lamp, "remaining_score": None, "remaining_attacks": None,
+                }
+            )
+            continue
         note_count = ctx.songdb.note_count_for(title, goal_dif)
         target = int(goal.target_value) if goal.target_value is not None else 0
         remaining = ctx.records.remaining_to_target(note_count, current, target)
@@ -1084,12 +1198,22 @@ async def on_plan_requested(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         title, dif = g.target_ref["song_title"], g.target_ref["difficulty"]
         pb = await ctx.records.pb_row(player_id, song_title=title, difficulty=dif)
         current = pb.score if pb is not None else 0
+        lamp = _song_lamp(g)
+        if lamp is not None:
+            # 램프 목표는 남은 어택으로 잴 수 없어 맨 뒤로 간다.
+            items.append(
+                {
+                    "goal_id": g.id, "song_title": title, "difficulty": dif, "target_score": None, "lamp": lamp,
+                    "remaining_score": None, "remaining_attacks": None,
+                }
+            )
+            continue
         note_count = ctx.songdb.note_count_for(title, dif)
         target = int(g.target_value) if g.target_value is not None else 0
         remaining = ctx.records.remaining_to_target(note_count, current, target)
         items.append(
             {
-                "goal_id": g.id, "song_title": title, "difficulty": dif, "target_score": target,
+                "goal_id": g.id, "song_title": title, "difficulty": dif, "target_score": target, "lamp": None,
                 "remaining_score": remaining[0] if remaining is not None else None,
                 "remaining_attacks": remaining[1] if remaining is not None else None,
             }
@@ -1098,6 +1222,8 @@ async def on_plan_requested(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
     top = items[:_PLAN_LIMIT]
 
     def _plan_line(i: dict[str, Any]) -> str:
+        if i["lamp"] is not None:
+            return f"{i['song_title']} {i['difficulty']}  {_LAMP_LABELS.get(i['lamp'], i['lamp'])} 목표"
         remaining_text = (
             "계산 불가"
             if i["remaining_attacks"] is None
