@@ -6,5 +6,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # CHUNITHM-NET 시각은 +09:00 벽시계다 — 세션 날짜(새벽 4시 경계) 추정과 예약 작업이
+      # 컨테이너 로컬 시각을 쓰므로 같은 시간대로 맞춘다.
+      - TZ=Asia/Tokyo
     volumes:
       - ./data:/app/data
