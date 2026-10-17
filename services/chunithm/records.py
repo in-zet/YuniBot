@@ -499,6 +499,11 @@ class RecordsService:
         )
         return [_pb_row_from(row) for row in await cursor.fetchall()]
 
+    async def current_frames(self, player_id: str) -> tuple[list[PbRow], list[PbRow]]:
+        """지금 시점 (베스트30, 신곡20). 제목 순이 아니라 프레임 순(레이팅 내림차순)이다 —
+        latest_sync_summary/candidates가 쓰는 _frames와 같은 계산이라 숫자가 어긋나지 않는다."""
+        return self._frames(await self.all_pb_rows(player_id))
+
     async def candidates(
         self, player_id: str, *, min_const: float | None, max_const: float | None, count: int
     ) -> list[CandidateHit]:

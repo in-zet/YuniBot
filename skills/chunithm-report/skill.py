@@ -1,0 +1,531 @@
+# skills/chunithm-report/skill.py
+from __future__ import annotations
+
+from collections import Counter
+from decimal import Decimal
+from enum import StrEnum
+from typing import Any, NamedTuple
+
+from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
+from chuni_penguin.types.score import RecentScore
+
+from core.decorators import on, tool
+from core.events import Section, Stage
+from core.tool_types import ChartRef, Display, PlayerRef, ToolContext, ToolResult
+from services.chunithm.chart_ref import ResolvedChart
+from services.chunithm.records import ChartUpdate, PbRow, SyncDiff, SyncLogSummary
+from services.common.players import Player
+
+# 판정 수(상세 판정)는 CHUNITHM-NET 플레이 상세 페이지를 한 곡씩 따로 열어야 붙는다.
+# 설계서가 고정한 상한이다 — 바꾸지 않는다.
+_DETAIL_LIMIT = 20
+_UNKNOWN = "계산 불가"
+_SSS_TIER = frozenset({"SSS", "SSS+"})
+# analyze의 랭크 분포를 높은 랭크부터 보여 주는 순서.
+_RANK_ORDER: tuple[str, ...] = (
+    "SSS+", "SSS", "SS+", "SS", "S+", "S", "AAA", "AA", "A", "BBB", "BB", "B", "C", "D",
+)
+_PRIVATE_ERROR = "그 사람은 기록을 비공개로 해 놨어."
+_NOT_SYNCED_ERROR = "아직 동기화한 기록이 없어. /동기화를 먼저 해 줘."
+_REPORT_ORDER = 10
+
+
+class BestKind(StrEnum):
+    BEST = "best"
+    NEW = "new"
+    BOTH = "both"
+
+
+# ---------------------------------------------------------------- 공통 도우미
+
+
+async def _target_player(ctx: ToolContext, player: PlayerRef | None) -> Player | ToolResult:
+    """조회 대상 플레이어. 안 넘어왔으면 본인이다(PlayerRef 해석기는 인자가 있을 때만 돈다).
+    본인은 공개 설정과 무관하게 보고, 남은 records_public이 켜져 있을 때만 본다(결정 사항 I)."""
+    if player is None:
+        me = await ctx.players.get_player(ctx.player_id)
+        if me is None:
+            return ToolResult(error="플레이어 정보를 찾지 못했어.")
+        return me
+    assert isinstance(player, Player)
+    if player.id != ctx.player_id and not player.records_public:
+        return ToolResult(error=_PRIVATE_ERROR)
+    return player
+
+
+def _num(value: Decimal | None) -> str:
+    return _UNKNOWN if value is None else str(value)
+
+
+def _delta(current: Decimal | None, previous: Decimal | None) -> str:
+    if current is None or previous is None:
+        return _UNKNOWN
+    return f"{current - previous:+}"
+
+
+def _score(value: int) -> str:
+    return f"{value:,}"
+
+
+def _const_text(const: float | None) -> str:
+    return "" if const is None else f" {const}"
+
+
+def _short_date(iso_date: str) -> str:
+    """"2026-10-08" → "10/08"."""
+    return f"{iso_date[5:7]}/{iso_date[8:10]}"
+
+
+def _contribution(rating: Decimal | None) -> str:
+    # 전체 레이팅 = (베스트30 + 신곡20 곡 레이팅 합) / 50. 곡 레이팅이 둘째 자리 값이라 /50은
+    # 넷째 자리에서 정확히 끝난다(반올림이 필요 없다).
+    return _UNKNOWN if rating is None else str(rating / 50)
+
+
+def _pb_data(row: PbRow) -> dict[str, Any]:
+    return {
+        "song_title": row.song_title, "difficulty": row.difficulty, "score": row.score, "rank": row.rank,
+        "clear_lamp": row.clear_lamp, "combo_lamp": row.combo_lamp, "chain_lamp": row.chain_lamp,
+        "const": row.const, "rating": _num(row.rating),
+    }
+
+
+# ---------------------------------------------------------------- 도구
+
+
+@tool(slash="프로필")
+async def profile(ctx: ToolContext, player: PlayerRef | None = None) -> ToolResult:
+    """닉네임, 현재 레이팅, 베스트 30 평균, 신곡 20 평균, 마지막 동기화 시각을 보여준다. player를 비우면 본인이다."""
+    target = await _target_player(ctx, player)
+    if isinstance(target, ToolResult):
+        return target
+    summary = await ctx.records.latest_sync_summary(target.id)
+    if summary is None:
+        return ToolResult(error=_NOT_SYNCED_ERROR)
+
+    data = {
+        "player_id": target.id,
+        "nickname": summary.nickname,
+        "computed_rating": _num(summary.computed_rating),
+        "best30_average": _num(summary.best30_average),
+        "new20_average": _num(summary.new20_average),
+        "last_synced_at": summary.last_synced_at,
+    }
+    lines = [
+        f"{summary.nickname or '(닉네임 없음)'}",
+        f"레이팅      {data['computed_rating']}",
+        f"베스트 30   {data['best30_average']}",
+        f"신곡 20     {data['new20_average']}",
+        f"마지막 동기화  {summary.last_synced_at}",
+    ]
+    return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
+
+
+@tool(slash="베스트")
+async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind = BestKind.BOTH) -> ToolResult:
+    """베스트 30과 신곡 20 목록(채보, 점수, 곡 레이팅, 전체 레이팅 기여도)을 보여준다. kind는 best(베스트 30), new(신곡 20), both(둘 다)."""
+    target = await _target_player(ctx, player)
+    if isinstance(target, ToolResult):
+        return target
+    try:
+        kind = BestKind(kind)
+    except ValueError:
+        return ToolResult(error="kind는 best, new, both 중 하나여야 해.")
+    best_rows, new_rows = await ctx.records.current_frames(target.id)
+    if not best_rows and not new_rows:
+        return ToolResult(error=_NOT_SYNCED_ERROR)
+    summary: SyncLogSummary | None = await ctx.records.latest_sync_summary(target.id)
+
+    data: dict[str, Any] = {"player_id": target.id, "kind": kind.value}
+    blocks: list[str] = []
+    frames: list[tuple[str, str, list[PbRow], Decimal | None]] = []
+    if kind in (BestKind.BEST, BestKind.BOTH):
+        frames.append(("best", "베스트 30", best_rows, summary.best30_average if summary else None))
+    if kind in (BestKind.NEW, BestKind.BOTH):
+        frames.append(("new", "신곡 20", new_rows, summary.new20_average if summary else None))
+
+    for key, title, rows, average in frames:
+        data[key] = [{**_pb_data(r), "contribution": _contribution(r.rating)} for r in rows]
+        data[f"{key}_average"] = _num(average)
+        lines = [f"{title}  평균 {_num(average)}"]
+        lines += [
+            f"{i}. {r.song_title} {r.difficulty}{_const_text(r.const)}  {_score(r.score)} {r.rank}  "
+            f"곡 레이팅 {_num(r.rating)}  기여 {_contribution(r.rating)}"
+            for i, r in enumerate(rows, start=1)
+        ]
+        blocks.append("\n".join(lines))
+    return ToolResult(data=data, display=Display(content="\n\n".join(blocks)))
+
+
+def _recent_data(score: RecentScore) -> dict[str, Any]:
+    judgements: dict[str, int] | None = None
+    if score.judgements is not None:
+        j = score.judgements
+        judgements = {"justice_critical": j.justice_critical, "justice": j.justice, "attack": j.attack, "miss": j.miss}
+        if j.justice_heaven is not None:
+            judgements["justice_heaven"] = j.justice_heaven
+    return {
+        "song_title": score.song.title,
+        "difficulty": score.chart.difficulty.short(),
+        "score": score.score,
+        "rank": str(score.rank),
+        "achieved_at": score.achieved_at.isoformat() if score.achieved_at is not None else None,
+        "judgements": judgements,
+    }
+
+
+@tool(slash="최근", cost="network")
+async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int = 10) -> ToolResult:
+    """CHUNITHM-NET 최근 플레이 이력을 count개 보여준다. 판정 수는 앞 20개에만 붙는다."""
+    target = await _target_player(ctx, player)
+    if isinstance(target, ToolResult):
+        return target
+    count = max(1, count)
+    try:
+        scores = await ctx.chunithm_net.get_recent_scores(target.id)
+        # 보여 줄 만큼만 넘긴다 — 상세 판정은 곡마다 따로 요청하므로, 안 보여 줄 곡까지 열지 않는다.
+        scores = await ctx.chunithm_net.enrich_recent_with_detail(target.id, scores[:count], limit=_DETAIL_LIMIT)
+    except MaintenanceError:
+        return ToolResult(error="CHUNITHM-NET이 점검 중이야. 점검이 끝나면 다시 해 줘.")
+    except (AuthenticationError, ConnectionError):
+        if target.id == ctx.player_id:
+            return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
+        return ToolResult(error="그 사람은 CHUNITHM-NET 로그인이 안 돼 있어서 최근 기록을 못 가져와.")
+
+    plays = [_recent_data(s) for s in scores]
+    lines: list[str] = []
+    for i, p in enumerate(plays, start=1):
+        line = f"{i}. {p['song_title']} {p['difficulty']}  {_score(p['score'])} {p['rank']}"
+        j = p["judgements"]
+        if j is not None:
+            line += f"  JC {j['justice_critical']} / J {j['justice']} / A {j['attack']} / M {j['miss']}"
+        lines.append(line)
+    if not lines:
+        lines.append("최근 플레이가 없어.")
+    elif len(plays) > _DETAIL_LIMIT:
+        lines.append(f"판정 수는 앞 {_DETAIL_LIMIT}개에만 있어.")
+    return ToolResult(
+        data={"player_id": target.id, "plays": plays, "detail_limit": _DETAIL_LIMIT},
+        display=Display(content="\n".join(lines)),
+    )
+
+
+@tool(slash="기록")
+async def record(ctx: ToolContext, chart: ChartRef, player: PlayerRef | None = None) -> ToolResult:
+    """채보 하나의 최고 기록(점수, 랭크, 램프, 곡 레이팅)을 보여준다. player를 비우면 본인이다."""
+    assert isinstance(chart, ResolvedChart)
+    target = await _target_player(ctx, player)
+    if isinstance(target, ToolResult):
+        return target
+    row = await ctx.records.pb_row(target.id, song_title=chart.song.title, difficulty=chart.chart.difficulty)
+    if row is None:
+        return ToolResult(error=f"{chart.song.title} {chart.chart.difficulty}는 플레이한 기록이 없어.")
+
+    content = (
+        f"{row.song_title} {row.difficulty}{_const_text(row.const)}\n"
+        f"{_score(row.score)} {row.rank}  {row.clear_lamp} / {row.combo_lamp}\n"
+        f"곡 레이팅 {_num(row.rating)}"
+    )
+    return ToolResult(
+        data={"player_id": target.id, **_pb_data(row)},
+        display=Display(content=content),
+        display_mode="optional",
+    )
+
+
+class ConstBand(NamedTuple):
+    band: int  # 상수의 정수 부분(15.3 → 15)
+    chart_count: int
+    average_score: int  # 버림
+    ranks: dict[str, int]  # 높은 랭크부터
+
+
+def const_band_stats(
+    rows: list[PbRow], *, min_const: float | None, max_const: float | None
+) -> tuple[list[ConstBand], int]:
+    """상수대(정수 단위)별 채보 수·평균 점수(버림)·랭크 분포. 높은 상수대부터.
+    상수를 모르는 채보는 묶지 않고 개수만 따로 돌려준다(상수 범위를 줬으면 그 개수도 0으로 친다)."""
+    grouped: dict[int, list[PbRow]] = {}
+    unknown = 0
+    for row in rows:
+        if row.const is None:
+            unknown += 1
+            continue
+        if (min_const is not None and row.const < min_const) or (max_const is not None and row.const > max_const):
+            continue
+        grouped.setdefault(int(row.const), []).append(row)
+    if min_const is not None or max_const is not None:
+        unknown = 0
+
+    bands: list[ConstBand] = []
+    for band in sorted(grouped, reverse=True):
+        members = grouped[band]
+        counter = Counter(r.rank for r in members)
+        ranks = {rank: counter[rank] for rank in _RANK_ORDER if counter[rank]}
+        ranks.update({rank: n for rank, n in counter.items() if rank not in ranks})
+        bands.append(
+            ConstBand(
+                band=band, chart_count=len(members), average_score=sum(r.score for r in members) // len(members),
+                ranks=ranks,
+            )
+        )
+    return bands, unknown
+
+
+@tool(slash="분석")
+async def analyze(
+    ctx: ToolContext,
+    player: PlayerRef | None = None,
+    min_const: float | None = None,
+    max_const: float | None = None,
+) -> ToolResult:
+    """플레이한 채보를 상수대(정수 단위)로 묶어 평균 점수와 랭크 분포를 보여준다. 상수 범위로 거를 수 있다."""
+    target = await _target_player(ctx, player)
+    if isinstance(target, ToolResult):
+        return target
+    rows = await ctx.records.all_pb_rows(target.id)
+    if not rows:
+        return ToolResult(error=_NOT_SYNCED_ERROR)
+    bands, unknown = const_band_stats(rows, min_const=min_const, max_const=max_const)
+
+    lines: list[str] = []
+    for b in bands:
+        dist = ", ".join(f"{rank} {n}" for rank, n in b.ranks.items())
+        lines.append(f"{b.band}대  {b.chart_count}채보  평균 {_score(b.average_score)}  ({dist})")
+    if not lines:
+        lines.append("그 상수 범위에 플레이한 채보가 없어.")
+    if unknown:
+        lines.append(f"상수를 몰라 묶지 못한 채보 {unknown}개")
+    return ToolResult(
+        data={
+            "player_id": target.id,
+            "min_const": min_const,
+            "max_const": max_const,
+            "bands": [
+                {"band": b.band, "count": b.chart_count, "average_score": b.average_score, "ranks": b.ranks}
+                for b in bands
+            ],
+            "unknown_const_count": unknown,
+        },
+        display=Display(content="\n".join(lines)),
+    )
+
+
+@tool(slash="후보곡")
+async def candidates(
+    ctx: ToolContext, min_const: float | None = None, max_const: float | None = None, count: int = 10
+) -> ToolResult:
+    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 보여준다. SSS까지 남은 점수와 어택을 붙인다. 상수 범위로 거를 수 있다."""
+    hits = await ctx.records.candidates(ctx.player_id, min_const=min_const, max_const=max_const, count=max(1, count))
+    items = [
+        {
+            "song_title": h.song_title, "difficulty": h.difficulty, "const": h.const, "upside": str(h.upside),
+            "current_score": h.current_score, "remaining_score": h.remaining_score,
+            "remaining_attacks": None if h.remaining_attacks is None else str(h.remaining_attacks),
+        }
+        for h in hits
+    ]
+    lines: list[str] = []
+    for i, h in enumerate(hits, start=1):
+        if h.remaining_score is None:
+            remaining = f"SSS까지 {_UNKNOWN}"
+        else:
+            remaining = f"SSS까지 {_score(h.remaining_score)}점 ({h.remaining_attacks}어택)"
+        lines.append(
+            f"{i}. {h.song_title} {h.difficulty} {h.const}  현재 {_score(h.current_score)}  {remaining}  "
+            f"상승폭 +{h.upside}"
+        )
+    if not lines:
+        lines.append("지금 조건으로는 레이팅을 올릴 후보곡이 없어.")
+    return ToolResult(
+        data={"min_const": min_const, "max_const": max_const, "candidates": items},
+        display=Display(content="\n".join(lines)),
+    )
+
+
+# ---------------------------------------------------------------- 동기화 리포트 조각
+
+
+def _metric_lines(summary: SyncLogSummary | None, diff: SyncDiff | None) -> tuple[list[str], dict[str, Any]]:
+    """레이팅·베스트30 평균·신곡20 평균의 (이전 →) 현재 (변화량) 줄과 data. 숫자는 현재값(지금
+    records 기준)과 diff에 담긴 동기화 직전 값의 차이다 — 세션별로 나누지 않는다."""
+    current = {
+        "computed_rating": summary.computed_rating if summary else None,
+        "best30_average": summary.best30_average if summary else None,
+        "new20_average": summary.new20_average if summary else None,
+    }
+    previous = (
+        {
+            "computed_rating": diff.previous_computed_rating,
+            "best30_average": diff.previous_best30_average,
+            "new20_average": diff.previous_new20_average,
+        }
+        if diff is not None
+        else None
+    )
+    labels = {"computed_rating": "레이팅    ", "best30_average": "베스트 30 ", "new20_average": "신곡 20   "}
+    lines: list[str] = []
+    for key, label in labels.items():
+        if previous is None:
+            lines.append(f"{label}  {_num(current[key])}")
+        else:
+            lines.append(
+                f"{label}  {_num(previous[key])} → {_num(current[key])}  ({_delta(current[key], previous[key])})"
+            )
+    data: dict[str, Any] = {"current": {k: _num(v) for k, v in current.items()}}
+    if previous is not None:
+        data["previous"] = {k: _num(v) for k, v in previous.items()}
+        data["change"] = {k: _delta(current[k], previous[k]) for k in current}
+    return lines, data
+
+
+def _update_line(ctx: ToolContext, u: ChartUpdate, *, session_estimated: bool) -> str:
+    const = ctx.songdb.const_for(u.song_title, u.difficulty)
+    head = f"{u.song_title} {u.difficulty}{_const_text(const)}"
+    if u.old_score is None:
+        score = f"신규 {_score(u.new_score)}"
+        rank = u.new_rank
+        rating = f"곡 레이팅 {_num(u.new_rating)}"
+    else:
+        score = f"{_score(u.old_score)} → {_score(u.new_score)}"
+        rank = f"{u.new_rank} 유지" if u.old_rank == u.new_rank else f"{u.old_rank} → {u.new_rank}"
+        rating = f"곡 레이팅 {_num(u.old_rating)} → {_num(u.new_rating)}"
+    line = f"{head}  {score}  {rank}  {rating}"
+    if u.entered_frame:
+        line += "  프레임 진입"
+    if u.estimated_session and not session_estimated:
+        line += "  (날짜 추정)"
+    return line
+
+
+def _update_data(u: ChartUpdate) -> dict[str, Any]:
+    return {
+        "song_title": u.song_title, "difficulty": u.difficulty,
+        "old_score": u.old_score, "new_score": u.new_score, "old_rank": u.old_rank, "new_rank": u.new_rank,
+        "old_rating": None if u.old_rating is None else str(u.old_rating), "new_rating": _num(u.new_rating),
+        "session_id": u.session_id, "estimated_session": u.estimated_session, "entered_frame": u.entered_frame,
+    }
+
+
+def _stage(diff: SyncDiff) -> Stage | None:
+    """반응 단계 축소판(SKILL.md 본문 참고). rest와 "평소 점수 수준" 기준은 다음에 정한다."""
+    if any(u.new_rank in _SSS_TIER for u in diff.chart_updates):
+        return "great"
+    if diff.chart_updates:
+        return "good"
+    if diff.unchanged_plays:
+        return "close"
+    return None
+
+
+def _hint(diff: SyncDiff) -> str | None:
+    sss = sum(1 for u in diff.chart_updates if u.new_rank in _SSS_TIER)
+    entered = sum(1 for u in diff.chart_updates if u.entered_frame)
+    parts = ([f"SSS 이상 갱신 {sss}개"] if sss else []) + ([f"프레임 진입 {entered}개"] if entered else [])
+    return ", ".join(parts) or None
+
+
+def _focus_keys(payload: dict[str, Any]) -> set[tuple[str, str]] | None:
+    focus = payload.get("focus")
+    if not focus:
+        return None
+    return {(item["song_title"], item["difficulty"]) for item in focus}
+
+
+@on("chunithm.sync.completed")
+async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section:
+    """동기화 리포트의 본문 조각(order 10): 세션 요약, 갱신 목록, 반응 단계."""
+    player_id: str = payload["player_id"]
+    summary = await ctx.records.latest_sync_summary(player_id)
+    if payload.get("is_first_sync"):
+        # chunithm-sync는 첫 동기화에 이 이벤트를 내지 않는다. 오면 기준점만 알린다.
+        return Section(
+            order=_REPORT_ORDER,
+            display=Display(content=f"기준점을 잡았어. 현재 레이팅 {_num(summary.computed_rating if summary else None)}"),
+            data={"kind": "sync_report", "is_first_sync": True},
+        )
+
+    diff = await ctx.records.sync_diff(payload["sync_id"])
+    if diff is None or not payload.get("has_new_plays"):
+        # 변화 없음, 또는 비교 데이터가 캐시에서 밀려난 경우: 현재값(+있으면 변화량)만.
+        metric_lines, metric_data = _metric_lines(summary, diff)
+        heading = "변화 없음" if not payload.get("has_new_plays") else "현재 기록"
+        return Section(
+            order=_REPORT_ORDER,
+            display=Display(content="\n".join([heading, *metric_lines])),
+            data={"kind": "sync_report", "has_new_plays": bool(payload.get("has_new_plays")), **metric_data},
+        )
+
+    focus = _focus_keys(payload)
+    shown_updates = [
+        u for u in diff.chart_updates if focus is None or (u.song_title, u.difficulty) in focus
+    ]
+    sessions = list(diff.sessions)
+    session_by_id = {s.id: s for s in sessions}
+
+    def session_label(s_id: str) -> str:
+        s = session_by_id[s_id]
+        return _short_date(s.play_date) + (" (추정)" if s.estimated else "")
+
+    metric_lines, metric_data = _metric_lines(summary, diff)
+    dates = ", ".join(session_label(s.id) for s in sessions) or "날짜 미상"
+    blocks: list[str] = [
+        "\n".join([f"세션 요약  {dates}", *metric_lines, f"갱신 {len(diff.chart_updates)}채보"])
+    ]
+
+    # 갱신 목록은 날짜(세션)별로 나눈다. 세션에 없는 session_id(일어나면 안 됨)는 마지막에 모은다.
+    lines_by_session: dict[str | None, list[str]] = {}
+    for u in shown_updates:
+        key = u.session_id if u.session_id in session_by_id else None
+        estimated = session_by_id[u.session_id].estimated if key is not None else False
+        lines_by_session.setdefault(key, []).append(_update_line(ctx, u, session_estimated=estimated))
+    multi = len(sessions) > 1
+    for s in sessions:
+        lines = lines_by_session.get(s.id)
+        if lines:
+            blocks.append("\n".join([f"갱신  {session_label(s.id)}" if multi else "갱신", *lines]))
+    if None in lines_by_session:
+        blocks.append("\n".join(["갱신  날짜 미상", *lines_by_session[None]]))
+    if focus is not None and not shown_updates:
+        blocks.append("고른 채보는 이번에 갱신이 없어.")
+    if diff.frame_exits:
+        blocks.append(
+            "\n".join(
+                ["프레임 이탈"]
+                + [f"{e.song_title} {e.difficulty}  곡 레이팅 {_num(e.old_rating)}" for e in diff.frame_exits]
+            )
+        )
+
+    stage = _stage(diff)
+    return Section(
+        order=_REPORT_ORDER,
+        display=Display(content="\n\n".join(blocks)),
+        data={
+            "kind": "sync_report",
+            "has_new_plays": True,
+            **metric_data,
+            "sessions": [
+                {
+                    "id": s.id, "play_date": s.play_date, "estimated": s.estimated,
+                    "updated_count": sum(1 for u in diff.chart_updates if u.session_id == s.id),
+                    "unchanged_count": sum(1 for p in diff.unchanged_plays if p.session_id == s.id),
+                }
+                for s in sessions
+            ],
+            "focus": payload.get("focus"),
+            "chart_updates": [_update_data(u) for u in shown_updates],
+            "chart_updates_total": len(diff.chart_updates),
+            "unchanged_plays": [
+                {"song_title": p.song_title, "difficulty": p.difficulty, "play_count": p.play_count,
+                 "current_score": p.current_score, "session_id": p.session_id}
+                for p in diff.unchanged_plays
+            ],
+            "frame_exits": [
+                {"song_title": e.song_title, "difficulty": e.difficulty, "old_rating": _num(e.old_rating)}
+                for e in diff.frame_exits
+            ],
+            "stage": stage,
+        },
+        hint=_hint(diff),
+        stage=stage,
+    )

@@ -16,10 +16,12 @@ examples:
 category: 기록과 리포트
 game: chunithm
 version: 1
-services: [records, songdb, players]
+services: [records, songdb, players, chunithm_net]
 tags: [chunithm-synced]
 listens: [chunithm.sync.completed]
 ```
+
+`recent`는 저장된 데이터가 없어(기록 테이블에는 PB·세션·동기화 로그만 있다) 그 자리에서 `chunithm_net`으로 최근 플레이를 가져오므로 `chunithm_net`이 services에 들어간다.
 
 다른 플레이어의 기록을 보는 것도 요청한 사람에게 `chunithm-synced`가 있어야 한다. 이것이 너무 엄격하면 남의 기록 조회 도구만 태그 없이 둔다(아래 미확인 사항).
 
@@ -46,7 +48,7 @@ listens: [chunithm.sync.completed]
 - **베스트 목록**: 베스트 30과 신곡 20 각각의 채보, 점수, 곡 레이팅, 전체 레이팅 기여도. 이미지나 표로 낸다.
 - **최근 플레이**: CHUNITHM-NET 최근 플레이 이력. 판정 수까지 보여 준다.
 - **곡별 기록**: 채보 하나의 내 최고 기록과 판정 수.
-- **분석**: 상수대별 평균 점수와 랭크 분포, 판정 수 기반 어택·미스 비중.
+- **분석**: 상수대(상수의 정수 부분, 예: 15.3 → 15대)별 평균 점수와 랭크 분포. (판정 수 기반 어택·미스 비중은 7단계에서 뺐다 — PB에는 판정 수가 저장되지 않는다.)
 - **후보곡**: 미플레이이거나 점수가 낮은 채보 중 프레임에 들어갈 때 레이팅 상승폭이 큰 순. 각 후보에 목표 랭크까지 남은 점수와 어택을 붙인다.
 - **다른 플레이어**: `PlayerRef`로 받고, 대상이 기록을 공개한 경우만 보여 준다. 비교는 양쪽 모두 공개한 경우만 한다.
 
@@ -62,6 +64,8 @@ listens: [chunithm.sync.completed]
 | 같은 상수대의 평소 점수 수준 | `good` (AAA·AA 계열) |
 | 목표에 조금 못 미침 | `close` (BBB·BB 계열) |
 | 평소보다 크게 낮음 | `rest` (C·D 계열) |
+
+7단계 구현은 축소판이다: SSS 이상 갱신이 하나라도 있으면 `great`, 그 밖의 갱신이 있으면 `good`, 갱신 없이 플레이만 했으면 `close`, 새 플레이가 없으면(변화 없음) 단계 없이 간단한 조각만 낸다. `rest`와 "평소 점수 수준" 기준은 실제 기록을 보고 다음에 정한다(미확인 사항).
 
 다른 조각도 반응 단계를 낼 수 있다. 예를 들어 목표 스킬은 To-Do를 달성하면 `great`를 낸다. `yuni` 서비스는 조각들의 단계 중 가장 높은 것을 쓴다.
 
@@ -80,7 +84,7 @@ listens: [chunithm.sync.completed]
 ```
 
 - 새 플레이가 없으면 "변화 없음"과 함께 현재 레이팅, 베스트 30 평균, 신곡 20 평균만 낸다.
-- 여러 날이면 날짜별로 세션 요약과 갱신 목록을 나눈다. 날짜가 추정인 갱신에는 표시를 붙인다.
+- 여러 날이면 갱신 목록을 날짜별로 나눈다. 세션 요약의 레이팅·평균 숫자는 동기화 전체(직전 동기화 → 지금) 기준으로 한 번만 쓰고 머리줄에 날짜들을 나열한다(날짜별 레이팅은 저장하지 않아 쪼갤 수 없다). 날짜가 추정인 세션과 갱신에는 표시를 붙인다.
 - `focus`가 있으면 갱신 목록을 그 채보로 거른다. 세션 요약은 그대로 둔다.
 
 ## 도구
@@ -89,9 +93,9 @@ listens: [chunithm.sync.completed]
 | --- | --- | --- | --- | --- |
 | `profile` | 프로필 | `player: PlayerRef`(기본 나) | `/프로필` | optional |
 | `best` | 베스트 30, 신곡 20 | `player: PlayerRef`, `kind`(best/new/둘 다) | `/베스트` | required |
-| `recent` | 최근 플레이 | `player: PlayerRef`, `count` | `/최근` | required |
+| `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만) | `player: PlayerRef`, `count` | `/최근` | required |
 | `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | `/기록` | optional |
-| `analyze` | 상수대별 평균, 랭크 분포, 어택·미스 비중 | `player: PlayerRef`, 상수 범위(선택) | `/분석` | required |
+| `analyze` | 상수대별 평균, 랭크 분포 | `player: PlayerRef`, 상수 범위(선택) | `/분석` | required |
 | `candidates` | 레이팅 후보곡 | 상수 범위(선택), `count` | `/후보곡` | required |
 
 모두 읽기 전용이고 confirm은 never다.

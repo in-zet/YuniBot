@@ -793,3 +793,31 @@ async def test_diff_cache_keeps_only_newest(conn, monkeypatch) -> None:
     assert await service.sync_diff(sync_ids[1]) is not None
     assert await service.sync_diff(sync_ids[2]) is not None
     assert await service.sync_diff("없는-id") is None
+
+
+async def test_current_frames_returns_best30_and_new20_in_rating_order(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    fetch = _fixture_fetch()
+    # 프레임 밖 채보가 하나 더 있어도 30/20개로 잘려야 한다.
+    fetch.all_personal_bests = {"MAS": [_personal_best("B.B.K.K.B.K.K.", "MAS", 900_000)]}
+    await service.save_sync(player_id, fetch, ctx)
+
+    best, new = await service.current_frames(player_id)
+
+    assert len(best) == 30
+    assert len(new) == 20
+    assert {r.song_title for r in new} == {pb.song.title for pb in fetch.new20}
+    for frame in (best, new):
+        ratings = [r.rating or Decimal(0) for r in frame]
+        assert all(r.rating is not None for r in frame)
+        assert ratings == sorted(ratings, reverse=True)
+    assert ("B.B.K.K.B.K.K.", "MAS") not in {(r.song_title, r.difficulty) for r in (*best, *new)}
+    summary = await service.latest_sync_summary(player_id)
+    assert summary is not None
+    assert average_rating([r.rating for r in best]) == summary.best30_average
+
+
+async def test_current_frames_empty_when_never_synced(conn) -> None:
+    _, player_id, _, service = await _setup(conn)
+
+    assert await service.current_frames(player_id) == ([], [])
