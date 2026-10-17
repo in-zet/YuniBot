@@ -79,3 +79,45 @@ def assign_session_date(played_at: datetime, *, boundary_hour: int = 4) -> date:
     if played_at.hour < boundary_hour:
         return (played_at - _ONE_DAY).date()
     return played_at.date()
+
+
+def match_session_for_chart(
+    chart_key: tuple[str, str],
+    recent_by_chart: dict[tuple[str, str], list[datetime]],
+    sessions_by_date: dict[date, str],
+    latest_session_id: str | None,
+) -> tuple[str | None, bool]:
+    """그 채보의 최근 플레이 이력으로 세션을 매칭한다. `recent_by_chart`에 그
+    채보가 있으면 가장 늦은(max) `achieved_at`의 날짜로 `sessions_by_date`를
+    찾아 (session_id, False)를 돌려준다. 없거나(또는 그 날짜가
+    `sessions_by_date`에 없어 데이터가 어긋나면) 가장 최근 세션
+    `latest_session_id`로 추정 매칭해 (latest_session_id, True)를 돌려준다.
+    `latest_session_id`도 없으면 (None, True) — 호출하는 쪽이 오늘 날짜 세션을
+    새로 만들어 다시 불러야 한다."""
+    achieved_ats = recent_by_chart.get(chart_key)
+    if achieved_ats:
+        latest_date = max(achieved_ats).date()
+        session_id = sessions_by_date.get(latest_date)
+        if session_id is not None:
+            return session_id, False
+    return latest_session_id, True
+
+
+def frame_changes(
+    previous: set[tuple[str, str]], current: set[tuple[str, str]]
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    """프레임(베스트30/신곡20 등) 진입과 이탈 집합. (진입, 이탈) =
+    (`current - previous`, `previous - current`)."""
+    return current - previous, previous - current
+
+
+def candidate_upside(
+    const: float, frame_floor: Decimal, *, target_bonus: Decimal = Decimal("2.00")
+) -> Decimal:
+    """후보곡(현재 프레임 밖)이 SSS(target_bonus 기본 2.00, 결정 사항 K)를 냈을 때
+    프레임 최저점을 얼마나 넘을지. `Decimal(str(const)) + target_bonus -
+    frame_floor`를 그대로 돌려준다 — float 오차를 피하려 const를 문자열로 거쳐
+    Decimal로 바꾼다. 음수면 그대로 음수로 돌려준다(아직 프레임에 못 들어온다는
+    뜻이고, 0 이하를 거르는 것은 호출하는 쪽의 몫이다). 자리수를 버리거나
+    반올림하지 않는다 — 필요하면 호출하는 쪽이 정리한다."""
+    return Decimal(str(const)) + target_bonus - frame_floor
