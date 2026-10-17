@@ -191,6 +191,53 @@ async def test_find_by_const_excludes_unavailable_songs(songdb: SongDbService) -
     assert all(hit.song.title != "天体観測" for hit in hits)  # 국제판 미수록곡은 제외
 
 
+async def test_find_by_level_returns_matching_hits(songdb: SongDbService) -> None:
+    hits = songdb.find_by_level(level="12+", difficulty="MAS")
+    assert hits
+    assert all(hit.chart.level == "12+" for hit in hits)
+    assert any(hit.song.title == "B.B.K.K.B.K.K." for hit in hits)
+    consts = [c for hit in hits if (c := hit.chart.const) is not None]
+    assert consts == sorted(consts)
+
+
+async def test_find_by_level_excludes_unavailable_song() -> None:
+    songdb = SongDbService()
+    # 天体観測은 국제판 미수록(available=False)인데, MAS 표기 레벨이 "9+"다.
+    hits = songdb.find_by_level(level="9+", difficulty="MAS")
+    assert all(hit.song.title != "天体観測" for hit in hits)
+
+
+async def test_find_by_level_returns_empty_when_nothing_matches(songdb: SongDbService) -> None:
+    hits = songdb.find_by_level(level="그런레벨없음", difficulty="MAS")
+    assert hits == []
+
+
+async def test_find_by_version_with_difficulty_filters_to_one_chart(songdb: SongDbService) -> None:
+    hits = songdb.find_by_version(version="LUMINOUS", difficulty="MAS")
+    assert hits
+    assert all(hit.song.version == "LUMINOUS" for hit in hits)
+    assert all(hit.chart.difficulty == "MAS" for hit in hits)
+    assert any(hit.song.title == "可愛くてごめん" for hit in hits)
+
+
+async def test_find_by_version_without_difficulty_returns_all_available_charts(songdb: SongDbService) -> None:
+    hits = songdb.find_by_version(version="LUMINOUS")
+    target_hits = [h for h in hits if h.song.title == "可愛くてごめん"]
+    # 이 곡은 BAS/ADV/EXP/MAS가 모두 국제판에서 고를 수 있다 — 난이도를 비우면 그 전부가
+    # 나와야 한다(find_by_version의 "버전 전체" 의미). WE 등 다른 난이도가 더 있어도 된다.
+    assert {"BAS", "ADV", "EXP", "MAS"}.issubset({h.chart.difficulty for h in target_hits})
+
+
+async def test_find_by_version_excludes_unavailable_song(songdb: SongDbService) -> None:
+    hits = songdb.find_by_version(version="LUMINOUS")
+    assert all(hit.song.title != "ALIVE" for hit in hits)  # 같은 버전이지만 국제판 미수록
+
+
+async def test_find_by_version_returns_empty_when_nothing_matches(songdb: SongDbService) -> None:
+    hits = songdb.find_by_version(version="그런버전없음")
+    assert hits == []
+
+
 async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService) -> None:
     song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
     link = songdb.chart_link(song, song.charts["MAS"])

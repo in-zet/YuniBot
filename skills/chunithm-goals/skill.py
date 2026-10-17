@@ -129,7 +129,14 @@ def _goal_label(goal: Any) -> str:
     if goal.kind == "overpower":
         return f"오버파워 {goal.target_value}"
     if goal.kind == "folder":
-        return f"폴더({ref['min_const']}~{ref['max_const']} {ref['difficulty']})  {ref['condition']}"
+        selector = ref.get("selector", "const")
+        if selector == "level":
+            scope = f"레벨 {ref['level']}"
+        elif selector == "version":
+            scope = f"버전 {ref['version']}"
+        else:
+            scope = f"{ref['min_const']}~{ref['max_const']}"
+        return f"폴더({scope} {ref['difficulty']})  {ref['condition']}"
     return ref.get("description", "자유 목표")
 
 
@@ -149,10 +156,24 @@ def _row_matches_condition(row: PbRow, condition: FolderCondition, rank_floor: s
     return False
 
 
+def _folder_hits(ctx: ToolContext, target_ref: dict[str, Any]) -> list[Any]:
+    """폴더 정의(상수 범위/표기 레벨/수록 버전 중 하나 + 난이도)에 맞는 채보를 songdb에서
+    찾는다. 설계서("폴더 정의"는 이 셋 중 하나에 난이도를 조합한다, 장르는 이번 범위 밖)에
+    맞춰 difficulty는 항상 요구한다 — songdb.find_by_version 자체는 difficulty를 비워
+    "그 버전 전체 난이도"도 찾을 수 있지만, 폴더 목표에서는 쓰지 않는다."""
+    selector = target_ref["selector"]
+    difficulty = target_ref["difficulty"]
+    if selector == "const":
+        return ctx.songdb.find_by_const(
+            min_const=target_ref["min_const"], max_const=target_ref["max_const"], difficulty=difficulty
+        )
+    if selector == "level":
+        return ctx.songdb.find_by_level(level=target_ref["level"], difficulty=difficulty)
+    return ctx.songdb.find_by_version(version=target_ref["version"], difficulty=difficulty)
+
+
 async def _folder_counts(ctx: ToolContext, target_ref: dict[str, Any], *, player_id: str) -> tuple[int, int]:
-    hits = ctx.songdb.find_by_const(
-        min_const=target_ref["min_const"], max_const=target_ref["max_const"], difficulty=target_ref["difficulty"]
-    )
+    hits = _folder_hits(ctx, target_ref)
     total = len(hits)
     if total == 0:
         return 0, 0
@@ -233,6 +254,8 @@ async def set_goal(
     difficulty: str | None = None,
     folder_min_const: float | None = None,
     folder_max_const: float | None = None,
+    folder_level: str | None = None,
+    folder_version: str | None = None,
     folder_difficulty: str | None = None,
     folder_condition: FolderCondition = FolderCondition.CLEARED,
     folder_rank: str | None = None,
@@ -246,11 +269,12 @@ async def set_goal(
 ) -> ToolResult:
     """목표를 만든다. kind별로 필요한 인자: rating은 metric+target_value, overpower는
     overpower_mode+target_value(전체만 지원, overpower_scope=folder는 아직 안 됨), folder는
-    folder_min_const/folder_max_const/folder_difficulty(+folder_condition, rank 조건이면
-    folder_rank), song은 song_title+difficulty+target_value(목표 점수), freeform은 description.
-    레이팅·오버파워·폴더 목표는 CHUNITHM-NET 동기화(chunithm-synced)가 있어야 만들 수 있다.
-    레이팅 최종 목표는 플레이어당 하나뿐이다 — 이미 있으면 새로 만들지 않고 에러를 돌려주고
-    `update`를 쓰라고 안내한다(설계서에 없던 세부, SKILL.md 본문 참고)."""
+    folder_difficulty + (folder_min_const와 folder_max_const) 또는 folder_level 또는
+    folder_version 중 하나(+folder_condition, rank 조건이면 folder_rank), song은
+    song_title+difficulty+target_value(목표 점수, 이미 그 점수를 넘겼으면 에러), freeform은
+    description. 레이팅·오버파워·폴더 목표는 CHUNITHM-NET 동기화(chunithm-synced)가 있어야
+    만들 수 있다. 레이팅 최종 목표는 플레이어당 하나뿐이다 — 이미 있으면 새로 만들지 않고
+    에러를 돌려주고 `update`를 쓰라고 안내한다(설계서에 없던 세부, SKILL.md 본문 참고)."""
     if kind in (GoalKind.RATING, GoalKind.OVERPOWER, GoalKind.FOLDER) and _SYNCED_TAG not in ctx.tags:
         return ToolResult(error="그 목표는 CHUNITHM-NET 동기화가 돼 있어야 만들 수 있어. /동기화를 먼저 해 줘.")
 
@@ -285,14 +309,38 @@ async def set_goal(
         target_ref = {"mode": overpower_mode.value}
         baseline_value = float(current)
     elif kind == GoalKind.FOLDER:
-        if folder_min_const is None or folder_max_const is None or folder_difficulty is None:
-            return ToolResult(error="폴더는 상수 범위(folder_min_const/folder_max_const)와 난이도(folder_difficulty)가 필요해.")
+        if folder_difficulty is None:
+            return ToolResult(error="폴더는 난이도(folder_difficulty)가 필요해.")
+        selectors_given = [
+            s for s in (folder_min_const is not None or folder_max_const is not None, folder_level is not None,
+                        folder_version is not None)
+            if s
+        ]
+        if len(selectors_given) != 1:
+            return ToolResult(
+                error="폴더는 상수 범위(folder_min_const/folder_max_const), 표기 레벨(folder_level), "
+                "수록 버전(folder_version) 중 하나만 줘야 해."
+            )
+        if folder_min_const is not None or folder_max_const is not None:
+            if folder_min_const is None or folder_max_const is None:
+                return ToolResult(error="상수 범위는 folder_min_const와 folder_max_const를 같이 줘야 해.")
+            target_ref = {
+                "selector": "const", "min_const": folder_min_const, "max_const": folder_max_const,
+                "difficulty": folder_difficulty, "condition": folder_condition.value, "rank": folder_rank,
+            }
+        elif folder_level is not None:
+            target_ref = {
+                "selector": "level", "level": folder_level, "difficulty": folder_difficulty,
+                "condition": folder_condition.value, "rank": folder_rank,
+            }
+        else:
+            assert folder_version is not None
+            target_ref = {
+                "selector": "version", "version": folder_version, "difficulty": folder_difficulty,
+                "condition": folder_condition.value, "rank": folder_rank,
+            }
         if folder_condition == FolderCondition.RANK and folder_rank is None:
             return ToolResult(error="랭크 조건이면 목표 랭크(folder_rank)를 알려 줘.")
-        target_ref = {
-            "min_const": folder_min_const, "max_const": folder_max_const, "difficulty": folder_difficulty,
-            "condition": folder_condition.value, "rank": folder_rank,
-        }
         total, matched = await _folder_counts(ctx, target_ref, player_id=ctx.player_id)
         if total == 0:
             return ToolResult(error="그 조건에 맞는 채보가 없어.")
@@ -304,6 +352,8 @@ async def set_goal(
         if await models.find_song_goal(ctx.db, ctx.player_id, song_title=song_title, difficulty=difficulty):
             return ToolResult(error="그 채보에는 이미 진행 중인 투두가 있어.")
         row = await ctx.records.pb_row(ctx.player_id, song_title=song_title, difficulty=difficulty)
+        if row is not None and row.score >= target_value:
+            return ToolResult(error="이미 그 목표를 달성했어.")
         target_ref = {"song_title": song_title, "difficulty": difficulty}
         baseline_value = float(row.score) if row is not None else 0.0
     else:

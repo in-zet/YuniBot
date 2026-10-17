@@ -279,6 +279,41 @@ class SongDbService:
         hits.sort(key=lambda hit: (hit.chart.const, hit.song.title))
         return hits
 
+    def find_by_level(self, *, level: str, difficulty: str) -> list[ConstRangeHit]:
+        """표기 레벨(문자열 그대로 비교, 예: "14+")과 난이도 코드로, 지금 국제판에서 고를 수
+        있는 채보를 찾는다. find_by_const와 같은 가용성 규칙을 쓰고, 정렬도 상수 오름차순
+        (같으면 제목순)으로 맞춘다 — 상수를 모르는 채보는 뒤로 보낸다(표시에는 상수도 같이
+        쓸 수 있으니 숨기지 않는다)."""
+        hits: list[ConstRangeHit] = []
+        for title, song in self._songs.items():
+            if title not in self._available_intl:
+                continue
+            chart = song.charts.get(difficulty)
+            if chart is None or not chart.is_available or chart.level != level:
+                continue
+            hits.append(ConstRangeHit(song=song, chart=chart))
+        hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
+        return hits
+
+    def find_by_version(self, *, version: str, difficulty: str | None = None) -> list[ConstRangeHit]:
+        """수록 버전으로 채보를 찾는다. difficulty를 주면 find_by_const처럼 그 난이도 하나만
+        본다. difficulty를 비우면("버전 전체" 폴더) 그 버전 곡들의 **고를 수 있는 채보를
+        전부**(난이도마다 하나씩) 돌려준다 — 폴더 목표의 "그 버전 전체"는 특정 난이도 하나로
+        좁힐 이유가 설계서에 없다(docs/design/skills/chunithm-goals.md "폴더 정의"는 난이도를
+        조합한다고만 적었지, 버전 폴더에서 난이도가 필수라고 하지 않았다)."""
+        hits: list[ConstRangeHit] = []
+        for title, song in self._songs.items():
+            if title not in self._available_intl or song.version != version:
+                continue
+            codes = [difficulty] if difficulty is not None else list(song.charts)
+            for code in codes:
+                chart = song.charts.get(code)
+                if chart is None or not chart.is_available:
+                    continue
+                hits.append(ConstRangeHit(song=song, chart=chart))
+        hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
+        return hits
+
     def chart_link(self, song: SongRecord, chart: ChartRecord) -> ChartLinkInfo:
         """채보 뷰어 링크. sdvx.in 매핑이 있으면 그 링크, 없으면 유튜브 검색 링크."""
         if chart.sdvxin is not None:
