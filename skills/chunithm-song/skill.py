@@ -35,7 +35,7 @@ async def info(ctx: ToolContext, song: SongQuery) -> ToolResult:
         note_text = f"{chart.note_count}노트" if chart.note_count is not None else "노트 수 알 수 없음"
         lines.append(f"{code} Lv.{chart.level or '?'} 상수 {chart.const}{const_suffix} — {note_text}")
 
-    await ctx.event_bus.emit_gather(
+    await ctx.emit_gather(
         "chunithm.song.viewed", {"player_id": ctx.player_id, "song_title": song.title, "difficulty": None}
     )
 

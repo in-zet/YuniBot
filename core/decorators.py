@@ -42,6 +42,8 @@ class SlashOnlySpec:
 class EventHandlerSpec:
     fn: Callable[..., Awaitable[Any]]
     event_name: str
+    tags: list[str] = field(default_factory=list)
+    tags_any: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -138,11 +140,15 @@ def slash_only(
     return deco
 
 
-def on(event_name: str) -> Callable[[F], F]:
+def on(
+    event_name: str, *, tags: list[str] | None = None, tags_any: list[str] | None = None
+) -> Callable[[F], F]:
     def deco(fn: F) -> F:
         _require_async(fn)
         _require_tool_context_first_param(fn)
-        fn.__yuni_on__ = EventHandlerSpec(fn=fn, event_name=event_name)  # pyright: ignore[reportFunctionMemberAccess]
+        fn.__yuni_on__ = EventHandlerSpec(  # pyright: ignore[reportFunctionMemberAccess]
+            fn=fn, event_name=event_name, tags=tags or [], tags_any=tags_any or []
+        )
         return fn
 
     return deco

@@ -360,7 +360,10 @@ def _build_modal_command(
             interaction, entry=entry, executor=executor, db=db, registry_snapshot=registry_snapshot
         )
         if is_new_player:
-            await executor.event_bus.emit_notify("players.first_seen", {"player_id": ctx.player_id})
+            await executor.event_bus.emit_notify(
+                "players.first_seen", {"player_id": ctx.player_id},
+                player_id=ctx.player_id, guild_id=ctx.guild_id,
+            )
 
         player_tags = set(ctx.tags)
         tool_ok = check_tags(
@@ -404,7 +407,10 @@ def _build_command(
         )
 
         if is_new_player:
-            await executor.event_bus.emit_notify("players.first_seen", {"player_id": ctx.player_id})
+            await executor.event_bus.emit_notify(
+                "players.first_seen", {"player_id": ctx.player_id},
+                player_id=ctx.player_id, guild_id=ctx.guild_id,
+            )
 
         outcome = await executor.invoke(
             entry.spec,

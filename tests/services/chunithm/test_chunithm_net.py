@@ -303,12 +303,12 @@ async def test_fetch_for_sync_on_connection_failure_expires_login(conn, secrets)
 
     received: list[object] = []
 
-    async def _record_expired(payload: object) -> None:
+    async def _record_expired(ctx: ToolContext, payload: object) -> None:
         received.append(payload)
 
     bus = EventBus()
     bus.register_notify(
-        "chunithm.login.expired", owner_skill="test", fn=_record_expired
+        "chunithm.login.expired", owner_skill="test", fn=_record_expired, skill_services=[]
     )
     ctx_with_bus = ToolContext(
         player_id=player.id, tags=frozenset(), services={}, event_bus=bus
@@ -334,11 +334,13 @@ async def test_fetch_for_sync_on_non_auth_failure_keeps_login(conn, secrets) -> 
 
     received: list[object] = []
 
-    async def _record_expired(payload: object) -> None:
+    async def _record_expired(ctx: ToolContext, payload: object) -> None:
         received.append(payload)
 
     bus = EventBus()
-    bus.register_notify("chunithm.login.expired", owner_skill="test", fn=_record_expired)
+    bus.register_notify(
+        "chunithm.login.expired", owner_skill="test", fn=_record_expired, skill_services=[]
+    )
     ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
 
     for error in (MaintenanceError(), ConnectionError("네트워크 끊김")):

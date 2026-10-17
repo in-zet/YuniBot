@@ -1,17 +1,37 @@
+# pyright: reportImportCycles=false
 from __future__ import annotations
 
 import asyncio
 import contextvars
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, get_type_hints
+
+from core.permissions import (
+    SkillToggleProvider,
+    TagProvider,
+    TagRequirement,
+    check_tags,
+)
+
+if TYPE_CHECKING:
+    # core/tool_types.py가 이미 core/events.py를 최상단에서 import한다(ToolContext가
+    # EventBus를 필드 타입으로 쓴다) — 반대 방향을 여기서 최상단에 더하면 순환 import가
+    # 난다. 타입 체크 시점에만 이 이름을 쓰고, 실제 참조(_build_handler_ctx 안)는
+    # 함수 안 지연 import로 만든다(services/chunithm/chunithm_net.py가 이미 쓰는 패턴).
+    # basedpyright는 TYPE_CHECKING 가드와 무관하게 이 두 파일의 import 그래프를 순환으로
+    # 본다(reportImportCycles) — 런타임에는 실제로 순환이 없다(여기선 타입만, 실제 참조는
+    # 함수 안 지연 import). 설계상 의도된 형태라 아래 한 줄만 억제한다.
+    from core.tool_types import ToolContext  # pyright: ignore[reportImportCycles]
 
 logger = logging.getLogger(__name__)
 
 Stage = Literal["great", "good", "close", "rest"]
 
 _chain_depth: contextvars.ContextVar[int] = contextvars.ContextVar("yuni_event_chain_depth", default=0)
+
+_HandlerFn = Callable[..., Awaitable[Any]]
 
 
 @dataclass(slots=True, kw_only=True)
@@ -26,7 +46,9 @@ class Section:
 @dataclass(slots=True, kw_only=True)
 class _Handler:
     owner_skill: str
-    fn: Callable[[Any], Awaitable[Any]]
+    fn: _HandlerFn
+    skill_services: list[str] = field(default_factory=list)
+    tags: TagRequirement = field(default_factory=TagRequirement)
 
 
 class EventBus:
@@ -36,33 +58,127 @@ class EventBus:
         self._notify_handlers: dict[str, list[_Handler]] = {}
         self._gather_handlers: dict[str, list[_Handler]] = {}
         self._background_tasks: set[asyncio.Task[Any]] = set()
+        self._services: Mapping[str, object] = {}
+        self._tag_provider: TagProvider | None = None
+        self._settings: SkillToggleProvider | None = None
 
-    def register_notify(self, event_name: str, *, owner_skill: str, fn: Callable[[Any], Awaitable[Any]]) -> None:
-        self._notify_handlers.setdefault(event_name, []).append(_Handler(owner_skill=owner_skill, fn=fn))
+    def bind_dispatch(
+        self,
+        *,
+        services: Mapping[str, object],
+        tag_provider: TagProvider,
+        settings: SkillToggleProvider | None,
+    ) -> None:
+        """build_client()가 services/players/settings_service를 다 만든 뒤 한 번 부른다.
 
-    def register_gather(self, event_name: str, *, owner_skill: str, fn: Callable[[Any], Awaitable[Any]]) -> None:
-        self._gather_handlers.setdefault(event_name, []).append(_Handler(owner_skill=owner_skill, fn=fn))
+        EventBus 자신은 그보다 먼저 만들어지므로 생성자로는 못 받는다(core/bot.py의 현재
+        순서를 바꾸지 않기 위한 늦은 바인딩). services는 dict 참조를 그대로 들고 있는다 —
+        build_client()가 이후 그 같은 dict에 notify/yuni/usage/http를 더 채워도(현재
+        코드가 이미 이런 식으로 서비스를 늦게 채운다) EventBus가 보는 것도 같은 객체라
+        최신 상태를 본다.
+        """
+        self._services = services
+        self._tag_provider = tag_provider
+        self._settings = settings
 
-    async def emit_notify(self, event_name: str, payload: Any) -> None:
+    def register_notify(
+        self,
+        event_name: str,
+        *,
+        owner_skill: str,
+        fn: _HandlerFn,
+        skill_services: list[str],
+        tags: list[str] | None = None,
+        tags_any: list[str] | None = None,
+    ) -> None:
+        self._notify_handlers.setdefault(event_name, []).append(
+            _Handler(
+                owner_skill=owner_skill,
+                fn=fn,
+                skill_services=skill_services,
+                tags=TagRequirement(tags=tags or [], tags_any=tags_any or []),
+            )
+        )
+
+    def register_gather(
+        self,
+        event_name: str,
+        *,
+        owner_skill: str,
+        fn: _HandlerFn,
+        skill_services: list[str],
+        tags: list[str] | None = None,
+        tags_any: list[str] | None = None,
+    ) -> None:
+        self._gather_handlers.setdefault(event_name, []).append(
+            _Handler(
+                owner_skill=owner_skill,
+                fn=fn,
+                skill_services=skill_services,
+                tags=TagRequirement(tags=tags or [], tags_any=tags_any or []),
+            )
+        )
+
+    async def _build_handler_ctx(
+        self, handler: _Handler, *, player_id: str, guild_id: str | None
+    ) -> ToolContext | None:
+        if (
+            guild_id is not None
+            and self._settings is not None
+            and not await self._settings.is_skill_enabled(guild_id=guild_id, skill=handler.owner_skill)
+        ):
+            return None
+        player_tags: set[str] = (
+            await self._tag_provider.tags_for(player_id) if self._tag_provider is not None else set()
+        )
+        if not check_tags(handler.tags, player_tags):
+            return None
+        scoped_services = {
+            name: self._services[name] for name in handler.skill_services if name in self._services
+        }
+        from core.tool_types import (
+            ToolContext,  # 지연 import — 위 TYPE_CHECKING 주석 참고
+        )
+
+        return ToolContext(
+            player_id=player_id,
+            tags=frozenset(player_tags),
+            services=scoped_services,
+            guild_id=guild_id,
+            event_bus=self,
+        )
+
+    async def emit_notify(
+        self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None
+    ) -> None:
         if _chain_depth.get() > self._max_chain_depth:
             logger.warning("event chain depth exceeded, dropping %s", event_name)
             return
 
         for handler in self._notify_handlers.get(event_name, []):
-            task = asyncio.create_task(self._run_notify_handler(handler, payload))
+            task = asyncio.create_task(
+                self._run_notify_handler(handler, payload, player_id=player_id, guild_id=guild_id)
+            )
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
 
-    async def _run_notify_handler(self, handler: _Handler, payload: Any) -> None:
+    async def _run_notify_handler(
+        self, handler: _Handler, payload: Any, *, player_id: str, guild_id: str | None
+    ) -> None:
         token = _chain_depth.set(_chain_depth.get() + 1)
         try:
-            await handler.fn(payload)
+            ctx = await self._build_handler_ctx(handler, player_id=player_id, guild_id=guild_id)
+            if ctx is None:
+                return
+            await handler.fn(ctx, payload)
         except Exception:
             logger.exception("notify handler '%s' failed for owner %s", handler.fn, handler.owner_skill)
         finally:
             _chain_depth.reset(token)
 
-    async def emit_gather(self, event_name: str, payload: Any) -> list[Section]:
+    async def emit_gather(
+        self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None
+    ) -> list[Section]:
         handlers = self._gather_handlers.get(event_name, [])
         if not handlers:
             return []
@@ -70,7 +186,11 @@ class EventBus:
         token = _chain_depth.set(_chain_depth.get() + 1)
         try:
             results = await asyncio.gather(
-                *(self._run_gather_handler(h, payload) for h in handlers), return_exceptions=False
+                *(
+                    self._run_gather_handler(h, payload, player_id=player_id, guild_id=guild_id)
+                    for h in handlers
+                ),
+                return_exceptions=False,
             )
         finally:
             _chain_depth.reset(token)
@@ -79,9 +199,14 @@ class EventBus:
         sections.sort(key=lambda pair: (pair[1].order, pair[0]))
         return [section for _, section in sections]
 
-    async def _run_gather_handler(self, handler: _Handler, payload: Any) -> tuple[str, Section | None]:
+    async def _run_gather_handler(
+        self, handler: _Handler, payload: Any, *, player_id: str, guild_id: str | None
+    ) -> tuple[str, Section | None]:
         try:
-            section = await asyncio.wait_for(handler.fn(payload), timeout=self._gather_timeout)
+            ctx = await self._build_handler_ctx(handler, player_id=player_id, guild_id=guild_id)
+            if ctx is None:
+                return handler.owner_skill, None
+            section = await asyncio.wait_for(handler.fn(ctx, payload), timeout=self._gather_timeout)
         except TimeoutError:
             logger.warning("gather handler '%s' (%s) timed out", handler.fn, handler.owner_skill)
             return handler.owner_skill, None
@@ -96,7 +221,7 @@ class EventBus:
             await asyncio.gather(*list(self._background_tasks), return_exceptions=True)
 
 
-def handler_kind(fn: Callable[[Any], Awaitable[Any]]) -> Literal["notify", "gather"]:
+def handler_kind(fn: _HandlerFn) -> Literal["notify", "gather"]:
     """@on 핸들러의 반환 타입 힌트로 notify/gather를 추론한다.
 
     @on 데코레이터(core/decorators.py)는 종류를 받지 않는다 — 핸들러가 Section을

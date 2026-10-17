@@ -29,6 +29,16 @@ class TagProvider(Protocol):
     async def tags_for(self, player_id: str) -> set[str]: ...
 
 
+class SkillToggleProvider(Protocol):
+    """서버(guild)에서 스킬이 켜져 있는지 묻는 자리. core/executor.py(슬래시/도구 경로)와
+    core/events.py(이벤트 배선)가 같은 Protocol을 쓴다 — 둘 다 core/permissions.py에만
+    의존하므로(core.manifest만 더 본다) 여기 두면 순환 import가 안 생긴다. core/executor.py가
+    core/events.py를 import하기 때문에, 반대로 core/events.py가 core/executor.py에서
+    이 Protocol을 가져오면 순환이 생긴다."""
+
+    async def is_skill_enabled(self, *, guild_id: str, skill: str) -> bool: ...
+
+
 class InMemoryTagProvider:
     """players 서비스(3단계)가 생기기 전까지 쓰는 임시 태그 제공자."""
 

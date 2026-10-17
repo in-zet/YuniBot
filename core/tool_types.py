@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import aiosqlite
 
-from core.events import EventBus
+from core.events import EventBus, Section
 from core.player_data import PlayerDataScanner
 from core.registry_snapshot import RegistrySnapshot
 from core.usage import UsageService
@@ -46,7 +46,13 @@ class ToolContext:
 
     async def emit(self, event_name: str, payload: Any) -> None:
         """스킬이 알림 이벤트를 낸다. 모으기 이벤트는 각 스킬이 직접 내지 않고 모으는 쪽이 bus.emit_gather를 부른다."""
-        await self.event_bus.emit_notify(event_name, payload)
+        await self.event_bus.emit_notify(event_name, payload, player_id=self.player_id, guild_id=self.guild_id)
+
+    async def emit_gather(self, event_name: str, payload: Any) -> list[Section]:
+        """모으기 이벤트는 스킬이 직접 emit_gather를 호출해 조각들을 모은다(emit()은 알림 전용)."""
+        return await self.event_bus.emit_gather(
+            event_name, payload, player_id=self.player_id, guild_id=self.guild_id
+        )
 
 
 @dataclass(slots=True, kw_only=True)

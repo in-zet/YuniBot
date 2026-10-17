@@ -5,12 +5,18 @@ import logging
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from core.decorators import SlashOnlySpec, ToolSpec
 from core.events import EventBus
 from core.manifest import DefinedTag
-from core.permissions import TagProvider, TagRequirement, check_tags, describe_lock
+from core.permissions import (
+    SkillToggleProvider,
+    TagProvider,
+    TagRequirement,
+    check_tags,
+    describe_lock,
+)
 from core.player_data import PlayerDataScanner
 from core.resolvers import ResolutionError, ResolverRegistry
 from core.schema import build_arg_schema
@@ -32,10 +38,6 @@ class _PendingConfirm:
     ctx: ToolContext
     resolved_args: dict[str, Any]
     requester_id: str  # 확인을 요청한 플레이어. 이 사람만 확인/취소할 수 있다.
-
-
-class SkillToggleProvider(Protocol):
-    async def is_skill_enabled(self, *, guild_id: str, skill: str) -> bool: ...
 
 
 def _missing_tags(requirement: TagRequirement, player_tags: set[str]) -> set[str]:

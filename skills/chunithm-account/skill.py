@@ -142,8 +142,8 @@ async def logout(ctx: ToolContext) -> ToolResult:
 @on("chunithm.login.expired")
 async def on_login_expired(ctx: ToolContext, payload: dict[str, object]) -> None:
     """만료된 로그인에 대해 대표 계정에 재로그인을 한 번만 안내한다(이 프로세스가 켜져
-    있는 동안만 — 재시작하면 다시 보낸다. core/bot.py가 이 이벤트를 실제로 ctx와 함께
-    호출하도록 배선하는 일은 7단계 chunithm-sync에서 마저 한다 — 결정 사항 2번 참고)."""
+    있는 동안만 — 재시작하면 다시 보낸다. 이 이벤트는 core/events.py의 EventBus가 이
+    스킬의 manifest.services만 담은 실제 ctx와 함께 호출한다 — 배선은 끝났다)."""
     player_id = str(payload["player_id"])
     if player_id in _notified_expiries:
         return

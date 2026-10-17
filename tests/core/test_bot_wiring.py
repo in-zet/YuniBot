@@ -10,14 +10,16 @@ from cryptography.fernet import Fernet
 
 from core.bot import (  # pyright: ignore[reportPrivateUsage]
     _migration_roots,
+    _register_event_handlers,
     _run_due_recurring,
     _sync_admin_bootstrap,
     build_client,
 )
 from core.config import CoreConfig
-from core.decorators import ScheduleSpec, SkillCode
+from core.decorators import EventHandlerSpec, ScheduleSpec, SkillCode
+from core.events import EventBus
 from core.manifest import SkillManifest
-from core.registry import LoadedSkill
+from core.registry import LoadedSkill, SkillRegistry
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -25,9 +27,18 @@ from core.tool_types import (
     RankRef,
     ScoreRef,
     SongQuery,
+    ToolContext,
 )
 from services.common.players import PlayersService
 from tests.core.skill_factory import slash_tool, write_skill
+
+
+class _FakeTagProvider:
+    def __init__(self, tags: dict[str, set[str]] | None = None) -> None:
+        self._tags = tags or {}
+
+    async def tags_for(self, player_id: str) -> set[str]:
+        return set(self._tags.get(player_id, set()))
 
 
 @pytest.mark.asyncio
@@ -101,6 +112,97 @@ async def test_build_client_skips_chunimaru_fetch_when_disabled(
     client, _registry, _executor = await build_client(_config(tmp_path))
     try:
         assert calls == []
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_register_event_handlers_scopes_ctx_to_skill_services_and_applies_tags() -> None:
+    # Task 0: _register_event_handlers가 skill.manifest.services와 핸들러의 tags/tags_any를
+    # EventBus에 넘기는지 — 실제로 bind_dispatch 뒤 emit_notify를 해 보고, 핸들러가 받는
+    # ctx.services가 선언한 서비스로만 좁혀지는지, 태그 조건이 적용되는지 끝에서 끝으로 확인한다.
+    received: list[set[str]] = []
+
+    async def handle(ctx: ToolContext, payload: dict[str, object]) -> None:
+        received.append(set(ctx.services))
+
+    code = SkillCode(
+        event_handlers=[
+            EventHandlerSpec(fn=handle, event_name="players.first_seen", tags=["chunithm-linked"])
+        ]
+    )
+    skill = LoadedSkill(
+        manifest=SkillManifest(
+            name="notif-skill", description="테스트용", examples=["예시"], category="메모",
+            game="common", version=1, services=["memory"],
+        ),
+        path=Path("."),
+        code=code,
+    )
+    registry = SkillRegistry([])
+    registry._loaded = {"notif-skill": skill}  # pyright: ignore[reportPrivateUsage]
+
+    bus = EventBus()
+    _register_event_handlers(bus, registry)
+    bus.bind_dispatch(
+        services={"memory": object(), "secrets": object()},
+        tag_provider=_FakeTagProvider({"p1": {"chunithm-linked"}}),
+        settings=None,
+    )
+
+    await bus.emit_notify("players.first_seen", {}, player_id="p1", guild_id=None)
+    await bus.drain()
+
+    assert received == [{"memory"}]  # secrets는 선언하지 않았으므로 ctx.services에 없다
+
+
+@pytest.mark.asyncio
+async def test_register_event_handlers_drops_handler_when_player_lacks_tag() -> None:
+    received: list[str] = []
+
+    async def handle(ctx: ToolContext, payload: dict[str, object]) -> None:
+        received.append("called")
+
+    code = SkillCode(
+        event_handlers=[
+            EventHandlerSpec(fn=handle, event_name="players.first_seen", tags=["chunithm-linked"])
+        ]
+    )
+    skill = LoadedSkill(
+        manifest=SkillManifest(
+            name="notif-skill", description="테스트용", examples=["예시"], category="메모",
+            game="common", version=1, services=[],
+        ),
+        path=Path("."),
+        code=code,
+    )
+    registry = SkillRegistry([])
+    registry._loaded = {"notif-skill": skill}  # pyright: ignore[reportPrivateUsage]
+
+    bus = EventBus()
+    _register_event_handlers(bus, registry)
+    bus.bind_dispatch(services={}, tag_provider=_FakeTagProvider({"p1": set()}), settings=None)
+
+    await bus.emit_notify("players.first_seen", {}, player_id="p1", guild_id=None)
+    await bus.drain()
+
+    assert received == []
+
+
+@pytest.mark.asyncio
+async def test_build_client_binds_event_bus_dispatch_to_live_services(tmp_path: Path) -> None:
+    # build_client()가 event_bus.bind_dispatch(services=services, ...)를 실제로 불러야
+    # @on 핸들러가 받는 ctx가 services 전체가 아니라 자기 manifest.services만 보게 된다.
+    # executor.event_bus와 executor는 같은 services dict를 공유해야 한다(늦게 채워지는
+    # notify/yuni/usage/http까지 EventBus가 최신으로 본다는 보장의 전제).
+    config = _config(tmp_path)
+
+    client, _registry, executor = await build_client(config)
+    try:
+        bound_services = executor.event_bus._services  # pyright: ignore[reportPrivateUsage]
+        assert bound_services is executor.services
+        assert executor.event_bus._tag_provider is not None  # pyright: ignore[reportPrivateUsage]
+        assert executor.event_bus._settings is not None  # pyright: ignore[reportPrivateUsage]
     finally:
         await client.close()
 

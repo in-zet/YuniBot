@@ -20,7 +20,7 @@ from core.prompt import PromptAssembler
 from core.registry import SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
-from core.tool_types import Display
+from core.tool_types import Display, ToolContext
 from services.common.notify import NotifyService
 from tests.core.skill_factory import write_skill
 from tests.support.fake_llm import FakeLlmAdapter
@@ -331,10 +331,10 @@ async def test_mention_entry_emits_first_seen_event_for_new_player() -> None:
     bus = EventBus()
     received: list[dict[str, object]] = []
 
-    async def _handler(payload: dict[str, object]) -> None:
+    async def _handler(ctx: ToolContext, payload: dict[str, object]) -> None:
         received.append(payload)
 
-    bus.register_notify("players.first_seen", owner_skill="test-first-seen", fn=_handler)
+    bus.register_notify("players.first_seen", owner_skill="test-first-seen", fn=_handler, skill_services=[])
     entry, _usage = _mention_entry(script, players=players, event_bus=bus)
 
     trigger = ChannelMessage(message_id="1", author_discord_id="newbie", is_bot=False, content="안녕", mentions_bot=True)
@@ -353,10 +353,10 @@ async def test_mention_entry_does_not_emit_first_seen_event_for_returning_player
     bus = EventBus()
     received: list[dict[str, object]] = []
 
-    async def _handler(payload: dict[str, object]) -> None:
+    async def _handler(ctx: ToolContext, payload: dict[str, object]) -> None:
         received.append(payload)
 
-    bus.register_notify("players.first_seen", owner_skill="test-first-seen", fn=_handler)
+    bus.register_notify("players.first_seen", owner_skill="test-first-seen", fn=_handler, skill_services=[])
     entry, _usage = _mention_entry(script, event_bus=bus)
 
     trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="안녕", mentions_bot=True)
@@ -453,10 +453,10 @@ async def test_mention_tool_call_event_reaches_executors_shared_event_bus(tmp_pa
     bus = EventBus()
     received: list[dict[str, object]] = []
 
-    async def _handler(payload: dict[str, object]) -> None:
+    async def _handler(ctx: ToolContext, payload: dict[str, object]) -> None:
         received.append(payload)
 
-    bus.register_notify("test.mention_event", owner_skill="test-emit", fn=_handler)
+    bus.register_notify("test.mention_event", owner_skill="test-emit", fn=_handler, skill_services=[])
 
     entry, _usage = _mention_entry([call_turn, answer_turn], extra_skill_dirs=(skills_root,), event_bus=bus)
 

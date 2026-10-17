@@ -278,10 +278,15 @@ def _register_event_handlers(bus: EventBus, registry: SkillRegistry) -> None:
         try:
             for handler in skill.code.event_handlers:
                 kind = handler_kind(handler.fn)
-                if kind == "gather":
-                    bus.register_gather(handler.event_name, owner_skill=skill.manifest.name, fn=handler.fn)
-                else:
-                    bus.register_notify(handler.event_name, owner_skill=skill.manifest.name, fn=handler.fn)
+                register = bus.register_gather if kind == "gather" else bus.register_notify
+                register(
+                    handler.event_name,
+                    owner_skill=skill.manifest.name,
+                    fn=handler.fn,
+                    skill_services=list(skill.manifest.services),
+                    tags=handler.tags,
+                    tags_any=handler.tags_any,
+                )
         except Exception as exc:  # noqa: BLE001 - 한 스킬의 어떤 실패도 코어 전체를 죽이면 안 된다
             registry.disable(skill.manifest.name, f"이벤트 핸들러 등록 실패: {exc}")
 
@@ -391,6 +396,10 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         player_data=player_data,
         settings=settings_service,
     )
+    # services는 이 시점에 아직 notify/yuni/usage/http가 없지만, 같은 dict 객체를 그대로
+    # 들고 있는다 — build_client()가 뒤에서 그 dict를 더 채우면(아래) EventBus도 같은
+    # 참조를 보므로 최신 상태를 보게 된다(services 프로퍼티의 주석과 같은 이유).
+    event_bus.bind_dispatch(services=services, tag_provider=players, settings=settings_service)
 
     # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야
     # 하기 때문이다(아래 YuniClient.close() 참고).
@@ -500,7 +509,17 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
 
     due_once = await scheduler.startup_catch_up_once(now=now)
     for once in due_once:
-        await event_bus.emit_notify(once.event_name, once.payload)
+        # OnceSchedule(core/scheduler.py)에는 player_id/guild_id 필드가 없다 — 어떤
+        # 스킬도 아직 schedule_once를 실제로 쓰지 않으므로(테스트에서만 쓴다), 방어적으로
+        # payload에서 뽑는다.
+        player_id = str(once.payload.get("player_id", "system"))
+        guild_id_raw = once.payload.get("guild_id")
+        await event_bus.emit_notify(
+            once.event_name,
+            once.payload,
+            player_id=player_id,
+            guild_id=str(guild_id_raw) if guild_id_raw is not None else None,
+        )
 
     plan = build_slash_plan(registry.tool_specs())
     attach_to_tree(client.tree, plan, executor=executor, db=conn, registry_snapshot=snapshot)

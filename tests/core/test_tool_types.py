@@ -1,7 +1,7 @@
 # tests/core/test_tool_types.py
 import pytest
 
-from core.events import EventBus
+from core.events import EventBus, Section
 from core.tool_types import (
     STANDARD_REF_TYPES,
     ChartRef,
@@ -49,16 +49,30 @@ async def test_tool_context_emit_uses_event_bus() -> None:
     bus = EventBus()
     received: list[object] = []
 
-    async def handler(payload: object) -> None:
+    async def handler(ctx: ToolContext, payload: object) -> None:
         received.append(payload)
 
-    bus.register_notify("players.linked", owner_skill="account-link", fn=handler)
-    ctx = ToolContext(player_id="1", tags=frozenset(), services={}, event_bus=bus)
+    bus.register_notify("players.linked", owner_skill="account-link", fn=handler, skill_services=[])
+    ctx = ToolContext(player_id="1", tags=frozenset(), services={}, event_bus=bus, guild_id="g1")
 
     await ctx.emit("players.linked", {"player_id": "1"})
     await bus.drain()
 
     assert received == [{"player_id": "1"}]
+
+
+async def test_tool_context_emit_gather_returns_sections() -> None:
+    bus = EventBus()
+
+    async def handler(ctx: ToolContext, payload: object) -> Section | None:
+        return Section(data={"ok": True})
+
+    bus.register_gather("chunithm.song.viewed", owner_skill="song", fn=handler, skill_services=[])
+    ctx = ToolContext(player_id="1", tags=frozenset(), services={}, event_bus=bus)
+
+    sections = await ctx.emit_gather("chunithm.song.viewed", {})
+
+    assert sections == [Section(data={"ok": True})]
 
 
 def test_tool_context_defaults_guild_id_and_event_bus() -> None:
