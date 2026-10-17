@@ -45,7 +45,7 @@ class _FakePlayer:
 
 
 class _FakePlayers:
-    """I3 회귀: player_for_discord로 먼저 player를 찾고, 그 player.id로 tags_for를
+    """회귀: player_for_discord로 먼저 player를 찾고, 그 player.id로 tags_for를
     불러야 한다. interaction.user.id(디스코드 id)를 바로 tags_for에 넣으면 이 가짜는
     항상 빈 집합을 돌려줘 admin 카드가 숨는다."""
 

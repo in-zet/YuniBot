@@ -12,8 +12,8 @@ class SkillLoadState:
     instructions 모드는 모든 스킬이 처음부터 'instructions' 수준(카드+본문 지침, 도구 정의는
     core/prompt.py가 instructions 모드일 때 전부 함께 넣는다)이고 open_skill은 'full'로 올린다.
     full 모드는 모든 스킬이 'card' 수준(카드만)에서 시작하고 open_skill이 'full'로 올린다.
-    대화(답장 사슬)를 넘어서는 유지는 하지 않는다 — 00-core.md "스킬 불러오기"의 범위를
-    이번 단계에서는 한 번의 에이전트 반복으로 좁힌 결정(결정 사항 B-5)에 따른 것이다.
+    대화(답장 사슬)를 넘어서는 유지는 하지 않는다 — 00-core.md "스킬 불러오기"의 유지 범위를
+    한 번의 에이전트 반복으로 좁혔다(답장 사슬 간 유지는 12단계).
     """
 
     def __init__(self, *, mode: Mode, known_skills: set[str]) -> None:

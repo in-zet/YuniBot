@@ -87,3 +87,11 @@ emits: [chunithm.song.viewed]
 
 - 국제판 공식 곡 목록(2026-10-08 기준 1,489건)과 Chunimaru songdb(1,574곡)의 차이 원인. 어느 쪽을 수록 기준으로 삼을지 `songdb` 서비스를 만들 때 정한다.
 - chuni-penguin 시드에서 sdvx.in 매핑과 별칭 데이터를 따로 읽어 올 수 있는지.
+
+## 구현 결정 (2026-10-11, 5단계 계획서에서 옮김)
+
+- `SongQuery` 해석 순서: ① 정확한 제목 ② 이 서버의 별칭(DM에서는 건너뜀) ③ 시드의 전역 별칭(대소문자 무시) ④ 부분 일치 후보.
+- 한국어 별칭은 서버별이다(`migrations/core/011_songdb_aliases.sql`의 `songdb_aliases`, 기본키 `guild_id`+`alias`, `songdb` 서비스가 관리). 서버 밖에서는 추가·삭제를 거절한다.
+- `chunithm.song.viewed`는 지금 내기만 하고 돌아온 조각은 버린다. 조각을 곡 정보 아래에 붙이는 코드는 실제로 받는 스킬(notes/goals)이 생길 때 넣는다.
+- 상수 범위 검색은 결과를 전부 돌려주되, 표시는 상위 25개까지만 하고 나머지는 "...외 N개"로 줄인다.
+- sdvx.in 링크는 vendored `sdvxin_link`를 그대로 쓰고, 매핑이 없을 때의 유튜브 검색 링크("곡명 譜面確認")는 `songdb.py`의 전용 함수가 만든다.

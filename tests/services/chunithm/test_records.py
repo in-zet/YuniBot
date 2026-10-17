@@ -218,7 +218,7 @@ async def test_session_date_uses_local_wall_clock_not_utc(conn, monkeypatch) -> 
     오전 5시(경계 4시 이후)인 플레이는 11일 세션이어야 한다 — UTC 날짜를 쓰면 10일로
     잘못 배정된다.
 
-    첫 동기화는 기준점만 만들고 세션을 만들지 않으므로(결정 사항 F, Task 4 Step 12),
+    첫 동기화는 기준점만 만들고 세션을 만들지 않으므로,
     둘째 동기화의 최근 플레이 이력으로 확인한다."""
     _, player_id, ctx, service = await _setup(conn)
     _freeze_now(monkeypatch, utc=datetime(2026, 10, 10, 12, 0, tzinfo=UTC), local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
@@ -360,7 +360,7 @@ async def _pb_rows(conn: aiosqlite.Connection, player_id: str) -> list[tuple[obj
 
 
 # ---------------------------------------------------------------------------
-# 7단계 Task 4: 전체 PB 저장, 동기화 비교 데이터(diff), diff 캐시
+# 전체 PB 저장, 동기화 비교 데이터(diff), diff 캐시
 # ---------------------------------------------------------------------------
 
 _T1_UTC = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)  # 첫 동기화 시각(= 10일 21:00 JST)
@@ -519,7 +519,7 @@ async def test_improved_pb_missing_from_recent_history_is_estimated(conn, monkey
 
 async def test_improved_pb_without_any_new_play_gets_estimated_today_session(conn, monkeypatch) -> None:
     """플레이 없이 PB가 오르는 일은 이론상 없지만, 생기면 오늘(로컬) 날짜 세션을
-    estimated로 만들어 붙인다(결정 사항 F 마지막 문장)."""
+    estimated로 만들어 붙인다."""
     _, player_id, ctx, service = await _setup(conn)
     await _baseline(service, player_id, ctx, monkeypatch)
     fetch = _fixture_fetch()
@@ -620,7 +620,7 @@ async def test_frame_entry_and_exit(conn, monkeypatch) -> None:
 
 
 async def test_tied_rating_outside_real_frame_is_not_reported_as_exit(conn, monkeypatch) -> None:
-    """리뷰 I-2 회귀 테스트: 베스트30 최저(16.91)와 같은 레이팅인데 실제로는 프레임 밖인 채보가
+    """회귀 테스트: 베스트30 최저(16.91)와 같은 레이팅인데 실제로는 프레임 밖인 채보가
     records_pb 재정렬에서는 제목순으로 30위 안에 들어간다. 이 동점 차이 때문에 새 플레이가
     없는 동기화마다 "이탈"로 뜨면 안 된다."""
     _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
@@ -686,7 +686,7 @@ async def test_all_personal_bests_outside_frames_are_saved(conn, monkeypatch) ->
 
 
 async def test_newly_seen_chart_outside_recent_history_is_estimated_update(conn, monkeypatch) -> None:
-    """처음 보는 채보(old_score=None)도 이미 있던 채보의 갱신과 똑같이 다룬다(리뷰 I-1, 결정 사항 F):
+    """처음 보는 채보(old_score=None)도 이미 있던 채보의 갱신과 똑같이 다룬다:
     최근 이력에서 못 찾으면 이번 동기화의 가장 늦은 세션에 estimated로 붙어 갱신 목록에 들어간다."""
     _, player_id, ctx, service = await _setup(conn)
     await _baseline(service, player_id, ctx, monkeypatch)

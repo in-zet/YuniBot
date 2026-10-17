@@ -157,10 +157,9 @@ class YuniClient(discord.Client):
         ] + [trigger]
 
         async def _send(text: str, displays: list[Display]) -> None:
-            # 강제 표시물(숫자 규칙 위반 시 Task 10이 모은 전체 표시물, 또는 모델이 [[show:id]]로
-            # 직접 고른 표시물)을 실제 디스코드 메시지에 붙인다 — assemble_response가 계산만
-            # 하고 버려지던 자리(Task 17 리뷰에서 드러난 결함)를 고친다. 멘션 경로는 인터랙션
-            # 응답이 아니라 메시지 답장이라 ephemeral 개념이 없고(Display.ephemeral은 무시),
+            # 강제 표시물(숫자 규칙 위반 시 모은 전체 표시물, 또는 모델이 [[show:id]]로 직접
+            # 고른 표시물)을 실제 디스코드 메시지에 붙인다. 멘션 경로는 인터랙션 응답이 아니라
+            # 메시지 답장이라 ephemeral 개념이 없고(Display.ephemeral은 무시),
             # view는 이 경로로 올 일이 없어(confirm="always" 도구는 core/agent.py의
             # AgentLoop._invoke가 needs_confirm에서 이미 걸러 display 자체를 못 만든다) 스킵한다.
             embeds = [embed for display in displays for embed in display.embeds]
@@ -192,12 +191,10 @@ class YuniClient(discord.Client):
 class _BotDiscordGateway:
     """NotifyService가 쓰는 DiscordGateway 프로토콜의 유일한 구현. discord API는 여기서만 안다.
 
-    client를 생성자에서 바로 쥐지 않고 get_client 콜러블로 늦게 묶는다(Task 15 전에는
-    client를 먼저 만들고 notify_service를 그 다음에 만들 수 있었지만, Task 15에서
-    YuniClient.__init__이 mention_entry를 요구하게 되면서 client → mention_entry →
-    notify_service → 이 게이트웨이 → client로 이어지는 순환 의존이 생겼다. get_client는
-    실제로 메시지를 보낼 때(런타임, build_client()가 끝나고 client가 이미 만들어진
-    뒤)만 불리므로 안전하다)."""
+    client를 생성자에서 바로 쥐지 않고 get_client 콜러블로 늦게 묶는다. YuniClient.__init__이
+    mention_entry를 요구해 client → mention_entry → notify_service → 이 게이트웨이 →
+    client로 이어지는 순환 의존이 있기 때문이다. get_client는 실제로 메시지를 보낼 때
+    (build_client()가 끝나고 client가 이미 만들어진 뒤)만 불리므로 안전하다."""
 
     def __init__(self, get_client: Callable[[], discord.Client]) -> None:
         self._get_client = get_client
@@ -268,8 +265,8 @@ def _register_event_handlers(bus: EventBus, registry: SkillRegistry) -> None:
     """스킬별로 핸들러 등록은 전부-아니면-전무다.
 
     handler_kind()는 @on 핸들러의 반환 타입 힌트를 get_type_hints()로 해석하는데, 그 힌트가
-    핸들러 자신의 모듈 전역에서 풀리지 않는 이름이면 NameError가 난다(core/events.py 참고,
-    Task 2 리뷰에서 의도적으로 가드를 안 둔 지점). 이 예외를 여기서 잡지 않으면 build_client()
+    핸들러 자신의 모듈 전역에서 풀리지 않는 이름이면 NameError가 난다(core/events.py는
+    의도적으로 가드를 두지 않는다). 이 예외를 여기서 잡지 않으면 build_client()
     전체가 죽어 "한 스킬의 결함이 다른 스킬을 막지 않는다"는 보장이 깨진다. 그래서 스킬 하나의
     핸들러 등록 전체를 한 try/except로 묶어, 실패하면 그 스킬 전체를 registry.disable()로
     비활성화하고 다음 스킬로 넘어간다 — 계약 검사 실패를 처리하는 build_client의 방식과 같다.
@@ -409,7 +406,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     http_service = await build_http_service(cache_db_path=config.db_path.parent / "http_cache.sqlite")
     # 켜진 직후: 국제판 수록 여부·신곡 플래그를 Chunimaru songdb로 한 번 덧씌운다.
     # refresh_from_chunimaru는 실패를 삼키고 로그만 남기므로, 네트워크가 안 되는
-    # 기동에서도 build_client() 전체가 죽지 않는다(Task 6).
+    # 기동에서도 build_client() 전체가 죽지 않는다.
     if config.fetch_chunimaru_on_startup:
         await songdb_service.refresh_from_chunimaru(http_service)
 

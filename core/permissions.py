@@ -40,7 +40,7 @@ class SkillToggleProvider(Protocol):
 
 
 class InMemoryTagProvider:
-    """players 서비스(3단계)가 생기기 전까지 쓰는 임시 태그 제공자."""
+    """메모리에만 두는 태그 제공자. 운영은 players 서비스를 쓰고, 이것은 시험과 평가 스크립트용이다."""
 
     def __init__(self) -> None:
         self._tags: dict[str, set[str]] = {}
@@ -70,7 +70,7 @@ def describe_lock(
         return LockResult(visible=True, message=None)
 
     definitions = [tag_definitions[name] for name in missing_tags if name in tag_definitions]
-    # 정의되지 않은 태그도 숨김으로 취급한다(fail-closed). 3단계 레지스트리 전까지의 기본값.
+    # 정의되지 않은 태그도 숨김으로 취급한다(fail-closed).
     if any(d.hidden for d in definitions) or len(definitions) != len(missing_tags):
         return LockResult(visible=False, message=None)
 

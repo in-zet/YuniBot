@@ -251,10 +251,10 @@ class ChunithmNetService:
         await self._players.revoke_status_tag(player_id, "chunithm-linked")
 
     async def fetch_for_sync(self, player_id: str, *, ctx: ToolContext | None = None) -> SyncFetch:
-        """동기화에 필요한 세 가지(프로필, 베스트30, 신곡20, 최근 이력)를 한 번에
-        가져온다. 인증 실패(AuthenticationError)일 때만 만료로 보고
+        """동기화에 필요한 것(프로필, 베스트30, 신곡20, 최근 이력, 난이도별 전체 PB)을
+        한 번에 가져온다. 인증 실패(AuthenticationError)일 때만 만료로 보고
         chunithm-linked를 떼고 chunithm.login.expired를 낸 뒤 그대로 예외를 다시
-        던진다 — 호출한 쪽(5단계 chunithm-sync 스킬)이 "/로그인 안내" 오류로 바꾼다.
+        던진다 — 호출한 쪽(chunithm-sync 스킬)이 "/로그인 안내" 오류로 바꾼다.
         점검(MaintenanceError), 네트워크 오류, 파서 오류는 로그인과 무관하므로 태그를
         건드리지 않고 그대로 올려 보낸다."""
         cookie = await self._decrypted_cookie(player_id)

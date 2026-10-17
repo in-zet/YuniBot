@@ -235,7 +235,7 @@ def _reported(f: _Fakes) -> dict[str, Any]:
     return reported[0]
 
 
-# ---------------------------------------------------------------- Step 2: 첫 동기화
+# ---------------------------------------------------------------- 첫 동기화
 
 
 async def test_run_first_sync_returns_baseline_message_without_report(skill: ModuleType) -> None:
@@ -255,7 +255,7 @@ async def test_run_first_sync_returns_baseline_message_without_report(skill: Mod
     assert f.notify.dms == []
 
 
-# ---------------------------------------------------------------- Step 3: 변화 없음
+# ---------------------------------------------------------------- 변화 없음
 
 
 async def test_run_without_new_plays_still_gathers_and_reports_no_sessions(skill: ModuleType) -> None:
@@ -294,7 +294,7 @@ async def test_completed_payload_has_exact_keys(skill: ModuleType) -> None:
     }
 
 
-# ---------------------------------------------------------------- Step 4: 쿠키 만료
+# ---------------------------------------------------------------- 쿠키 만료
 
 
 @pytest.mark.parametrize("error", [AuthenticationError("expired"), ConnectionError("로그인되어 있지 않다")])
@@ -320,7 +320,7 @@ async def test_run_maintenance_returns_maintenance_error(skill: ModuleType) -> N
     assert f.records.save_calls == []
 
 
-# ---------------------------------------------------------------- Step 5: 공개 리포트
+# ---------------------------------------------------------------- 공개 리포트
 
 
 async def test_run_public_report_returns_full_text_in_display(skill: ModuleType) -> None:
@@ -370,7 +370,7 @@ async def test_rating_mismatch_is_noted_at_bottom(skill: ModuleType) -> None:
     assert result.data["rating_mismatch"] is True
 
 
-# ---------------------------------------------------------------- Step 6: 비공개 리포트
+# ---------------------------------------------------------------- 비공개 리포트
 
 
 async def test_run_private_report_sends_dm_and_returns_short_ephemeral(skill: ModuleType) -> None:
@@ -389,7 +389,7 @@ async def test_run_private_report_sends_dm_and_returns_short_ephemeral(skill: Mo
     assert reported["rendered_text"] == "유니 한마디\n\n세션 요약\n\n목표 점검"
 
 
-# ---------------------------------------------------------------- Step 7: quiet
+# ---------------------------------------------------------------- quiet
 
 
 async def test_run_quiet_skips_yuni_line(skill: ModuleType) -> None:
@@ -405,7 +405,7 @@ async def test_run_quiet_skips_yuni_line(skill: ModuleType) -> None:
     assert reported["rendered_text"] == "세션 요약\n\n목표 점검"
 
 
-# ---------------------------------------------------------------- Step 8: focus / arcade
+# ---------------------------------------------------------------- focus / arcade
 
 
 async def test_run_focus_and_arcade_go_into_completed_payload(skill: ModuleType) -> None:
@@ -420,7 +420,7 @@ async def test_run_focus_and_arcade_go_into_completed_payload(skill: ModuleType)
     assert _reported(f)["focus"] == [{"song_title": "Chronomia", "difficulty": "MAS"}]
 
 
-# ---------------------------------------------------------------- Step 9: 쿨다운
+# ---------------------------------------------------------------- 쿨다운
 
 
 async def test_run_cooldown_blocks_too_fast_retry_with_remaining_seconds(skill: ModuleType) -> None:

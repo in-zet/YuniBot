@@ -107,7 +107,7 @@ class _FakeUsage:
 
 
 class _CapExceededUsage(_FakeUsage):
-    """I4 회귀: 월 상한을 항상 넘긴 것으로 돌려준다 — guild 멘션이면 바로 막혀야 하고,
+    """회귀: 월 상한을 항상 넘긴 것으로 돌려준다 — guild 멘션이면 바로 막혀야 하고,
     DM 멘션이면 guild_id가 없어 이 검사 자체를 안 타야 한다."""
 
     async def month_total_usd(self, *, guild_id: str, year_month: str) -> float:
@@ -368,7 +368,7 @@ async def test_mention_entry_does_not_emit_first_seen_event_for_returning_player
 
 @pytest.mark.asyncio
 async def test_mention_entry_records_usage_with_configured_agent_model_not_hardcoded() -> None:
-    # I1 회귀: usage.record에 들어가는 model이 core/mention.py에 박아 둔 문자열이 아니라
+    # 회귀: usage.record에 들어가는 model이 core/mention.py에 박아 둔 문자열이 아니라
     # MentionEntry에 실제로 설정된 agent_model을 그대로 써야 한다.
     script = [
         GenerationTurn(
@@ -385,7 +385,7 @@ async def test_mention_entry_records_usage_with_configured_agent_model_not_hardc
 
 @pytest.mark.asyncio
 async def test_dm_mention_gets_cooldown_and_usage_but_skips_monthly_cap() -> None:
-    # I4 회귀: DM(guild_id=None)도 쿨다운/사용량 기록은 받아야 하고, 월상한 검사만 건너뛴다.
+    # 회귀: DM(guild_id=None)도 쿨다운/사용량 기록은 받아야 하고, 월상한 검사만 건너뛴다.
     # _CapExceededUsage는 month_total_usd를 항상 터무니없이 큰 값으로 돌려준다 — guild
     # 멘션이었다면 바로 막혔을 상황인데, DM이라 guild_id가 없어 이 검사 자체를 안 탄다.
     script = [
@@ -411,7 +411,7 @@ async def test_dm_mention_gets_cooldown_and_usage_but_skips_monthly_cap() -> Non
 
 @pytest.mark.asyncio
 async def test_mention_entry_injects_player_memory_into_system_instruction() -> None:
-    # I5 회귀: remember로 저장된 메모리가 다음 멘션의 system_instruction(prompt_context_snippets
+    # 회귀: remember로 저장된 메모리가 다음 멘션의 system_instruction(prompt_context_snippets
     # 경유)에 실제로 들어가야 한다. 이전에는 저장만 되고 다시 읽히는 곳이 없었다.
     script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
     memory = _FakeMemory()

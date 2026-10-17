@@ -14,7 +14,7 @@ _DEFAULT_TTL_SECONDS = 3600.0
 
 class HttpService:
     """공개 웹 페이지/JSON을 가져온다. 캐시와 ETag 재검증은 hishel이, 호스트별 호출
-    간격 제한은 aiolimiter가 한다 — 둘 다 1단계부터 벤더링된 third_party 코드가 이미
+    간격 제한은 aiolimiter가 한다 — 둘 다 벤더링된 third_party 코드가 이미
     의존하는 라이브러리라 새 의존성을 더하지 않는다."""
 
     def __init__(self, *, client: httpx.AsyncClient, min_interval_seconds: float = 1.0) -> None:
@@ -45,7 +45,7 @@ class HttpService:
 
 async def build_http_service(*, cache_db_path: Path, min_interval_seconds: float = 1.0) -> HttpService:
     """`cache_db_path`는 코어 DB(`data/yuni.db`)와 분리된 캐시 전용 SQLite 파일이다
-    (합의된 단순화 7번). hishel이 그 파일 안의 캐시 스키마를 알아서 관리한다."""
+    (순전히 캐시라 지워도 안전하다). hishel이 그 파일 안의 캐시 스키마를 알아서 관리한다."""
     connection = await anysqlite.connect(str(cache_db_path))
     storage = hishel.AsyncSQLiteStorage(connection=connection, ttl=_DEFAULT_TTL_SECONDS)
     controller = hishel.Controller(

@@ -42,8 +42,7 @@ async def remember(ctx: ToolContext, content: str) -> ToolResult:
 @tool()
 async def list_capabilities(ctx: ToolContext, category: str | None = None) -> ToolResult:
     """등록된 스킬을 바탕으로 할 수 있는 일을 분류별로 안내한다. category를 주면 그 분류만 보여준다."""
-    # 실제 카드 목록 조립은 core/capabilities.py(Task 14)가 맡는다 — 여기서는 그 모듈을 부르기만
-    # 한다. core/capabilities.py가 아직 없는 이 태스크 시점에는 자리만 채운다.
+    # 실제 카드 목록 조립은 core/capabilities.py가 맡는다 — 여기서는 그 모듈을 부르기만 한다.
     from core.capabilities import (  # pyright: ignore[reportMissingImports]
         build_capabilities_result,
     )

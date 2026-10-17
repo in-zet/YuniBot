@@ -170,3 +170,10 @@ emits: [chunithm.goal.completed]
 ## 미확인 사항
 
 - 오버파워 계산식과 CHUNITHM-NET 표시값의 일치 여부. 맞지 않으면 오버파워 목표는 CHUNITHM-NET 표시값을 그대로 쓴다.
+
+## 구현 결정 (2026-10-17, 7단계 계획서에서 옮김 — 구현 전)
+
+- manifest의 `services`는 `[records, songdb, notify, players, yuni]` 그대로다. 전체 PB는 `chunithm-sync`가 받아 `records`에 저장하고, 이 스킬은 `records`로만 읽는다.
+- 오버파워는 직접 계산하지 않고 CHUNITHM-NET 표시값(`Profile.over_power`, `records_sync_log`에 저장)을 쓴다. 폴더별 오버파워 퍼센트는 이번 단계에서 만들지 않는다 — `set()`은 오버파워 범위로 "전체"만 받는다.
+- 폴더 정의는 표기 레벨·상수 범위·수록 버전만 지원한다. `songdb`에 장르가 없어 장르 조합은 뺀다.
+- 기한(`due_at`)과 알림 시점(`notify_offsets`)은 저장만 한다. `@schedule` 등록과 알림 발송은 9단계다.

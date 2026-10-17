@@ -110,7 +110,7 @@ async def test_agent_loop_stops_after_max_tool_calls_without_infinite_loop() -> 
     )
     result = await loop.run(ctx=_ctx(), skill_state=_state(registry, mode="full"), user_text="질문", prompt_context_snippets=[])
     assert result.hit_tool_call_cap is True
-    assert result.text is None  # 모델이 끝까지 텍스트를 안 줬다 — mention 쪼음(Task 11)이 고정 문구로 바꾼다
+    assert result.text is None  # 모델이 끝까지 텍스트를 안 줬다 — core/mention.py가 고정 문구로 바꾼다
 
 
 @pytest.mark.asyncio
@@ -207,7 +207,7 @@ async def test_agent_loop_handles_list_capabilities_directly() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_loop_scopes_registry_snapshot_to_declared_skill_tool() -> None:
-    # Task 17 리뷰에서 드러난 결함의 핵심 회귀 테스트: core/mention.py가 만드는 ToolContext는
+    # 핵심 회귀 테스트: core/mention.py가 만드는 ToolContext는
     # services={}이고, AgentLoop가 그걸 그대로 돌려쓰면 admin_skills처럼 manifest.services에
     # registry_snapshot을 선언한 스킬 도구가 멘션 경로에서는 항상 "스킬 현황을 아직 알 수
     # 없다"로 실패했다(슬래시 경로는 core/slash.py._player_context가 따로 채워 줘서 멀쩡했다).

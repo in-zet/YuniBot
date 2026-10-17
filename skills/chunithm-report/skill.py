@@ -46,7 +46,7 @@ class BestKind(StrEnum):
 
 async def _target_player(ctx: ToolContext, player: PlayerRef | None) -> Player | ToolResult:
     """조회 대상 플레이어. 안 넘어왔으면 본인이다(PlayerRef 해석기는 인자가 있을 때만 돈다).
-    본인은 공개 설정과 무관하게 보고, 남은 records_public이 켜져 있을 때만 본다(결정 사항 I)."""
+    본인은 공개 설정과 무관하게 보고, 남은 records_public이 켜져 있을 때만 본다."""
     if player is None:
         me = await ctx.players.get_player(ctx.player_id)
         if me is None:

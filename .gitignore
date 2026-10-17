@@ -11,9 +11,9 @@ __pycache__/
 .env
 /data/
 
+# scratch (Claude 작업용 임시 파일·컨텍스트 스냅샷)
+/temp/
+
 # editors
 .vscode/
 .idea/
-
-# design doc archive (already extracted into docs/design/)
-yuni-bot-design.tar

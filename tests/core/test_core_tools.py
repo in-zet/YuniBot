@@ -9,8 +9,8 @@ def test_core_tool_specs_contains_all_three() -> None:
 
 
 def test_list_capabilities_importable_without_core_capabilities_module() -> None:
-    # core/capabilities.py는 Task 14에서 생긴다. list_capabilities 내부의 늦은 import 덕분에
-    # 이 모듈을 import하는 것만으로는(= 이 함수를 직접 부르지 않는 한) 깨지지 않아야 한다.
+    # list_capabilities는 core/capabilities.py를 함수 안에서 늦게 import한다. 이 모듈을
+    # import하는 것만으로는(= 이 함수를 직접 부르지 않는 한) 깨지지 않아야 한다.
     assert list_capabilities.__name__ == "list_capabilities"
 
 

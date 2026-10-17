@@ -122,12 +122,12 @@ skills/chunithm-border/
 | `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 함께한 기록, 관리 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
 | `game` | 예 | `chunithm` 또는 `common`. 다른 게임을 붙일 때 묶는 단위다. |
 | `version` | 예 | 스킬 버전. 바꾼 것을 추적한다. |
-| `services` | 예 | 쓰는 서비스 목록. 예: `songdb`, `chunithm_net`, `players`. 선언하지 않은 서비스는 못 쓴다. 코어 전용 맥락(`db` 원시 DB 연결, `player_data` 스킬 테이블 전체의 플레이어 데이터 집계·삭제, `registry_snapshot` 스킬 등록 현황)도 같은 방식으로 여기 적어야 받는다(account-link, admin처럼 꼭 필요한 공통 스킬만). |
+| `services` | 예 | 쓰는 서비스 목록. 예: `songdb`, `chunithm_net`, `players`. 선언하지 않은 서비스는 못 쓴다. 코어 전용 맥락(`db` 원시 DB 연결, `player_data` 스킬 테이블 전체의 플레이어 데이터 집계·삭제, `registry_snapshot` 스킬 등록 현황, `usage` LLM 사용량)도 같은 방식으로 여기 적어야 받는다(account-link, admin처럼 꼭 필요한 공통 스킬만). |
 | `tags` | 아니오 | 이 스킬을 쓰는 데 필요한 권한 태그. 없으면 누구나 쓴다. 예: `[chunithm-linked]`, `[admin]`. |
 | `defines_tags` | 아니오 | 이 스킬이 새로 정의하는 태그(이름, 설명, 얻는 방법, 없을 때 숨길지). |
 | `emits` / `listens` | 아니오 | 내는 이벤트와 받는 이벤트 이름. |
-| `settings` | 아니오 | 플레이어가 바꿀 수 있는 설정(이름, 형식, 기본값, 설명). 코어의 공통 설정 화면에 자동으로 나온다. |
-| `enabled` | 아니오 | 기본값 켜짐. 서버별로 끌 수 있다. |
+| `settings` | 아니오 | 플레이어가 바꿀 수 있는 설정(이름, 형식, 기본값, 설명, 범위 `scope: player|guild` — 기본 player). 코어의 공통 설정 화면(`/설정 보기`, `/설정 바꾸기 skill:… setting:… value:…`, 자동완성 없음)에 자동으로 나온다. guild 범위 값을 바꾸려면 admin 태그가 필요하다. |
+| `enabled` | 아니오 | 기본값 켜짐. 서버별로 끌 수 있다. 꺼진 서버에서는 도구 실행기가 스키마·태그 검사보다 먼저 막고 "모르는 명령"으로 답한다. DM에는 적용되지 않는다. |
 
 ### SKILL.md 본문 (유니에게 주는 지침)
 
@@ -143,13 +143,13 @@ skills/chunithm-border/
 | `tags` | 스킬의 `tags`에 더해지는 조건. 스킬은 누구나 쓰되 도구 하나만 제한할 때 쓴다. |
 | `mutates` | 데이터를 바꾸는지. 바꾸는 도구는 요청한 플레이어 본인의 데이터만 바꿀 수 있다. 예외는 서버 공유 데이터(별칭, 서버 은어, 오락실 목록, 서버 설정)다. 이런 도구는 바꾼 사람과 시각을 남기고, 남이 만든 것 지우기·승인·서버 설정은 admin 태그를 요구한다. |
 | `confirm` | `never`, `bulk`, `always`. `bulk`는 여러 건을 바꾸거나 지울 때만 확인 버튼을 낸다. |
-| `cost` | `light`, `network`, `llm`. 적지 않으면 light다. CHUNITHM-NET이나 외부 검색을 부르는 도구는 network로 적고, 요청당 횟수 상한을 따로 건다. |
+| `cost` | `light`, `network`, `llm`. 적지 않으면 light다. CHUNITHM-NET이나 외부 검색을 부르는 도구는 network로 적고, 요청당 횟수 상한을 따로 건다(아직 구현 안 됨 — 지금은 전역 "응답당 도구 호출 5회"만 집행된다). |
 
 **표준 인자 타입.** 플레이어, 곡, 오락실을 가리키는 인자는 반드시 아래 타입을 쓴다. 모델은 들은 말을 그대로 넘기고, 코어가 함수를 부르기 전에 실제 대상으로 바꾼다. 바꿀 수 없으면 함수는 불리지 않고 오류가 모델에 돌아간다. 그래서 권한 검사와 곡 이름 해석이 모든 스킬에서 같게 동작하고, 스킬 코드는 이 일을 신경 쓸 필요가 없다.
 
 | 타입 | 모델이 넘기는 것 | 코어가 하는 일 | 함수가 받는 것 | 실패할 때 |
 | --- | --- | --- | --- | --- |
-| `PlayerRef` | 이름, 호칭, 멘션, "나" | `players`로 플레이어를 찾고 공개 설정을 검사 | 플레이어 | "비공개" 또는 "누구인지 모름" |
+| `PlayerRef` | 멘션, 디스코드 ID 숫자, "나"(이름·호칭 매칭은 아직 없다) | `players`로 플레이어를 찾는다. 봇과 상호작용한 적 없는 계정이면 플레이어를 만들지 않는다. 공개 설정은 그 데이터를 읽는 스킬이 검사한다 | 플레이어 | "누구인지 모름" |
 | `SongQuery` | 곡 이름, 별칭, 줄임말 | `songdb`의 별칭 검색으로 곡을 하나로 좁힘. 국제판 미수록 곡은 제외 | 곡 | "후보: …"(여러 개) 또는 "찾지 못함" |
 | `ChartRef` | `SongQuery` + 난이도 | 위와 같고, 그 난이도 채보가 있는지 확인. 난이도가 없으면 MAS | 채보(상수, 노트 수 포함) | "그 난이도 없음" |
 | `ArcadeRef` | 오락실 이름, 별칭, 줄임말 | `arcades`의 이름 확인(정확히 같음, 비슷한 후보, 없음). 별칭은 플레이어별 | 오락실 | "후보: …" 또는 "없음". 새 별칭과 새 오락실은 버튼으로 확정한 뒤에만 저장 |
@@ -180,16 +180,16 @@ skills/chunithm-border/
 
 ### 이벤트와 예약 작업
 
-- `@on("chunithm.sync.completed")`: 다른 스킬이 낸 이벤트를 받는다.
+- `@on("chunithm.sync.completed")`: 다른 스킬이 낸 이벤트를 받는다. 핸들러는 `(ctx, payload)`를 받고, 반환 타입 힌트가 `Section`(또는 `Section | None`)이면 모으기, 아니면 알림으로 등록된다.
 - `@schedule("0 9 * * *", catch_up=True)`: 예약 작업. `catch_up`은 새벽 정지 시간에 놓친 실행을 켜진 뒤 한 번 돌린다는 뜻이다.
 - 이벤트 처리와 예약 작업도 도구와 같은 `display`를 내고, 필요하면 `ctx.yuni.line(...)`으로 유니의 한마디를 붙인다.
 - `@prompt_context`: 유니를 부른 플레이어에 대해 짧은 맥락을 프롬프트에 넣는다. 스킬이 펼쳐지지 않아도 들어간다. 예: `yuni-bond`의 열린 약속. 스킬당 300자를 넘지 않고, 코어가 넘치는 부분을 자른다. 상태를 바꾸지 않고 읽기만 한다.
-- `@slash_only`: 도구로 노출하지 않는 슬래시 명령. 쿠키 입력창이나 계정 연결처럼 LLM이 건드리면 안 되는 기능에 쓴다.
+- `@slash_only`: 도구로 노출하지 않는 슬래시 명령. 쿠키 입력창이나 계정 연결처럼 LLM이 건드리면 안 되는 기능에 쓴다. 반환 타입 힌트가 `discord.ui.Modal`이면 코어가 defer 없이 바로 입력창을 연다(다른 슬래시 명령은 먼저 defer한다).
 
 ### 데이터와 설정
 
 - 스킬 테이블은 이름이 스킬 이름에서 게임 접두사(`chunithm-`)를 빼고 하이픈을 밑줄로 바꾼 것으로 시작한다(`chunithm-goals` → `goals_`, `yuni-bond` → `yuni_bond_`, `account-link` → `account_link_`). 접두사가 겹치면 계약 테스트에서 걸린다. 게임에 딸린 테이블은 `game` 열을, 플레이어 데이터는 `player_id` 열을 둔다. 계정 연결로 한쪽 플레이어의 데이터를 버릴 때, 코어가 이 열로 모든 스킬 테이블의 행을 미리 세고 지운다.
-- 마이그레이션은 스킬 폴더마다 따로 둔다. `migrations/001_init.sql`처럼 `번호_설명.sql` 파일을 두고, 봇이 시작할 때 코어가 아직 실행하지 않은 파일만 번호순으로 실행한다. 코어(`migrations/core/`)가 먼저, 스킬은 이름순이다. 파일 하나는 트랜잭션 하나로 돌리고, 실행한 파일은 `schema_migrations` 테이블(스킬, 파일 이름, 적용 시각)에 남긴다. 실패하면 봇을 띄우지 않는다. 이미 적용한 파일은 고치지 않고 다음 번호 파일을 더한다.
+- 마이그레이션은 스킬 폴더마다 따로 둔다. `migrations/001_init.sql`처럼 `번호_설명.sql` 파일을 두고, 봇이 시작할 때 코어가 아직 실행하지 않은 파일만 번호순으로 실행한다. 코어(`migrations/core/`)가 먼저, 스킬은 이름순이다. 파일 하나는 트랜잭션 하나로 돌리고, 실행한 파일은 `schema_migrations` 테이블(스킬, 파일 이름, 적용 시각, 내용 체크섬)에 남긴다. 실패하면 봇을 띄우지 않는다. 이미 적용한 파일은 고치지 않고 다음 번호 파일을 더한다. 적용한 파일의 내용이 바뀌면 체크섬으로 잡아 기동을 멈춘다.
 - 다른 스킬의 테이블은 직접 읽거나 쓰지 않는다. 필요하면 서비스나 이벤트를 거친다.
 
 ### 예시: 보더 스킬
@@ -227,7 +227,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 모델에는 평소에 스킬 카드(이름, 소개, 질문 예시)만 넣고, 모델이 고른 스킬만 펼친다. Claude 스킬의 단계별 로딩과 같은 생각이다.
 
 1. **카드.** 코어가 켜진 스킬의 카드를 프롬프트에 넣는다. 스킬 16개면 대략 2천 토큰 안쪽으로 본다(한국어 소개와 예시 기준 추정).
-2. **펼치기.** 모델이 `open_skill("chunithm-border")`을 부르면, 다음 호출부터 그 스킬의 본문 지침과 도구 정의가 들어간다. 질문 하나가 여러 스킬에 걸치면 여러 개를 한 번에 펼친다.
+2. **펼치기.** 모델이 `open_skill("chunithm-border")`을 부르면, 다음 호출부터 그 스킬의 본문 지침과 도구 정의가 들어간다. 질문 하나가 여러 스킬에 걸치면 여러 개를 한 번에 펼친다(`open_skill`은 스킬 하나만 받으므로 같은 턴에 병렬로 여러 번 부른다).
 3. **참고 자료.** `reference/`의 긴 자료는 스킬이 제공하는 읽기 도구로만 들어간다.
 4. **유지와 정리.** 펼친 스킬은 같은 대화(답장 사슬이나 스레드) 안에서 유지한다. 동시에 펼칠 수 있는 스킬 수에 상한을 두고, 넘치면 가장 오래 안 쓴 것부터 접는다.
 
@@ -264,7 +264,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | `websearch` | 공통 | Gemini 검색 도구 호출, 출처 추출, 응답당 검색 횟수 상한 |
 | `http` | 공통 | 공개 웹 페이지와 JSON 가져오기. 캐시, ETag, 호스트별 호출 간격 제한 |
 | `chunithm_net` | 츄니즘 | 원본 어댑터를 플레이어별로 열어 주고, 접속 횟수를 제한한다. 로그인 성공과 쿠키 만료에 따라 `chunithm-linked` 태그를 붙이고 떼며, 만료 때 `chunithm.login.expired`를 낸다 |
-| `songdb` | 츄니즘 | 곡·채보 정보, 상수, 노트 수, 별칭, sdvx.in 매핑, 위키 문서명, 국제판 수록 여부. 원본 시드 위에 Chunimaru songdb를 1시간 주기로 덧씌운다 |
+| `songdb` | 츄니즘 | 곡·채보 정보, 상수, 노트 수, 별칭, sdvx.in 매핑, 위키 문서명, 국제판 수록 여부. 원본 시드 위에 Chunimaru songdb를 덧씌운다(지금은 기동 때 한 번. 실패하면 시드의 수록 여부를 쓴다. 1시간 주기 갱신은 아직 없다) |
 | `records` | 츄니즘 | 기록 스냅샷, 베스트, 변화량, 플레이 날짜별 세션 id(날짜 경계 기본 새벽 4시), 레이팅·오버파워 계산과 CHUNITHM-NET 대조, 점수·어택 환산 함수. 첫 동기화가 끝나면 `chunithm-synced` 태그를 붙인다 |
 | `terms` | 츄니즘 | 용어 사전. 랭크·난이도·램프·점수의 별칭(표준 타입이 읽음), 개념 용어의 뜻, 승인된 서버 은어. 원본은 `terms.yaml` |
 
@@ -287,7 +287,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 **규칙**
 
-- **이름과 형식**: 이름은 `게임.영역.사건`(공통은 `players.사건`)으로 짓는다. 내용 형식은 내는 쪽이 msgspec 구조체로 정하고 manifest의 `emits`에 적는다. 서비스도 이벤트를 낼 수 있다. 아무도 내지 않는 이벤트를 받겠다고 적으면 계약 테스트에서 걸린다.
+- **이름과 형식**: 이름은 `게임.영역.사건`(공통은 `players.사건`)으로 짓는다. 내용은 평문 dict이고(기존 이벤트가 모두 dict라 msgspec 구조체 대신 이렇게 통일했다), 각 key는 내는 쪽 스킬 문서의 이벤트 절에 적는다. 이벤트 이름은 manifest의 `emits`에 적는다. 서비스도 이벤트를 낼 수 있다. 아무도 내지 않는 이벤트를 받겠다고 적으면 계약 테스트에서 걸린다.
 - **시간 제한**: 모으기 이벤트의 받는 함수는 기본 5초 안에 답해야 한다. 넘기거나 오류가 나면 그 조각만 빠지고 로그가 남는다. 다른 받는 쪽과 낸 쪽은 계속 돈다.
 - **받기 전 검사**: 그 서버에서 스킬이 켜져 있는지, 이벤트 대상 플레이어가 그 스킬의 태그 조건을 갖췄는지, 연쇄 깊이가 3을 넘지 않는지를 코어가 본다.
 - **메모리 안에서만**: 이벤트는 저장하지 않는다. 도중에 봇이 꺼지면 그 이벤트는 사라진다. 재시작에도 살아야 하는 일은 DB에 저장되는 예약 작업으로 한다.
@@ -316,6 +316,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 - 예약은 DB에 저장해서 재시작에도 남는다. 기한 알림처럼 한 번 도는 예약과, 공지 확인처럼 주기적으로 도는 예약을 같은 표에 둔다.
 - 예약 시각은 새벽 정지 시간대(설정값, 기본 02시\~06시) 밖으로 잡는다. 예기치 않게 꺼져 있었다면 켜질 때 `catch_up`이 켜진 예약 중 그날 것만 보낸다. 꺼져 있는 동안 온 멘션에는 켜진 뒤에도 답하지 않는다.
+- 구현 상태: 지금은 기동 때 `catch_up`만 돈다. 운영 중 주기 확인 루프는 예약을 쓰는 첫 스킬(`chunithm-goals` 기한 알림, 9단계)을 만들 때 `core/bot.py`에 더한다. 예약 상태는 `(스킬, 함수 이름)`으로 저장하고, 예약 작업의 `ctx.player_id`는 `"system"`이다. 자정을 걸치는 정지 시간대는 지원하지 않는다.
 
 ## 데이터, 권한, 비밀 값
 
@@ -331,7 +332,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 **권한**
 
-- 누구의 데이터를 쓸지는 코어가 정한다. 플레이어 인자는 `PlayerRef` 타입으로만 받고, 공개 설정 검사는 도구 실행기가 한다.
+- 누구의 데이터를 쓸지는 코어가 정한다. 플레이어 인자는 `PlayerRef` 타입으로만 받는다. 공개 설정 검사는 그 데이터를 읽는 스킬 코드가 남을 조회할 때 한다(LLM에 맡기지 않는다).
 - 다른 사람의 기록은 그 사람이 공개한 경우만 보인다. 메모와 목표는 기본 비공개, 동기화 리포트는 플레이어별 설정이고 기본은 채널 공개다. 본인이 채널에서 자기 기록을 요청하면 공개 설정과 상관없이 그 채널에 답한다.
 - 바꾸는 도구는 요청한 플레이어 본인의 데이터만 바꾼다(서버 공유 데이터는 mutates 설명의 예외를 따른다). 여러 건을 바꾸거나 지우면 확인 버튼을 거친다.
 - 디스코드 계정 연결과 해제는 account-link 스킬의 슬래시 명령과 버튼으로만 한다. 도구로 만들지 않는다.
@@ -343,20 +344,22 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 | 종류 | 예 | 누가 붙이나 | 없는 사람에게 |
 | --- | --- | --- | --- |
-| 부여 태그 | `admin`, `tester` | 관리자가 `admin` 스킬로. 첫 관리자는 `.env`에 적은 디스코드 ID | 숨긴다. 카드, 안내, 슬래시 목록에서 빠진다 |
+| 부여 태그 | `admin`, `tester` | 관리자가 `admin` 스킬로. 첫 관리자는 `.env`에 적은 디스코드 ID | 숨긴다. 카드와 안내에서 빠진다. 슬래시 목록에는 보이지만(디스코드에서 막을 수 없다) 실행하면 안내 없이 "모르는 명령"으로만 답한다 |
 | 상태 태그 | `chunithm-linked`, `chunithm-synced` | 서비스가 상태를 보고 자동으로. 로그인 성공, 쿠키 만료, 첫 동기화 | 보이되 잠긴다. "CHUNITHM-NET 로그인하면 쓸 수 있어요"처럼 얻는 방법을 안내한다 |
 | 스킬 태그 | 예: `goals-beta` | 스킬이 `defines_tags`로 정의하고, 관리자가 붙인다 | 정의할 때 숨길지 안내할지 고른다 |
 
 - **조건 적는 법**: `tags: [a, b]`는 둘 다 있어야 한다. 하나만 있어도 되면 `tags_any: [a, b]`를 쓴다. 도구의 `tags`는 스킬의 조건에 더해진다.
 - **검사하는 곳**: 프롬프트 조립(카드 거르기), 도구 실행기(호출 직전), 슬래시 경로 세 곳이 같은 함수를 쓴다. 예약 작업과 이벤트 처리는 대상 플레이어의 태그로 검사한다.
 - **태그는 플레이어에 붙는다.** 연결된 디스코드 계정은 모두 같은 태그를 갖는다.
+- **상태 태그와 부여 태그의 구분**: 종류 열을 두지 않고 상태 태그 이름 집합(`core/permissions.py`의 `STATUS_ONLY_TAGS`)으로 구분한다. 상태 태그는 서비스 전용 메서드로만 바뀌고 admin이 붙이거나 뗄 수 없다. `defines_tags`로 정의한 태그는 모두 admin이 붙이고 뗄 수 있다.
+- **`full` 모드의 도구 태그**: 펼친 스킬의 도구 선언은 도구 수준 태그로 숨기지 않는다. 태그가 없는 사람이 부르면 실행기가 막고 그 안내가 모델에 돌아간다. 카드는 스킬 수준 `tags`/`tags_any`로만 거른다.
 - **정의 없는 태그는 못 쓴다.** 태그는 코어, 서비스, 스킬에서 정의하고 레지스트리에 모인다. 정의되지 않은 태그를 조건으로 쓰는 스킬은 계약 테스트에서 걸린다.
 - **더 세분화할 때**: 서버별 태그나 디스코드 역할 연동이 필요해지면, 태그를 얻는 경로만 더한다. 스킬 쪽 조건 문법은 그대로다.
 
 **비밀 값**
 
 - clal 쿠키는 암호화해 저장하고, 복호화는 `secrets`와 `chunithm_net` 서비스 안에서만 한다. 스킬, 로그, LLM 입력에는 들어가지 않는다.
-- 디스코드 토큰, Gemini 키, 암호화 키는 `.env`에서 읽는다.
+- 디스코드 토큰, LLM 키(`GEMINI_API_KEY`/`ANTHROPIC_API_KEY`), 암호화 키(`COOKIE_ENCRYPTION_KEY`, `Fernet.generate_key()` 값, 키 회전 없음), 첫 관리자(`ADMIN_DISCORD_IDS`)는 `.env`에서 읽는다. 암호화 키가 비어 있으면 `secrets` 서비스 없이 기동한다.
 - 웹 검색 결과와 다른 사람이 쓴 글(메모, 후기)은 인용 데이터로만 모델에 넘긴다.
 
 **한계.** 스킬은 같은 프로세스에서 도는 파이썬 코드라 샌드박스가 아니다. 위 규칙은 실수를 막는 장치이고, 악의적인 코드를 막지는 못한다. 지인 서버 규모에서는 저장소에 들어오는 스킬을 검토하는 것으로 충분하다고 본다.
@@ -418,7 +421,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - Linked VERSE 스토리는 플레이어가 묻기 전에는 꺼내지 않는다.
 - 나비는 화자로 나오지 않는다. 유니가 이름을 언급하는 것은 된다.
 - 한국어 말투는 직접 정한다. 국제판에 공식 한국어 대사가 있는지는 확인하지 못했다. 말투 파일의 예시로 쓸 원문은 저장본에서 직접 옮긴다.
-- LLM 장애 때 나가는 고정 문구도 미리 유니 말투로 써 둔다.
+- LLM 장애 때 나가는 고정 문구도 미리 유니 말투로 써 둔다(지금은 건조한 평서체이고, 11단계에서 `core/fallback_messages.py`의 문자열만 바꾼다).
 
 * 표시물은 항상 정식 표기(SSS+, MAS)를 쓴다. 유니의 말은 플레이어가 쓴 표현을 따라갈 수 있다. 예: "트플플까지 3.20어택이에요."
 
@@ -455,8 +458,9 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 **제한과 장애**
 
-- 도구 호출은 응답당 최대 5회가 기본이다. 플레이어별 쿨다운과 월 비용 상한을 둔다.
-- LLM 호출이 실패하거나 월 상한에 닿으면 유니 말투의 고정 문구로 슬래시 명령을 안내한다. 슬래시 명령은 LLM 없이 계속 동작한다.
+- 에이전트 반복 상한은 설정값 둘이다: 도구 호출 `MAX_TOOL_CALLS_PER_TURN`(기본 5), 토큰 `MAX_TOKENS_PER_TURN`(기본 50,000). 넘으면 멈추고, 모델이 낸 글이 있으면 그것을, 없으면 고정 문구를 보낸다.
+- 플레이어별 쿨다운과 월 비용 상한은 멘션 경로에서만 집행한다. 쿨다운은 메모리에만 두어 재시작하면 풀린다. 월 상한은 서버별 설정이라 DM에는 없다.
+- LLM 호출이 실패하거나 월 상한에 닿으면 유니 말투의 고정 문구로 슬래시 명령을 안내한다. 슬래시 명령은 LLM 없이 계속 동작한다. 일시 오류(Gemini 503 등)에도 재시도 없이 바로 고정 문구로 간다(2026-10-18 확인, `docs/plan.md` 리스크).
 - 멘션 응답은 수 초가 걸리므로 처리 중에는 입력 중 표시를 띄운다.
 
 **할 수 있는 일 안내** (`list_capabilities`)
@@ -464,7 +468,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - 근거는 등록된 스킬의 카드(소개, `category`, `examples`, 슬래시 명령, `tags`) 하나다. 유니는 여기에 없는 기능을 말하지 않는다. 스킬을 더하거나 빼면 안내도 같이 바뀐다.
 - "뭐 할 수 있어?"에는 분류별로 한 줄씩 짧게 소개하고 분류를 고르는 버튼을 낸다. 첫 답은 한 화면을 넘기지 않는다.
 - 그 플레이어가 지금 쓸 수 있는 것과, 상태 태그를 얻으면 쓸 수 있는 것(예: 로그인하면)을 나눠 보여 준다. 부여 태그가 없는 스킬은 보여 주지 않는다.
-- 처음 멘션한 플레이어에게는 짧게 자기소개를 하고 로그인부터 안내한다.
+- 처음 멘션한 플레이어에게는 짧게 자기소개를 하고 로그인부터 안내한다. 코드 분기가 아니라 프롬프트 맥락 한 줄("이 플레이어는 유니를 처음 멘션했다")로 넣고 `rules.md`가 처리한다.
 - 못 하는 일도 적어 둔다. 일본판 계정 동기화, 멘션 없는 대화에 끼어들기, 꺼져 있는 새벽 시간의 응답, 말만 듣고 디스코드 계정 연결하기, 한 플레이어가 CHUNITHM-NET 계정 여러 개 쓰기.
 - 슬래시 `/도움말`도 같은 목록을 LLM 없이 보여 준다.
 
@@ -488,22 +492,22 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 | 스킬 | 범위 | 하는 일 | 태그 |
 | --- | --- | --- | --- |
-| [account-link](https://claude.ai/code/artifact/a0b23e0f-02c6-4b4c-b8f2-52ad1c593979) | 공통 | 디스코드 계정 연결·해제·확인. 슬래시와 버튼만 | 없음 |
-| [admin](https://claude.ai/code/artifact/441c4a0e-badb-45e1-94f8-3a844b270d0b) | 공통 | 사용량, 서버별 스킬 켜기·끄기, 부여 태그, 비용 상한 | `admin` |
-| [memory](https://claude.ai/code/artifact/4beee2fc-6106-42c3-ae24-07b9d1c39d76) | 공통 | 기억한 내용 보기, 지우기, 자동 저장 끄기 | 없음 |
-| [yuni-bond](https://claude.ai/code/artifact/52baa8ac-395c-4ac6-b7e3-a047437dd20b) | 공통 | 함께한 기록, 동기화 때 덧붙이는 귀띔, 플레이 계획과 약속 | 없음 |
-| [chunithm-account](https://claude.ai/code/artifact/b8732716-34f9-4195-8754-23dad960bc89) | 츄니즘 | CHUNITHM-NET 로그인(입력창), 쿠키 만료 안내, 기록 공개 설정 | 없음 |
-| [chunithm-song](https://claude.ai/code/artifact/59f086ec-628d-41a5-b8eb-3c8afbe7f951) | 츄니즘 | 곡·별칭 검색, 상수, 노트 수, 채보 뷰어 링크, 한국어 별칭 | 없음 |
-| [chunithm-terms](https://claude.ai/code/artifact/37dc75be-3545-49d8-8b83-139e6c04bc74) | 츄니즘 | 용어와 은어의 뜻, 서버 은어 제안·승인 | 없음. 승인만 `admin` |
-| [chunithm-border](https://claude.ai/code/artifact/4cbade6d-406c-4613-b638-243a197ad659) | 츄니즘 | 허용 어택 개수, 목표까지 남은 어택 | 없음. 남은 어택만 `chunithm-synced` |
-| [chunithm-sync](https://claude.ai/code/artifact/49a71fac-d6b3-4b09-a2fe-4d5b5063f05e) | 츄니즘 | 동기화 실행, 리포트 조각 모으기 | `chunithm-linked` |
-| [chunithm-report](https://claude.ai/code/artifact/295a42f0-d58f-41a0-886b-c950bbc991e5) | 츄니즘 | 프로필, 베스트, 최근 플레이, 분석, 후보곡, 리포트 본문 | `chunithm-synced` |
-| [chunithm-goals](https://claude.ai/code/artifact/e0d2ee02-0911-4a8e-be73-a3c7db056a27) | 츄니즘 | 레이팅·오버파워·폴더·곡별(To-Do)·자유 목표, 기한 알림 | 없음. 기록 기반 도구만 `chunithm-synced` |
-| [chunithm-session](https://claude.ai/code/artifact/61afb368-e421-4a59-887a-3ef99df1084f) | 츄니즘 | 세션 보관·목록·불러오기, 세션 후기 대화 | `chunithm-synced` |
-| [chunithm-arcade](https://claude.ai/code/artifact/7da30f56-cef6-4fb2-a579-22a66252c130) | 츄니즘 | 오락실별 게임 설정 저장·조회 | `chunithm-linked` |
-| [chunithm-notes](https://claude.ai/code/artifact/eb303b24-14a8-4af2-8319-09d85c10b452) | 츄니즘 | 곡별 메모 | 없음 |
-| [chunithm-updates](https://claude.ai/code/artifact/98d0b3aa-cde1-4180-8c52-2f68f2181534) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
-| [web-qa](https://claude.ai/code/artifact/63212f21-2199-4bbd-91ce-d4cba678c437) | 츄니즘 | 용어 사전에 없는 일반 질문을 검색해 출처와 함께 답하기 | 없음 |
+| [account-link](skills/account-link.md) | 공통 | 디스코드 계정 연결·해제·확인. 슬래시와 버튼만 | 없음 |
+| [admin](skills/admin.md) | 공통 | 사용량, 서버별 스킬 켜기·끄기, 부여 태그, 비용 상한 | `admin` |
+| [memory](skills/memory.md) | 공통 | 기억한 내용 보기, 지우기, 자동 저장 끄기 | 없음 |
+| [yuni-bond](skills/yuni-bond.md) | 공통 | 함께한 기록, 동기화 때 덧붙이는 귀띔, 플레이 계획과 약속 | 없음 |
+| [chunithm-account](skills/chunithm-account.md) | 츄니즘 | CHUNITHM-NET 로그인(입력창), 쿠키 만료 안내, 기록 공개 설정 | 없음 |
+| [chunithm-song](skills/chunithm-song.md) | 츄니즘 | 곡·별칭 검색, 상수, 노트 수, 채보 뷰어 링크, 한국어 별칭 | 없음 |
+| [chunithm-terms](skills/chunithm-terms.md) | 츄니즘 | 용어와 은어의 뜻, 서버 은어 제안·승인 | 없음. 승인만 `admin` |
+| [chunithm-border](skills/chunithm-border.md) | 츄니즘 | 허용 어택 개수, 목표까지 남은 어택 | 없음. 남은 어택만 `chunithm-synced` |
+| [chunithm-sync](skills/chunithm-sync.md) | 츄니즘 | 동기화 실행, 리포트 조각 모으기 | `chunithm-linked` |
+| [chunithm-report](skills/chunithm-report.md) | 츄니즘 | 프로필, 베스트, 최근 플레이, 분석, 후보곡, 리포트 본문 | `chunithm-synced` |
+| [chunithm-goals](skills/chunithm-goals.md) | 츄니즘 | 레이팅·오버파워·폴더·곡별(To-Do)·자유 목표, 기한 알림 | 없음. 기록 기반 도구만 `chunithm-synced` |
+| [chunithm-session](skills/chunithm-session.md) | 츄니즘 | 세션 보관·목록·불러오기, 세션 후기 대화 | `chunithm-synced` |
+| [chunithm-arcade](skills/chunithm-arcade.md) | 츄니즘 | 오락실별 게임 설정 저장·조회 | `chunithm-linked` |
+| [chunithm-notes](skills/chunithm-notes.md) | 츄니즘 | 곡별 메모 | 없음 |
+| [chunithm-updates](skills/chunithm-updates.md) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
+| [web-qa](skills/web-qa.md) | 츄니즘 | 용어 사전에 없는 일반 질문을 검색해 출처와 함께 답하기 | 없음 |
 
 스킬끼리 주고받는 이벤트는 "이벤트, 예약 작업, 서비스" 절의 이벤트 목록에 모었다. 스킬 문서의 이벤트 표와 이 목록이 어긋나면 이 목록을 기준으로 맞춘다.
 
@@ -526,6 +530,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | Gemini 3.1 Flash-Lite | 0.25 | 1.50 | 더 싼 대안 |
 
 - **추천 구성**: 에이전트는 3.8 Flash, 요약류는 3.5 Flash-Lite. 도구 고르기, 규칙 준수, 한국어 캐릭터 말투를 동시에 요구하는 쪽이 에이전트이기 때문이다.
+- **Claude 선택지**: `LLM_PROVIDER=claude`면 `AGENT_MODEL`에 Claude 모델(예: `claude-haiku-5-5`)을 넣는다. 가격은 `core/llm_pricing.py`에 있고, 요금표에 없는 모델이면 월 상한 계산이 멈춘다. Claude 어댑터는 아직 프롬프트 캐시를 쓰지 않는다.
 - **검증 방법**: 이 조합을 잰 공개 벤치마크는 찾지 못했다. 스킬들의 `examples`를 모아 두 모델에 똑같이 돌리고, 도구 선택 오류와 숫자 규칙 위반을 센다. Flash-Lite가 통과하면 에이전트도 Flash-Lite로 내린다.
 - **Google 검색**: 유료 등급에서만 쓸 수 있다. 월 5,000회까지 무료(Gemini 3 계열 공용)이고 이후 1,000회당 14달러다. 이 규모에서는 무료 한도 안에 든다. 함수 호출과 검색을 한 요청에 함께 쓰는 기능은 Gemini 3 계열에서 지원된다([문서](https://ai.google.dev/gemini-api/docs/tool-combination)).
 - **무료 등급을 쓰지 않는 이유**: 검색을 못 쓰고, 입력 내용이 구글 제품 개선에 쓰인다. 친구들의 대화와 메모리가 들어가므로 유료 등급을 쓴다.
@@ -540,11 +545,11 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - **실행 방식**: Docker Compose. 이 저장소의 Dockerfile로 직접 빌드한다. Python 3.14 이미지를 써서 우분투의 기본 파이썬 버전에 묶이지 않는다.
 - **아키텍처**: CPU가 라이젠 5이므로 x86-64다.
 - **자동 시작**: 재시작 정책 `unless-stopped`와 부팅 시 Docker 시작. 기기가 켜지면 봇도 올라온다.
-- **보존할 것**: DB가 든 `data` 폴더, 설정 파일, 토큰과 암호화 키가 든 `.env`. 셋 다 컨테이너 밖 볼륨에 둔다.
+- **보존할 것**: DB가 든 `data` 폴더, 설정 파일, 토큰과 암호화 키가 든 `.env`. 셋 다 컨테이너 밖 볼륨에 둔다. `data/http_cache.sqlite`는 캐시라 지워도 되고 백업하지 않는다.
 - **네트워크**: 디스코드와 외부 API로 나가는 연결만 쓴다. 포트 개방과 고정 IP가 필요 없다. 웹 로그인 서버는 두지 않는다.
 - **디스코드 설정**: 멘션과 답장을 읽기 위해 메시지 내용 인텐트를 켠다.
 
-**새벽 정지 시간에 맞춘 동작** (정지 시간대는 설정값, 기본 02시\~06시)
+**새벽 정지 시간에 맞춘 동작** (정지 시간대는 설정값 `QUIET_HOURS_START`/`QUIET_HOURS_END`, 기본 02시\~06시)
 
 | 상황 | 처리 |
 | --- | --- |
@@ -576,85 +581,10 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - **하지 않는 것**: 여러 게임을 아우르는 공통 인터페이스나 추상 계층은 지금 만들지 않는다. 두 번째 게임이 실제로 정해졌을 때 그 게임에 맞춰 만든다.
 - 유니는 츄니즘 캐릭터다. 다른 게임을 얹을 때 인격을 어떻게 할지는 그때 정한다.
 
-## 채택하지 않은 안
+## 저장소 구조, 작업 순서, 리스크
 
-아래 안은 검토하고 버렸다. 구현 중에 다시 제안하지 않는다.
-
-- **스킬마다 MCP 서버**: 이벤트, 예약, 디스코드 버튼, 플레이어 권한이 MCP 범위 밖이라 결국 자체 규약이 또 필요하다. 대신 도구 정의를 MCP 형식에 맞춰, 나중에 읽기 전용 도구를 MCP 서버 하나로 내보낼 수 있게만 한다.
-- **라우터 모델**(싼 모델이 먼저 스킬을 분류): 호출이 하나 늘고, 분류가 틀리면 본 모델이 바로잡지 못한다. `open_skill`로 본 모델이 직접 고른다.
-- **슬래시 명령 중심, LLM 최소**: 유니 중심이라는 목표와 반대다. 다만 대부분의 도구는 슬래시로도 열려 있어, LLM이 멈춰도 봇은 쓸 수 있다.
-- **스킬 없이 도구 전부 넘기기**: 지침이 한 프롬프트에 모여 커진다. 왕복이 늘지 않는 장점은 `instructions` 모드가 가져간다.
-- **스킬끼리 직접 호출**: 하나를 빼면 다른 스킬이 깨진다. 스킬 사이는 서비스와 이벤트로만 잇는다.
-
-## 저장소 구조와 개발 규칙
-
-새 저장소는 코어, 서비스, 스킬, 원본에서 가져온 코드를 폴더로 나눈다. 가져온 코드는 고치지 않고, 원본이 바뀌면 스크립트로 통째 교체한다.
-
-```
-yuni-bot/
-  core/                  입구, 에이전트, 도구 실행기, 레지스트리, 메모리, 예약, 이벤트, LLM 어댑터
-  services/common/       players, settings, memory, notify, yuni, secrets, arcades, websearch, http
-  services/chunithm/     chunithm_net, songdb, records, terms
-  skills/                스킬 폴더들
-  skills/_template/      새 스킬의 복사본
-  prompts/               rules.md(규칙), persona.md(유니 말투)
-  third_party/chuni_penguin/  adapters, types, constants 등 + 시드 데이터. UPSTREAM 파일에 원본 커밋 기록
-  migrations/core/       코어와 서비스의 SQL 파일 (번호순)
-  scripts/sync_upstream.py   원본에서 third_party를 다시 가져오는 스크립트
-  docs/                  설계서, 스킬 작성 안내, 참고 자료
-```
-
-**기술 스택**: Python 3.14, discord.py, google-genai(Gemini 공식 SDK), anthropic(Claude 공식 SDK, 6단계 추가), aiosqlite + SQLite, httpx, uv, ruff, basedpyright, pytest, Docker Compose. ORM과 alembic은 쓰지 않는다. 테이블은 SQL 파일로 만들고, 쿼리도 SQL 문을 직접 쓴다. 원본 어댑터가 요구하는 버전과 라이브러리를 그대로 따른다. 원본은 SQLAlchemy를 쓰므로, 가져온 코드가 그것을 import하면 `third_party` 때문에만 의존성으로 남기고 우리 코드에서는 쓰지 않는다. 도구 인자 스키마는 msgspec으로 만든다. 원본도 msgspec을 의존성으로 쓴다.
-
-**개발 규칙**
-
-- 새 스킬은 `_template`을 복사해 만든다. 코어나 다른 스킬을 고치지 않고 스킬을 더할 수 있어야 한다. 고쳐야 한다면 규격이 모자라다는 신호로 보고 규격부터 고친다.
-- **계약 테스트**: 모든 스킬에 대해 자동으로 도는 테스트다. manifest 항목, 도구 스키마 생성, 이름 중복, docstring, 선언하지 않은 서비스 사용, 테이블 이름 접두사(SQL 파일의 CREATE TABLE 기준), 마이그레이션 파일 이름 규칙을 검사한다.
-- 계산 로직(레이팅, 허용 어택, 목표 달성률, 세션 날짜 배정)은 순수 함수로 두고 테스트를 먼저 쓴다.
-- CHUNITHM-NET 파서는 저장해 둔 페이지로 테스트한다. 실제 사이트에 접속하는 테스트는 없다.
-- LLM을 부르는 테스트는 기본 실행에서 뺀다. 단, 스킬 `examples`로 도구 선택을 재는 별도 평가 명령을 둔다.
-- 스킬을 설치에서 빼는 것은 설정 파일로 하고 재시작하면 반영된다. 서버별 켜고 끄기는 admin의 /관리 스킬설정으로 하고, DB에 저장되어 바로 반영된다.
-
-## 작업 순서
-
-규격을 가장 먼저 만들고, 스킬 두세 개로 규격을 시험한 뒤 나머지를 채운다. 에이전트는 기능을 다 만든 뒤가 아니라 6단계에서 붙인다. `open_skill` 방식이 실제로 도는지는 규격의 일부라 일찍 확인해야 하기 때문이다. 숫자 검증은 여전히 슬래시 명령으로 먼저 한다.
-
-1. **저장소와 가져온 코드**: 새 저장소를 만들고 원본의 `adapters`가 의존하는 파일 범위를 확인해 `third_party/`로 가져온다. `sync_upstream.py`를 만들고, 미니 PC에서 Docker로 뜨는지 확인한다.
-2. **코어 뼈대**: 레지스트리, `@tool` `@on` `@schedule` `@prompt_context` `@slash_only`, 슬래시 경로, 도구 실행기(스키마 검사, 권한 태그 검사, 확인 버튼), 이벤트 버스, 대화 스레드, SQL 마이그레이션 실행기, 계약 테스트, `_template`. LLM은 아직 없고, 태그는 임시 태그 제공자로 시험한다. 통과 기준: 코어를 고치지 않고 연습용 스킬 하나를 더해 슬래시로 쓸 수 있고, 태그가 없는 플레이어에게는 그 스킬이 막힌다.
-3. **공통 서비스**: `players`(태그 저장 포함), `settings`, `memory`, `secrets`, `notify`, `arcades`, `http`, 예약 저장, yuni 서비스 뼈대(정해진 문구를 돌려주는 임시 구현). 스킬은 `account-link`와 `admin`.
-4. **츄니즘 서비스**: `chunithm_net`, `songdb`(원본 시드 + Chunimaru + 국제판 필터), `records`(스냅샷, 세션 id, 레이팅 계산), 용어 사전 terms, 상태 태그. 레이팅은 CHUNITHM-NET 표시값과 대조한다.
-5. **첫 스킬**: `chunithm-account`, `chunithm-song`, `chunithm-border`, chunithm-terms. 슬래시 명령으로 숫자와 용어 해석을 검증한다.
-6. **에이전트**: google-genai로 만든 LLM 어댑터, 스킬 카드와 `open_skill`, 표시물 고르기와 숫자 대조, 건조한 말투, 비용 상한, `list_capabilities`. 스킬 `examples`로 도구 선택을 재고 두 모델을 비교한다.
-7. **기록 스킬**: `chunithm-sync`, `chunithm-report`, `chunithm-goals`, `chunithm-session`(보관과 불러오기), `chunithm-notes`. 스킬마다 멘션과 슬래시 두 길에서 확인한다.
-8. **오락실 스킬**: `chunithm-arcade`. CHUNITHM-NET 설정 페이지와 플레이 이력 상세 페이지 저장본을 받은 뒤 시작한다.
-9. **알림**: `chunithm-updates`, 목표 기한 알림.
-10. **검색 답변**: `websearch` 서비스와 `web-qa`. 출처 강제, 질문 분류.
-11. **유니 인격**: `persona.md`, `yuni` 서비스의 한마디, 반응 단계, 동기화 리포트와 알림 연결.
-12. **메모리와 관계**: 자동 요약, 호칭 우선순위, `memory` 스킬, `yuni-bond` 스킬, 대화 스레드를 쓰는 세션 후기.
-
-각 단계는 superpowers에서 계획을 따로 쓰고 한 번에 하나씩 진행한다. 단계 1의 의존 범위 확인과 단계 2의 규격 코드가 나머지 전부의 기반이라, 이 두 단계는 리뷰를 두텁게 하기를 권한다.
-
-## 미확인 사항과 리스크
-
-아래는 여러 스킬에 걸치거나 구조에 영향을 주는 항목이다. 스킬 하나에만 해당하는 미확인 사항은 그 스킬 문서에 있다.
-
-| 항목 | 상태 | 대응 |
-| --- | --- | --- |
-| 원본 `adapters`가 의존하는 파일 범위 | 확인됨 (1단계). `types`/`constants`/`utils`/`calculation`까지 필요. 점수 조회 메서드는 chuni-penguin 자신의 SQLAlchemy DB에 묶여 있어 `third_party/patches/`의 패치로 그 부분만 제거했다. 네이티브(Rust) 모듈은 음성 기능 전용이라 불필요 | 패치가 업스트림 변경으로 깨지면 `sync_upstream.py`가 실패하도록 했다(실제 검증함). 그때 사람이 다시 diff를 맞춘다 |
-| 원본 구조가 바뀌면 `sync_upstream.py`가 깨짐 | 예상되는 위험 | 경로 목록을 손으로 안 두고, 패치 적용 후 실제로 import해서 생긴 `chuni_penguin.*` 모듈 전체를 가져오는 방식으로 짰다(1단계). 패치가 안 맞으면 스크립트가 실패하고, 가져온 뒤 스모크 테스트를 돌린다 |
-| `httpx-aiohttp` 패치가 업스트림 포크의 재시도 동작을 잃음 | 확인됨 (1단계). PyPI 쪽 `AiohttpTransport`는 `retries` 값을 받긴 하지만 실제로 재시도하지 않는다 — 업스트림 포크는 지수 백오프로 재시도한다 | 상세는 `third_party/patches/README.md`. 4단계(`chunithm_net` 서비스)에서 포크를 들여올지 서비스 레벨에서 재시도를 새로 짤지 정한다 |
-| 국제판 버전업 | 일본판은 이미 다음 버전 가동 중, 국제판 시기는 미정 | 버전업 직후 파서와 신곡 기준일을 점검하고 원본 어댑터 수정을 가져온다. `chunithm-updates`가 관리자에게 알린다 |
-| 원본 시드를 데이터로만 쓸 수 있는지 | 확인됨 (1단계). `database/seeds/songs.json`은 SQLAlchemy와 무관한 순수 JSON 리스트라 그대로 데이터로 읽어 쓸 수 있다 | 4단계에서 이 형식으로 `songdb` 읽기 코드를 쓴다 |
-| 레이팅·오버파워 계산이 CHUNITHM-NET과 맞는지 | 확인 못 함 | `records`가 동기화마다 대조하고, 어긋나면 리포트에 표시한다 |
-| `open_skill` 왕복의 지연과 비용 | 측정 전 | 6단계에서 `instructions`와 `full` 모드를 비교한다 |
-| Gemini가 안정적으로 고르는 도구 수 | 문서에서 찾지 못함 | 위와 같은 평가로 잰다 |
-| Gemini 함수 이름의 허용 문자와 길이 | 확인됨(6단계). a-z/A-Z/0-9/밑줄/콜론/점/대시, 128자 이내 — 하이픈이 그대로 허용되어 변환이 필요 없었다 | core/declarations.py가 그대로 `<스킬>_<함수>`를 쓴다 |
-| thought 블록을 어떻게 주고받을지 | 확인됨(6단계). 모델이 낸 Content 전체(raw)를 수정 없이 다음 턴 히스토리에 그대로 돌려주는 직접 전달 방식을 쓴다. 병렬 호출은 첫 function_call part에만 서명이 있고 순서를 유지해야 한다 | core/llm_gemini.py의 to_provider_content가 raw를 우선한다 |
-| LLM 가격과 모델 | 수시로 바뀐다. 3.8 Flash의 할인가는 2026-12-31까지 | 구현 시점과 2027년 1월에 가격표를 다시 확인한다 |
-| 모으기 이벤트에서 느린 스킬 하나가 리포트를 붙잡음 | 예상되는 위험 | 스킬별 시간 제한. 넘기면 그 조각만 빼고 보낸다 |
-| 공식 캐릭터를 인격으로 쓰는 것의 권리 문제 | 판단 불가 | 비공식 팬 제작 표기, 공식 음성·일러스트 재배포 금지, 지인 서버 밖으로 공개하지 않음 |
-| 스킬이 샌드박스가 아님 | 설계상 한계 | 저장소에 들어오는 스킬을 검토한다 |
-| 코드 없이 고칠 수 있는 범위 | 제한적 | `SKILL.md`의 소개, 예시, 지침은 글만 고쳐도 된다. 새 도구는 파이썬이 필요하다 |
+- 저장소 구조와 개발 규칙(구조·DB·시험): `docs/conventions.md`
+- 작업 순서(12단계)와 진행 상태, 채택하지 않은 안, 미확인 사항과 리스크: `docs/plan.md`
 
 ## 출처
 

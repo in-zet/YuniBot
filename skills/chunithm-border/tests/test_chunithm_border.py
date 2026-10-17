@@ -124,7 +124,7 @@ async def test_remaining_unknown_note_count_is_an_error() -> None:
 
 
 async def test_remaining_locked_without_chunithm_synced_shows_how_to_get_it() -> None:
-    """chunithm-synced는 chunithm-account의 defines_tags가 설명을 소유한다(finding 3).
+    """chunithm-synced는 chunithm-account의 defines_tags가 설명을 소유한다.
     두 스킬을 함께 real SkillRegistry로 읽어야 (1) chunithm-border의 tags=["chunithm-synced"]가
     "정의되지 않은 태그" 검사를 통과하고, (2) describe_lock이 쓸 설명이 채워진다."""
     from core.executor import ToolExecutor

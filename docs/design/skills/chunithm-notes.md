@@ -63,3 +63,7 @@ listens: [chunithm.song.viewed, chunithm.plan.requested]
 - 비공개 메모가 다른 플레이어의 곡 조회 조각에 나오지 않는지.
 - 덮어쓰기와 덧붙이기.
 - 난이도 없는 메모와 난이도별 메모가 함께 있을 때의 표시.
+
+## 구현 결정 (2026-10-17, 7단계 계획서에서 옮김 — 구현 전)
+
+- `notes_notes`의 기본키는 (player_id, game, song_title, difficulty)다. "곡 전체 메모"는 difficulty를 NULL이 아니라 빈 문자열로 저장한다(`TEXT NOT NULL DEFAULT ''`). SQLite는 기본키 안의 NULL을 서로 다른 값으로 봐서 겹쳐쓰기가 안 되기 때문이다.
