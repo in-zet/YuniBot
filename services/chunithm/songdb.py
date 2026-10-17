@@ -256,6 +256,12 @@ class SongDbService:
         chart = song.charts.get(difficulty)
         return chart.note_count if chart else None
 
+    def is_new_for(self, title: str) -> bool:
+        """그 곡이 신곡(신곡20 프레임 대상)인가. 모르는 곡은 False — Chunimaru 덧씌우기가
+        한 번도 안 됐으면 시드에는 신곡 표시가 없으므로 전부 False다."""
+        song = self._songs.get(title)
+        return song.is_new if song is not None else False
+
     def find_by_const(
         self, *, min_const: float, max_const: float, difficulty: str
     ) -> list[ConstRangeHit]:

@@ -101,6 +101,20 @@ async def test_chunimaru_overlay_marks_new_songs(songdb: SongDbService) -> None:
     assert song.is_new is True
 
 
+async def test_is_new_for_follows_chunimaru_overlay(songdb: SongDbService) -> None:
+    # 덧씌우기 전에는 시드에 신곡 표시가 없으니 False다.
+    assert songdb.is_new_for("Ave Mujica") is False
+
+    songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
+
+    assert songdb.is_new_for("Ave Mujica") is True
+    assert songdb.is_new_for("B.B.K.K.B.K.K.") is False
+
+
+async def test_is_new_for_unknown_title_is_false(songdb: SongDbService) -> None:
+    assert songdb.is_new_for("존재하지않는곡") is False
+
+
 async def test_refresh_from_chunimaru_failure_keeps_previous_state(songdb: SongDbService) -> None:
     class _FailingHttp:
         async def get_json(self, url: str) -> None:
