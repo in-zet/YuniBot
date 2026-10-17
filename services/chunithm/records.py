@@ -176,6 +176,11 @@ def _frame_floor(frame: list[PbRow], size: int) -> Decimal:
     return min(known)
 
 
+def _known_min(ratings: list[Decimal | None]) -> Decimal | None:
+    known = [r for r in ratings if r is not None]
+    return min(known) if known else None
+
+
 def _merge_personal_bests(fetch: SyncFetch) -> dict[ChartKey, PersonalBest]:
     """베스트30·신곡20·전체 PB를 (제목, 난이도)로 합친다. 같은 채보가 여러 목록에 있으면
     점수가 높은 쪽을 쓴다(정상이라면 같은 값이다)."""
@@ -355,13 +360,8 @@ class RecordsService:
             if existing is not None and pb.score <= existing.score:
                 continue
             improved_keys.add(key)
-            # 처음 보는 채보인데 최근 이력에도 없으면 "이번에 쳤다"는 증거가 없다(예: 전체 PB를
-            # 저장하기 전 동기화로 만든 records_pb에 빠져 있던 채보). 저장만 하고 갱신 목록에는
-            # 넣지 않는다 — 안 그러면 처음 한 번 수백 곡이 "갱신"으로 뜬다.
-            if existing is None and key not in recent_times:
-                await self._upsert_pb(player_id, pb, session_id=None, synced_at=synced_at)
-                continue
-
+            # 처음 보는 채보(old_score=None)도 이미 있던 채보의 갱신과 똑같이 다룬다 — 최근 이력에서
+            # 못 찾으면 가장 늦은 세션에 estimated로 붙는다(결정 사항 F).
             session_id, estimated = match_session_for_chart(
                 key, recent_by_session_day, sessions_by_date, latest_session_id
             )
@@ -412,10 +412,20 @@ class RecordsService:
                 )
             )
 
-        frame_exits = [
-            FrameExit(song_title=key[0], difficulty=key[1], old_rating=previous_by_key[key].rating)
-            for key in sorted(exited)
-        ]
+        # 이탈 오탐 거르기: "이전 프레임"은 records_pb를 다시 정렬해 만든 것이라, 레이팅이 같은
+        # 채보 사이의 순서가 CHUNITHM-NET의 실제 동점 처리와 다를 수 있다. 그래서 저장된 레이팅이
+        # 이번 프레임(CHUNITHM-NET이 준 베스트30/신곡20)의 최저 레이팅보다 엄격히 낮을 때만
+        # 진짜 이탈로 본다. 같거나 높으면 정렬 차이로 생긴 오탐으로 보고 뺀다. 진입은
+        # 이번 프레임을 그대로 믿으므로 손대지 않는다.
+        best_floor = _known_min([self._rating_of(pb) for pb in fetch.best30])
+        new_floor = _known_min([self._rating_of(pb) for pb in fetch.new20])
+        frame_exits: list[FrameExit] = []
+        for key in sorted(exited):
+            old_rating = previous_by_key[key].rating
+            floor = new_floor if self._songdb.is_new_for(key[0]) else best_floor
+            if old_rating is not None and floor is not None and old_rating >= floor:
+                continue
+            frame_exits.append(FrameExit(song_title=key[0], difficulty=key[1], old_rating=old_rating))
         chart_updates.sort(
             key=lambda u: (u.new_rating is None, -(u.new_rating or Decimal(0)), u.song_title, u.difficulty)
         )

@@ -559,24 +559,30 @@ async def test_played_but_not_improved_goes_to_unchanged_plays(conn, monkeypatch
     ]
 
 
+_PLANT_SQL = (
+    "INSERT INTO records_pb (player_id, game, song_title, difficulty, score, rank, clear_lamp, "
+    "combo_lamp, chain_lamp, const, rating, session_id, updated_at) "
+    "VALUES (?, 'chunithm', ?, 'MAS', 1000000, 'SS', 'CLEAR', 'NONE', 'NONE', 14.8, ?, NULL, 'x')"
+)
+# 저장본 베스트30에서 레이팅이 16.94 이하인 여섯 채보(16.94 둘, 16.93, 16.92, 16.91 둘).
+_LOW_BEST30 = ("Igallta", "初音天地開闢神話", "ホーリーサンバランド", "Kaleidoscope", "Tempestissimo", "幻想ロードオブキング")
+
+
 async def test_frame_entry_and_exit(conn, monkeypatch) -> None:
     _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
     await _baseline(service, player_id, ctx, monkeypatch)
-    # 동기화 전 records_pb에 베스트30 최저(16.91 동점 둘)보다 높은 채보 둘을 심어 둔다 —
-    # "이전 프레임"(records_pb 재계산)에서는 이 둘이 들어가고 16.91 둘이 밀려나 있다.
-    for title in ("심어둔곡A", "심어둔곡B"):
-        await conn.execute(
-            "INSERT INTO records_pb (player_id, game, song_title, difficulty, score, rank, clear_lamp, "
-            "combo_lamp, chain_lamp, const, rating, session_id, updated_at) "
-            "VALUES (?, 'chunithm', ?, 'MAS', 1010000, 'SSS+', 'CLEAR', 'AJC', 'NONE', 15.0, '99.00', NULL, 'x')",
-            (player_id, title),
-        )
+    # 동기화 전 records_pb에 레이팅 16.94 채보를 심어 둔다 — "이전 프레임"(records_pb 재계산)에서는
+    # 이 채보가 들어가고 16.91 동점 둘 중 하나(幻想ロードオブキング, 제목순 뒤)가 밀려나 있다.
+    await conn.execute(_PLANT_SQL, (player_id, "심어둔곡", "16.94"))
     await conn.commit()
     fetch = _fixture_fetch()
-    fetch.best30 = _replace_in(fetch.best30, "幻想ロードオブキング", 1_008_000)
+    # 낮은 여섯 채보가 전부 올라 이번 베스트30 최저가 16.95(初音 14.8+2.15)가 된다 —
+    # 심어 둔 16.94는 그보다 엄격히 낮으니 진짜 이탈이다.
+    for title in _LOW_BEST30:
+        fetch.best30 = _replace_in(fetch.best30, title, 1_009_000)
     fetch.best30 = _replace_in(fetch.best30, "I Wanna", 1_008_500)
     fetch.recent_scores = [
-        _recent("幻想ロードオブキング", "MAS", 1_008_000, datetime(2026, 10, 12, 20, 0, tzinfo=_JST)),
+        _recent("幻想ロードオブキング", "MAS", 1_009_000, datetime(2026, 10, 12, 20, 0, tzinfo=_JST)),
         _recent("I Wanna", "MAS", 1_008_500, datetime(2026, 10, 12, 20, 5, tzinfo=_JST)),
     ]
 
@@ -584,14 +590,28 @@ async def test_frame_entry_and_exit(conn, monkeypatch) -> None:
 
     diff = await service.sync_diff(result.sync_id)
     assert diff is not None
-    # 이번 베스트30(저장본)에는 심어 둔 채보가 없으니 이탈이다.
-    assert diff.frame_exits == [
-        FrameExit(song_title="심어둔곡A", difficulty="MAS", old_rating=Decimal("99.00")),
-        FrameExit(song_title="심어둔곡B", difficulty="MAS", old_rating=Decimal("99.00")),
-    ]
+    assert diff.frame_exits == [FrameExit(song_title="심어둔곡", difficulty="MAS", old_rating=Decimal("16.94"))]
     by_title = {u.song_title: u for u in diff.chart_updates}
     assert by_title["幻想ロードオブキング"].entered_frame is True
     assert by_title["I Wanna"].entered_frame is False
+
+
+async def test_tied_rating_outside_real_frame_is_not_reported_as_exit(conn, monkeypatch) -> None:
+    """리뷰 I-2 회귀 테스트: 베스트30 최저(16.91)와 같은 레이팅인데 실제로는 프레임 밖인 채보가
+    records_pb 재정렬에서는 제목순으로 30위 안에 들어간다. 이 동점 차이 때문에 새 플레이가
+    없는 동기화마다 "이탈"로 뜨면 안 된다."""
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    await _baseline(service, player_id, ctx, monkeypatch)
+    # "A"로 시작하는 제목이라 동점 16.91 안에서 Tempestissimo·幻想ロードオブキング보다 앞에 정렬된다.
+    await conn.execute(_PLANT_SQL, (player_id, "A동점곡", "16.91"))
+    await conn.commit()
+
+    for _ in range(3):
+        result = await service.save_sync(player_id, _fixture_fetch(), ctx)
+        diff = await service.sync_diff(result.sync_id)
+        assert diff is not None
+        assert result.has_new_plays is False
+        assert diff.frame_exits == []
 
 
 async def test_previous_ratings_come_from_previous_log_and_pb_frames(conn, monkeypatch) -> None:
@@ -642,19 +662,28 @@ async def test_all_personal_bests_outside_frames_are_saved(conn, monkeypatch) ->
     )
 
 
-async def test_newly_seen_chart_outside_recent_history_is_backfilled_silently(conn, monkeypatch) -> None:
-    """전체 PB 목록에 처음 보이는 채보가 최근 이력에도 없으면, "이번에 쳤다"는 증거가
-    없는 채보다(예: 전체 PB를 저장하기 전의 동기화로 만든 records_pb에 빠져 있던 채보).
-    저장은 하되 갱신 목록에는 넣지 않는다 — 안 그러면 처음 한 번 수백 곡이 "갱신"으로 뜬다."""
+async def test_newly_seen_chart_outside_recent_history_is_estimated_update(conn, monkeypatch) -> None:
+    """처음 보는 채보(old_score=None)도 이미 있던 채보의 갱신과 똑같이 다룬다(리뷰 I-1, 결정 사항 F):
+    최근 이력에서 못 찾으면 이번 동기화의 가장 늦은 세션에 estimated로 붙어 갱신 목록에 들어간다."""
     _, player_id, ctx, service = await _setup(conn)
     await _baseline(service, player_id, ctx, monkeypatch)
+    odin = next(pb for pb in _fixture_fetch().best30 if pb.song.title == "Odin")
     fetch = _fixture_fetch()
     fetch.all_personal_bests = {"MAS": [_personal_best("B.B.K.K.B.K.K.", "MAS", 1_000_000)]}
+    fetch.recent_scores = [_recent("Odin", "MAS", odin.score - 1000, datetime(2026, 10, 12, 20, 0, tzinfo=_JST))]
 
     result = await service.save_sync(player_id, fetch, ctx)
 
     diff = await service.sync_diff(result.sync_id)
-    assert diff is not None and diff.chart_updates == [] and diff.sessions == []
+    assert diff is not None
+    assert [s.play_date for s in diff.sessions] == ["2026-10-12"]
+    assert len(diff.chart_updates) == 1
+    update = diff.chart_updates[0]
+    assert (update.song_title, update.difficulty) == ("B.B.K.K.B.K.K.", "MAS")
+    assert (update.old_score, update.old_rank, update.old_rating) == (None, None, None)
+    assert update.new_score == 1_000_000
+    assert update.session_id == diff.sessions[0].id
+    assert update.estimated_session is True
     assert await service.best_score(player_id, song_title="B.B.K.K.B.K.K.", difficulty="MAS") == 1_000_000
 
 
