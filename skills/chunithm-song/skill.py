@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.decorators import tool
+from core.events import Section
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -16,6 +17,13 @@ from services.chunithm.terms import ResolvedDifficulty
 
 _DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 _MAX_LISTED = 25
+
+
+def _with_sections(head: str, sections: list[Section]) -> str:
+    """곡 조회 조각(chunithm.song.viewed 모으기 결과, order순)을 본문 뒤에 빈 줄로 나눠 붙인다.
+    chunithm-sync가 동기화 리포트 조각을 붙이는 것과 같은 방식이다."""
+    parts = [head, *(s.display.content for s in sections if s.display is not None and s.display.content)]
+    return "\n\n".join(parts)
 
 
 @tool(slash="곡")
@@ -35,28 +43,34 @@ async def info(ctx: ToolContext, song: SongQuery) -> ToolResult:
         note_text = f"{chart.note_count}노트" if chart.note_count is not None else "노트 수 알 수 없음"
         lines.append(f"{code} Lv.{chart.level or '?'} 상수 {chart.const}{const_suffix} — {note_text}")
 
-    await ctx.emit_gather(
+    # difficulty None = 곡 전체 보기. 받는 스킬은 그 곡의 모든 난이도에 걸친 것을 보여준다.
+    sections = await ctx.emit_gather(
         "chunithm.song.viewed", {"player_id": ctx.player_id, "song_title": song.title, "difficulty": None}
     )
 
     return ToolResult(
         data={"title": song.title, "artist": song.artist, "is_new": song.is_new},
-        display=Display(content="\n".join(lines)),
+        display=Display(content=_with_sections("\n".join(lines), sections)),
     )
 
 
 @tool()
 async def chart(ctx: ToolContext, chart: ChartRef) -> ToolResult:
-    """채보 하나의 상수와 노트 수를 돌려준다."""
+    """채보 하나의 상수와 노트 수를 돌려준다(내 To-Do·메모가 있으면 함께 보여준다)."""
     assert isinstance(chart, ResolvedChart)
     note_text = f"{chart.chart.note_count}노트" if chart.chart.note_count is not None else "계산 불가"
+    sections = await ctx.emit_gather(
+        "chunithm.song.viewed",
+        {"player_id": ctx.player_id, "song_title": chart.song.title, "difficulty": chart.chart.difficulty},
+    )
+    head = f"{chart.song.title} {chart.chart.difficulty} 상수 {chart.chart.const} ({note_text})"
     return ToolResult(
         data={
             "song": chart.song.title, "difficulty": chart.chart.difficulty,
             "const": chart.chart.const, "note_count": chart.chart.note_count,
             "is_const_unknown": chart.chart.is_const_unknown,
         },
-        display=Display(content=f"{chart.song.title} {chart.chart.difficulty} 상수 {chart.chart.const} ({note_text})"),
+        display=Display(content=_with_sections(head, sections)),
         display_mode="optional",
     )
 

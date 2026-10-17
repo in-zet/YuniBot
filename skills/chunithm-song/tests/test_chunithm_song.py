@@ -4,9 +4,10 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
-from core.events import EventBus
-from core.tool_types import ToolContext
+from core.events import EventBus, Section
+from core.tool_types import Display, ToolContext
 from services.chunithm.songdb import SongDbService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -51,6 +52,60 @@ async def test_chart_reports_const_and_note_count() -> None:
 
     assert result.data["const"] == chart.const
     assert result.data["note_count"] == chart.note_count
+
+
+class _RecordingBus(EventBus):
+    """emit_gather 호출을 기록하고, 정해 둔 조각을 돌려주는 버스(다른 스킬의 곡 조회 조각 대신)."""
+
+    def __init__(self, sections: list[Section]) -> None:
+        super().__init__()
+        self.calls: list[tuple[str, Any]] = []
+        self._sections = sections
+
+    async def emit_gather(self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None) -> list[Section]:
+        self.calls.append((event_name, payload))
+        return list(self._sections)
+
+
+def _ctx_with_bus(songdb: SongDbService, bus: EventBus) -> ToolContext:
+    return ToolContext(player_id="p1", tags=frozenset(), services={"songdb": songdb}, event_bus=bus)
+
+
+async def test_chart_emits_song_viewed_with_real_difficulty_and_renders_sections() -> None:
+    """I3: chart는 실제 난이도 코드로 chunithm.song.viewed를 내고, 돌아온 조각을 표시에 붙인다."""
+    skill = _load_skill()
+    songdb = SongDbService()
+    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX_NO_GUILD)
+    from services.chunithm.chart_ref import ResolvedChart
+
+    bus = _RecordingBus([
+        Section(order=10, display=Display(content="투두 목표 1,007,500점"), data={}),
+        Section(order=20, display=Display(content="내 메모\n후반 주의"), data={}),
+    ])
+    result = await skill.chart(_ctx_with_bus(songdb, bus), chart=ResolvedChart(song=song, chart=song.charts["MAS"]))
+
+    assert bus.calls == [
+        ("chunithm.song.viewed", {"player_id": "p1", "song_title": song.title, "difficulty": "MAS"})
+    ]
+    content = result.display.content if result.display is not None else ""
+    assert "투두 목표 1,007,500점" in content
+    assert "후반 주의" in content
+    assert content.index("투두 목표") < content.index("내 메모")
+
+
+async def test_info_emits_whole_song_view_and_renders_sections() -> None:
+    """I3: info는 곡 전체 보기(difficulty None)로 내고, 돌아온 조각을 표시에 붙인다."""
+    skill = _load_skill()
+    songdb = SongDbService()
+    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX_NO_GUILD)
+
+    bus = _RecordingBus([Section(order=20, display=Display(content="내 메모\n곡 전체 메모"), data={})])
+    result = await skill.info(_ctx_with_bus(songdb, bus), song=song)
+
+    assert bus.calls == [("chunithm.song.viewed", {"player_id": "p1", "song_title": song.title, "difficulty": None})]
+    content = result.display.content if result.display is not None else ""
+    assert content.startswith("B.B.K.K.B.K.K.")
+    assert "곡 전체 메모" in content
 
 
 async def test_find_by_const_returns_sorted_results() -> None:

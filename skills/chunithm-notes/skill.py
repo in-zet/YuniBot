@@ -90,16 +90,19 @@ async def set_note(
     text: str,
     difficulty: DifficultyRef | None = None,
     append: bool = False,
-    public: bool = False,
+    public: bool | None = None,
 ) -> ToolResult:
     """곡(또는 채보)에 메모를 쓴다. 난이도를 비우면 곡 전체 메모다. 같은 곳에 다시 쓰면
     덮어쓰고, append=True면 줄바꿈으로 이어 붙인다. public=True면 다른 사람도 곡 조회
-    조각에서 볼 수 있다(기본은 비공개). 본인 메모만 바꾼다."""
+    조각에서 볼 수 있다. public을 주지 않으면 이미 있는 메모는 공개 여부를 그대로 두고, 새
+    메모는 비공개로 만든다. 본인 메모만 바꾼다."""
     assert isinstance(song, SongRecord)
     assert ctx.db is not None
     code = _difficulty_code(difficulty)
     existing = await _fetch_note(ctx, player_id=ctx.player_id, song_title=song.title, difficulty=code)
     body = f"{existing['body']}\n{text}" if append and existing is not None else text
+    if public is None:
+        public = bool(existing["public"]) if existing is not None else False
     now = datetime.now(UTC).isoformat()
     await ctx.db.execute(
         "INSERT INTO notes_notes (player_id, game, song_title, difficulty, body, public, updated_at) "
@@ -196,31 +199,63 @@ async def delete(ctx: ToolContext, song: SongQuery, difficulty: DifficultyRef | 
 # ---------------------------------------------------------------- 이벤트 핸들러
 
 
+def _scope_label(difficulty: str) -> str:
+    return difficulty or "곡 전체"
+
+
+async def _fetch_viewed_notes(
+    ctx: ToolContext, *, viewer_id: str, song_title: str, difficulty: str | None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+    """곡 조회 조각에 쓸 메모. difficulty가 None(곡 전체 보기)이면 그 곡의 모든 난이도 메모를,
+    난이도 코드면 그 난이도 메모와 곡 전체 메모("")를 모은다. (내 메모, 보여줄 남의 공개 메모,
+    남의 공개 메모 전체 개수)."""
+    assert ctx.db is not None
+    scope_sql = "" if difficulty is None else " AND difficulty IN (?, '')"
+    scope_params: tuple[str, ...] = () if difficulty is None else (difficulty,)
+    cursor = await ctx.db.execute(
+        "SELECT player_id, difficulty, body, public, updated_at FROM notes_notes "
+        f"WHERE game = ? AND song_title = ?{scope_sql} AND (player_id = ? OR public = 1) "
+        "ORDER BY updated_at DESC",
+        (_GAME, song_title, *scope_params, viewer_id),
+    )
+    rows: list[aiosqlite.Row] = list(await cursor.fetchall())
+    mine = [
+        {"difficulty": r["difficulty"] or None, **_note_dict(r)} for r in rows if r["player_id"] == viewer_id
+    ]
+    others_all = [
+        {"player_id": r["player_id"], "difficulty": r["difficulty"] or None, "body": r["body"],
+         "updated_at": r["updated_at"]}
+        for r in rows
+        if r["player_id"] != viewer_id
+    ]
+    return mine, others_all[:_OTHERS_LIMIT], len(others_all)
+
+
 @on("chunithm.song.viewed")
 async def on_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
-    """그 곡(난이도)에 내 메모나 공개된 남의 메모가 있으면 조각으로 돌려준다. 둘 다 없으면
-    None(모으기에서 조각이 빠진다)."""
+    """그 곡에 내 메모나 공개된 남의 메모가 있으면 조각으로 돌려준다. difficulty가 None이면(곡
+    전체 보기) 모든 난이도의 메모를, 난이도 코드면(채보 보기) 그 난이도와 곡 전체 메모를 모은다.
+    둘 다 없으면 None(모으기에서 조각이 빠진다)."""
     player_id: str = payload["player_id"]
     title: str = payload["song_title"]
-    code: str = payload.get("difficulty") or ""
+    code: str | None = payload.get("difficulty") or None
 
-    mine = await _fetch_note(ctx, player_id=player_id, song_title=title, difficulty=code)
-    others, others_total = await _fetch_public_others(
-        ctx, song_title=title, difficulty=code, exclude_player_id=player_id, limit=_OTHERS_LIMIT
+    mine, others, others_total = await _fetch_viewed_notes(
+        ctx, viewer_id=player_id, song_title=title, difficulty=code
     )
-    if mine is None and not others:
+    if not mine and not others:
         return None
 
-    lines: list[str] = []
-    if mine is not None:
-        lines.append(f"내 메모\n{mine['body']}")
-    lines += _others_lines(others, others_total)
+    lines = [f"내 메모 ({_scope_label(m['difficulty'] or '')})\n{m['body']}" for m in mine]
+    lines += [f"{o['player_id']}의 메모 ({_scope_label(o['difficulty'] or '')})\n{o['body']}" for o in others]
+    if others_total > len(others):
+        lines.append(f"...외 {others_total - len(others)}개 더 있음")
 
     return Section(
         order=_SONG_VIEW_ORDER,
-        display=Display(content="\n\n".join([_head(title, code), *lines])),
+        display=Display(content="\n\n".join([_head(title, code or ""), *lines])),
         data={
-            "kind": "song_notes", "mine": mine, "others": others,
+            "kind": "song_notes", "difficulty": code, "mine": mine, "others": others,
             "others_total": others_total, "has_more": others_total > len(others),
         },
     )

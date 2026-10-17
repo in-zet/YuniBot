@@ -1025,30 +1025,48 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
 
 @on("chunithm.song.viewed")
 async def on_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
-    """그 곡에 내 To-Do가 있으면 상태와 남은 어택을 붙인다."""
+    """그 곡에 내 To-Do가 있으면 상태와 남은 어택을 붙인다. difficulty가 None이면(곡 전체 보기)
+    그 곡의 모든 난이도 투두를, 난이도 코드면(채보 보기) 그 난이도 투두만 보여준다. 없으면 None."""
     player_id: str = payload["player_id"]
     title: str = payload["song_title"]
-    dif: str = payload["difficulty"]
-    goal = await models.find_song_goal(ctx.db, player_id, song_title=title, difficulty=dif)
-    if goal is None:
+    dif: str | None = payload.get("difficulty") or None
+    goals = [
+        g
+        for g in await models.list_goals_for_player(
+            ctx.db, player_id, kind=GoalKind.SONG.value, statuses=[GoalStatus.IN_PROGRESS.value]
+        )
+        if g.target_ref.get("song_title") == title and (dif is None or g.target_ref.get("difficulty") == dif)
+    ]
+    if not goals:
         return None
 
-    pb = await ctx.records.pb_row(player_id, song_title=title, difficulty=dif)
-    current = pb.score if pb is not None else 0
-    note_count = ctx.songdb.note_count_for(title, dif)
-    target = int(goal.target_value) if goal.target_value is not None else 0
-    remaining = ctx.records.remaining_to_target(note_count, current, target)
-    if remaining is None:
-        content = f"투두 목표 {target:,}점  (남은 양 계산 불가)"
-        data: dict[str, Any] = {"goal_id": goal.id, "target_score": target, "remaining_score": None, "remaining_attacks": None}
-    else:
-        remaining_score, remaining_attacks = remaining
-        content = f"투두 목표 {target:,}점  남은 {remaining_score:,}점 ({remaining_attacks}어택)"
-        data = {
-            "goal_id": goal.id, "target_score": target, "remaining_score": remaining_score,
-            "remaining_attacks": str(remaining_attacks),
-        }
-    return Section(order=_SONG_VIEW_ORDER, display=Display(content=content), data={"kind": "goal_todo", **data})
+    todos: list[dict[str, Any]] = []
+    lines: list[str] = []
+    for goal in goals:
+        goal_dif: str = goal.target_ref["difficulty"]
+        pb = await ctx.records.pb_row(player_id, song_title=title, difficulty=goal_dif)
+        current = pb.score if pb is not None else 0
+        note_count = ctx.songdb.note_count_for(title, goal_dif)
+        target = int(goal.target_value) if goal.target_value is not None else 0
+        remaining = ctx.records.remaining_to_target(note_count, current, target)
+        if remaining is None:
+            lines.append(f"투두 {goal_dif} 목표 {target:,}점  (현재 {current:,}, 남은 양 계산 불가)")
+        else:
+            lines.append(
+                f"투두 {goal_dif} 목표 {target:,}점  남은 {remaining[0]:,}점 ({remaining[1]}어택, 현재 {current:,})"
+            )
+        todos.append(
+            {
+                "goal_id": goal.id, "difficulty": goal_dif, "current_score": current, "target_score": target,
+                "remaining_score": remaining[0] if remaining is not None else None,
+                "remaining_attacks": str(remaining[1]) if remaining is not None else None,
+            }
+        )
+    return Section(
+        order=_SONG_VIEW_ORDER,
+        display=Display(content="\n".join(lines)),
+        data={"kind": "goal_todo", "difficulty": dif, "todos": todos},
+    )
 
 
 @on("chunithm.plan.requested")

@@ -845,7 +845,38 @@ async def test_on_song_viewed_returns_todo_status(skill: ModuleType, db: aiosqli
 
     section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": "곡A", "difficulty": "MAS"})
     assert section is not None
-    assert section.data["remaining_attacks"] is not None
+    assert len(section.data["todos"]) == 1
+    assert section.data["todos"][0]["remaining_attacks"] is not None
+
+
+async def test_on_song_viewed_chart_view_only_shows_that_difficulty(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    await skill.todo_add(ctx, _chart("곡A", "MAS"), 1_007_500)
+    await skill.todo_add(ctx, _chart("곡A", "EXP"), 1_009_000)
+    section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": "곡A", "difficulty": "EXP"})
+    assert section is not None
+    assert [t["difficulty"] for t in section.data["todos"]] == ["EXP"]
+
+
+async def test_on_song_viewed_whole_song_view_aggregates_all_difficulties(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """I3: `곡` 도구는 difficulty None으로 낸다 — 그 곡의 모든 난이도 투두를 보여준다."""
+    records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0")]})
+    songdb = _FakeSongDb(note_counts={("곡A", "MAS"): 1000})
+    ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
+    await skill.todo_add(ctx, _chart("곡A", "MAS"), 1_007_500)
+    await skill.todo_add(ctx, _chart("곡A", "EXP"), 1_009_000)
+    await skill.todo_add(ctx, _chart("곡B", "MAS"), 1_009_000)
+
+    section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": "곡A", "difficulty": None})
+    assert section is not None
+    assert sorted(t["difficulty"] for t in section.data["todos"]) == ["EXP", "MAS"]
+    content = section.display.content or ""
+    assert "MAS" in content and "EXP" in content and "곡B" not in content
+    exp = next(t for t in section.data["todos"] if t["difficulty"] == "EXP")
+    assert exp["remaining_attacks"] is None  # EXP 노트 수를 모른다 → 계산 불가
+    assert "계산 불가" in content
 
 
 async def test_on_song_viewed_returns_none_without_todo(skill: ModuleType, db: aiosqlite.Connection) -> None:

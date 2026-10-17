@@ -116,6 +116,32 @@ async def test_set_note_append_joins_with_newline(skill: ModuleType, db: aiosqli
     assert result.data["body"] == "첫 줄\n둘째 줄"
 
 
+async def test_set_note_without_public_keeps_existing_visibility(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    """I9: 공개 메모에 public을 다시 말하지 않고 덧붙이거나 덮어써도 공개가 유지된다."""
+    songdb = SongDbService()
+    ctx = _ctx(db=db, songdb=songdb)
+    song = await _song(songdb, "B.B.K.K.B.K.K.", ctx)
+
+    await skill.set_note(ctx, song, "첫 줄", public=True)
+    appended = await skill.set_note(ctx, song, "둘째 줄", append=True)
+    assert appended.data["public"] is True
+    overwritten = await skill.set_note(ctx, song, "새로 씀")
+    assert overwritten.data["public"] is True
+    row = await (await db.execute("SELECT public FROM notes_notes WHERE player_id = 'p1'")).fetchone()
+    assert row is not None and row["public"] == 1
+
+    made_private = await skill.set_note(ctx, song, "이제 비공개", public=False)
+    assert made_private.data["public"] is False
+
+
+async def test_set_note_new_note_without_public_is_private(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    songdb = SongDbService()
+    ctx = _ctx(db=db, songdb=songdb)
+    song = await _song(songdb, "B.B.K.K.B.K.K.", ctx)
+    result = await skill.set_note(ctx, song, "메모")
+    assert result.data["public"] is False
+
+
 # ---------------------------------------------------------------- Step 3: get_note
 
 
@@ -278,7 +304,7 @@ async def test_on_song_viewed_returns_section_with_own_note(skill: ModuleType, d
 
     section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": song.title, "difficulty": None})
     assert section is not None
-    assert section.data["mine"]["body"] == "내 메모"
+    assert section.data["mine"][0]["body"] == "내 메모"
 
 
 async def test_on_song_viewed_excludes_private_notes_from_other_player(
@@ -309,9 +335,49 @@ async def test_on_song_viewed_includes_public_notes_from_other_player(
         viewer_ctx, {"player_id": "p2", "song_title": song.title, "difficulty": None}
     )
     assert section is not None
-    assert section.data["mine"] is None
+    assert section.data["mine"] == []
     assert len(section.data["others"]) == 1
     assert section.data["others"][0]["player_id"] == "p1"
+
+
+def _exp() -> ResolvedDifficulty:
+    return ResolvedDifficulty(canonical="EXPERT")
+
+
+async def test_on_song_viewed_whole_song_view_aggregates_all_difficulties(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """I3: 곡 전체 보기(difficulty None, `곡` 도구)는 그 곡의 모든 난이도 메모를 모은다."""
+    songdb = SongDbService()
+    ctx = _ctx(db=db, player_id="p1", songdb=songdb)
+    song = await _song(songdb, "B.B.K.K.B.K.K.", ctx)
+    await skill.set_note(ctx, song, "곡 전체 메모")
+    await skill.set_note(ctx, song, "마스 메모", difficulty=_mas())
+    other_ctx = _ctx(db=db, player_id="p2", songdb=songdb)
+    await skill.set_note(other_ctx, song, "남의 엑스퍼 메모", difficulty=_exp(), public=True)
+
+    section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": song.title, "difficulty": None})
+    assert section is not None
+    assert sorted(n["body"] for n in section.data["mine"]) == ["곡 전체 메모", "마스 메모"]
+    assert [(o["difficulty"], o["body"]) for o in section.data["others"]] == [("EXP", "남의 엑스퍼 메모")]
+    content = section.display.content or ""
+    assert "마스 메모" in content and "곡 전체 메모" in content and "남의 엑스퍼 메모" in content
+
+
+async def test_on_song_viewed_chart_view_shows_that_difficulty_and_whole_song_notes(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """I3: 채보 보기(difficulty "MAS", `chart` 도구)는 그 난이도 메모와 곡 전체 메모만 보인다."""
+    songdb = SongDbService()
+    ctx = _ctx(db=db, player_id="p1", songdb=songdb)
+    song = await _song(songdb, "B.B.K.K.B.K.K.", ctx)
+    await skill.set_note(ctx, song, "곡 전체 메모")
+    await skill.set_note(ctx, song, "마스 메모", difficulty=_mas())
+    await skill.set_note(ctx, song, "엑스퍼 메모", difficulty=_exp())
+
+    section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": song.title, "difficulty": "MAS"})
+    assert section is not None
+    assert sorted(n["body"] for n in section.data["mine"]) == ["곡 전체 메모", "마스 메모"]
 
 
 # ---------------------------------------------------------------- Step 6: on_plan_requested
