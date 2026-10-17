@@ -8,6 +8,9 @@ from typing import Any, Literal, TypeVar
 F = TypeVar("F", bound=Callable[..., Awaitable[Any]])
 
 ConfirmMode = Literal["never", "bulk", "always"]
+# confirm="bulk" 도구에 실행기(core/executor.py)가 넣는 인자 이름. core/schema.py는 이 이름을
+# 스키마에서 뺀다. 이 모듈은 다른 core 모듈을 import하지 않으므로 여기 둔다(순환 import 방지).
+DRY_RUN_PARAM = "dry_run"
 CostTier = Literal["light", "network", "llm"]
 
 
@@ -86,6 +89,18 @@ def _require_tool_context_first_param(fn: Callable[..., Any]) -> None:
         )
 
 
+def _require_dry_run_for_bulk(fn: Callable[..., Any], confirm: ConfirmMode) -> None:
+    """confirm="bulk"는 실행기가 먼저 dry_run=True로 불러 바뀔 건수를 보고 2건 이상일 때만
+    확인 버튼을 낸다(core/executor.py). 그러려면 도구가 dry_run 키워드를 받아야 한다."""
+    if confirm != "bulk":
+        return
+    param = inspect.signature(fn).parameters.get(DRY_RUN_PARAM)
+    if param is None or param.default is not False:
+        raise DecoratorError(
+            f"'{fn.__name__}'는 confirm=\"bulk\"라서 '{DRY_RUN_PARAM}: bool = False' 키워드 인자가 있어야 한다"
+        )
+
+
 def tool(
     *,
     slash: str | None = None,
@@ -99,6 +114,7 @@ def tool(
         _require_async(fn)
         _require_docstring(fn)
         _require_tool_context_first_param(fn)
+        _require_dry_run_for_bulk(fn, confirm)
         fn.__yuni_tool__ = ToolSpec(  # pyright: ignore[reportFunctionMemberAccess]
             fn=fn,
             name=fn.__name__,
@@ -126,6 +142,7 @@ def slash_only(
         _require_async(fn)
         _require_docstring(fn)
         _require_tool_context_first_param(fn)
+        _require_dry_run_for_bulk(fn, confirm)
         fn.__yuni_slash_only__ = SlashOnlySpec(  # pyright: ignore[reportFunctionMemberAccess]
             fn=fn,
             name=fn.__name__,

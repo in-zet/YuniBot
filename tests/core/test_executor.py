@@ -430,3 +430,106 @@ async def test_invoke_allows_tool_when_no_guild_context() -> None:
 
     assert outcome.result is not None
     assert outcome.result.data == {"ok": True}
+
+
+# ---------------------------------------------------------------- confirm="bulk"
+
+_bulk_writes: list[int] = []
+
+
+@tool(slash="일괄", mutates=True, confirm="bulk")
+async def bulk_tool(ctx: ToolContext, n: int, *, dry_run: bool = False) -> ToolResult:
+    """n건을 바꾸는 도구. dry_run이면 바꿀 건수만 돌려준다."""
+    if n < 0:
+        return ToolResult(error="음수는 안 된다")
+    if dry_run:
+        return ToolResult(data={"count": n})
+    _bulk_writes.append(n)
+    return ToolResult(data={"count": n, "written": True})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("n", [0, 1])
+async def test_bulk_tool_with_zero_or_one_item_runs_immediately(n: int) -> None:
+    _bulk_writes.clear()
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(bulk_tool.__yuni_tool__, ctx, {"n": n})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.needs_confirm is False
+    assert outcome.confirm_token is None
+    assert outcome.result is not None
+    assert outcome.result.data == {"count": n, "written": True}
+    assert _bulk_writes == [n]
+
+
+@pytest.mark.asyncio
+async def test_bulk_tool_with_many_items_pauses_until_confirmed() -> None:
+    _bulk_writes.clear()
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(bulk_tool.__yuni_tool__, ctx, {"n": 3})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.needs_confirm is True
+    assert outcome.result is None
+    assert outcome.confirm_token is not None
+    assert outcome.preview is not None
+    assert outcome.preview.data == {"count": 3}
+    assert _bulk_writes == []  # 확인 전에는 아무것도 쓰지 않는다
+
+    result = await executor.confirm(outcome.confirm_token, confirmed=True, player_id="p1")
+    assert result.data == {"count": 3, "written": True}
+    assert _bulk_writes == [3]
+
+
+@pytest.mark.asyncio
+async def test_bulk_tool_declined_does_not_write() -> None:
+    _bulk_writes.clear()
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(bulk_tool.__yuni_tool__, ctx, {"n": 5})  # pyright: ignore[reportFunctionMemberAccess]
+    assert outcome.confirm_token is not None
+    result = await executor.confirm(outcome.confirm_token, confirmed=False, player_id="p1")
+    assert result.error is not None
+    assert _bulk_writes == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_tool_dry_run_error_is_returned_without_pending() -> None:
+    _bulk_writes.clear()
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(bulk_tool.__yuni_tool__, ctx, {"n": -1})  # pyright: ignore[reportFunctionMemberAccess]
+    assert outcome.needs_confirm is False
+    assert outcome.result is not None
+    assert outcome.result.error == "음수는 안 된다"
+    assert _bulk_writes == []
+
+
+@pytest.mark.asyncio
+async def test_bulk_tool_ignores_caller_supplied_dry_run() -> None:
+    """dry_run은 실행기가 넣는 인자다 — 모델/슬래시가 넘겨도 스키마에 없어 무시된다."""
+    _bulk_writes.clear()
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(
+        bulk_tool.__yuni_tool__, ctx, {"n": 1, "dry_run": True}  # pyright: ignore[reportFunctionMemberAccess]
+    )
+    assert outcome.result is not None
+    assert outcome.result.data.get("written") is True
+    assert _bulk_writes == [1]
+
+
+@pytest.mark.asyncio
+async def test_always_tool_still_pauses_regardless_of_count() -> None:
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(dangerous.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
+    assert outcome.needs_confirm is True
+    assert outcome.preview is None

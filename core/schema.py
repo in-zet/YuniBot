@@ -8,9 +8,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, get_type_hints
 
+from core.decorators import DRY_RUN_PARAM
 from core.tool_types import STANDARD_REF_TYPES
 
 _PRIMITIVES: frozenset[type] = frozenset({str, int, float, bool})
+
+# 실행기가 직접 넣는 인자 — 모델/슬래시가 고르는 값이 아니라 스키마에 싣지 않는다.
+# dry_run: confirm="bulk" 도구에 실행기가 먼저 dry_run=True로 불러 바뀔 건수(data["count"])를
+# 받아 본다(core/executor.py). 모델/슬래시가 같은 이름을 넘겨도 스키마에 없으니 무시된다.
+CORE_INJECTED_PARAMS: frozenset[str] = frozenset({"ctx", DRY_RUN_PARAM})
 
 
 class SchemaBuildError(ValueError):
@@ -44,13 +50,13 @@ def _unwrap_optional(py_type: Any) -> tuple[Any, bool]:
 
 
 def build_arg_schema(fn: Callable[..., Any]) -> ArgSchema:
-    """ctx를 제외한 함수 인자에서 JSON Schema에 준하는 ArgSchema를 만든다."""
+    """ctx(와 실행기가 넣는 dry_run)를 제외한 함수 인자에서 JSON Schema에 준하는 ArgSchema를 만든다."""
     hints = get_type_hints(fn)
     signature = inspect.signature(fn)
     args: list[ArgSpec] = []
 
     for param_name, param in signature.parameters.items():
-        if param_name == "ctx":
+        if param_name in CORE_INJECTED_PARAMS:
             continue
 
         py_type = hints.get(param_name, Any)

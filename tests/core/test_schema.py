@@ -63,3 +63,12 @@ def test_build_arg_schema_rejects_optional_multi_member_union() -> None:
 def test_build_arg_schema_rejects_unsupported_type() -> None:
     with pytest.raises(SchemaBuildError, match="blob"):
         build_arg_schema(unsupported)
+
+
+async def with_dry_run(ctx: ToolContext, n: int, *, dry_run: bool = False) -> None: ...
+
+
+def test_build_arg_schema_excludes_core_injected_dry_run() -> None:
+    """dry_run은 confirm="bulk" 도구에 실행기가 넣는 인자다 — 모델/슬래시 스키마에 나오지 않는다."""
+    schema = build_arg_schema(with_dry_run)
+    assert [a.name for a in schema.args] == ["n"]

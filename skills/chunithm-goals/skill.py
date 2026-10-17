@@ -479,8 +479,9 @@ async def progress(ctx: ToolContext, goal_id: str) -> ToolResult:
 
 
 @tool(slash="목표 삭제", mutates=True, confirm="bulk")
-async def delete(ctx: ToolContext, goal_ids: str) -> ToolResult:
-    """목표를 지운다(쉼표로 여러 개 지정할 수 있다). 본인 목표만 지울 수 있다."""
+async def delete(ctx: ToolContext, goal_ids: str, *, dry_run: bool = False) -> ToolResult:
+    """목표를 지운다(쉼표로 여러 개 지정할 수 있다). 본인 목표만 지울 수 있다. 2개 이상을
+    지울 때는 실행기가 지울 개수를 보여 주고 확인 버튼을 받은 뒤에 지운다."""
     ids = [g.strip() for g in goal_ids.split(",") if g.strip()]
     owned: list[str] = []
     for gid in ids:
@@ -489,6 +490,12 @@ async def delete(ctx: ToolContext, goal_ids: str) -> ToolResult:
             owned.append(gid)
     if not owned:
         return ToolResult(error="지울 수 있는 목표가 없어.")
+    if dry_run:
+        return ToolResult(
+            data={"count": len(owned), "goal_ids": owned},
+            display=Display(content=f"목표 {len(owned)}개를 지울게."),
+            display_mode="optional",
+        )
     count = await models.delete_goals(ctx.db, owned)
     return ToolResult(
         data={"deleted_count": count, "goal_ids": owned},
@@ -521,10 +528,12 @@ async def todo_bulk(
     condition: FolderCondition = FolderCondition.RANK,
     rank: str | None = None,
     public: bool = False,
+    dry_run: bool = False,
 ) -> ToolResult:
     """상수 범위·난이도·현재 랭크(또는 클리어/풀콤보/올저스티스) 조건에 맞는 채보를 모아
     To-Do로 일괄 추가한다. 조건이 played가 아니면 CHUNITHM-NET 동기화(chunithm-synced)가
-    있어야 한다. 추가 전 대상 개수를 data에 담아 돌려준다(실행기가 확인 버튼을 보여준다)."""
+    있어야 한다. 대상이 2개 이상이면 실행기가 먼저 대상 개수를 보여 주고 확인 버튼을 받은
+    뒤에 추가한다(0~1개면 바로 추가한다)."""
     if condition != FolderCondition.PLAYED and _SYNCED_TAG not in ctx.tags:
         return ToolResult(error="그 조건을 쓰려면 CHUNITHM-NET 동기화가 돼 있어야 해.")
     if condition == FolderCondition.RANK and rank is None:
@@ -547,6 +556,12 @@ async def todo_bulk(
         return ToolResult(
             data={"count": 0, "song_titles": []},
             display=Display(content="그 조건에 맞는 곡이 없어."),
+            display_mode="required",
+        )
+    if dry_run:
+        return ToolResult(
+            data={"count": len(targets), "song_titles": targets},
+            display=Display(content=f"투두 {len(targets)}개를 추가할게: {', '.join(targets)}"),
             display_mode="required",
         )
 

@@ -13,6 +13,9 @@ import aiosqlite
 import pytest
 
 from core.events import EventBus
+from core.executor import ToolExecutor
+from core.permissions import InMemoryTagProvider
+from core.resolvers import ResolverRegistry
 from core.tool_types import ToolContext
 from services.chunithm.records import (
     ChartUpdate,
@@ -465,6 +468,75 @@ async def test_todo_bulk_counts_targets_and_skips_already_met(skill: ModuleType,
     # 곡A는 이미 SSS를 넘었으니 빠지고, 곡B/곡C만 투두로 들어간다 — confirm="bulk"로 보여줄 개수다.
     assert result.data["count"] == 2
     assert "곡A" not in result.data["song_titles"]
+
+
+def _executor() -> ToolExecutor:
+    return ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
+
+
+async def test_todo_bulk_via_executor_with_one_target_runs_without_confirm(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    songdb = _FakeSongDb(const_range_hits=["곡B"])
+    ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
+    outcome = await _executor().invoke(
+        skill.todo_bulk.__yuni_tool__, ctx,
+        {"min_const": 15.0, "max_const": 15.3, "difficulty": "MAS", "target_score": 1_007_500, "rank": "SSS"},
+    )
+    assert outcome.needs_confirm is False
+    assert outcome.result is not None and outcome.result.error is None
+    assert outcome.result.data["count"] == 1
+    assert len(await skill.models.list_goals_for_player(db, "p1", kind="song")) == 1
+
+
+async def test_todo_bulk_via_executor_with_many_targets_needs_confirm_before_writing(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    songdb = _FakeSongDb(const_range_hits=["곡B", "곡C"])
+    ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
+    executor = _executor()
+    outcome = await executor.invoke(
+        skill.todo_bulk.__yuni_tool__, ctx,
+        {"min_const": 15.0, "max_const": 15.3, "difficulty": "MAS", "target_score": 1_007_500, "rank": "SSS"},
+    )
+    assert outcome.needs_confirm is True
+    assert outcome.confirm_token is not None
+    assert outcome.preview is not None and outcome.preview.data["count"] == 2
+    assert await skill.models.list_goals_for_player(db, "p1", kind="song") == []  # 아직 안 썼다
+
+    result = await executor.confirm(outcome.confirm_token, confirmed=True, player_id="p1")
+    assert result.error is None
+    assert result.data["count"] == 2
+    assert len(await skill.models.list_goals_for_player(db, "p1", kind="song")) == 2
+
+
+async def test_delete_via_executor_single_goal_runs_without_confirm(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
+    outcome = await _executor().invoke(skill.delete.__yuni_tool__, ctx, {"goal_ids": created.data["goal_id"]})
+    assert outcome.needs_confirm is False
+    assert outcome.result is not None and outcome.result.data["deleted_count"] == 1
+    assert await skill.models.fetch_goal(db, created.data["goal_id"]) is None
+
+
+async def test_delete_via_executor_many_goals_needs_confirm_before_deleting(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    a = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습1")
+    b = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습2")
+    executor = _executor()
+    outcome = await executor.invoke(
+        skill.delete.__yuni_tool__, ctx, {"goal_ids": f"{a.data['goal_id']},{b.data['goal_id']}"}
+    )
+    assert outcome.needs_confirm is True
+    assert outcome.confirm_token is not None
+    assert await skill.models.fetch_goal(db, a.data["goal_id"]) is not None  # 아직 안 지웠다
+
+    result = await executor.confirm(outcome.confirm_token, confirmed=True, player_id="p1")
+    assert result.data["deleted_count"] == 2
+    assert await skill.models.fetch_goal(db, a.data["goal_id"]) is None
+    assert await skill.models.fetch_goal(db, b.data["goal_id"]) is None
 
 
 async def test_todo_list_sorts_by_remaining(skill: ModuleType, db: aiosqlite.Connection) -> None:

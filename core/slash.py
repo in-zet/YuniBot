@@ -423,7 +423,14 @@ def _build_command(
 
         if outcome.needs_confirm:
             view = ConfirmView(executor=executor, token=outcome.confirm_token or "", requester_id=ctx.player_id)
-            await respond(interaction, content="확인해 주세요.", view=view, ephemeral=True)
+            # confirm="bulk"면 dry_run 미리보기(바뀔 건수 안내)를 버튼과 함께 보여준다.
+            preview_text = (
+                outcome.preview.display.content
+                if outcome.preview is not None and outcome.preview.display is not None
+                else None
+            )
+            content = f"{preview_text}\n확인해 주세요." if preview_text else "확인해 주세요."
+            await respond(interaction, content=content, view=view, ephemeral=True)
             return
 
         result = outcome.result
@@ -450,7 +457,8 @@ def _build_command(
 
 
 class ConfirmView(discord.ui.View):
-    """confirm="always" 도구의 확인/취소 버튼. 요청한 플레이어 본인만 누를 수 있다.
+    """confirm="always" 도구(와 2건 이상을 바꾸는 confirm="bulk" 도구)의 확인/취소 버튼.
+    요청한 플레이어 본인만 누를 수 있다.
 
     본인 확인은 두 겹이다: 여기 interaction_check가 디스코드 UI 단계에서 먼저 막고,
     ToolExecutor.confirm(player_id=...)이 실행기 단계에서 다시 막는다."""

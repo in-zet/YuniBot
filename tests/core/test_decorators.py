@@ -144,3 +144,21 @@ def test_tool_requires_tool_context_first_param() -> None:
         async def bad_first_param(name: str) -> ToolResult:
             """첫 인자가 ctx가 아님."""
             return ToolResult(data={})
+
+
+def test_bulk_confirm_tool_requires_dry_run_param() -> None:
+    with pytest.raises(DecoratorError, match="dry_run"):
+
+        @tool(slash="일괄", mutates=True, confirm="bulk")
+        async def no_dry_run(ctx: ToolContext, n: int) -> ToolResult:
+            """dry_run이 없는 bulk 도구."""
+            return ToolResult(data={"count": n})
+
+
+def test_bulk_confirm_tool_with_dry_run_param_is_accepted() -> None:
+    @tool(slash="일괄", mutates=True, confirm="bulk")
+    async def with_dry_run(ctx: ToolContext, n: int, *, dry_run: bool = False) -> ToolResult:
+        """dry_run이 있는 bulk 도구."""
+        return ToolResult(data={"count": n})
+
+    assert with_dry_run.__yuni_tool__.confirm == "bulk"  # pyright: ignore[reportFunctionMemberAccess]

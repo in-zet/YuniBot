@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from core.decorators import SlashOnlySpec, ToolSpec
+from core.decorators import DRY_RUN_PARAM, SlashOnlySpec, ToolSpec
 from core.events import EventBus
 from core.manifest import DefinedTag
 from core.permissions import (
@@ -30,6 +30,14 @@ class ExecutionOutcome:
     result: ToolResult | None
     needs_confirm: bool = False
     confirm_token: str | None = None
+    # confirm="bulk" 도구가 dry_run으로 돌려준 미리보기(바뀔 건수와 안내문). 확인 버튼과
+    # 함께 보여준다. confirm="always"면 None이다.
+    preview: ToolResult | None = None
+
+
+def _bulk_count(preview: ToolResult) -> int:
+    count = preview.data.get("count", 0)
+    return count if isinstance(count, int) else 0
 
 
 @dataclass(slots=True, kw_only=True)
@@ -177,13 +185,35 @@ class ToolExecutor:
 
         confirm_mode = getattr(spec, "confirm", "never")
         if confirm_mode == "always":
-            token = str(uuid.uuid4())
-            self._pending[token] = _PendingConfirm(
-                spec=spec, ctx=ctx, resolved_args=resolved, requester_id=ctx.player_id
-            )
-            return ExecutionOutcome(result=None, needs_confirm=True, confirm_token=token)
+            return self._hold(spec, ctx, resolved)
+
+        if confirm_mode == "bulk":
+            # 먼저 dry_run=True로 불러 바뀔 건수(data["count"])만 받는다 — 이 호출은 아무것도
+            # 쓰지 않는다(도구의 약속, @tool이 dry_run 인자를 강제한다). 2건 이상이면 확인을
+            # 받고, 0~1건(또는 count가 없음)이면 확인 없이 바로 실제로 부른다.
+            preview = await self._call(spec, ctx, {**resolved, DRY_RUN_PARAM: True})
+            if preview.error is not None:
+                return ExecutionOutcome(result=preview)
+            if _bulk_count(preview) > 1:
+                return self._hold(spec, ctx, resolved, preview=preview)
 
         return ExecutionOutcome(result=await self._call(spec, ctx, resolved))
+
+    def _hold(
+        self,
+        spec: ToolSpec | SlashOnlySpec,
+        ctx: ToolContext,
+        resolved: dict[str, Any],
+        *,
+        preview: ToolResult | None = None,
+    ) -> ExecutionOutcome:
+        """확인을 받을 때까지 실행을 미룬다. resolved에는 dry_run이 들어가지 않는다 —
+        확인 뒤 confirm()이 그대로 실제 호출에 쓴다."""
+        token = str(uuid.uuid4())
+        self._pending[token] = _PendingConfirm(
+            spec=spec, ctx=ctx, resolved_args=resolved, requester_id=ctx.player_id
+        )
+        return ExecutionOutcome(result=None, needs_confirm=True, confirm_token=token, preview=preview)
 
     async def confirm(self, confirm_token: str, *, confirmed: bool, player_id: str) -> ToolResult:
         """player_id는 버튼을 누른 플레이어다. 요청한 본인이 아니면 실행도 취소도 하지 않고,
