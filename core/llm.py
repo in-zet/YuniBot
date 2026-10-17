@@ -16,6 +16,9 @@ class FunctionCallRequest:
 class FunctionResultPart:
     name: str
     response: dict[str, Any] = field(default_factory=dict)
+    call_id: str | None = None  # Claude는 결과를 호출 ID로 짝짓는다(이름만으론 같은 도구를
+    # 병렬로 두 번 부른 경우를 구분 못 한다). Gemini 어댑터는 이름 매칭만으로 충분해 이 필드를
+    # 쓰지 않는다.
 
 
 @dataclass(slots=True, kw_only=True)

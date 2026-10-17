@@ -12,7 +12,7 @@ Oct 9, 2026 · @astrove
 | 대상 게임 | 츄니즘 국제판. 일본판은 업데이트 알림만 |
 | 구동 환경 | 우분투 서버 미니 PC(라이젠 5, x86-64), Docker Compose. 매일 새벽 몇 시간 꺼짐 |
 | 부르는 방법 | 유니 멘션은 LLM을 거치고, 슬래시 명령은 LLM 없이 같은 기능을 쓴다 |
-| LLM | Gemini API 유료 등급. 에이전트는 Flash, 요약은 Flash-Lite 계열("비용과 운영" 절) |
+| LLM | 기본은 Gemini API 유료 등급(에이전트는 Flash, 요약은 Flash-Lite 계열, "비용과 운영" 절). `LLM_PROVIDER` 설정값으로 Claude(Haiku 계열)도 고를 수 있다(6단계 추가, 2026-10-17) |
 | 인격 | 유니 단독. 파트너 나비는 이름만 언급하고 화자로 나오지 않는다 |
 | 호칭 | 정해 둔 호칭, 없으면 CHUNITHM-NET 닉네임, 그것도 없으면 디스코드 닉네임. 닉네임으로 부를 때는 "상"을 붙인다 |
 | 메모리 | LLM이 자동으로 요약해 저장하고, 플레이어가 보고 지울 수 있다 |
@@ -87,7 +87,7 @@ Oct 9, 2026 · @astrove
 | 권한 태그 | 플레이어가 가진 태그를 모으고, 스킬과 도구의 조건과 맞춰 본다. 자세한 규칙은 "데이터, 권한, 비밀 값" 절에 있다. |
 | 메모리 | 플레이어별 기억의 저장, 요약, 프롬프트 주입. 요약에는 싼 모델을 쓴다. 보기·지우기·끄기는 `memory` 스킬이 맡는다. |
 | 이벤트 버스와 예약 작업 | 스킬이 내는 사건을 다른 스킬에 전하고, 예약된 작업을 돌린다. 새벽 정지 시간에 놓친 작업을 다시 잡는다. |
-| LLM 어댑터 | 모델 제공자를 감춘다. Gemini는 공식 SDK google-genai의 비동기 클라이언트(client.aio)로 부른다. SDK의 자동 함수 호출은 끄고, 도구 실행은 코어의 도구 실행기만 한다. 모델 이름은 설정값이고, Gemini의 thought 블록 전달 같은 제공자별 처리는 여기서만 한다. |
+| LLM 어댑터 | 모델 제공자를 감춘다. 제공자는 `LLM_PROVIDER` 설정값(부팅 시점에만 고름, 런타임 전환 없음)으로 Gemini/Claude 중 하나를 고른다. Gemini는 공식 SDK google-genai의 비동기 클라이언트(client.aio)로, Claude는 공식 SDK anthropic의 비동기 클라이언트(AsyncAnthropic)로 부른다. 두 SDK 모두 자동 함수 호출은 끄고(Claude는 원래 자동 실행을 안 하므로 해당 없음), 도구 실행은 코어의 도구 실행기만 한다. 모델 이름은 설정값이고, Gemini의 thought 블록 전달 같은 제공자별 처리는 그 어댑터 안에서만 한다(6단계에서 Claude 지원 추가, 2026-10-17). |
 | 스킬 레지스트리 | 시작할 때 스킬 폴더와 태그 정의를 읽고 규격을 검사해 등록한다. 규격에 어긋난 스킬은 실패한 이유를 남기고 끈다. |
 
 **코어가 직접 갖는 도구**는 세 개뿐이다. 스킬을 펼치는 `open_skill`, 플레이어 메모리를 남기는 `remember`, 할 수 있는 일을 안내하는 `list_capabilities`다. 나머지는 모두 스킬이 가져온다.
@@ -604,7 +604,7 @@ yuni-bot/
   docs/                  설계서, 스킬 작성 안내, 참고 자료
 ```
 
-**기술 스택**: Python 3.14, discord.py, google-genai(Gemini 공식 SDK), aiosqlite + SQLite, httpx, uv, ruff, basedpyright, pytest, Docker Compose. ORM과 alembic은 쓰지 않는다. 테이블은 SQL 파일로 만들고, 쿼리도 SQL 문을 직접 쓴다. 원본 어댑터가 요구하는 버전과 라이브러리를 그대로 따른다. 원본은 SQLAlchemy를 쓰므로, 가져온 코드가 그것을 import하면 `third_party` 때문에만 의존성으로 남기고 우리 코드에서는 쓰지 않는다. 도구 인자 스키마는 msgspec으로 만든다. 원본도 msgspec을 의존성으로 쓴다.
+**기술 스택**: Python 3.14, discord.py, google-genai(Gemini 공식 SDK), anthropic(Claude 공식 SDK, 6단계 추가), aiosqlite + SQLite, httpx, uv, ruff, basedpyright, pytest, Docker Compose. ORM과 alembic은 쓰지 않는다. 테이블은 SQL 파일로 만들고, 쿼리도 SQL 문을 직접 쓴다. 원본 어댑터가 요구하는 버전과 라이브러리를 그대로 따른다. 원본은 SQLAlchemy를 쓰므로, 가져온 코드가 그것을 import하면 `third_party` 때문에만 의존성으로 남기고 우리 코드에서는 쓰지 않는다. 도구 인자 스키마는 msgspec으로 만든다. 원본도 msgspec을 의존성으로 쓴다.
 
 **개발 규칙**
 

@@ -23,7 +23,11 @@ class CoreConfig:
     # 기동 시 Chunimaru songdb를 받아 덧씌울지. 테스트가 실제 사이트에 접속하지 않도록
     # 끌 수 있게 둔 스위치다(운영 기본값은 켬).
     fetch_chunimaru_on_startup: bool = True
+    # 제공자는 부팅 시점 설정값이다(런타임 전환 없음). agent_model/summary_model의 값은
+    # 고른 제공자에 맞는 모델 이름이어야 한다(예: claude면 "claude-haiku-5-5").
+    llm_provider: Literal["gemini", "claude"] = "gemini"
     gemini_api_key: str = ""
+    anthropic_api_key: str = ""
     agent_model: str = "gemini-3.8-flash"
     summary_model: str = "gemini-3.5-flash-lite"
     thinking_level: Literal["low", "medium", "high"] = "low"
@@ -65,7 +69,9 @@ def load_config() -> CoreConfig:
 
     cookie_key = os.environ.get("COOKIE_ENCRYPTION_KEY", "").encode()
 
+    llm_provider_raw = os.environ.get("LLM_PROVIDER", "gemini")
     gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     agent_model = os.environ.get("AGENT_MODEL", "gemini-3.8-flash")
     summary_model = os.environ.get("SUMMARY_MODEL", "gemini-3.5-flash-lite")
     thinking_level_raw = os.environ.get("THINKING_LEVEL", "low")
@@ -82,7 +88,9 @@ def load_config() -> CoreConfig:
         quiet_hours_start=quiet_start,
         quiet_hours_end=quiet_end,
         cookie_encryption_key=cookie_key,
+        llm_provider=cast("Literal['gemini', 'claude']", llm_provider_raw),
         gemini_api_key=gemini_api_key,
+        anthropic_api_key=anthropic_api_key,
         agent_model=agent_model,
         summary_model=summary_model,
         thinking_level=cast("Literal['low', 'medium', 'high']", thinking_level_raw),

@@ -20,6 +20,8 @@ from core.decorators import ScheduleSpec
 from core.events import EventBus, handler_kind
 from core.executor import ToolExecutor
 from core.help_slash import build_help_command
+from core.llm import LlmAdapter
+from core.llm_claude import ClaudeLlmAdapter
 from core.llm_gemini import GeminiLlmAdapter
 from core.mention import ChannelMessage, MentionEntry, is_mention_eligible
 from core.migrations import run_migrations
@@ -179,8 +181,9 @@ class YuniClient(discord.Client):
         await self.http_service.aclose()
         # LlmAdapter 프로토콜(core/llm.py)은 aclose()를 선언하지 않는다 — 테스트용
         # FakeLlmAdapter 등 다른 구현에는 없을 수 있는 메서드이기 때문이다. build_client가
-        # 실제로 넣는 것은 항상 GeminiLlmAdapter이므로 여기서만 구체 타입으로 좁혀 닫는다.
-        llm_adapter = cast("GeminiLlmAdapter", self._mention_entry._agent._llm)
+        # 실제로 넣는 것은 항상 GeminiLlmAdapter 아니면 ClaudeLlmAdapter(LLM_PROVIDER에 따라)
+        # 둘 중 하나이므로 여기서만 구체 타입으로 좁혀 닫는다.
+        llm_adapter = cast("GeminiLlmAdapter | ClaudeLlmAdapter", self._mention_entry._agent._llm)
         await llm_adapter.aclose()
         await self.conn.close()
         await super().close()
@@ -422,16 +425,24 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         persona_text=Path("prompts/persona.md").read_text(),
         registry=registry,
     )
+    # 제공자(Gemini/Claude)는 부팅 시점 설정값이다(LLM_PROVIDER, 런타임 전환 없음).
     # google-genai의 Client(api_key="")는 "네트워크 없이 어댑터 객체만 만든다"가 아니라,
-    # 생성 시점에 키가 비어 있으면(환경변수 GOOGLE_API_KEY/GEMINI_API_KEY도 없으면) 바로
-    # ValueError를 던진다 — 테스트처럼 키 없이 build_client를 띄우는 경로를 막아서는 안
-    # 되므로(실제 호출은 멘션 경로에서 어차피 try/except로 LLM_FAILURE_MESSAGE로 감싼다),
-    # 빈 키는 더미 값으로 바꿔 구성만 통과시킨다.
-    if not config.gemini_api_key:
-        logger.warning(
-            "GEMINI_API_KEY가 비어 있다 - 설정 전까지 모든 멘션이 실패한다"
-        )
-    llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
+    # 생성 시점에 키가 비어 있으면 바로 ValueError를 던진다 — 테스트처럼 키 없이
+    # build_client를 띄우는 경로를 막아서는 안 되므로(실제 호출은 멘션 경로에서 어차피
+    # try/except로 LLM_FAILURE_MESSAGE로 감싼다), 빈 키는 더미 값으로 바꿔 구성만 통과시킨다.
+    llm_adapter: LlmAdapter
+    if config.llm_provider == "claude":
+        if not config.anthropic_api_key:
+            logger.warning(
+                "ANTHROPIC_API_KEY가 비어 있다 - 설정 전까지 모든 멘션이 실패한다"
+            )
+        llm_adapter = ClaudeLlmAdapter(api_key=config.anthropic_api_key or "unset")
+    else:
+        if not config.gemini_api_key:
+            logger.warning(
+                "GEMINI_API_KEY가 비어 있다 - 설정 전까지 모든 멘션이 실패한다"
+            )
+        llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
     # registry_snapshot은 슬래시 쪽(아래 attach_to_tree)보다 먼저 만든다 — AgentLoop도 같은
     # 스냅샷을 쥐고 있어야 멘션 경로의 admin_skills 같은 도구가 ctx.registry_snapshot을 쓸 수
     # 있다(core/slash.py의 _player_context와 같은 배선). registry는 이 시점 이후로

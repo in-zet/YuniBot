@@ -15,7 +15,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from core.agent import AgentLoop
+from google.genai.errors import ServerError
+
+from core.agent import AgentLoop, AgentTurnResult
 from core.executor import ToolExecutor
 from core.llm_gemini import GeminiLlmAdapter
 from core.llm_pricing import estimate_cost_usd
@@ -72,6 +74,22 @@ class _RecordingAgentLoop(AgentLoop):
         return await super()._invoke(ctx, tool_name, args)
 
 
+async def _run_with_retry(
+    loop: AgentLoop, *, ctx: ToolContext, state: SkillLoadState, question: str
+) -> AgentTurnResult:
+    """Gemini가 "현재 수요가 많다"는 503을 던진다(실제로 관찰됨, 분당 요청 수 제한에 걸리는
+    것으로 보인다 — 짧은 재시도로는 안 풀려서 간격을 늘렸다). 평가 케이스 하나가 이걸로
+    전체 비교를 멈춰 세우지 않도록 재시도한다."""
+    for attempt in range(4):
+        try:
+            return await loop.run(ctx=ctx, skill_state=state, user_text=question, prompt_context_snippets=[])
+        except ServerError:
+            if attempt == 3:
+                raise
+            await asyncio.sleep(20 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
 async def run_eval(
     *, model: str, mode: Literal["instructions", "full"], registry: SkillRegistry, executor: ToolExecutor, api_key: str
 ) -> EvalReport:
@@ -91,7 +109,7 @@ async def run_eval(
         ctx = ToolContext(player_id="eval", tags=frozenset(), services={})
         state = SkillLoadState(mode=mode, known_skills=known_skills)
         started = time.monotonic()
-        result = await loop.run(ctx=ctx, skill_state=state, user_text=case.question, prompt_context_snippets=[])
+        result = await _run_with_retry(loop, ctx=ctx, state=state, question=case.question)
         report.latencies_seconds.append(time.monotonic() - started)
         report.total += 1
         report.estimated_cost_usd += estimate_cost_usd(
@@ -103,6 +121,7 @@ async def run_eval(
             report.tool_choice_errors += 1
         if assemble_response(result).numeric_violation:
             report.numeric_violations += 1
+        await asyncio.sleep(2)  # 분당 요청 수 제한을 피하려고 케이스 사이에 간격을 둔다
 
     await llm.aclose()
     return report

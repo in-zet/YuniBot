@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import logging
 from pathlib import Path
@@ -334,5 +335,20 @@ async def test_build_client_registers_usage_service(tmp_path: Path) -> None:
     try:
         assert "usage" in executor.services
         assert client.tree.get_command("도움말") is not None
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_build_client_wires_claude_adapter_when_provider_is_claude(tmp_path: Path) -> None:
+    # anthropic_api_key가 비어 있어도 build_client는 떠야 한다(Gemini와 같은 이유 — 어댑터
+    # 생성은 네트워크를 안 쓴다). llm_provider="claude"면 ClaudeLlmAdapter가 들어가야 한다.
+    config = _config(tmp_path)
+    config = dataclasses.replace(config, llm_provider="claude")
+
+    client, _registry, _executor = await build_client(config)
+    try:
+        llm_adapter = client._mention_entry._agent._llm  # pyright: ignore[reportPrivateUsage]
+        assert type(llm_adapter).__name__ == "ClaudeLlmAdapter"
     finally:
         await client.close()

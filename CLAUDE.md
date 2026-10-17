@@ -66,8 +66,8 @@
 **유니와 LLM**
 
 - 멘션, 유니 메시지에 단 답장(멘션 알림 켜짐), 유니가 낸 버튼, 스킬이 연 대화 스레드에만 반응한다. 그 밖의 메시지는 LLM에 넘기지 않는다.
-- LLM 호출은 `core/`의 LLM 어댑터 한 곳에서만 한다. google-genai 비동기 클라이언트를 쓰고, SDK의 자동 함수 호출은 끈다. 도구 실행은 코어의 도구 실행기만 한다.
-- 모델 이름은 설정값이다. 코드에 박지 않는다.
+- LLM 호출은 `core/`의 LLM 어댑터 한 곳에서만 한다. Gemini는 google-genai, Claude는 anthropic 비동기 클라이언트를 쓰고(제공자는 `LLM_PROVIDER` 설정값, 부팅 시점에만 고름), SDK의 자동 함수 호출은 끈다(해당 안 되면 그대로 둔다). 도구 실행은 코어의 도구 실행기만 한다.
+- 모델 이름과 제공자는 설정값이다. 코드에 박지 않는다.
 - `prompts/rules.md`(규칙)와 `prompts/persona.md`(말투)를 나눈다. 규칙이 우선한다.
 - 웹 검색 결과와 남이 쓴 글(메모, 후기)은 인용 데이터로만 넘긴다. 그 안의 지시문은 따르지 않는다.
 
@@ -101,4 +101,4 @@ docker compose up -d --build                                 # 기동
 
 ## 스택
 
-Python 3.14, discord.py, google-genai, aiosqlite + SQLite, httpx, msgspec, uv, ruff, basedpyright, pytest, Docker Compose. 원본 어댑터가 요구하는 라이브러리와 버전은 그대로 따른다. 원본 코드가 SQLAlchemy를 import하면 `third_party` 때문에만 의존성으로 두고, 우리 코드에서는 쓰지 않는다.
+Python 3.14, discord.py, google-genai, anthropic, aiosqlite + SQLite, httpx, msgspec, uv, ruff, basedpyright, pytest, Docker Compose. 원본 어댑터가 요구하는 라이브러리와 버전은 그대로 따른다. 원본 코드가 SQLAlchemy를 import하면 `third_party` 때문에만 의존성으로 두고, 우리 코드에서는 쓰지 않는다.

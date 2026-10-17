@@ -166,6 +166,7 @@ class AgentLoop:
                         function_response=FunctionResultPart(
                             name=call.name,
                             response={"error": tool_result.error} if tool_result.error else tool_result.data,
+                            call_id=call.call_id,
                         )
                     )
                 )

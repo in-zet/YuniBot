@@ -15,3 +15,9 @@ def test_estimate_cost_usd_flash_lite() -> None:
 def test_estimate_cost_usd_unknown_model_is_zero_but_does_not_raise() -> None:
     # 요금표에 없는 모델 이름이 설정값으로 들어와도 사용량 기록 전체가 죽으면 안 된다.
     assert estimate_cost_usd("some-future-model", input_tokens=1000, output_tokens=1000) == 0.0
+
+
+def test_estimate_cost_usd_claude_haiku() -> None:
+    # 100만 입력 + 100만 출력 기준, 100K 이하 프롬프트 표준가(2026-10-17 확인).
+    cost = estimate_cost_usd("claude-haiku-5-5", input_tokens=1_000_000, output_tokens=1_000_000)
+    assert cost == 0.10 + 0.50

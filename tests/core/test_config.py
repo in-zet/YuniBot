@@ -115,3 +115,26 @@ def test_load_config_llm_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.skill_loading_mode == "full"
     assert config.max_tool_calls_per_turn == 3
     assert config.max_tokens_per_turn == 20000
+
+
+def test_load_config_llm_provider_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("core.config.load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    config = load_config()
+
+    assert config.llm_provider == "gemini"
+    assert config.anthropic_api_key == ""
+
+
+def test_load_config_llm_provider_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.setenv("LLM_PROVIDER", "claude")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-anthropic-key")
+
+    config = load_config()
+
+    assert config.llm_provider == "claude"
+    assert config.anthropic_api_key == "fake-anthropic-key"
