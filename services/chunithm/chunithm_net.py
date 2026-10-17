@@ -5,13 +5,14 @@ import http.cookiejar
 import io
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 import aiosqlite
 from chuni_penguin.adapters.chunithm_net.utils import is_valid_clal
 from chuni_penguin.adapters.errors import AuthenticationError
+from chuni_penguin.types import Difficulty
 
 from core.tool_types import ToolContext
 from services.common.players import PlayersService
@@ -22,12 +23,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# fetch_for_sync가 전체 PB를 모을 때 도는 순서. CHUNITHM-NET이 쓰는 코드 그대로다
+# (Difficulty(code)가 "BAS"/"ADV"/"EXP"/"MAS"/"ULT"/"WE"를 그대로 알아듣는다).
+_PERSONAL_BEST_DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
+
 
 class ChunithmNetAdapterLike(Protocol):
     async def get_profile(self) -> Profile: ...
     async def get_best30(self) -> list[PersonalBest]: ...
     async def get_new20(self) -> list[PersonalBest]: ...
     async def get_recent_scores(self) -> list[RecentScore]: ...
+    async def get_personal_bests(self, *, difficulty: Difficulty) -> list[PersonalBest]: ...
+    async def get_detailed_recent_score(self, score: RecentScore) -> RecentScore: ...
     async def logout(self) -> None: ...
     async def aclose(self) -> None: ...
 
@@ -129,6 +136,8 @@ class SyncFetch:
     best30: list[PersonalBest]
     new20: list[PersonalBest]
     recent_scores: list[RecentScore]
+    # 키는 "BAS"/"ADV"/"EXP"/"MAS"/"ULT"/"WE" (_PERSONAL_BEST_DIFFICULTY_CODES).
+    all_personal_bests: dict[str, list[PersonalBest]] = field(default_factory=dict)
 
 
 class ChunithmNetService:
@@ -258,6 +267,9 @@ class ChunithmNetService:
             best30 = await adapter.get_best30()
             new20 = await adapter.get_new20()
             recent_scores = await adapter.get_recent_scores()
+            all_personal_bests: dict[str, list[PersonalBest]] = {}
+            for code in _PERSONAL_BEST_DIFFICULTY_CODES:
+                all_personal_bests[code] = await adapter.get_personal_bests(difficulty=Difficulty(code))
         except AuthenticationError:
             await self._players.revoke_status_tag(player_id, "chunithm-linked")
             if ctx is not None:
@@ -266,7 +278,42 @@ class ChunithmNetService:
         finally:
             await adapter.aclose()
 
-        return SyncFetch(profile=profile, best30=best30, new20=new20, recent_scores=recent_scores)
+        return SyncFetch(
+            profile=profile,
+            best30=best30,
+            new20=new20,
+            recent_scores=recent_scores,
+            all_personal_bests=all_personal_bests,
+        )
+
+    async def get_recent_scores(self, player_id: str) -> list[RecentScore]:
+        """최근 플레이 이력만 따로 가져온다(동기화와 달리 판정 상세 없이 목록만)."""
+        cookie = await self._decrypted_cookie(player_id)
+        if cookie is None:
+            raise ConnectionError("로그인되어 있지 않다")
+
+        adapter = self._adapter_factory(cookie)
+        try:
+            return await adapter.get_recent_scores()
+        finally:
+            await adapter.aclose()
+
+    async def enrich_recent_with_detail(
+        self, player_id: str, scores: list[RecentScore], *, limit: int
+    ) -> list[RecentScore]:
+        """앞 `limit`개만 상세 판정이 붙은 버전으로 바꿔 끼운 새 리스트를 돌려준다.
+        나머지는 받은 그대로 둔다. 넘겨받은 `scores` 리스트 자체는 건드리지 않는다."""
+        cookie = await self._decrypted_cookie(player_id)
+        if cookie is None:
+            raise ConnectionError("로그인되어 있지 않다")
+
+        adapter = self._adapter_factory(cookie)
+        try:
+            detailed = [await adapter.get_detailed_recent_score(score) for score in scores[:limit]]
+        finally:
+            await adapter.aclose()
+
+        return detailed + scores[limit:]
 
     async def _decrypted_cookie(self, player_id: str) -> str | None:
         """평문은 이 메서드를 부른 호출자 스코프에만 잠깐 존재한다 — 반환값을

@@ -1,5 +1,6 @@
 # tests/services/chunithm/test_chunithm_net.py
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 
 import aiosqlite
@@ -9,6 +10,16 @@ from chuni_penguin.adapters.chunithm_net.parser import (
     parse_player_data,
 )
 from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
+from chuni_penguin.types import (
+    Chart,
+    ClearLamp,
+    ComboLamp,
+    Difficulty,
+    Judgements,
+    PersonalBest,
+    RecentScore,
+    Song,
+)
 from cryptography.fernet import Fernet
 from selectolax.lexbor import LexborHTMLParser
 
@@ -51,6 +62,19 @@ def _fixture_new20():
     return parse_music_for_rating(LexborHTMLParser(_RECENT_HTML))
 
 
+def _make_recent_score(n: int) -> RecentScore:
+    """상세 판정 조회 테스트에 쓸 최소한의 RecentScore. judgements는 비워 둬서
+    enrich_recent_with_detail이 채웠는지 아닌지로 구분할 수 있게 한다."""
+    return RecentScore(
+        song=Song(id=n, title=f"테스트곡 {n}"),
+        chart=Chart(difficulty=Difficulty.master),
+        score=1_000_000,
+        clear_lamp=ClearLamp.clear,
+        combo_lamp=ComboLamp.none,
+        judgements=None,
+    )
+
+
 class _FakeAdapter:
     def __init__(
         self,
@@ -59,6 +83,8 @@ class _FakeAdapter:
         error: Exception | None = None,
         logout_fails: bool = False,
         jar: str = "#LWP-Cookies-2.0\n",
+        recent_scores: list[RecentScore] | None = None,
+        personal_bests: dict[str, list[PersonalBest]] | None = None,
     ) -> None:
         self.fails = fails
         # fails=True의 기본 실패는 "쿠키 만료" — 실제 어댑터가 인증 실패에서 던지는 타입이다.
@@ -66,6 +92,8 @@ class _FakeAdapter:
         self.logout_fails = logout_fails
         self.logged_out = False
         self._jar = jar
+        self._recent_scores = recent_scores if recent_scores is not None else []
+        self._personal_bests = personal_bests if personal_bests is not None else {}
 
     @property
     def lwp_cookie_jar(self) -> str:
@@ -83,7 +111,17 @@ class _FakeAdapter:
         return _fixture_new20()
 
     async def get_recent_scores(self):
-        return []
+        return self._recent_scores
+
+    async def get_personal_bests(self, *, difficulty: Difficulty) -> list[PersonalBest]:
+        return self._personal_bests.get(difficulty.short(), [])
+
+    async def get_detailed_recent_score(self, score: RecentScore) -> RecentScore:
+        # 실제 어댑터는 상세 페이지를 다시 읽어 judgements를 채운다 — 가짜에서는
+        # 상세 조회가 다녀갔다는 것만 알 수 있으면 충분하다.
+        return replace(
+            score, judgements=Judgements(justice_critical=0, justice=0, attack=0, miss=0)
+        )
 
     async def logout(self) -> None:
         if self.logout_fails:
@@ -413,3 +451,89 @@ def test_build_lwp_cookie_jar_rejects_invalid_clal_without_embedding_it() -> Non
     with pytest.raises(ValueError) as exc_info:
         _ = _build_lwp_cookie_jar("not-a-valid-clal")
     assert "not-a-valid-clal" not in str(exc_info.value)
+
+
+async def test_fetch_for_sync_fills_all_personal_bests_for_every_difficulty(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    personal_bests = {
+        code: [PersonalBest(song=Song(id=idx, title=code), chart=Chart(difficulty=Difficulty(code)),
+                             score=900_000, clear_lamp=ClearLamp.clear, combo_lamp=ComboLamp.none)]
+        for idx, code in enumerate(("BAS", "ADV", "EXP", "MAS", "ULT", "WE"))
+    }
+    service = _make_service(
+        conn, secrets, adapter=_FakeAdapter(personal_bests=personal_bests), players=players
+    )
+    await service.login(player.id, "a" * 64, ctx)
+
+    fetch = await service.fetch_for_sync(player.id)
+
+    assert set(fetch.all_personal_bests.keys()) == {"BAS", "ADV", "EXP", "MAS", "ULT", "WE"}
+    for code in ("BAS", "ADV", "EXP", "MAS", "ULT", "WE"):
+        assert [pb.song.title for pb in fetch.all_personal_bests[code]] == [code]
+
+
+async def test_fetch_for_sync_on_connection_failure_does_not_partially_fill_personal_bests(
+    conn, secrets
+) -> None:
+    """Review Focus 3: 인증 실패면 PB 수집 도중이라도 부분 저장 없이 예외만 올라가야
+    한다(기존 best30/new20과 같은 취급)."""
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    await _make_service(conn, secrets, adapter=_FakeAdapter(), players=players).login(
+        player.id, "a" * 64, ctx
+    )
+
+    failing = _FakeAdapter(fails=True)
+    service_for_sync = _make_service(conn, secrets, adapter=failing, players=players)
+
+    with pytest.raises(AuthenticationError):
+        await service_for_sync.fetch_for_sync(player.id)
+
+
+async def test_get_recent_scores_returns_adapter_list(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    scores = [_make_recent_score(1), _make_recent_score(2)]
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(recent_scores=scores), players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    result = await service.get_recent_scores(player.id)
+
+    assert result == scores
+
+
+async def test_get_recent_scores_without_login_raises_connection_error(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+
+    with pytest.raises(ConnectionError):
+        await service.get_recent_scores(player.id)
+
+
+async def test_enrich_recent_with_detail_replaces_only_the_first_limit_items(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+    await service.login(player.id, "a" * 64, ctx)
+    scores = [_make_recent_score(n) for n in range(4)]
+
+    enriched = await service.enrich_recent_with_detail(player.id, scores, limit=2)
+
+    assert [s.judgements is not None for s in enriched] == [True, True, False, False]
+    # 원본 리스트는 건드리지 않는다.
+    assert all(s.judgements is None for s in scores)
+
+
+async def test_enrich_recent_with_detail_without_login_raises_connection_error(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+
+    with pytest.raises(ConnectionError):
+        await service.enrich_recent_with_detail(player.id, [_make_recent_score(1)], limit=1)
