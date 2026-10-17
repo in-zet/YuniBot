@@ -15,7 +15,7 @@ examples:
 category: 기록과 리포트
 game: chunithm
 version: 1
-services: [chunithm_net, records, yuni, notify]
+services: [chunithm_net, records, settings, yuni, notify, players]
 tags: [chunithm-linked]
 emits: [chunithm.sync.completed, chunithm.sync.reported]
 ```
@@ -35,7 +35,7 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 - **변화 없음**: 새 플레이가 없으면 모으기 이벤트는 내되, 받는 스킬들은 이 경우 현재값 조각만 돌려준다. 세션 보관과 후기는 나오지 않는다.
 - **여러 날이 섞임**: 플레이 이력의 날짜로 세션을 나누고, 리포트는 날짜별로 보여 준다. 날짜 경계와 배정 규칙은 `records` 서비스가 정한다.
 - **범위 지정**: 멘션에 "크로노만 봐 줘" 같은 지시가 붙으면 `focus` 인자로 채보를 넘기고, 조각을 만드는 스킬들은 그 채보로 걸러서 보여 준다. 저장은 항상 전체를 한다.
-- **공개 범위**: 기본은 동기화한 채널에 공개다. 플레이어 설정을 본인만 보기로 바꾸면, 슬래시로 부른 경우는 본인에게만 보이는 메시지로, 멘션으로 부른 경우는 DM으로 보낸다.
+- **공개 범위**: 기본은 동기화한 채널에 공개다. 플레이어 설정(`sync_report_public`)을 본인만 보기로 바꾸면, 슬래시든 멘션이든 리포트 전문을 대표 계정 DM으로 보내고, 부른 자리에는 "DM으로 보냈다"는 짧은 확인만 남긴다(슬래시는 본인에게만 보이는 메시지). 도구는 자기가 슬래시로 불렸는지 멘션으로 불렸는지, 지금 채널이 어디인지 모르기 때문이다. 그래서 공개 리포트의 `sent_location.channel_id`는 비워 둔다(`None`).
 - **유니 한마디 빼기**: 슬래시 명령에 옵션을 둔다. 표시물만 보낸다.
 - **레이팅 대조**: `records`가 계산한 레이팅이 CHUNITHM-NET 표시값과 다르면, 리포트 맨 아래에 어긋났다고 표시하고 로그를 남긴다.
 - **실패**: 쿠키 만료면 `chunithm_net`이 만료 이벤트를 내고, 이 스킬은 `/로그인`을 안내하는 오류를 돌려준다. 저장이 끝난 뒤 모으기에서 실패한 것은 리포트를 줄여서라도 보낸다.
@@ -56,7 +56,7 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 
 | 함수 | 하는 일 | 인자 | 슬래시 | 태그 | display | confirm | cost |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `run` | 동기화와 리포트 | `focus: list[ChartRef]`(선택), `quiet: bool`(유니 한마디 빼기), arcade: ArcadeRef(선택, 말한 오락실) | `/동기화` | 스킬 조건 | required | never | network |
+| `run` | 동기화와 리포트 | `focus: ChartRef`(선택. 지금은 채보 하나만 지정할 수 있다(여러 개 동시 지정은 이후 단계). 이벤트의 `focus`는 그대로 리스트 모양), `quiet: bool`(유니 한마디 빼기), arcade: ArcadeRef(선택, 말한 오락실) | `/동기화` | 스킬 조건 | required | never | network |
 
 ## 이벤트
 
@@ -76,7 +76,7 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 | 이름 | 범위 | 기본값 |
 | --- | --- | --- |
 | 리포트 공개 범위 | 플레이어 | 채널에 공개 |
-| 동기화 쿨다운 | 서버 | 2분(제안값) |
+| 동기화 쿨다운 | 서버 | 120초 |
 | 조각 시간 제한 | 전역 | 5초 |
 
 ## 유니 지침 (SKILL.md 본문 초안)
