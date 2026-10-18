@@ -59,9 +59,9 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
 
     assert "practice" in {s.manifest.name for s in registry.enabled_skills()}
     assert client.tree.get_command("연습") is not None  # 그룹: "연습 보기" 등
-    # 이 단계(18단계)에서 와이어링한 여섯 서비스가 전부 실행기까지 도달해야 한다 —
+    # build_client가 와이어링한 서비스가 전부 실행기까지 도달해야 한다 —
     # scheduler catch-up이 services 채우기보다 먼저 돌면 이 중 일부가 비어 있다.
-    # usage는 Task 15에서 추가로 와이어링됐다(admin.usage 등이 ctx.usage로 쓴다).
+    # usage는 admin.usage 등이 ctx.usage로 쓴다.
     assert set(executor.services) == {
         "players", "settings", "memory", "arcades", "http", "notify", "yuni",
         "songdb", "terms", "records", "usage",
@@ -118,7 +118,7 @@ async def test_build_client_skips_chunimaru_fetch_when_disabled(
 
 @pytest.mark.asyncio
 async def test_register_event_handlers_scopes_ctx_to_skill_services_and_applies_tags() -> None:
-    # Task 0: _register_event_handlers가 skill.manifest.services와 핸들러의 tags/tags_any를
+    # _register_event_handlers가 skill.manifest.services와 핸들러의 tags/tags_any를
     # EventBus에 넘기는지 — 실제로 bind_dispatch 뒤 emit_notify를 해 보고, 핸들러가 받는
     # ctx.services가 선언한 서비스로만 좁혀지는지, 태그 조건이 적용되는지 끝에서 끝으로 확인한다.
     received: list[set[str]] = []

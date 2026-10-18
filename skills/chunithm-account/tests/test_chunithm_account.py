@@ -289,7 +289,7 @@ async def test_login_expired_handler_sends_dm_once() -> None:
 
 
 async def test_logout_locked_without_chunithm_linked_shows_how_to_get_it() -> None:
-    """chunithm-linked는 chunithm-account의 defines_tags가 설명을 소유한다(finding 3).
+    """chunithm-linked는 chunithm-account의 defines_tags가 설명을 소유한다.
     실제 SkillRegistry로 manifest를 읽어야 describe_lock이 쓸 설명이 채워진다 —
     그래서 skill.logout()을 직접 부르지 않고 core.executor.ToolExecutor를 거친다
     (skills/chunithm-terms의 test_review_requires_admin_tag_via_executor와 같은 모양)."""

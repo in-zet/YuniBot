@@ -145,3 +145,10 @@ emits: [chunithm.session.closed, chunithm.session.viewed]
 - 날짜·기간·오락실 조합 검색과 없을 때의 제안.
 - 후기 종결 시 전문이 그대로 저장되고, 이어 남기기가 뒤에 붙는지.
 - 후기가 세션 공개와 별개로 비공개인지.
+
+## 구현 결정 (2026-10-17, 7단계 계획서에서 옮김 — 구현 전)
+
+- 7단계에서는 보관과 조회(`list`/`get`/`delete`)만 만든다. 후기(`review_open` 도구, `session_reviews` 테이블)는 만들지 않고, `get()`의 후기 표시는 건너뛴다.
+- `chunithm.sync.reported`를 받아도 대화 스레드를 열지 않고 보관만 한다.
+- manifest `emits`에는 `chunithm.session.viewed`만 적는다. `chunithm.session.closed`는 후기 종료 코드가 생기는 12단계에 더한다.
+- 조회 도구는 본인을 조회할 때 공개 설정을 보지 않고, 남을 조회할 때만 그 사람의 공개 설정을 확인한다.

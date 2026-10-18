@@ -28,7 +28,7 @@ KNOWN_SERVICE_NAMES: frozenset[str] = frozenset(
 )
 
 # 00-core.md "이벤트 목록"에서 코어/서비스가 내는 것으로 적힌 이벤트.
-# 3~4단계 전까지는 실제로 내는 코드가 없어도 "정의된 이벤트"로 취급한다.
+# 스킬 manifest의 emits에는 없으므로 여기서 "정의된 이벤트"로 등록한다.
 CORE_EMITTED_EVENTS: frozenset[str] = frozenset(
     {"players.first_seen", "chunithm.login.expired"}
 )

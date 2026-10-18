@@ -15,7 +15,7 @@ def chart_rating(score: int, const: float | None) -> Decimal | None:
     """채보 하나의 레이팅. 상수를 모르면 None("계산 불가")을 돌려준다 — vendored
     calculate_rating에 None을 그대로 넘기면 internal_level=0으로 취급해 조용히
     틀린(하지만 그럴듯한) 값을 낸다. 숫자는 코드가 계산하되, 모르는 것은 모른다고
-    드러내야 한다(CLAUDE.md, 2026-10-11 최종 리뷰에서 사용자 판단).
+    드러내야 한다(CLAUDE.md 숫자 규칙).
 
     const가 있으면 vendored calculate_rating을 그대로 감싼다 — 그 함수가
     이미 둘째 자리에서 버린다(1/10000 단위 정수를 //100으로 두 자리 버린 뒤 /100).
@@ -114,7 +114,7 @@ def frame_changes(
 def candidate_upside(
     const: float, frame_floor: Decimal, *, target_bonus: Decimal = Decimal("2.00")
 ) -> Decimal:
-    """후보곡(현재 프레임 밖)이 SSS(target_bonus 기본 2.00, 결정 사항 K)를 냈을 때
+    """후보곡(현재 프레임 밖)이 SSS(target_bonus 기본 2.00)를 냈을 때
     프레임 최저점을 얼마나 넘을지. `Decimal(str(const)) + target_bonus -
     frame_floor`를 그대로 돌려준다 — float 오차를 피하려 const를 문자열로 거쳐
     Decimal로 바꾼다. 음수면 그대로 음수로 돌려준다(아직 프레임에 못 들어온다는

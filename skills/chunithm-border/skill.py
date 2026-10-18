@@ -7,7 +7,7 @@ from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.terms import ResolvedRank
 
 # chunithm-border.md "계산" 표가 명시한 기준 점수 — terms 서비스를 또 부르지 않고
-# 설계서가 고정값으로 제시한 숫자를 그대로 쓴다(결정 사항 8번).
+# 설계서가 고정값으로 제시한 숫자를 그대로 쓴다(chunithm-border.md "구현 결정").
 _DEFAULT_BORDER_RANKS: tuple[tuple[str, int], ...] = (
     ("SSS+", 1_009_000), ("SSS", 1_007_500), ("SS+", 1_005_000), ("SS", 1_000_000),
 )

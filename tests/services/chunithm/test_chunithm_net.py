@@ -481,7 +481,7 @@ async def test_fetch_for_sync_fills_all_personal_bests_for_every_difficulty(conn
 async def test_fetch_for_sync_on_connection_failure_does_not_partially_fill_personal_bests(
     conn, secrets
 ) -> None:
-    """Review Focus 3: 인증 실패면 PB 수집 도중이라도 부분 저장 없이 예외만 올라가야
+    """인증 실패면 PB 수집 도중이라도 부분 저장 없이 예외만 올라가야
     한다(기존 best30/new20과 같은 취급)."""
     players = PlayersService(conn)
     player = await players.create_player()

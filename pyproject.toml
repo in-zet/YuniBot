@@ -1,7 +1,7 @@
 [project]
 name = "yunibot"
 version = "0.1.0"
-description = "Add your description here"
+description = "국제판 CHUNITHM 지인용 디스코드 봇 유니"
 requires-python = ">=3.14"
 dependencies = [
     "aiolimiter~=1.2",

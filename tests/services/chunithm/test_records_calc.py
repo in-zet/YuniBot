@@ -24,10 +24,7 @@ def test_chart_rating_below_500k_is_zero():
 
 
 def test_chart_rating_none_const_is_none():
-    """상수를 모르면 "계산 불가"(None)다 — 0으로 취급해 조용히 틀린 값을 내지 않는다
-    (사용자 판단, 2026-10-11 최종 리뷰에서 이 테스트의 기존 고정값이 Review Focus의
-    "상수를 못 찾으면 None/에러로 드러나야 한다"는 요구와 충돌한다는 걸 확인하고
-    바꿨다)."""
+    """상수를 모르면 "계산 불가"(None)다 — 0으로 취급해 조용히 틀린 값을 내지 않는다."""
     assert chart_rating(1_009_000, None) is None
 
 

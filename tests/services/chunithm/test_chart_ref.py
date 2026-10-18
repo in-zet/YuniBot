@@ -34,7 +34,7 @@ async def test_no_difficulty_token_defaults_to_master(resolver: ChartRefResolver
 async def test_missing_difficulty_on_song_raises(resolver: ChartRefResolver) -> None:
     # "B.B.K.K.B.K.K. 울티마"는 실제 시드에서 ULT 채보가 존재해(const 13.7,
     # charts = BAS/ADV/EXP/MAS/ULT/WE) 이 테스트의 전제(그 난이도가 없다)가
-    # 거짓이 된다. "前前前世"는 Task 6에서 확인된 단일, 중복 없는, available
+    # 거짓이 된다. "前前前世"는 확인된 단일, 중복 없는, available
     # 엔트리로 charts가 BAS/ADV/EXP/MAS뿐이라 ULT/WE가 실제로 없다 — 테스트
     # 의도(진짜로 없는 난이도를 물으면 raise)를 그대로 유지하면서 실제 시드
     # 데이터와 어긋나지 않는 조합으로 교체한다.

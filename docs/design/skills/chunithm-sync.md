@@ -96,3 +96,11 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 ## 미확인 사항
 
 - CHUNITHM-NET 최근 플레이 이력의 보관 개수 한도. 동기화 간격이 길면 일부 플레이의 날짜를 알 수 없다.
+
+## 구현 결정 (2026-10-17, 7단계 계획서에서 옮김)
+
+- 동기화 한 번에 CHUNITHM-NET 요청은 최대 10회다: 프로필·베스트30·신곡20·최근 이력 4회 + 난이도별 전체 PB 6회(BAS/ADV/EXP/MAS/ULT/WE). 그래서 `records_pb`는 "PB가 있는 모든 채보"를 담는다(목표 스킬의 To-Do 자동 완료용).
+- 세션 날짜와 "새 플레이" 판정은 최근 이력의 `achieved_at`이 1차 근거다. 직전 동기화 뒤의 플레이만 새 플레이로 보고, 최근 이력에 없는데 PB가 오른 채보는 이번 동기화의 가장 늦은 세션에 `estimated=True`로 붙인다. PB가 오르면 최근 이력이 비어도 `has_new_plays=True`다.
+- 프레임 진입·이탈은 동기화 적용 전 `records_pb`로 다시 계산한 상위 30/20과 이번 베스트30/신곡20을 비교한다.
+- 동기화 비교 데이터(diff)는 DB에 두지 않고 `RecordsService`의 메모리 캐시(최대 200개)에만 둔다. 같은 요청 안에서 쓰고 버린다.
+- 리포트의 레이팅·베스트30평균·신곡20평균 현재값과 직전값은 `/프로필`·`/베스트`와 같은 출처(`RecordsService.rating_deltas`, 동기화 때 저장한 CHUNITHM-NET 스냅샷)에서 가져온다.

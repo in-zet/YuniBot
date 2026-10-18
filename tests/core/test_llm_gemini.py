@@ -89,7 +89,7 @@ async def test_generate_converts_function_call_and_preserves_thought_signature()
 
 @pytest.mark.asyncio
 async def test_generate_folds_thinking_tokens_into_output_tokens() -> None:
-    # I2 회귀: 설계서 "비용과 운영"은 사고 토큰이 출력 가격에 포함된다고 적는다.
+    # 회귀: 설계서 "비용과 운영"은 사고 토큰이 출력 가격에 포함된다고 적는다.
     # thoughts_token_count를 무시하면 비용/월상한 집행이 실제보다 낮게 잡힌다.
     adapter = GeminiLlmAdapter(api_key="fake")
     content = types.Content(role="model", parts=[types.Part(text="답")])

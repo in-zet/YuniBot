@@ -137,7 +137,7 @@ async def run(
     player = await ctx.players.get_player(ctx.player_id)
     if player is None or player.sync_report_public:
         is_public = True
-        # ToolContext는 지금 채널을 모른다(결정 사항 J) — 채널 id는 비워 둔다.
+        # ToolContext는 지금 채널을 모른다(chunithm-sync.md "공개 범위") — 채널 id는 비워 둔다.
         sent_location: dict[str, Any] = {"kind": "channel", "channel_id": None}
         display = Display(content=rendered_text)
     else:

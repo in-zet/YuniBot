@@ -20,7 +20,7 @@ async def test_line_default_when_no_section_has_a_stage() -> None:
 
 
 def test_line_is_async_so_the_llm_swap_keeps_the_signature() -> None:
-    """리뷰(최종) Fix 8: 11단계 LLM 구현은 비동기여야 한다 — 지금부터 async로 둬 부르는 쪽이 안 바뀐다."""
+    """11단계 LLM 구현은 비동기여야 한다 — 지금부터 async로 둬 부르는 쪽이 안 바뀐다."""
     import inspect
 
     assert inspect.iscoroutinefunction(YuniService.line)

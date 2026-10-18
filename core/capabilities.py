@@ -48,7 +48,7 @@ def build_capabilities_text(
 
 async def build_capabilities_result(ctx: ToolContext, *, category: str | None) -> ToolResult:
     """core_tools.list_capabilities가 부르는 자리. 실제로는 core/agent.py의 AgentLoop가
-    list_capabilities 호출을 가로채 PromptAssembler로 직접 처리하므로(Task 14 설명 참고),
+    list_capabilities 호출을 가로채 PromptAssembler로 직접 처리하므로,
     이 함수는 AgentLoop를 거치지 않는 경로(예: 향후 직접 단위 테스트)를 위한 대비용 구현이고
     평소 에이전트 루프에서는 쓰이지 않는다. 레지스트리 접근이 없는 상태에서는 안내만 못 한다고
     답한다."""

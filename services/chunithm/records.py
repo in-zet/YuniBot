@@ -32,12 +32,12 @@ _GAME = "chunithm"
 # records_pb.rating / records_sync_log.computed_rating은 TEXT NOT NULL이라 None을
 # 그대로 넣을 수 없다 — 상수를 몰라 계산하지 못한 값은 이 표시로 남긴다.
 _UNKNOWN_RATING = "계산 불가"
-# 동기화 비교 데이터(diff)는 메모리에만 둔다(결정 사항 H). 한 요청 안에서 쓰고 버려지므로
+# 동기화 비교 데이터(diff)는 메모리에만 둔다(chunithm-sync.md "구현 결정"). 한 요청 안에서 쓰고 버려지므로
 # 이 이상 쌓일 일이 없다 — 넘치면 가장 오래된 것부터 지운다.
 _DIFF_CACHE_LIMIT = 200
 _BEST_FRAME_SIZE = 30
 _NEW_FRAME_SIZE = 20
-# 후보곡 상승폭·남은 점수의 기준점은 SSS다(결정 사항 K).
+# 후보곡 상승폭·남은 점수의 기준점은 SSS다(chunithm-report.md "후보곡").
 _SSS_SCORE = 1_007_500
 _DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 
@@ -227,7 +227,7 @@ class RecordsService:
     async def save_sync(self, player_id: str, fetch: SyncFetch, ctx: ToolContext) -> SyncResult:
         """동기화 결과를 저장한다. 베스트30·신곡20·전체 PB를 records_pb에 합쳐 넣고
         (점수가 오른 채보만 행 전체를 바꾼다), 첫 동기화가 아니면 직전 상태와 비교한
-        diff를 계산해 메모리 캐시에 둔다(sync_diff로 읽는다, 결정 사항 F/G/H).
+        diff를 계산해 메모리 캐시에 둔다(sync_diff로 읽는다, chunithm-sync.md "구현 결정").
 
         첫 동기화는 기준점만 만든다 — 세션도 diff도 만들지 않는다(리포트를 내지 않는다).
         세션 날짜는 동기화 시각이 아니라 최근 플레이 이력의 achieved_at(CHUNITHM-NET이
@@ -330,7 +330,7 @@ class RecordsService:
     ) -> tuple[SyncDiff, bool]:
         """첫 동기화가 아닐 때: PB를 합쳐 넣으면서 직전 상태와의 비교 데이터를 만든다.
         (diff, 새 플레이가 있었나)를 돌려준다. 커밋은 부르는 쪽(save_sync)이 한다."""
-        # 1) 직전 동기화 이후의 최근 플레이만 "이번에 새로 생긴 플레이"로 본다(결정 사항 F).
+        # 1) 직전 동기화 이후의 최근 플레이만 "이번에 새로 생긴 플레이"로 본다.
         recent_times: dict[ChartKey, list[datetime]] = {}
         recent_scores: dict[ChartKey, list[int]] = {}
         for recent in fetch.recent_scores:
@@ -357,7 +357,7 @@ class RecordsService:
             for key, times in recent_times.items()
         }
 
-        # 3) 동기화 적용 전 records_pb로 "이전 프레임"을 다시 계산한다(결정 사항 G).
+        # 3) 동기화 적용 전 records_pb로 "이전 프레임"을 다시 계산한다.
         previous_rows = await self.all_pb_rows(player_id)
         previous_by_key = {(r.song_title, r.difficulty): r for r in previous_rows}
         previous_best, previous_new = self._frames(previous_rows)
@@ -376,7 +376,7 @@ class RecordsService:
                 continue
             improved_keys.add(key)
             # 처음 보는 채보(old_score=None)도 이미 있던 채보의 갱신과 똑같이 다룬다 — 최근 이력에서
-            # 못 찾으면 가장 늦은 세션에 estimated로 붙는다(결정 사항 F).
+            # 못 찾으면 가장 늦은 세션에 estimated로 붙는다.
             session_id, estimated = match_session_for_chart(
                 key, recent_by_session_day, sessions_by_date, latest_session_id
             )
@@ -464,7 +464,7 @@ class RecordsService:
         return self._diff_cache.get(sync_id)
 
     async def latest_overpower(self, player_id: str) -> tuple[float | None, float | None] | None:
-        """최신 동기화 로그의 (오버파워 값, 퍼센트). CHUNITHM-NET 표시값 그대로다(결정 사항 L).
+        """최신 동기화 로그의 (오버파워 값, 퍼센트). CHUNITHM-NET 표시값 그대로다(chunithm-goals.md "구현 결정").
         동기화한 적이 없으면 None, 있지만 값이 없으면 (None, None)."""
         cursor = await self._conn.execute(
             "SELECT overpower_value, overpower_percentage FROM records_sync_log "
@@ -551,7 +551,7 @@ class RecordsService:
     ) -> list[CandidateHit]:
         """레이팅을 올릴 후보곡. 상수 범위 안에서 지금 프레임(베스트30/신곡20, records_pb
         기준) 밖에 있는 채보를, SSS를 냈을 때 그 채보가 속할 프레임 최저점을 얼마나 넘는지
-        (candidate_upside, 결정 사항 K) 내림차순으로 count개까지 돌려준다. 상승폭이 0 이하인
+        (candidate_upside) 내림차순으로 count개까지 돌려준다. 상승폭이 0 이하인
         채보는 뺀다. 안 친 채보는 현재 점수 0으로 본다."""
         rows = await self.all_pb_rows(player_id)
         best, new = self._frames(rows)
@@ -622,7 +622,7 @@ class RecordsService:
 
     def _frames(self, rows: list[PbRow]) -> tuple[list[PbRow], list[PbRow]]:
         """records_pb 행들로 (베스트30, 신곡20) 프레임을 다시 계산한다. 신곡 여부는
-        songdb.is_new_for로 판정한다(결정 사항 G)."""
+        songdb.is_new_for로 판정한다."""
         best: list[PbRow] = []
         new: list[PbRow] = []
         for row in sorted(rows, key=_frame_sort_key):

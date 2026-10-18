@@ -9,8 +9,8 @@ class DecryptionError(ValueError):
 
 class SecretsService:
     """clal 쿠키 같은 비밀값의 암호화/복호화. 복호화한 평문은 반환값으로만 나가고, 이
-    클래스는 그 값을 로그로도, 예외 메시지로도 남기지 않는다 — 호출하는 쪽(4단계
-    chunithm_net 서비스)도 같은 규칙을 지켜야 비밀값이 스킬/로그/LLM 입력으로 새지 않는다."""
+    클래스는 그 값을 로그로도, 예외 메시지로도 남기지 않는다 — 호출하는 쪽(chunithm_net
+    서비스)도 같은 규칙을 지켜야 비밀값이 스킬/로그/LLM 입력으로 새지 않는다."""
 
     def __init__(self, key: bytes) -> None:
         self._fernet = Fernet(key)

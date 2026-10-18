@@ -295,7 +295,7 @@ async def test_server_alias_lookup_is_case_insensitive(songdb_with_conn: SongDbS
 async def test_add_alias_same_song_reregister_does_not_steal_ownership(
     songdb_with_conn: SongDbService,
 ) -> None:
-    # finding 1: 같은 별칭을 같은 곡으로 다시 등록하는 것(멱등 재등록)은 허용되지만,
+    # 같은 별칭을 같은 곡으로 다시 등록하는 것(멱등 재등록)은 허용되지만,
     # added_by/created_at은 원래 추가한 사람 걸로 남아야 한다. 안 그러면 누구나 재등록만
     # 으로 alias_remove의 "추가한 사람이나 admin만 지운다" 제한을 비껴갈 수 있다.
     await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="playerA")
@@ -315,7 +315,7 @@ async def test_add_alias_same_song_reregister_does_not_steal_ownership(
 async def test_add_alias_colliding_with_other_songs_exact_title_raises(
     songdb_with_conn: SongDbService,
 ) -> None:
-    # finding 2: "Reach For The Stars"는 실제 시드에 있는 다른 곡의 정식 제목이다.
+    # "Reach For The Stars"는 실제 시드에 있는 다른 곡의 정식 제목이다.
     # "B.B.K.K.B.K.K."에 그 이름을 서버 별칭으로 등록하면, 이후 resolve()가 그 서버에서
     # "Reach For The Stars"를 "B.B.K.K.B.K.K."로 잘못 돌려주게 된다 — 막아야 한다.
     with pytest.raises(ValueError, match="이미"):
@@ -327,9 +327,9 @@ async def test_add_alias_colliding_with_other_songs_exact_title_raises(
 async def test_add_alias_colliding_with_other_songs_global_alias_raises(
     songdb_with_conn: SongDbService,
 ) -> None:
-    # finding 2: "RFTS"는 실제 시드에서 "Reach For The Stars"의 전역(시드) 별칭이다.
-    # "B.B.K.K.B.K.K."에 서버 별칭으로 등록하려 하면 막아야 한다(서버 별칭과 전역
-    # 별칭은 같은 우선순위라는 결정 사항 6번).
+    # "RFTS"는 실제 시드에서 "Reach For The Stars"의 전역(시드) 별칭이다.
+    # "B.B.K.K.B.K.K."에 서버 별칭으로 등록하려 하면 막아야 한다(서버 별칭이 먼저 검사돼
+    # 전역 별칭을 가리게 된다).
     with pytest.raises(ValueError, match="이미"):
         await songdb_with_conn.add_alias(
             guild_id="g1", alias="RFTS", song_title="B.B.K.K.B.K.K.", added_by="p1"
@@ -340,7 +340,7 @@ async def test_add_alias_matching_own_songs_global_alias_is_allowed(
     songdb_with_conn: SongDbService,
 ) -> None:
     # "RFTS"를 그 별칭의 원래 주인인 "Reach For The Stars" 자신에게 서버 별칭으로
-    # 등록하는 것은 중복이지만 충돌이 아니다 — 허용한다(finding 2, "같은 곡" 예외).
+    # 등록하는 것은 중복이지만 충돌이 아니다 — 허용한다("같은 곡" 예외).
     await songdb_with_conn.add_alias(
         guild_id="g1", alias="RFTS", song_title="Reach For The Stars", added_by="p1"
     )

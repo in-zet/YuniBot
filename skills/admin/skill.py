@@ -93,7 +93,7 @@ async def revoke_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResul
 
 @tool(slash="관리 상한", mutates=True, confirm="always")
 async def set_limits(ctx: ToolContext, monthly_cost_cap: float, player_cooldown_seconds: int) -> ToolResult:
-    """월 비용 상한과 플레이어별 쿨다운을 저장한다. 적용(한도 집행)은 6단계다."""
+    """월 비용 상한과 플레이어별 쿨다운을 저장한다. 멘션 응답에 바로 적용된다."""
     if ctx.guild_id is None:
         return ToolResult(error="서버 안에서만 쓸 수 있다")
     await ctx.settings.set_value(

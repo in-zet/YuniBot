@@ -69,7 +69,7 @@ class AgentLoop:
 
     def _registry_skills(self) -> list[LoadedSkill]:
         # PromptAssembler는 registry를 공개 속성으로 내지 않는다. 같은 core/ 패키지 안의
-        # 협력이라 private 접근을 쓴다(Task 7이 공개 getter를 추가하기 전까지의 임시 통로).
+        # 협력이라 private 접근을 쓴다.
         return self._prompt._registry.enabled_skills()
 
     def _find_spec(self, tool_name: str) -> tuple[ToolSpec, str | None] | None:

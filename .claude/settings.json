@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./third_party/chuni_penguin/database/seeds/songs.json)"
+    ]
+  }
+}

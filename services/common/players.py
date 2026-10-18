@@ -239,7 +239,7 @@ class PlayersService:
         await self._conn.commit()
 
     async def resolve(self, raw: str, ctx: ToolContext) -> Player:
-        """PlayerRef 해석기. 지원 범위는 설계서 합의된 단순화 1번 참고:
+        """PlayerRef 해석기. 자유 텍스트 이름 매칭은 아직 없고, 지원 범위는
         멘션(<@id>/<@!id>), 디스코드 스노우플레이크 숫자열, '나'/'저'/'me'/'자신'뿐이다."""
         text = raw.strip()
 

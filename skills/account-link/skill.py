@@ -34,7 +34,7 @@ CODE_LENGTH = 6
 CODE_TTL = timedelta(minutes=10)
 MAX_WRONG_ATTEMPTS = 5
 WRONG_ATTEMPT_COOLDOWN = timedelta(minutes=10)
-# 00-core.md/account-link.md: "플레이어당 최대 계정 수"의 범위는 "전역"이다. 3단계
+# 00-core.md/account-link.md: "플레이어당 최대 계정 수"의 범위는 "전역"이다.
 # settings 서비스의 범위는 플레이어/서버뿐이라(core/settings_slash.py 참고) "서버와
 # 무관하게 봇 전체에 하나"인 값을 표현하지 못한다. 설계서에 없는 세부 판단으로, 이
 # 값은 설정이 아니라 코드 상수로 둔다.

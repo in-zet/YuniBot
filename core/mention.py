@@ -25,7 +25,7 @@ from services.common.players import DiscordAccount, Player
 
 # DM(guild_id=None)의 쿨다운/사용량 기록에 guild_id 대신 쓰는 고정 스코프 값. 월 상한만
 # 서버별 설정(/관리 상한)이라 DM에는 적용할 상한 자체가 없다 — 쿨다운/사용량 기록은
-# guild/DM을 가리지 않고 걸어야 하므로(I4) 이 문자열로 "서버가 아닌 대화"를 표시한다.
+# guild/DM을 가리지 않고 걸어야 하므로 이 문자열로 "서버가 아닌 대화"를 표시한다.
 _DM_SCOPE = "dm"
 
 MAX_CONTEXT_MESSAGES = 6
@@ -130,7 +130,7 @@ class MentionEntry:
         self._usage = usage
         self._bot_discord_id = bot_discord_id
         # usage.record에 쓸 모델 이름은 설정값을 그대로 받는다(CLAUDE.md: "모델 이름은
-        # 설정값이다. 코드에 박지 않는다", I1) — AgentLoop에 실제로 설정된 모델과 다른
+        # 설정값이다. 코드에 박지 않는다") — AgentLoop에 실제로 설정된 모델과 다른
         # 문자열을 기록하면 비용 추정이 틀어지고, 요금표에 없는 모델명이면 월상한 집행
         # 자체가 조용히 멈춘다.
         self._agent_model = agent_model
@@ -171,7 +171,7 @@ class MentionEntry:
                 "players.first_seen", {"player_id": player.id}, player_id=player.id, guild_id=guild_id
             )
 
-        # 쿨다운은 guild/DM을 가리지 않고 건다(I4) — DM에는 서버 설정이 없으니 admin 스킬의
+        # 쿨다운은 guild/DM을 가리지 않고 건다 — DM에는 서버 설정이 없으니 admin 스킬의
         # "플레이어 쿨다운" 기본값(10초)을 그대로 쓴다. 월 상한은 서버별 설정(/관리 상한)뿐이라
         # DM에는 적용할 상한이 없다 — guild_id가 있을 때만 검사한다.
         cooldown_scope = guild_id if guild_id is not None else _DM_SCOPE
@@ -204,9 +204,8 @@ class MentionEntry:
         if is_new_player:
             prompt_context_snippets.append("이 플레이어는 유니를 처음 멘션했다.")
 
-        # 저장된 플레이어 메모리를 읽어 프롬프트에 넣는다(I5) — remember 도구는 저장만
-        # 하고, 이 지점 전까지는 다시 읽는 곳이 없어 완전히 죽은 경로였다. 00-core.md
-        # "주입 범위: 요청한 본인의 메모리만 프롬프트에 넣는다"를 그대로 따른다.
+        # 저장된 플레이어 메모리를 읽어 프롬프트에 넣는다(remember 도구는 저장만 한다).
+        # 00-core.md "주입 범위: 요청한 본인의 메모리만 프롬프트에 넣는다"를 그대로 따른다.
         memory_text = await self._memory.get(player.id)
         if memory_text:
             prompt_context_snippets.append(f"[참고: 이 플레이어가 기억해 달라고 한 내용]\n{memory_text}")
@@ -235,7 +234,7 @@ class MentionEntry:
                 await send(LLM_FAILURE_MESSAGE, [])
                 return
 
-        # 사용량 기록도 guild/DM을 가리지 않는다(I4) — DM 멘션은 guild_id가 없어 쿨다운
+        # 사용량 기록도 guild/DM을 가리지 않는다 — DM 멘션은 guild_id가 없어 쿨다운
         # 스코프와 같은 고정값을 쓴다.
         await self._usage.record(
             guild_id=cooldown_scope, player_id=player.id, model=self._agent_model, kind="agent",

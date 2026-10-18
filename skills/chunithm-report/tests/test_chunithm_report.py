@@ -218,7 +218,7 @@ def _chart(title: str = "Chronomia", difficulty: str = "MAS") -> ResolvedChart:
     return ResolvedChart(song=song, chart=ChartRecord(difficulty=difficulty, const=14.8, note_count=2000))
 
 
-# ---------------------------------------------------------------- profile (Step 2)
+# ---------------------------------------------------------------- profile
 
 
 async def test_profile_self_ignores_privacy_setting(skill: ModuleType) -> None:
@@ -294,7 +294,7 @@ async def test_profile_never_synced(skill: ModuleType) -> None:
     assert result.error is not None and "동기화" in result.error
 
 
-# ---------------------------------------------------------------- best (Step 3)
+# ---------------------------------------------------------------- best
 
 
 def _frames() -> tuple[list[PbRow], list[PbRow]]:
@@ -375,7 +375,7 @@ async def test_best_of_private_other_is_refused(skill: ModuleType) -> None:
     assert result.error is not None and "비공개" in result.error
 
 
-# ---------------------------------------------------------------- recent (Step 3)
+# ---------------------------------------------------------------- recent
 
 
 async def test_recent_enriches_only_first_twenty_with_judgements(skill: ModuleType) -> None:
@@ -426,7 +426,7 @@ async def test_recent_of_private_other_is_refused_before_network(skill: ModuleTy
     assert f.net.enrich_calls == []
 
 
-# ---------------------------------------------------------------- record (Step 3)
+# ---------------------------------------------------------------- record
 
 
 async def test_record_not_played(skill: ModuleType) -> None:
@@ -461,7 +461,7 @@ async def test_record_of_private_other_is_refused(skill: ModuleType) -> None:
     assert result.error is not None and "비공개" in result.error
 
 
-# ---------------------------------------------------------------- analyze (Step 3)
+# ---------------------------------------------------------------- analyze
 
 
 def _analyze_rows() -> list[PbRow]:
@@ -498,7 +498,7 @@ async def test_analyze_groups_by_integer_const_band(skill: ModuleType) -> None:
     assert bands[14]["ranks"] == {"SS": 1, "S+": 1}
     assert result.data["unknown_const_count"] == 1
     assert "15대" in _content(result)
-    assert "attack" not in str(result.data).lower()  # 결정 사항 E — 어택·미스 비중은 없다
+    assert "attack" not in str(result.data).lower()  # 어택·미스 비중은 없다(chunithm-report.md "분석")
 
 
 async def test_analyze_const_range_filter(skill: ModuleType) -> None:
@@ -521,7 +521,7 @@ async def test_analyze_of_private_other_is_refused(skill: ModuleType) -> None:
     assert result.error is not None and "비공개" in result.error
 
 
-# ---------------------------------------------------------------- candidates (Step 3)
+# ---------------------------------------------------------------- candidates
 
 
 def _hit(title: str, upside: str, *, remaining: int | None = 7_500) -> CandidateHit:
@@ -556,7 +556,7 @@ async def test_candidates_empty(skill: ModuleType) -> None:
     assert "없" in _content(result)
 
 
-# ---------------------------------------------------------------- 동기화 리포트 조각 (Step 4, 5)
+# ---------------------------------------------------------------- 동기화 리포트 조각
 
 _S1 = SessionInfo(id="s1", play_date="2026-10-15", estimated=False)
 _S2 = SessionInfo(id="s2", play_date="2026-10-16", estimated=True)
@@ -789,7 +789,7 @@ async def test_sync_report_metrics_match_rating_deltas_exactly(skill: ModuleType
 
 async def test_sync_report_shows_pb_missing_from_recent_history_as_estimated(skill: ModuleType) -> None:
     """크레딧 직후 동기화로 최근 이력엔 안 보이지만 PB가 오른 경우: records가 has_new_plays=True로
-    올려 주므로(I-1) 리포트는 "변화 없음"으로 숨지 않고 추정 세션의 갱신으로 보여 준다."""
+    올려 주므로 리포트는 "변화 없음"으로 숨지 않고 추정 세션의 갱신으로 보여 준다."""
     estimated_today = SessionInfo(id="s-est", play_date="2026-10-17", estimated=True)
     diff = _sync_diff(
         sessions=[estimated_today],
