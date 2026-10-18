@@ -2,6 +2,7 @@ import dataclasses
 import datetime
 import logging
 from pathlib import Path
+from typing import cast
 
 import aiosqlite
 import discord
@@ -30,6 +31,7 @@ from core.tool_types import (
     ToolContext,
 )
 from services.common.players import PlayersService
+from services.common.websearch import WebsearchService
 from tests.core.skill_factory import slash_tool, write_skill
 
 
@@ -64,7 +66,7 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
     # usage는 admin.usage 등이 ctx.usage로 쓴다.
     assert set(executor.services) == {
         "players", "settings", "memory", "arcades", "http", "notify", "yuni",
-        "songdb", "terms", "records", "usage",
+        "songdb", "terms", "records", "usage", "websearch",
     }
 
     await client.close()
@@ -614,5 +616,35 @@ async def test_build_client_wires_claude_adapter_when_provider_is_claude(tmp_pat
     try:
         llm_adapter = client._mention_entry._agent._llm  # pyright: ignore[reportPrivateUsage]
         assert type(llm_adapter).__name__ == "ClaudeLlmAdapter"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_build_client_wires_gemini_search_adapter_by_default(tmp_path: Path) -> None:
+    # websearch_provider는 llm_provider와 독립이다 — 기본값(gemini)이면 GeminiSearchAdapter가
+    # services["websearch"] 안에 들어가야 한다.
+    config = _config(tmp_path)
+
+    client, _registry, executor = await build_client(config)
+    try:
+        websearch = cast("WebsearchService", executor.services["websearch"])
+        search_adapter = websearch._adapter  # pyright: ignore[reportPrivateUsage]
+        assert type(search_adapter).__name__ == "GeminiSearchAdapter"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_build_client_wires_claude_search_adapter_when_websearch_provider_is_claude(
+    tmp_path: Path,
+) -> None:
+    config = dataclasses.replace(_config(tmp_path), websearch_provider="claude")
+
+    client, _registry, executor = await build_client(config)
+    try:
+        websearch = cast("WebsearchService", executor.services["websearch"])
+        search_adapter = websearch._adapter  # pyright: ignore[reportPrivateUsage]
+        assert type(search_adapter).__name__ == "ClaudeSearchAdapter"
     finally:
         await client.close()

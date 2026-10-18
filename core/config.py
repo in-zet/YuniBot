@@ -30,6 +30,11 @@ class CoreConfig:
     anthropic_api_key: str = ""
     agent_model: str = "gemini-3.8-flash"
     summary_model: str = "gemini-3.5-flash-lite"
+    # websearch는 LLM_PROVIDER와 독립이다 — 메인 에이전트와 검색이 다른 제공자를 쓸 수
+    # 있다(00-core.md "websearch" 서비스).
+    websearch_provider: Literal["gemini", "claude"] = "gemini"
+    search_model: str = "gemini-3.8-flash"
+    websearch_cooldown_seconds: int = 15
     thinking_level: Literal["low", "medium", "high"] = "low"
     skill_loading_mode: Literal["instructions", "full"] = "instructions"
     max_tool_calls_per_turn: int = 5
@@ -74,6 +79,9 @@ def load_config() -> CoreConfig:
     anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     agent_model = os.environ.get("AGENT_MODEL", "gemini-3.8-flash")
     summary_model = os.environ.get("SUMMARY_MODEL", "gemini-3.5-flash-lite")
+    websearch_provider_raw = os.environ.get("WEBSEARCH_PROVIDER", "gemini")
+    search_model = os.environ.get("SEARCH_MODEL", "gemini-3.8-flash")
+    websearch_cooldown_seconds = int(os.environ.get("WEBSEARCH_COOLDOWN_SECONDS", "15"))
     thinking_level_raw = os.environ.get("THINKING_LEVEL", "low")
     skill_loading_mode_raw = os.environ.get("SKILL_LOADING_MODE", "instructions")
     max_tool_calls_per_turn = int(os.environ.get("MAX_TOOL_CALLS_PER_TURN", "5"))
@@ -93,6 +101,9 @@ def load_config() -> CoreConfig:
         anthropic_api_key=anthropic_api_key,
         agent_model=agent_model,
         summary_model=summary_model,
+        websearch_provider=cast("Literal['gemini', 'claude']", websearch_provider_raw),
+        search_model=search_model,
+        websearch_cooldown_seconds=websearch_cooldown_seconds,
         thinking_level=cast("Literal['low', 'medium', 'high']", thinking_level_raw),
         skill_loading_mode=cast("Literal['instructions', 'full']", skill_loading_mode_raw),
         max_tool_calls_per_turn=max_tool_calls_per_turn,

@@ -138,3 +138,33 @@ def test_load_config_llm_provider_override(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert config.llm_provider == "claude"
     assert config.anthropic_api_key == "fake-anthropic-key"
+
+
+def test_load_config_websearch_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("core.config.load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.delenv("WEBSEARCH_PROVIDER", raising=False)
+    monkeypatch.delenv("SEARCH_MODEL", raising=False)
+    monkeypatch.delenv("WEBSEARCH_COOLDOWN_SECONDS", raising=False)
+
+    config = load_config()
+
+    assert config.websearch_provider == "gemini"
+    assert config.search_model == "gemini-3.8-flash"
+    assert config.websearch_cooldown_seconds == 15
+
+
+def test_load_config_websearch_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    # websearch_provider는 llm_provider를 안 건드린다 — 둘이 독립이라는 게 핵심이다.
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("WEBSEARCH_PROVIDER", "claude")
+    monkeypatch.setenv("SEARCH_MODEL", "claude-haiku-5-5")
+    monkeypatch.setenv("WEBSEARCH_COOLDOWN_SECONDS", "5")
+
+    config = load_config()
+
+    assert config.llm_provider == "gemini"
+    assert config.websearch_provider == "claude"
+    assert config.search_model == "claude-haiku-5-5"
+    assert config.websearch_cooldown_seconds == 5

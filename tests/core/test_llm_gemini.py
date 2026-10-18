@@ -138,7 +138,7 @@ async def test_generate_folds_thinking_tokens_into_output_tokens() -> None:
 async def test_generate_retries_on_503_and_notifies_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     """실기 2026-10-18: 재시도 없이 한 번 503을 맞으면 바로 고정 문구로 답했다. 503은
     두 번 재시도해 성공하면 그대로 결과를 돌려주고, 재시도 직전마다 on_retry를 불러야 한다."""
-    monkeypatch.setattr("core.llm_gemini.asyncio.sleep", lambda _delay: _NoopAwaitable())
+    monkeypatch.setattr("core.gemini_retry.asyncio.sleep", lambda _delay: _NoopAwaitable())
     adapter = GeminiLlmAdapter(api_key="fake")
     fake_models = _FlakyModelsApi(
         to_raise=[_server_error(503), _server_error(503)],
@@ -164,7 +164,7 @@ async def test_generate_retries_on_503_and_notifies_then_succeeds(monkeypatch: p
 
 @pytest.mark.asyncio
 async def test_generate_gives_up_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("core.llm_gemini.asyncio.sleep", lambda _delay: _NoopAwaitable())
+    monkeypatch.setattr("core.gemini_retry.asyncio.sleep", lambda _delay: _NoopAwaitable())
     adapter = GeminiLlmAdapter(api_key="fake")
     fake_models = _FlakyModelsApi(to_raise=[_server_error(503)] * 10)
     adapter._client.aio._models = fake_models  # pyright: ignore[reportAttributeAccessIssue]

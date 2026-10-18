@@ -32,6 +32,9 @@ from core.registry import LoadedSkill, SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
 from core.scheduler import OnceSchedule, Scheduler
+from core.search import SearchAdapter
+from core.search_claude import ClaudeSearchAdapter
+from core.search_gemini import GeminiSearchAdapter
 from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
 from core.threads import ThreadManager
@@ -60,6 +63,7 @@ from services.common.notify import NotifyService
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
 from services.common.settings import SettingsService
+from services.common.websearch import WebsearchService
 from services.common.yuni import YuniService
 
 logger = logging.getLogger(__name__)
@@ -114,6 +118,7 @@ class YuniClient(discord.Client):
         test_guild_id: int | None,
         conn: aiosqlite.Connection,
         http_service: HttpService,
+        websearch_service: WebsearchService,
         mention_entry: MentionEntry,
         known_skill_names: set[str],
         skill_loading_mode: str,
@@ -127,6 +132,7 @@ class YuniClient(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.conn = conn
         self.http_service = http_service
+        self.websearch_service = websearch_service
         self._test_guild_id = test_guild_id
         self._mention_entry = mention_entry
         self._known_skill_names = known_skill_names
@@ -213,6 +219,7 @@ class YuniClient(discord.Client):
         # http_service.aclose()는 hishel의 AsyncCacheTransport.aclose()를 거쳐 캐시용
         # SQLite 연결(anysqlite)까지 닫는다 — 코어 DB 연결을 닫는 아래 줄과 같은 역할이다.
         await self.http_service.aclose()
+        await self.websearch_service.aclose()
         # LlmAdapter 프로토콜(core/llm.py)은 aclose()를 선언하지 않는다 — 테스트용
         # FakeLlmAdapter 등 다른 구현에는 없을 수 있는 메서드이기 때문이다. build_client가
         # 실제로 넣는 것은 항상 GeminiLlmAdapter 아니면 ClaudeLlmAdapter(LLM_PROVIDER에 따라)
@@ -509,6 +516,28 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
                 "GEMINI_API_KEY가 비어 있다 - 설정 전까지 모든 멘션이 실패한다"
             )
         llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
+
+    # websearch_provider는 llm_provider와 독립이다 — 메인 에이전트와 검색이 다른 제공자를
+    # 쓸 수 있다(00-core.md "websearch" 서비스, docs/plan.md §4 10단계 Part 2). 위 llm_adapter와
+    # 같은 이유로 빈 키는 더미 값으로 바꿔 구성만 통과시킨다.
+    search_adapter: SearchAdapter
+    if config.websearch_provider == "claude":
+        if not config.anthropic_api_key:
+            logger.warning(
+                "ANTHROPIC_API_KEY가 비어 있다 - 설정 전까지 모든 검색이 실패한다"
+            )
+        search_adapter = ClaudeSearchAdapter(api_key=config.anthropic_api_key or "unset")
+    else:
+        if not config.gemini_api_key:
+            logger.warning(
+                "GEMINI_API_KEY가 비어 있다 - 설정 전까지 모든 검색이 실패한다"
+            )
+        search_adapter = GeminiSearchAdapter(api_key=config.gemini_api_key or "unset")
+    websearch_service = WebsearchService(
+        adapter=search_adapter, model=config.search_model, cooldown_seconds=config.websearch_cooldown_seconds,
+    )
+    services["websearch"] = websearch_service
+
     # registry_snapshot은 슬래시 쪽(아래 attach_to_tree)보다 먼저 만든다 — AgentLoop도 같은
     # 스냅샷을 쥐고 있어야 멘션 경로의 admin_skills 같은 도구가 ctx.registry_snapshot을 쓸 수
     # 있다(core/slash.py의 _player_context와 같은 배선). registry는 이 시점 이후로
@@ -542,6 +571,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     intents.message_content = True
     client = YuniClient(
         intents=intents, test_guild_id=config.test_guild_id, conn=conn, http_service=http_service,
+        websearch_service=websearch_service,
         mention_entry=mention_entry, known_skill_names=known_skill_names,
         skill_loading_mode=config.skill_loading_mode,
         scheduler=scheduler, schedule_fns=schedule_fns, services=services, event_bus=event_bus,
