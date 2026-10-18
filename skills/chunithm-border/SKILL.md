@@ -3,7 +3,7 @@ name: chunithm-border
 description: 곡과 난이도별 랭크 보더(허용 어택 개수)와, 내 기록에서 목표 랭크까지 남은 어택을 계산한다.
 examples:
   - 크로노 마스 SSS+ 보더 알려줘
-  - 내 최고점에서 트플플까지 몇 어택 남았어?
+  - 크로노 마스에서 내 최고점 기준 트플플까지 몇 어택 남았어?
 category: 곡 정보
 game: chunithm
 version: 1

@@ -46,11 +46,26 @@ class EvalReport:
 
 
 def collect_eval_cases(registry: SkillRegistry) -> list[EvalCase]:
-    return [
-        EvalCase(skill_name=skill.manifest.name, question=example)
-        for skill in registry.enabled_skills()
-        for example in skill.manifest.examples
-    ]
+    """도구 선택 평가 대상. LLM이 부를 수 있는 도구가 하나도 없는 스킬(전부 slash_only,
+    예: account-link)은 뺀다 — 그런 스킬의 examples는 애초에 도구 호출로 통과할 길이 없다."""
+    cases: list[EvalCase] = []
+    for skill in registry.enabled_skills():
+        if not skill.code.tools:
+            print(f"[스킵] {skill.manifest.name}: LLM 도구가 없다(슬래시 전용)")
+            continue
+        cases.extend(EvalCase(skill_name=skill.manifest.name, question=example) for example in skill.manifest.examples)
+    return cases
+
+
+def all_manifest_tags(registry: SkillRegistry) -> frozenset[str]:
+    """평가용 가짜 플레이어에게 줄 태그. 등록된 스킬이 요구하는 태그를 모두 모아 쥐여 줘서
+    (실제 서버엔 이 조합을 가진 사람이 없을 수 있지만) 태그 때문에 도구 자체가 안 보여 평가가
+    뭉개지는 것을 막는다(각 스킬의 manifest.tags/tags_any)."""
+    tags: set[str] = set()
+    for skill in registry.enabled_skills():
+        tags.update(skill.manifest.tags)
+        tags.update(skill.manifest.tags_any)
+    return frozenset(tags)
 
 
 def score_tool_choice(*, expected_skill: str, first_tool_name: str, mode: Literal["instructions", "full"]) -> bool:
@@ -100,13 +115,14 @@ async def run_eval(
         registry=registry,
     )
     known_skills = {s.manifest.name for s in registry.enabled_skills()}
+    eval_tags = all_manifest_tags(registry)
 
     for case in collect_eval_cases(registry):
         loop = _RecordingAgentLoop(
             llm=llm, executor=executor, prompt=prompt, model=model, thinking_level="low",
             max_tool_calls=5, max_tokens=50000,
         )
-        ctx = ToolContext(player_id="eval", tags=frozenset(), services={})
+        ctx = ToolContext(player_id="eval", tags=eval_tags, services={})
         state = SkillLoadState(mode=mode, known_skills=known_skills)
         started = time.monotonic()
         result = await _run_with_retry(loop, ctx=ctx, state=state, question=case.question)
@@ -119,6 +135,10 @@ async def run_eval(
             expected_skill=case.skill_name, first_tool_name=loop.first_tool_name, mode=mode
         ):
             report.tool_choice_errors += 1
+            print(
+                f"  [오류] 기대 스킬={case.skill_name!r} 질문={case.question!r} "
+                f"실제 첫 도구={loop.first_tool_name!r}"
+            )
         if assemble_response(result).numeric_violation:
             report.numeric_violations += 1
         await asyncio.sleep(2)  # 분당 요청 수 제한을 피하려고 케이스 사이에 간격을 둔다

@@ -58,7 +58,7 @@
   - [x] Part 1: `chunithm-sync`·`chunithm-report`(서비스 확장 포함). 실기 미확인: 첫 동기화 기준점 → 플레이 후 리포트 → 비공개 DM → `/프로필`·`/베스트`·`/최근`·`/분석`·`/후보곡` → 변화 없음
   - [ ] Part 2: `chunithm-goals`·`chunithm-notes`(마이그레이션 `goals_goals`·`goals_progress`·`notes_notes`, 순수 함수 `goals_calc.py` 먼저)
   - [ ] Part 3: `chunithm-session`(보관·조회만) — 구현 완료(`list_sessions`·`get_session`·`delete_session`, `on_sync_reported`). 실기 미확인: 동기화 후 세션 보관 → `/세션 목록`·`/세션 보기`(날짜·오락실 지정 포함)·`/세션 삭제`
-  - [ ] 다섯 스킬의 `examples`로 도구 선택 재평가
+  - [x] 다섯 스킬의 `examples`로 도구 선택 재평가 — `gemini-3.8-flash`/`instructions` 모드, 등록된 스킬 전체(27건, `account-link`는 LLM 도구가 없어 제외) 도구 선택 오류 0건·숫자 규칙 위반 0건. `full` 모드·모델 비교는 안 함(§5 참고)
 - [ ] 8. 오락실 `chunithm-arcade` — CHUNITHM-NET 설정 페이지와 플레이 이력 상세 페이지 저장본이 `docs/reference/`에 있어야 시작한다
 - [ ] 9. 알림 `chunithm-updates`, 목표 기한 알림(운영 중 예약 확인 루프를 이때 `core/bot.py`에 더한다)
 - [ ] 10. 검색 답변 `websearch` 서비스와 `web-qa`
@@ -77,7 +77,8 @@
 | `httpx-aiohttp` 패치가 업스트림의 재시도를 잃음 | PyPI판 `AiohttpTransport`는 `retries`를 받지만 재시도하지 않는다 | `third_party/patches/README.md`. CHUNITHM-NET 재시도를 서비스에서 짤지 정해야 한다 |
 | 국제판 버전업 | 시기 미정 | 직후 파서와 신곡 기준일을 점검하고 원본 어댑터 수정을 가져온다 |
 | 레이팅·오버파워가 CHUNITHM-NET과 맞는지 | 확인 못 함 | `records`가 동기화마다 대조하고 어긋나면 리포트에 표시 |
-| `open_skill` 왕복의 지연·비용, Gemini가 안정적으로 고르는 도구 수 | 측정 전 | §4 6단계 평가 |
+| `open_skill` 왕복의 지연·비용 | `full` 모드 측정 전(비교용 데이터 없음) | `--compare-modes`로 다음에 측정 |
+| Gemini가 안정적으로 고르는 도구 수 | 2026-10-18 확인: `instructions` 모드에서 태그를 올바로 쥐여 주면 등록 스킬 전체(27건, account-link 제외) 도구 선택 오류 0건. 이전 측정(13/29 오류)은 평가 플레이어에게 태그가 전혀 없어 스킬 카드 자체가 안 보인 하네스 버그였다(`core/prompt.py`의 `visible_skill_cards`가 플레이어 태그로 거른다) | 해결(하네스 버그), `scripts/eval_agent.py`가 이제 등록된 스킬의 태그를 모두 모아 쥐여 준다 |
 | 모으기 이벤트에서 느린 스킬 | 예상 위험 | 스킬별 시간 제한(기본 5초), 넘기면 그 조각만 뺀다 |
 | PlayerRef 자유 텍스트 이름 매칭, `/설정` 자동완성 | 없음 | 필요해지면 그때 만든다 |
 | `terms.yaml`의 개념 용어 4개 | 2026-10-11 임시 등록(저스티스 크리티컬·안미츠/비비기·상수·오버파워), 출처 없음 | 사용자 검토 필요 |
