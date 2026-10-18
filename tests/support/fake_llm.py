@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from core.llm import GenerationTurn, LlmContent, ToolDeclaration
+from core.llm import GenerationTurn, LlmContent, OnRetry, ToolDeclaration
 
 
 class FakeLlmAdapter:
@@ -31,7 +31,9 @@ class FakeLlmAdapter:
         contents: list[LlmContent],
         tools: list[ToolDeclaration],
         thinking_level: str,
+        on_retry: OnRetry | None = None,
     ) -> GenerationTurn:
+        del on_retry  # 가짜 어댑터는 재시도를 흉내 내지 않는다.
         self.calls.append((model, system_instruction, list(contents), list(tools)))
         if callable(self._script):
             return self._script(model, system_instruction, contents, tools)

@@ -12,8 +12,19 @@ from core.agent import AgentLoop
 from core.cooldown import CooldownTracker
 from core.events import EventBus
 from core.executor import ToolExecutor
-from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGE
-from core.llm import FunctionCallRequest, GenerationTurn, LlmContent, LlmPart, UsageInfo
+from core.fallback_messages import (
+    COOLDOWN_ACTIVE_MESSAGE,
+    RETRY_WAIT_MESSAGE,
+    WORKING_MESSAGE,
+)
+from core.llm import (
+    FunctionCallRequest,
+    GenerationTurn,
+    LlmContent,
+    LlmPart,
+    OnRetry,
+    UsageInfo,
+)
 from core.mention import ChannelMessage, MentionEntry
 from core.permissions import InMemoryTagProvider
 from core.prompt import PromptAssembler
@@ -467,3 +478,119 @@ async def test_mention_tool_call_event_reaches_executors_shared_event_bus(tmp_pa
         await asyncio.sleep(0)
 
     assert received == [{"player_id": "p1"}]
+
+
+class _RetryOnceLlmAdapter:
+    """실제 어댑터의 재시도 루프를 흉내 내지 않고, on_retry를 한 번 부른 뒤 바로 최종 턴을
+    돌려준다 — core/mention.py가 그 신호를 받아 RETRY_WAIT_MESSAGE를 보내는지만 본다."""
+
+    def __init__(self, final_turn: GenerationTurn) -> None:
+        self._final_turn = final_turn
+
+    async def generate(
+        self, *, model: str, system_instruction: str, contents, tools, thinking_level: str,
+        on_retry: OnRetry | None = None,
+    ) -> GenerationTurn:
+        if on_retry is not None:
+            await on_retry(1, 2.0)
+        return self._final_turn
+
+
+@pytest.mark.asyncio
+async def test_mention_sends_retry_wait_message_once_before_final_answer() -> None:
+    """2026-10-18: Gemini 503 재시도 중에는 "잠깐만 기다려 달라"를 한 번만 보내고, 재시도가
+    끝나면 평소대로 최종 답을 보낸다."""
+    registry = _registry()
+    bus = EventBus()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(), event_bus=bus,
+    )
+    prompt = PromptAssembler(
+        rules_text=Path("prompts/rules.md").read_text(), persona_text=Path("prompts/persona.md").read_text(),
+        registry=registry,
+    )
+    answer_turn = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="다 됐다")]), text="다 됐다")
+    agent = AgentLoop(
+        llm=_RetryOnceLlmAdapter(answer_turn), executor=executor, prompt=prompt, model="gemini-3.8-flash",
+        thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    entry = MentionEntry(
+        agent=agent, players=_FakePlayers(), notify=NotifyService.__new__(NotifyService), cooldown=CooldownTracker(),
+        settings=_FakeSettings(), usage=_FakeUsage(), bot_discord_id="bot", agent_model="gemini-3.8-flash",
+        memory=_FakeMemory(), event_bus=bus, known_skill_names={s.manifest.name for s in registry.enabled_skills()},
+        skill_loading_mode="instructions",
+    )
+
+    sent: list[str] = []
+
+    async def _record_send(text: str, displays: list[Display]) -> None:
+        del displays
+        sent.append(text)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 18, tzinfo=UTC),
+        send=_record_send, typing=_NoopTyping(),
+    )
+
+    assert sent == [RETRY_WAIT_MESSAGE, "다 됐다"]
+
+
+class _SlowLlmAdapter:
+    """generate가 정해 둔 시간만큼 멈췄다가 최종 턴을 돌려준다 — 느린 응답 안내 시험용."""
+
+    def __init__(self, final_turn: GenerationTurn, delay: float) -> None:
+        self._final_turn = final_turn
+        self._delay = delay
+
+    async def generate(
+        self, *, model: str, system_instruction: str, contents, tools, thinking_level: str,
+        on_retry: OnRetry | None = None,
+    ) -> GenerationTurn:
+        del on_retry
+        await asyncio.sleep(self._delay)
+        return self._final_turn
+
+
+@pytest.mark.asyncio
+async def test_mention_sends_working_message_when_agent_is_slow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """실기 2026-10-18: 도구 호출이 여러 번 이어지는 동안 타이핑 표시만 뜨고 몇 분씩 아무
+    말이 없어 응답이 멈춘 것처럼 보였다. SLOW_RESPONSE_NOTICE_SECONDS를 넘기면 최종 답
+    전에 WORKING_MESSAGE를 한 번 보낸다."""
+    monkeypatch.setattr("core.mention.SLOW_RESPONSE_NOTICE_SECONDS", 0.01)
+    registry = _registry()
+    bus = EventBus()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(), event_bus=bus,
+    )
+    prompt = PromptAssembler(
+        rules_text=Path("prompts/rules.md").read_text(), persona_text=Path("prompts/persona.md").read_text(),
+        registry=registry,
+    )
+    answer_turn = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="다 됐다")]), text="다 됐다")
+    agent = AgentLoop(
+        llm=_SlowLlmAdapter(answer_turn, delay=0.05), executor=executor, prompt=prompt, model="gemini-3.8-flash",
+        thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    entry = MentionEntry(
+        agent=agent, players=_FakePlayers(), notify=NotifyService.__new__(NotifyService), cooldown=CooldownTracker(),
+        settings=_FakeSettings(), usage=_FakeUsage(), bot_discord_id="bot", agent_model="gemini-3.8-flash",
+        memory=_FakeMemory(), event_bus=bus, known_skill_names={s.manifest.name for s in registry.enabled_skills()},
+        skill_loading_mode="instructions",
+    )
+
+    sent: list[str] = []
+
+    async def _record_send(text: str, displays: list[Display]) -> None:
+        del displays
+        sent.append(text)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 18, tzinfo=UTC),
+        send=_record_send, typing=_NoopTyping(),
+    )
+
+    assert sent == [WORKING_MESSAGE, "다 됐다"]

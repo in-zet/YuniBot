@@ -38,7 +38,7 @@ Python 3.14 · discord.py · google-genai / anthropic(`LLM_PROVIDER`로 부팅 �
 
 ## 안전 레드라인
 - 참고 자료(`docs/reference/`, `third_party/`)는 **읽기 전용**이다.
-- 되돌리기 어려운 작업(삭제·덮어쓰기·`git push`·외부 서비스로 전송)은 대상을 먼저 확인하고 승인 없이 진행하지 않는다.
+- 되돌리기 어려운 작업(삭제·덮어쓰기·외부 서비스로 전송)은 대상을 먼저 확인하고 승인 없이 진행하지 않는다. 커밋·`git push`는 예외 — 아래 "문서 규칙"을 따른다.
 - `third_party/chuni_penguin/database/seeds/songs.json`(7.5MB)은 열지 않는다(`.claude/settings.json`에서 읽기를 막아 둠). 곡 데이터는 `services/chunithm/songdb.py`와 그 시험으로 본다.
 
 ## 문서 규칙
@@ -46,7 +46,7 @@ Python 3.14 · discord.py · google-genai / anthropic(`LLM_PROVIDER`로 부팅 �
 - 긴 근거·실험 서술은 여기 적지 않는다 → `progress/YYYY-MM-DD.md`에 기록하고 여기엔 포인터만.
 - 상대 날짜("어제")는 쓰지 않고 항상 절대 날짜로 적는다.
 - 설계서와 다르게 구현해야 할 이유가 생기면 구현 전에 먼저 말하고, 합의되면 그 설계서를 같이 고친다.
-- 커밋은 사용자가 요청할 때만 한다. `git push`는 따로 확인받는다.
+- 작업 단위가 어느 정도 끝나면(검증까지 마친 뒤) 승인 없이 바로 커밋한다. 여러 작업 단위를 묶은 큰 작업이 끝나면 승인 없이 바로 `git push`한다(2026-10-18 결정 — 그 전엔 매번 확인받았다).
 
 ## 보고 규칙
 사용자에게는 항상 한글로 답한다. 판단이 필요한 것만 보고한다: **결정이 필요한 갈림길 / 실기 테스트로 확인할 것 / 막혀서 멈춘 지점**.

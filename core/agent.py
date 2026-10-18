@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,6 +17,7 @@ from core.llm import (
     LlmAdapter,
     LlmContent,
     LlmPart,
+    OnRetry,
     UsageInfo,
 )
 from core.prompt import PromptAssembler
@@ -94,6 +96,7 @@ class AgentLoop:
         skill_state: SkillLoadState,
         user_text: str,
         prompt_context_snippets: list[str],
+        on_retry: OnRetry | None = None,
     ) -> AgentTurnResult:
         inner_ctx = ToolContext(
             player_id=ctx.player_id,
@@ -124,12 +127,18 @@ class AgentLoop:
             )
             tools = self._prompt.build_tool_declarations(player_tags=player_tags, skill_state=skill_state)
 
+            llm_started = time.monotonic()
             turn = await self._llm.generate(
                 model=self._model,
                 system_instruction=system_instruction,
                 contents=contents,
                 tools=tools,
                 thinking_level=self._thinking_level,
+                on_retry=on_retry,
+            )
+            logger.info(
+                "player %s: LLM 왕복 %d회차 %.2f초 (함수 호출 %d개)",
+                ctx.player_id, llm_turns, time.monotonic() - llm_started, len(turn.function_calls),
             )
             result.usage = UsageInfo(
                 input_tokens=result.usage.input_tokens + turn.usage.input_tokens,
@@ -173,7 +182,12 @@ class AgentLoop:
                     "player %s: 도구 호출 %d/%d '%s' args=%s",
                     ctx.player_id, tool_calls_made, self._max_tool_calls, call.name, call.args,
                 )
+                tool_started = time.monotonic()
                 tool_result = await self._invoke(inner_ctx, call.name, call.args)
+                logger.info(
+                    "player %s: 도구 '%s' 완료 %.2f초",
+                    ctx.player_id, call.name, time.monotonic() - tool_started,
+                )
                 if tool_result.data:
                     result.collected_data.append(tool_result.data)
                 if tool_result.display is not None and tool_result.display_mode == "optional":

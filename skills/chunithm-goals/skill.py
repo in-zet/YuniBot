@@ -502,6 +502,16 @@ async def set_goal(
     due_at은 ISO 날짜(YYYY-MM-DD)다. 레이팅·오버파워·폴더 목표는 CHUNITHM-NET 동기화(chunithm-synced)가 있어야
     만들 수 있다. 레이팅 최종 목표는 플레이어당 하나뿐이다 — 이미 있으면 새로 만들지 않고
     에러를 돌려주고 `update`를 쓰라고 안내한다(설계서에 없던 세부, SKILL.md 본문 참고)."""
+    # LLM 경로는 enum 인자를 원문 문자열로 넘긴다(core/schema.py) — 슬래시와 달리 여기서
+    # 직접 enum으로 되돌려야 .value 호출이 안전하다(chunithm-report의 BestKind(kind)와 같은 패턴).
+    kind = GoalKind(kind)
+    metric = RatingMetric(metric)
+    overpower_mode = OverpowerMode(overpower_mode)
+    folder_condition = FolderCondition(folder_condition)
+    if lamp is not None:
+        lamp = SongLamp(lamp)
+    if duration_tag is not None:
+        duration_tag = DurationTag(duration_tag)
     if kind in (GoalKind.RATING, GoalKind.OVERPOWER, GoalKind.FOLDER) and _SYNCED_TAG not in ctx.tags:
         return ToolResult(error="그 목표는 CHUNITHM-NET 동기화가 돼 있어야 만들 수 있어. /동기화를 먼저 해 줘.")
     due = _parse_due(due_at)
@@ -639,6 +649,7 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
+    kind = GoalKind(kind) if kind is not None else None
     rows = await models.list_goals_for_player(ctx.db, target.id, kind=kind.value if kind is not None else None)
     if target.id != ctx.player_id:
         rows = [r for r in rows if r.public]  # 남의 목표는 목표마다 고른 공개 여부를 따른다
@@ -685,6 +696,9 @@ async def update(
     goal = await models.fetch_goal(ctx.db, goal_id)
     if goal is None or goal.player_id != ctx.player_id:
         return ToolResult(error="그 목표를 찾지 못했어.")
+
+    duration_tag = DurationTag(duration_tag) if duration_tag is not None else None
+    status = GoalStatus(status) if status is not None else None
 
     fields: dict[str, Any] = {}
     if target_value is not None:

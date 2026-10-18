@@ -21,6 +21,7 @@ from core.llm import (
     GenerationTurn,
     LlmContent,
     LlmPart,
+    OnRetry,
     ToolDeclaration,
     UsageInfo,
 )
@@ -102,8 +103,10 @@ class ClaudeLlmAdapter:
         contents: list[LlmContent],
         tools: list[ToolDeclaration],
         thinking_level: str,
+        on_retry: OnRetry | None = None,
     ) -> GenerationTurn:
         del thinking_level  # 위 docstring 참고 — Haiku는 확장 사고를 안 쓴다.
+        del on_retry  # Claude 쪽 503 재시도는 아직 구현하지 않았다(docs/plan.md §5, Gemini만 실기로 확인됨).
         provider_messages = [to_provider_content(c) for c in contents]
         response = await self._client.messages.create(
             model=model,

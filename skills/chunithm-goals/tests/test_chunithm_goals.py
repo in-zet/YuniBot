@@ -420,6 +420,22 @@ async def test_update_changes_status_and_due_at(skill: ModuleType, db: aiosqlite
     assert goal.due_at == "2026-12-31"
 
 
+async def test_update_via_executor_with_raw_string_enum_args(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """set_goal과 같은 종류의 버그: status/duration_tag도 LLM 경로에선 원문 문자열로 온다."""
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
+    outcome = await _executor().invoke(
+        skill.update.__yuni_tool__, ctx,
+        {"goal_id": created.data["goal_id"], "status": "stopped", "duration_tag": "short"},
+    )
+    assert outcome.result is not None and outcome.result.error is None
+    goal = await skill.models.fetch_goal(db, created.data["goal_id"])
+    assert goal.status == "stopped"
+    assert goal.duration_tag == "short"
+
+
 async def test_update_rejects_other_players_goal(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, player_id="p1", tags=frozenset())
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
@@ -556,6 +572,21 @@ def test_all_justice_condition_checks_combo_lamp_not_chain_lamp(skill: ModuleTyp
     assert skill._row_matches_condition(full_chain_only, cond, None) is False
     assert skill._row_matches_condition(aj, cond, None) is True
     assert skill._row_matches_condition(ajc, cond, None) is True
+
+
+async def test_set_goal_via_executor_with_raw_string_enum_args(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """실기 2026-10-18: LLM 경로는 core/schema.py가 enum 인자를 원문 문자열로 넘기는데
+    set_goal이 kind.value 등을 바로 불러 AttributeError('str' object has no attribute
+    'value')로 터졌다. ToolExecutor.invoke는 enum 인자를 변환하지 않으므로(ref type만
+    변환) 도구 자신이 되돌려야 한다 — 그 경로를 그대로 재현한다."""
+    ctx = _ctx(db=db, tags=frozenset())
+    outcome = await _executor().invoke(
+        skill.set_goal.__yuni_tool__, ctx, {"kind": "freeform", "description": "손배치 연습"},
+    )
+    assert outcome.result is not None and outcome.result.error is None
+    assert outcome.result.data["kind"] == "freeform"
 
 
 async def test_todo_bulk_excludes_chart_that_already_meets_target_score(

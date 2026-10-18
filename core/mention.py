@@ -1,6 +1,7 @@
 # core/mention.py
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
@@ -15,7 +16,9 @@ from core.fallback_messages import (
     COOLDOWN_ACTIVE_MESSAGE,
     LLM_FAILURE_MESSAGE,
     MONTHLY_CAP_REACHED_MESSAGE,
+    RETRY_WAIT_MESSAGE,
     TOOL_CALL_CAP_MESSAGE,
+    WORKING_MESSAGE,
 )
 from core.response_assembly import assemble_response
 from core.skill_loading import Mode, SkillLoadState
@@ -29,6 +32,11 @@ from services.common.players import DiscordAccount, Player
 _DM_SCOPE = "dm"
 
 MAX_CONTEXT_MESSAGES = 6
+
+# 이 시간 안에 에이전트가 끝내지 못하면(도구를 여러 번 부르는 긴 처리 등) 최종 답 전에
+# "확인하고 있다"를 한 번 보낸다 — 실기 2026-10-18: 도구 호출이 이어지는 동안 디스코드에
+# 타이핑 표시만 뜨고 몇 분씩 아무 말이 없어 응답이 멈춘 것처럼 보였다.
+SLOW_RESPONSE_NOTICE_SECONDS = 5.0
 
 logger = logging.getLogger(__name__)
 
@@ -223,12 +231,30 @@ class MentionEntry:
             mode=cast("Mode", self._skill_loading_mode), known_skills=self._known_skill_names
         )
 
+        retry_notified = False
+
+        async def on_retry(attempt: int, delay: float) -> None:
+            # 재시도 중이라고 매번 알리면 스팸이 된다 — 이번 요청에서 한 번만 보낸다.
+            nonlocal retry_notified
+            if retry_notified:
+                return
+            retry_notified = True
+            await send(RETRY_WAIT_MESSAGE, [])
+
         async with typing:
-            try:
-                result = await self._agent.run(
+            agent_task = asyncio.ensure_future(
+                self._agent.run(
                     ctx=ctx, skill_state=skill_state, user_text=user_text,
-                    prompt_context_snippets=prompt_context_snippets,
+                    prompt_context_snippets=prompt_context_snippets, on_retry=on_retry,
                 )
+            )
+            done, _pending = await asyncio.wait({agent_task}, timeout=SLOW_RESPONSE_NOTICE_SECONDS)
+            # on_retry가 이미 "잠깐만 기다려 달라"를 보냈으면 또 보내지 않는다(같은 요청에
+            # 안내를 두 번 띄우면 스팸이다).
+            if agent_task not in done and not retry_notified:
+                await send(WORKING_MESSAGE, [])
+            try:
+                result = await agent_task
             except Exception:  # LLM/네트워크 어떤 실패든 디스코드 핸들러를 죽이지 않고 고정 문구로 돌린다
                 logger.warning("플레이어 %s의 멘션 처리 실패, 고정 문구로 응답한다", player.id, exc_info=True)
                 await send(LLM_FAILURE_MESSAGE, [])

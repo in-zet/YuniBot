@@ -11,3 +11,5 @@ LLM_FAILURE_MESSAGE = "지금 응답을 만들 수 없다. 슬래시 명령(/도
 MONTHLY_CAP_REACHED_MESSAGE = "이번 달 LLM 사용량 상한에 도달했다. 슬래시 명령(/도움말 등)은 계속 쓸 수 있다."
 COOLDOWN_ACTIVE_MESSAGE = "요청이 너무 잦다. 잠시 후 다시 멘션해 달라."
 TOOL_CALL_CAP_MESSAGE = "이번 요청에서 도구를 너무 많이 불렀다. 질문을 나눠서 다시 말해 달라."
+RETRY_WAIT_MESSAGE = "지금 응답이 늦네. 잠깐만 기다려 달라."
+WORKING_MESSAGE = "확인하고 있다. 잠깐만 기다려 달라."

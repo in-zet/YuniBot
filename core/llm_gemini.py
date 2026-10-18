@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from core.llm import (
@@ -8,9 +12,19 @@ from core.llm import (
     GenerationTurn,
     LlmContent,
     LlmPart,
+    OnRetry,
     ToolDeclaration,
     UsageInfo,
 )
+
+logger = logging.getLogger(__name__)
+
+# Gemini가 일시 과부하(503)·속도 제한(429)일 때만 재시도한다 — 나머지 4xx(잘못된 요청,
+# 인증 등)는 다시 불러도 똑같이 실패하니 바로 올린다. 2026-10-18 실기에서 재시도 없이
+# 한 번 실패하면 바로 고정 문구로 답하는 문제를 확인했다(docs/plan.md §5).
+_RETRYABLE_CODES = frozenset({429, 500, 502, 503, 504})
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY_SECONDS = 2.0  # 시도마다 2배로 늘린다(2초, 4초, 8초).
 
 
 def to_provider_content(content: LlmContent) -> types.Content:
@@ -93,6 +107,7 @@ class GeminiLlmAdapter:
         contents: list[LlmContent],
         tools: list[ToolDeclaration],
         thinking_level: str,
+        on_retry: OnRetry | None = None,
     ) -> GenerationTurn:
         provider_contents = [to_provider_content(c) for c in contents]
         config = types.GenerateContentConfig(
@@ -101,10 +116,24 @@ class GeminiLlmAdapter:
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel(thinking_level)),
         )
-        response = await self._client.aio.models.generate_content(
-            model=model, contents=provider_contents, config=config
-        )
-        return _from_provider_response(response)
+        attempt = 0
+        while True:
+            try:
+                response = await self._client.aio.models.generate_content(
+                    model=model, contents=provider_contents, config=config
+                )
+                return _from_provider_response(response)
+            except genai_errors.APIError as exc:
+                attempt += 1
+                if exc.code not in _RETRYABLE_CODES or attempt > _MAX_RETRIES:
+                    raise
+                delay = _RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "Gemini %s, 재시도 %d/%d (%.0f초 후): %s", exc.code, attempt, _MAX_RETRIES, delay, exc.message,
+                )
+                if on_retry is not None:
+                    await on_retry(attempt, delay)
+                await asyncio.sleep(delay)
 
     async def aclose(self) -> None:
         await self._client.aio.aclose()

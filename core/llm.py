@@ -1,8 +1,13 @@
 # core/llm.py
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
+
+# 어댑터가 일시 오류(503 과부하 등)로 재시도하기 직전에 부른다. 인자는 (몇 번째 시도인지,
+# 대기할 초). core/mention.py가 이걸로 "잠깐만 기다려 달라" 안내를 한 번만 보낸다.
+OnRetry = Callable[[int, float], Awaitable[None]]
 
 
 @dataclass(slots=True, kw_only=True)
@@ -66,4 +71,5 @@ class LlmAdapter(Protocol):
         contents: list[LlmContent],
         tools: list[ToolDeclaration],
         thinking_level: str,
+        on_retry: OnRetry | None = None,
     ) -> GenerationTurn: ...
