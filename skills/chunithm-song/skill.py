@@ -16,10 +16,6 @@ from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, SongRecord
 from services.chunithm.terms import ResolvedDifficulty
 
 _DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
-# 실기 2026-10-18: 25는 너무 작아서 상수 범위 하나에도 다 못 보여주는 경우가 흔했다(폴더
-# 목표에 54곡짜리 범위도 실제로 있다) — data["titles"]도 이 상한에 걸려 모델이 26번째
-# 곡부터는 아예 몰랐다.
-_MAX_LISTED = 60
 
 
 def _with_sections(head: str, sections: list[Section]) -> str:
@@ -87,12 +83,10 @@ async def find_by_const(
     short_code = LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
     hits = ctx.songdb.find_by_const(min_const=min_const, max_const=max_const, difficulty=short_code)
 
-    lines = [f"{hit.song.title} — 상수 {hit.chart.const}" for hit in hits[:_MAX_LISTED]]
-    if len(hits) > _MAX_LISTED:
-        lines.append(f"...외 {len(hits) - _MAX_LISTED}개")
+    lines = [f"{hit.song.title} — 상수 {hit.chart.const}" for hit in hits]
 
     return ToolResult(
-        data={"count": len(hits), "titles": [hit.song.title for hit in hits[:_MAX_LISTED]]},
+        data={"count": len(hits), "titles": [hit.song.title for hit in hits]},
         display=Display(content="\n".join(lines) if lines else "해당 범위의 채보가 없다."),
     )
 
