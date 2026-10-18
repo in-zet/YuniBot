@@ -497,6 +497,24 @@ async def test_update_target_score_resolves_rank_name_to_correct_score(
     assert goal.target_value == 1_007_500.0
 
 
+async def test_update_rejects_target_value_alone_on_song_goal(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """실기 2026-10-18: target_score를 추가한 뒤에도 target_value가 곡 목표에 여전히
+    열려 있어서, 모델이 또 "트리플"을 1,000,000(SS)으로 직접 계산해 target_value로
+    넘긴 사례가 재현됐다 — 곡 목표는 이제 target_value를 아예 거절해 target_score로만
+    가게 한다."""
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
+    goal_id = created.data["goal_id"]
+
+    result = await skill.update(ctx, goal_id, target_value=1_000_000.0)
+
+    assert result.error is not None
+    goal = await skill.models.fetch_goal(db, goal_id)
+    assert goal.target_value == 1_000_000.0  # 안 바뀌었다(set_goal 때 값 그대로)
+
+
 async def test_update_rejects_both_target_value_and_target_score(
     skill: ModuleType, db: aiosqlite.Connection
 ) -> None:

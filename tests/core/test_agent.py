@@ -149,7 +149,10 @@ async def test_agent_loop_surfaces_tag_error_from_executor_as_function_response(
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_rejects_confirm_always_tool_without_crashing() -> None:
+async def test_agent_loop_auto_confirms_confirm_always_tool_without_a_button() -> None:
+    """멘션 경로에는 확인 버튼을 낼 인터랙션이 없어, confirm="always"/"bulk" 도구는 거부하지
+    않고 바로 실행한다(2026-10-18 사용자 결정 — 실기에서 "일괄 삭제는 슬래시로만" 거절이
+    불편하다는 피드백)."""
     registry = _registry()
     call_turn = GenerationTurn(
         content=LlmContent(role="model", parts=[]),
@@ -172,20 +175,35 @@ async def test_agent_loop_rejects_confirm_always_tool_without_crashing() -> None
                 seen_function_responses.append(part.function_response.response)
         return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="알겠다")]), text="알겠다")
 
+    class _FakeSettings:
+        def __init__(self) -> None:
+            self.saved: dict[str, object] = {}
+
+        async def set_value(self, *, scope: str, scope_id: str, skill: str, name: str, value: object, updated_by: str) -> None:
+            self.saved[name] = value
+
+    settings = _FakeSettings()
+    # 스킬 도구는 ctx.services가 아니라 executor가 쥔 전역 services에서 manifest가
+    # 선언한 것만 골라 받는다(AgentLoop._scoped_ctx) — 그래서 settings를 executor에 넣는다.
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(), services={"settings": settings},
+    )
     loop = AgentLoop(
-        llm=FakeLlmAdapter(script), executor=_executor(registry),
+        llm=FakeLlmAdapter(script), executor=executor,
         prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
         model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
     )
     # admin 스킬은 tags=[admin]을 요구한다. admin_set_limits는 confirm="always"라
-    # ToolExecutor.invoke가 result=None, needs_confirm=True를 돌려주는 경로를 탄다 —
-    # AgentLoop._invoke의 assert outcome.result is not None 바로 앞 분기다.
-    ctx = ToolContext(player_id="p1", tags=frozenset({"admin"}), services={})
+    # ToolExecutor.invoke가 result=None, needs_confirm=True를 돌려주는 경로를 타지만,
+    # AgentLoop._invoke가 이제 그 token으로 바로 executor.confirm(confirmed=True)을 부른다.
+    ctx = ToolContext(player_id="p1", tags=frozenset({"admin"}), services={}, guild_id="g1")
     result = await loop.run(ctx=ctx, skill_state=_state(registry, mode="full"), user_text="월 비용 상한 20불로 바꿔줘", prompt_context_snippets=[])
     assert result.text == "알겠다"
-    error_value = seen_function_responses[0].get("error")
-    assert isinstance(error_value, str)
-    assert "슬래시 명령으로만 확인할 수 있다" in error_value
+    assert "error" not in seen_function_responses[0]
+    assert seen_function_responses[0] == {"monthly_cost_cap": 20.0, "player_cooldown_seconds": 5}
+    assert settings.saved["월 비용 상한"] == 20.0
+    assert settings.saved["플레이어 쿨다운"] == 5
 
 
 @pytest.mark.asyncio

@@ -244,10 +244,13 @@ class AgentLoop:
             spec, scoped_ctx, args, skill_tags=skill_tags, skill_tags_any=skill_tags_any, skill_name=skill_name,
         )
         if outcome.needs_confirm:
-            # 멘션 경로에서 confirm="always" 도구(와 2건 이상을 바꾸는 confirm="bulk" 도구)는
-            # 디스코드 버튼을 낼 인터랙션이 없다
-            # (대화 스레드 중이라 상호작용 컨텍스트가 없다) — 바로 거부하고 슬래시로 안내한다.
-            return ToolResult(error="이 작업은 슬래시 명령으로만 확인할 수 있다")
+            # 멘션 경로에는 확인 버튼을 낼 인터랙션이 없다(대화 스레드 중이라 상호작용
+            # 컨텍스트가 없다). 슬래시처럼 버튼으로 다시 묻는 대신, 플레이어가 이미 멘션으로
+            # 명시적으로 요청한 것 자체를 확인으로 보고 바로 실행한다(2026-10-18 사용자 결정).
+            assert outcome.confirm_token is not None
+            return await self._executor.confirm(
+                outcome.confirm_token, confirmed=True, player_id=scoped_ctx.player_id
+            )
         assert outcome.result is not None
         return outcome.result
 

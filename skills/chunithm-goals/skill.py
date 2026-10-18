@@ -702,6 +702,13 @@ async def update(
 
     if target_value is not None and target_score is not None:
         return ToolResult(error="점수(target_score)나 목표값(target_value) 중 하나만 줘.")
+    if target_value is not None and goal.kind == GoalKind.SONG.value:
+        # 곡 목표는 target_value를 받지 않는다(target_score만) — 이게 열려 있으면 모델이
+        # 랭크 이름을 점수로 직접 계산해 target_value로 넘길 수 있다. 실기에서 "트리플(SSS,
+        # 1,007,500)"을 1,000,000으로 잘못 계산해 넘긴 사례(CLAUDE.md "숫자는 코드가
+        # 계산한다" 위반, progress/2026-10-18.md)가 target_score 추가 뒤에도 재현됐다 —
+        # target_value가 여전히 받아졌기 때문이다. 이제 코드가 아예 거절한다.
+        return ToolResult(error="곡 목표의 점수는 target_score로 줘(점수 숫자나 랭크 이름을 원문 그대로) — 점수를 직접 계산해서 넘기지 않는다.")
     if target_score is not None:
         if goal.kind != GoalKind.SONG.value:
             return ToolResult(error="target_score는 곡 목표에만 쓸 수 있어. 레이팅·오버파워는 target_value를 줘.")
