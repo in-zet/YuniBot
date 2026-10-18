@@ -265,25 +265,18 @@ async def test_profile_of_public_other_player(skill: ModuleType) -> None:
     assert result.data["player_id"] == "other"
 
 
-async def test_profile_shows_change_since_previous_sync(skill: ModuleType) -> None:
+async def test_profile_does_not_show_change_since_previous_sync(skill: ModuleType) -> None:
+    """변화량은 동기화 리포트 전용이다(사용자 확인 2026-10-18) — 프로필은 지금 값만 낸다."""
     f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.profile(f.ctx)
 
-    assert result.data["change"] == {"computed_rating": "+0.04", "best30_average": "+0.02", "new20_average": "+0.00"}
-    assert result.data["previous"]["computed_rating"] == "16.90"
+    assert "change" not in result.data
+    assert "previous" not in result.data
+    assert "has_previous" not in result.data
     content = _content(result)
-    assert "16.94 (+0.04)" in content and "17.02 (+0.02)" in content and "16.83 (+0.00)" in content
-
-
-async def test_profile_after_first_sync_has_no_previous(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_FIRST}))
-
-    result = await skill.profile(f.ctx)
-
-    assert result.data["has_previous"] is False
-    assert result.data["change"] == {"computed_rating": None, "best30_average": None, "new20_average": None}
-    assert "16.94 (비교할 직전 기록 없음)" in _content(result)
+    assert "16.94" in content and "17.02" in content and "16.83" in content
+    assert "+0.04" not in content and "비교할 직전 기록 없음" not in content
 
 
 async def test_profile_never_synced(skill: ModuleType) -> None:
@@ -326,30 +319,23 @@ async def test_best_both_lists_rows_and_contribution(skill: ModuleType) -> None:
     assert "곡 A" in content and "신곡 C" in content and "1,007,620" in content and "0.3462" in content
 
 
-async def test_best_shows_average_changes(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, deltas={"me": _DELTAS_SECOND}))
+async def test_best_does_not_show_average_changes(skill: ModuleType) -> None:
+    """변화량은 동기화 리포트 전용이다(사용자 확인 2026-10-18) — 베스트도 지금 값만 낸다."""
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.best(f.ctx)
 
-    assert result.data["best_average"] == {"current": "17.02", "previous": "17.00", "change": "+0.02"}
-    assert result.data["computed_rating"]["change"] == "+0.04"
+    assert result.data["best_average"] == "17.02"
+    assert result.data["computed_rating"] == "16.94"
     content = _content(result)
-    assert "레이팅  16.94 (+0.04)" in content
-    assert "베스트 30  평균 17.02 (+0.02)" in content
-    assert "신곡 20  평균 16.83 (+0.00)" in content
-
-
-async def test_best_after_first_sync_has_no_previous(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, deltas={"me": _DELTAS_FIRST}))
-
-    result = await skill.best(f.ctx)
-
-    assert result.data["best_average"]["change"] is None
-    assert "베스트 30  평균 17.02 (비교할 직전 기록 없음)" in _content(result)
+    assert "레이팅  16.94" in content
+    assert "베스트 30  평균 17.02" in content
+    assert "신곡 20  평균 16.83" in content
+    assert "+0.04" not in content and "비교할 직전 기록 없음" not in content
 
 
 async def test_best_kind_new_only(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, deltas={"me": _DELTAS_SECOND}))
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.best(f.ctx, kind="new")
 
@@ -359,7 +345,7 @@ async def test_best_kind_new_only(skill: ModuleType) -> None:
 
 
 async def test_best_invalid_kind_is_error(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, deltas={"me": _DELTAS_SECOND}))
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.best(f.ctx, kind="전부")
 
