@@ -1,6 +1,7 @@
 # core/agent.py
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -22,6 +23,8 @@ from core.registry import LoadedSkill
 from core.registry_snapshot import RegistrySnapshot
 from core.skill_loading import SkillLoadState
 from core.tool_types import Display, ToolContext, ToolResult
+
+logger = logging.getLogger(__name__)
 
 _CORE_TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in CORE_TOOL_SPECS}
 
@@ -108,8 +111,11 @@ class AgentLoop:
         contents: list[LlmContent] = [LlmContent(role="user", parts=[LlmPart(text=user_text)])]
         result = AgentTurnResult()
         tool_calls_made = 0
+        tool_call_log: list[str] = []
+        llm_turns = 0
 
         while True:
+            llm_turns += 1
             player_tags = set(ctx.tags)
             system_instruction = self._prompt.build_system_instruction(
                 player_tags=player_tags,
@@ -130,11 +136,19 @@ class AgentLoop:
                 output_tokens=result.usage.output_tokens + turn.usage.output_tokens,
             )
             if result.usage.input_tokens + result.usage.output_tokens > self._max_tokens:
+                logger.warning(
+                    "player %s: 토큰 상한(%d) 초과 — LLM 턴 %d회, 불린 도구 %s",
+                    ctx.player_id, self._max_tokens, llm_turns, tool_call_log,
+                )
                 result.hit_token_cap = True
                 result.text = turn.text
                 return result
 
             if not turn.function_calls:
+                logger.info(
+                    "player %s: 멘션 응답 종료 — LLM 턴 %d회, 도구 호출 %s",
+                    ctx.player_id, llm_turns, tool_call_log,
+                )
                 result.text = turn.text
                 return result
 
@@ -146,10 +160,19 @@ class AgentLoop:
             for call in turn.function_calls:
                 tool_calls_made += 1
                 if tool_calls_made > self._max_tool_calls:
+                    logger.warning(
+                        "player %s: 도구 호출 상한(%d) 초과 — LLM 턴 %d회, 불린 도구 %s, 넘긴 호출 '%s'",
+                        ctx.player_id, self._max_tool_calls, llm_turns, tool_call_log, call.name,
+                    )
                     result.hit_tool_call_cap = True
                     result.text = turn.text
                     return result
 
+                tool_call_log.append(call.name)
+                logger.info(
+                    "player %s: 도구 호출 %d/%d '%s' args=%s",
+                    ctx.player_id, tool_calls_made, self._max_tool_calls, call.name, call.args,
+                )
                 tool_result = await self._invoke(inner_ctx, call.name, call.args)
                 if tool_result.data:
                     result.collected_data.append(tool_result.data)

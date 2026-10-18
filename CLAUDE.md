@@ -2,10 +2,6 @@
 
 유니 코어 위에 같은 규격의 스킬 모듈을 꽂는 구조다. CHUNITHM-NET 접속·파싱만 chuni-penguin에서 `third_party/`로 가져와 쓴다.
 
-## 1회성 안내 (처리가 끝나면 이 절을 지운다)
-작업 방식이 2026-10-18에 바뀌었다. 다음 세션의 첫 응답에서 `docs/onboarding.md`를 읽고 그 지시대로 사용자에게 안내한다.
-안내를 마치고 사용자가 확인하면, 이 절과 `docs/onboarding.md`를 지우고 `docs/INDEX.md`에서 그 행을 뺀다.
-
 ## 세션 시작
 새 세션 시작 시 `docs/start.md`를 읽는다.
 
