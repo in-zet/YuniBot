@@ -605,6 +605,14 @@ class RecordsService:
         row = await cursor.fetchone()
         return row["score"] if row is not None else None
 
+    async def new_frame_floor(self, player_id: str) -> Decimal:
+        """지금 신곡20 프레임의 최저 레이팅(`_frame_floor`와 같은 규칙 — 20곡을 아직 못
+        채웠으면 0.00). `chunithm-updates`가 새로 들어온 곡이 이 프레임에 들어올 상수대인지
+        `candidate_upside(const, floor)`로 판정할 때 쓴다(`candidates()`의 new_floor와 같은
+        계산이라 숫자가 어긋나지 않는다)."""
+        _, new = self._frames(await self.all_pb_rows(player_id))
+        return _frame_floor(new, _NEW_FRAME_SIZE)
+
     async def last_sync_at(self, player_id: str) -> str | None:
         cursor = await self._conn.execute(
             "SELECT synced_at FROM records_sync_log WHERE player_id = ? AND game = ? "

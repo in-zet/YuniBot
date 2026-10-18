@@ -1,26 +1,12 @@
 # skills/admin/skill.py
 from __future__ import annotations
 
-import re
-
 from core.decorators import tool
 from core.tool_types import Display, PlayerRef, ToolContext, ToolResult
+from services.common.notify import parse_channel_ref
 from services.common.players import Player
 
 _UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
-_CHANNEL_MENTION_RE = re.compile(r"^<#(\d{15,25})>$")
-_BARE_CHANNEL_ID_RE = re.compile(r"^\d{15,25}$")
-
-
-def _parse_channel_id(raw: str) -> str | None:
-    """#채널 멘션(<#id>)이나 맨 숫자 id를 채널 id로 바꾼다. 못 읽으면 None."""
-    text = raw.strip()
-    mention = _CHANNEL_MENTION_RE.match(text)
-    if mention:
-        return mention.group(1)
-    if _BARE_CHANNEL_ID_RE.match(text):
-        return text
-    return None
 
 
 @tool(slash="관리 사용량")
@@ -131,7 +117,7 @@ async def set_report_channel(ctx: ToolContext, channel: str) -> ToolResult:
     채널 id로 준다. 빈 문자열이면 끈다(아무 데도 안 보낸다)."""
     if ctx.guild_id is None:
         return ToolResult(error="서버 안에서만 쓸 수 있다")
-    channel_id = _parse_channel_id(channel) if channel else ""
+    channel_id = parse_channel_ref(channel) if channel else ""
     if channel and channel_id is None:
         return ToolResult(error="채널을 못 읽었어. #채널 멘션이나 채널 id로 줘.")
     await ctx.settings.set_value(

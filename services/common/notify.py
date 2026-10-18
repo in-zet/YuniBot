@@ -1,6 +1,7 @@
 # services/common/notify.py
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Protocol
@@ -11,6 +12,21 @@ from services.common.settings import SettingsService
 
 _MENTION_SETTING_SKILL = "account-link"
 _MENTION_SETTING_NAME = "알림을 받을 계정"
+
+_CHANNEL_MENTION_RE = re.compile(r"^<#(\d{15,25})>$")
+_BARE_CHANNEL_ID_RE = re.compile(r"^\d{15,25}$")
+
+
+def parse_channel_ref(raw: str) -> str | None:
+    """#채널 멘션(<#id>)이나 맨 숫자 id를 채널 id로 바꾼다. 못 읽으면 None. 여러 스킬이
+    "채널을 설정값으로 받는" 같은 모양이라 공통 함수로 둔다(admin, chunithm-updates)."""
+    text = raw.strip()
+    mention = _CHANNEL_MENTION_RE.match(text)
+    if mention:
+        return mention.group(1)
+    if _BARE_CHANNEL_ID_RE.match(text):
+        return text
+    return None
 
 
 class DiscordGateway(Protocol):
