@@ -179,3 +179,7 @@ emits: [chunithm.goal.completed]
 - 오버파워는 직접 계산하지 않고 CHUNITHM-NET 표시값(`Profile.over_power`, `records_sync_log`에 저장)을 쓴다. 폴더별 오버파워 퍼센트는 이번 단계에서 만들지 않는다 — `set()`은 오버파워 범위로 "전체"만 받는다.
 - 폴더 정의는 표기 레벨·상수 범위·수록 버전만 지원한다. `songdb`에 장르가 없어 장르 조합은 뺀다.
 - 기한(`due_at`)과 알림 시점(`notify_offsets`)은 저장만 한다. `@schedule` 등록과 알림 발송은 9단계다.
+
+## 구현 결정 (2026-10-18, 실기에서 드러난 버그)
+
+- `update()`에 `target_score: ScoreRef | None`을 추가했다. 곡 목표의 목표값을 랭크 이름("트리플" 등)으로 바꿔 달라고 하면, 기존엔 `target_value: float`만 받아 모델이 점수를 직접 계산해 넘겨야 했다 — 실기에서 "트리플(SSS)"을 1,000,000점(SS)으로 잘못 기억해 넘긴 사례가 나왔다(CLAUDE.md "숫자는 코드가 계산한다" 위반). `set_goal()`과 같은 `_score()`/`terms.resolve_score` 해석 경로를 타게 했다. `target_value`와 함께 줄 수 없고, 곡 목표가 아니면 거절한다.

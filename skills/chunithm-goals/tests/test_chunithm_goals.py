@@ -482,6 +482,39 @@ async def test_update_via_executor_with_raw_string_enum_args(
     assert goal.duration_tag == "short"
 
 
+async def test_update_target_score_resolves_rank_name_to_correct_score(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """실기 2026-10-18: "트리플(SSS)로 수정해줘"에 모델이 SSS를 1,000,000점(SS)으로 잘못
+    기억해 넘겼다 — set_goal처럼 target_score(ScoreRef)로 해석기를 거치게 고쳤다."""
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
+    goal_id = created.data["goal_id"]
+
+    result = await skill.update(ctx, goal_id, target_score=1_007_500)
+    assert result.error is None
+    goal = await skill.models.fetch_goal(db, goal_id)
+    assert goal.target_value == 1_007_500.0
+
+
+async def test_update_rejects_both_target_value_and_target_score(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
+    result = await skill.update(ctx, created.data["goal_id"], target_value=1_005_000, target_score=1_007_500)
+    assert result.error is not None
+
+
+async def test_update_rejects_target_score_on_non_song_goal(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
+    result = await skill.update(ctx, created.data["goal_id"], target_score=1_007_500)
+    assert result.error is not None
+
+
 async def test_update_rejects_other_players_goal(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, player_id="p1", tags=frozenset())
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")

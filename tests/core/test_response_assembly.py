@@ -27,7 +27,10 @@ def test_assemble_response_passes_when_all_numbers_in_data() -> None:
     assert assembled.displays == []  # optional이라 모델이 [[show:..]]를 안 쓰면 안 붙는다
 
 
-def test_assemble_response_forces_all_optional_displays_on_violation() -> None:
+def test_assemble_response_violation_does_not_force_optional_displays() -> None:
+    # 실기 2026-10-18: 목표 하나만 고쳤는데 id 해석용으로 불렀을 뿐인 list_goals까지
+    # 위반이라는 이유로 통째로 새어 나왔다 — 위반은 경고 로그로만 남고, 표시물은 여전히
+    # [[show:..]]로 모델이 직접 고른 것만 붙는다.
     result = AgentTurnResult(
         text="보더는 15어택이다.",  # 15는 data에 없는 숫자
         collected_data=[{"borders": {"SSS+": 12}}],
@@ -35,7 +38,7 @@ def test_assemble_response_forces_all_optional_displays_on_violation() -> None:
     )
     assembled = assemble_response(result)
     assert assembled.numeric_violation is True
-    assert len(assembled.displays) == 2
+    assert assembled.displays == []
 
 
 def test_assemble_response_shows_display_requested_via_show_tag() -> None:
@@ -63,9 +66,9 @@ def test_assemble_response_always_includes_required_displays_without_violation()
     assert assembled.displays == [Display(content="곡 정보 표")]
 
 
-def test_assemble_response_required_displays_come_first_and_survive_violation() -> None:
-    # 숫자 위반이 나도 required 표시물은 그대로 앞에 오고, optional 표시물은 기존 규칙대로
-    # (위반이면 전부) 뒤에 따라온다.
+def test_assemble_response_required_displays_survive_violation_without_show_tag() -> None:
+    # 숫자 위반이 나도 required 표시물은 그대로 붙는다. optional 표시물은 [[show:..]]가
+    # 없으면 위반 여부와 무관하게 안 붙는다.
     result = AgentTurnResult(
         text="15어택이다.",  # data에 없는 숫자 — 위반
         collected_data=[{"borders": {"SSS+": 12}}],
@@ -74,4 +77,4 @@ def test_assemble_response_required_displays_come_first_and_survive_violation() 
     )
     assembled = assemble_response(result)
     assert assembled.numeric_violation is True
-    assert assembled.displays == [Display(content="필수 표"), Display(content="표1")]
+    assert assembled.displays == [Display(content="필수 표")]

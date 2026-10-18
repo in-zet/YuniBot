@@ -66,10 +66,10 @@ def assemble_response(result: AgentTurnResult) -> AssembledResponse:
     requested_ids = set(_SHOW_TAG_RE.findall(text))
     clean_text = _SHOW_TAG_RE.sub("", text).strip()
 
-    if violation:
-        optional = list(result.optional_displays.values())
-    else:
-        optional = [result.optional_displays[i] for i in requested_ids if i in result.optional_displays]
+    # 숫자 위반이어도 그 턴에 모인 optional 표시물을 전부 보여주지 않는다 — 실기 2026-10-18:
+    # 목표 하나만 수정했는데 이름→id 해석용으로 불렀을 뿐인 list_goals까지 통째로 새어 나왔다.
+    # `[[show:<id>]]`로 모델이 명시한 것만 보여준다(위반은 경고 로그로만 남는다).
+    optional = [result.optional_displays[i] for i in requested_ids if i in result.optional_displays]
 
     # required 표시물은 숫자 위반 여부와 무관하게 항상 붙는다(도구의 정상적인 주 출력이지,
     # 위반의 "증거"가 아니다) — 그래서 위반 게이트를 거치지 않고, 강제로 보여줄 것들보다

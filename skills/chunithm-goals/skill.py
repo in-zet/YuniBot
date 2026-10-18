@@ -683,6 +683,7 @@ async def update(
     goal_id: str,
     *,
     target_value: float | None = None,
+    target_score: ScoreRef | None = None,
     due_at: str | None = None,
     duration_tag: DurationTag | None = None,
     parent_goal_id: str | None = None,
@@ -691,11 +692,22 @@ async def update(
     notify_offsets: str | None = None,
 ) -> ToolResult:
     """목표값·기한(YYYY-MM-DD)·기간 꼬리표·상위 목표·상태·공개 여부·알림 시점을 바꾼다(자유
-    목표의 진행은 상태로 기록한다). notify_offsets는 기한 며칠 전에 알릴지 쉼표로(예: "7,1,0"),
-    빈 문자열이면 알림을 끈다. goal_id는 `/목표 목록`에 나오는 id다. 본인 목표만 바꿀 수 있다."""
+    목표의 진행은 상태로 기록한다). 곡 목표의 점수는 target_score(점수 숫자나 랭크 이름을 원문
+    그대로 — 점수 환산은 해석기가 한다)로 바꾼다. 레이팅·오버파워 목표는 target_value를 쓴다.
+    notify_offsets는 기한 며칠 전에 알릴지 쉼표로(예: "7,1,0"), 빈 문자열이면 알림을 끈다.
+    goal_id는 `/목표 목록`에 나오는 id다. 본인 목표만 바꿀 수 있다."""
     goal = await models.fetch_goal(ctx.db, goal_id)
     if goal is None or goal.player_id != ctx.player_id:
         return ToolResult(error="그 목표를 찾지 못했어.")
+
+    if target_value is not None and target_score is not None:
+        return ToolResult(error="점수(target_score)나 목표값(target_value) 중 하나만 줘.")
+    if target_score is not None:
+        if goal.kind != GoalKind.SONG.value:
+            return ToolResult(error="target_score는 곡 목표에만 쓸 수 있어. 레이팅·오버파워는 target_value를 줘.")
+        score = _score(target_score)
+        assert score is not None
+        target_value = float(score)
 
     duration_tag = DurationTag(duration_tag) if duration_tag is not None else None
     status = GoalStatus(status) if status is not None else None
