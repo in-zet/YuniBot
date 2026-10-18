@@ -28,6 +28,9 @@ class ToolSpec:
     mutates: bool = False
     confirm: ConfirmMode = "never"
     cost: CostTier = "light"
+    # 응답(멘션 한 번) 안에서 이 도구만 따로 거는 호출 상한. 전역 max_tool_calls_per_turn보다
+    # 좁게 쓴다 — 넘기면 core/agent.py가 그 호출만 에러로 돌리고 턴은 계속 진행한다.
+    max_calls_per_turn: int | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -101,6 +104,11 @@ def _require_dry_run_for_bulk(fn: Callable[..., Any], confirm: ConfirmMode) -> N
         )
 
 
+def _require_positive_max_calls(fn: Callable[..., Any], max_calls_per_turn: int | None) -> None:
+    if max_calls_per_turn is not None and max_calls_per_turn < 1:
+        raise DecoratorError(f"'{fn.__name__}'의 max_calls_per_turn은 1 이상이어야 한다")
+
+
 def tool(
     *,
     slash: str | None = None,
@@ -109,12 +117,14 @@ def tool(
     mutates: bool = False,
     confirm: ConfirmMode = "never",
     cost: CostTier = "light",
+    max_calls_per_turn: int | None = None,
 ) -> Callable[[F], F]:
     def deco(fn: F) -> F:
         _require_async(fn)
         _require_docstring(fn)
         _require_tool_context_first_param(fn)
         _require_dry_run_for_bulk(fn, confirm)
+        _require_positive_max_calls(fn, max_calls_per_turn)
         fn.__yuni_tool__ = ToolSpec(  # pyright: ignore[reportFunctionMemberAccess]
             fn=fn,
             name=fn.__name__,
@@ -124,6 +134,7 @@ def tool(
             mutates=mutates,
             confirm=confirm,
             cost=cost,
+            max_calls_per_turn=max_calls_per_turn,
         )
         return fn
 

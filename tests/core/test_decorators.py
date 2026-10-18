@@ -65,6 +65,25 @@ def test_tool_spec_attached() -> None:
     assert spec.cost == "network"
     assert spec.confirm == "never"
     assert spec.mutates is False
+    assert spec.max_calls_per_turn is None
+
+
+def test_tool_spec_carries_max_calls_per_turn() -> None:
+    @tool(cost="llm", max_calls_per_turn=3)
+    async def search(ctx: ToolContext, question: str) -> ToolResult:
+        """검색한다."""
+        return ToolResult(data={"question": question})
+
+    assert search.__yuni_tool__.max_calls_per_turn == 3  # pyright: ignore[reportFunctionMemberAccess]
+
+
+def test_tool_rejects_non_positive_max_calls_per_turn() -> None:
+    with pytest.raises(DecoratorError, match="max_calls_per_turn"):
+
+        @tool(max_calls_per_turn=0)
+        async def bad(ctx: ToolContext) -> ToolResult:
+            """0은 안 된다."""
+            return ToolResult(data={})
 
 
 def test_collect_specs_groups_everything() -> None:

@@ -93,6 +93,10 @@ class AgentLoop:
                         return spec, skill.manifest.name
         return None
 
+    def _max_calls_for(self, tool_name: str) -> int | None:
+        found = self._find_spec(tool_name)
+        return found[0].max_calls_per_turn if found is not None else None
+
     def _skill_weight(self, skill_name: str | None) -> str:
         if skill_name is None:
             return "light"  # core 도구(open_skill/remember 등)는 네트워크 스크래핑이 없다
@@ -129,6 +133,7 @@ class AgentLoop:
         result = AgentTurnResult()
         tool_calls_made = 0
         tool_call_log: list[str] = []
+        tool_call_counts: dict[str, int] = {}
         llm_turns = 0
         heavy_notified = False
 
@@ -202,12 +207,26 @@ class AgentLoop:
                     if found is not None and self._skill_weight(found[1]) == "heavy":
                         heavy_notified = True
                         await on_heavy_call()
-                tool_started = time.monotonic()
-                tool_result = await self._invoke(inner_ctx, call.name, call.args)
-                logger.info(
-                    "player %s: 도구 '%s' 완료 %.2f초",
-                    ctx.player_id, call.name, time.monotonic() - tool_started,
-                )
+
+                tool_call_counts[call.name] = tool_call_counts.get(call.name, 0) + 1
+                per_tool_cap = self._max_calls_for(call.name)
+                if per_tool_cap is not None and tool_call_counts[call.name] > per_tool_cap:
+                    # 전역 상한과 달리 이 호출 하나만 거절한다 — 턴은 멈추지 않고 모델이
+                    # 다른 도구나 지금까지 모은 결과로 답을 이어 가게 둔다.
+                    logger.warning(
+                        "player %s: 도구 '%s' 응답당 호출 상한(%d) 초과 — 이 호출만 거절",
+                        ctx.player_id, call.name, per_tool_cap,
+                    )
+                    tool_result = ToolResult(
+                        error=f"'{call.name}'은 이번 응답에서 이미 {per_tool_cap}번 불렀다. 더 부르지 마라"
+                    )
+                else:
+                    tool_started = time.monotonic()
+                    tool_result = await self._invoke(inner_ctx, call.name, call.args)
+                    logger.info(
+                        "player %s: 도구 '%s' 완료 %.2f초",
+                        ctx.player_id, call.name, time.monotonic() - tool_started,
+                    )
                 if tool_result.data:
                     result.collected_data.append(tool_result.data)
                 if tool_result.display is not None and tool_result.display_mode == "optional":

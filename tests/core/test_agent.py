@@ -21,6 +21,7 @@ from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
 from core.skill_loading import Mode, SkillLoadState
 from core.tool_types import ToolContext
+from tests.core.skill_factory import write_skill
 from tests.support.fake_llm import FakeLlmAdapter
 
 
@@ -146,6 +147,61 @@ async def test_agent_loop_surfaces_tag_error_from_executor_as_function_response(
     result = await loop.run(ctx=_ctx(), skill_state=_state(registry, mode="full"), user_text="질문", prompt_context_snippets=[])
     assert result.text == "막혔다"
     assert "error" in seen_function_responses[0]
+
+
+_CAPPED_TOOL_BODY = (
+    "@tool(max_calls_per_turn=1)\n"
+    "async def do_search(ctx: ToolContext) -> ToolResult:\n"
+    '    """테스트용: 응답당 호출 상한이 있는 도구."""\n'
+    "    return ToolResult(data={\"ok\": True})\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_rejects_call_beyond_per_tool_cap_but_keeps_turn_going(tmp_path: Path) -> None:
+    """max_calls_per_turn은 전역 max_tool_calls_per_turn과 달리 이 도구 하나만 거절한다 —
+    턴 전체는 멈추지 않고, 모델이 거절 사유를 보고 답을 마무리할 수 있다(10단계 Part 1)."""
+    skills_root = tmp_path / "skills"
+    write_skill(skills_root, "capped-search", _CAPPED_TOOL_BODY)
+    registry = SkillRegistry([Path("skills"), skills_root])
+    registry.load()
+    assert "capped-search" in {s.manifest.name for s in registry.enabled_skills()}, registry.failures()
+
+    first_call = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="capped-search_do_search", args={})],
+    )
+    second_call = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="2", name="capped-search_do_search", args={})],
+    )
+    seen_function_responses: list[dict[str, object]] = []
+
+    def script(
+        model: str, system: str, contents: list[LlmContent], tools: list[ToolDeclaration]
+    ) -> GenerationTurn:
+        for part in contents[-1].parts:
+            if part.function_response is not None:
+                seen_function_responses.append(part.function_response.response)
+        if len(seen_function_responses) == 0:
+            return first_call
+        if len(seen_function_responses) == 1:
+            return second_call
+        return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="끝냈다")]), text="끝냈다")
+
+    loop = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    result = await loop.run(
+        ctx=_ctx(), skill_state=_state(registry, mode="full"), user_text="검색해줘", prompt_context_snippets=[]
+    )
+
+    assert result.text == "끝냈다"
+    assert result.hit_tool_call_cap is False
+    assert "error" not in seen_function_responses[0]
+    assert "error" in seen_function_responses[1]
 
 
 @pytest.mark.asyncio
