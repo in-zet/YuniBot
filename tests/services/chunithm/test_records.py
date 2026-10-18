@@ -2,7 +2,7 @@
 import dataclasses
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -134,13 +134,14 @@ async def test_computed_rating_matches_fixture_displayed_rating(conn) -> None:
     쓰던 중 실제로 세 파일 중 하나가 다른 시점이라 어긋난 적이 있다(player_data.html을
     베스트30/신곡20과 같은 시점으로 다시 저장해 고쳤다).
 
-    전체 레이팅(16.94)은 CHUNITHM-NET이 숫자 이미지로 보여주는 실제 표시값과
-    대조한다. 베스트30 평균(17.02)·신곡20 평균(16.83)은 CHUNITHM-NET이 텍스트로
-    따로 보여주는 페이지가 없어 저장본과 직접 대조할 수는 없지만, 공식대로
-    (30곡·20곡 가중) 다시 합쳤을 때 이미 검증된 전체 레이팅과 정확히 같아야 한다
-    — 이 일관성이 "베스트 평균"이 올바로 계산됐다는 증거다. 아래 숫자는 지금
-    저장된 두 파일(2026-10-11)로 실제로 계산해 확인한 값이다 — 저장본을 다시
-    받으면 이 상수들도 다시 계산해서 맞춰야 한다."""
+    전체 레이팅은 CHUNITHM-NET이 숫자 이미지로 보여주는 실제 표시값(16.94, 둘째 자리까지만
+    보여준다)과 둘째 자리에서 대조한다 — 우리가 들고 있는 계산값(16.9480, 넷째 자리까지
+    정확히 끝난다)은 표시값보다 정밀하다(사용자 확인 2026-10-18, `records_calc.average_rating`
+    참고). 베스트30 평균(17.02)·신곡20 평균(16.83)은 CHUNITHM-NET이 텍스트로 따로 보여주는
+    페이지가 없어 저장본과 직접 대조할 수는 없지만, 공식대로(30곡·20곡 가중) 다시 합쳐 둘째
+    자리로 버리면 표시 레이팅과 같아야 한다 — 이 일관성이 "베스트 평균"이 올바로 계산됐다는
+    증거다. 아래 숫자는 지금 저장된 두 파일(2026-10-11)로 실제로 계산해 확인한 값이다 —
+    저장본을 다시 받으면 이 상수들도 다시 계산해서 맞춰야 한다."""
     players = PlayersService(conn)
     player = await players.create_player()
     ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
@@ -152,16 +153,16 @@ async def test_computed_rating_matches_fixture_displayed_rating(conn) -> None:
     assert result.rating_mismatch is False, (
         f"계산값 {result.computed_rating} != 표시값 {result.displayed_rating}"
     )
-    assert result.computed_rating == Decimal("16.94")
+    assert result.computed_rating == Decimal("16.9480")
     assert result.best30_average == Decimal("17.02")
     assert result.new20_average == Decimal("16.83")
 
-    # 베스트 평균 일관성: 30곡·20곡 가중 재합산이 이미 검증된 전체 레이팅과 같아야 한다.
+    # 베스트 평균 일관성: 30곡·20곡 가중 재합산을 둘째 자리로 버리면 표시 레이팅과 같아야 한다.
     assert result.best30_average is not None and result.new20_average is not None
     recombined = ((result.best30_average * 30 + result.new20_average * 20) / 50).quantize(
-        Decimal("0.01")
+        Decimal("0.01"), rounding=ROUND_DOWN
     )
-    assert recombined == result.computed_rating
+    assert recombined == result.displayed_rating
 
 
 async def test_second_sync_with_unimproved_score_does_not_overwrite_session_or_timestamp(
@@ -650,7 +651,7 @@ async def test_previous_ratings_come_from_previous_log_and_pb_frames(conn, monke
 
     diff = await service.sync_diff(result.sync_id)
     assert diff is not None
-    assert diff.previous_computed_rating == Decimal("16.94")
+    assert diff.previous_computed_rating == Decimal("16.9480")
     assert diff.previous_best30_average == Decimal("17.02")
     assert diff.previous_new20_average == Decimal("16.83")
     # 지금값은 이번 저장본(갱신된 베스트30) 기준이다 — 이전값과 따로 계산된다.
@@ -772,7 +773,7 @@ async def test_latest_sync_summary(conn, monkeypatch) -> None:
 
     assert summary is not None
     assert summary.nickname == fetch.profile.username
-    assert summary.computed_rating == Decimal("16.94")
+    assert summary.computed_rating == Decimal("16.9480")
     assert summary.best30_average == Decimal("17.02")
     assert summary.new20_average == Decimal("16.83")
     assert summary.last_synced_at == _T1_UTC.isoformat()
@@ -861,7 +862,7 @@ async def test_rating_deltas_first_sync_has_no_previous(conn, monkeypatch) -> No
     assert deltas is not None
     assert deltas.has_previous is False
     assert (deltas.computed_rating, deltas.best30_average, deltas.new20_average) == (
-        Decimal("16.94"), Decimal("17.02"), Decimal("16.83"),
+        Decimal("16.9480"), Decimal("17.02"), Decimal("16.83"),
     )
     assert (deltas.previous_computed_rating, deltas.previous_best30_average, deltas.previous_new20_average) == (
         None, None, None,
@@ -880,7 +881,7 @@ async def test_rating_deltas_second_sync_compares_with_previous_snapshot(conn, m
 
     assert deltas is not None and deltas.has_previous is True
     assert (deltas.previous_computed_rating, deltas.previous_best30_average, deltas.previous_new20_average) == (
-        Decimal("16.94"), Decimal("17.02"), Decimal("16.83"),
+        Decimal("16.9480"), Decimal("17.02"), Decimal("16.83"),
     )
     assert deltas.computed_rating == result.computed_rating
     assert deltas.best30_average == result.best30_average

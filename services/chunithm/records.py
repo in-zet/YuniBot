@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 import aiosqlite
@@ -251,13 +251,21 @@ class RecordsService:
         new20_ratings = [self._rating_of(pb) for pb in fetch.new20]
         best30_average = average_rating(best30_ratings)
         new20_average = average_rating(new20_ratings)
-        computed_rating = average_rating(best30_ratings + new20_ratings)
+        # 전체 레이팅은 50으로 나눠 넷째 자리까지 정확히 끝난다 — 둘째 자리에서 자르지
+        # 않는다(사용자 확인 2026-10-18, records_calc.average_rating 참고).
+        computed_rating = average_rating(best30_ratings + new20_ratings, places=4)
 
         displayed_rating = None
         if fetch.profile.rating_systems:
             displayed_rating = Decimal(str(fetch.profile.rating_systems[0].value))
-        # 계산 불가(None)인데 표시값이 있으면 대조할 수 없으므로 불일치로 남긴다.
-        rating_mismatch = displayed_rating is not None and computed_rating != displayed_rating
+        # 계산 불가(None)인데 표시값이 있으면 대조할 수 없으므로 불일치로 남긴다. CHUNITHM-NET이
+        # 실제로 보여주는 자리수는 둘째 자리뿐이라, computed_rating(넷째 자리까지 유지)을 그
+        # 자리에서 버려 맞춰 비교한다 — 그대로 비교하면 셋째·넷째 자리 때문에 거의 항상
+        # 어긋난 것처럼 보인다.
+        comparable_computed = (
+            computed_rating.quantize(Decimal("0.01"), rounding=ROUND_DOWN) if computed_rating is not None else None
+        )
+        rating_mismatch = displayed_rating is not None and comparable_computed != displayed_rating
 
         over_power = fetch.profile.over_power
         overpower_value = over_power.value if over_power is not None else None

@@ -45,6 +45,15 @@ def test_average_rating_truncates_not_rounds():
     assert average_rating(ratings) == Decimal("16.94")
 
 
+def test_average_rating_places_4_keeps_full_precision_for_computed_rating():
+    # 사용자 확인 2026-10-18: 곡 레이팅(이미 2dp)은 그대로 둘째 자리 버림이 맞지만, 50으로
+    # 나누는 전체 레이팅(computed_rating)은 넷째 자리까지 정확히 끝나므로 거기까지 버려야
+    # 한다 — 기존처럼 2dp로 자르면 실제로 존재하는 셋째·넷째 자리가 통째로 사라진다.
+    ratings = [Decimal("16.95")] * 49 + [Decimal("16.82")]  # 합=847.37, 평균=16.9474(정확히 끝남)
+    assert average_rating(ratings, places=4) == Decimal("16.9474")
+    assert average_rating(ratings) == Decimal("16.94")  # 기본(places=2)은 여전히 둘째 자리 버림
+
+
 def test_allowed_attacks_matches_border_doc_examples():
     # 노트 3,000개: SSS(1,007,500) -> 14.70, SSS+(1,009,000) -> 5.88
     assert allowed_attacks(3000, 1_007_500) == Decimal("14.70")

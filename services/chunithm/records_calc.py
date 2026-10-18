@@ -31,19 +31,26 @@ def chart_rating(score: int, const: float | None) -> Decimal | None:
     return calculate_rating(score, const)
 
 
-def average_rating(ratings: Sequence[Decimal | None]) -> Decimal | None:
-    """베스트30 평균, 신곡20 평균, 전체 레이팅(50으로 나눔)에 공통으로 쓴다. 입력은
-    이미 chart_rating()으로 둘째 자리까지 버려진 값들이고, 합산한 평균도 둘째
-    자리에서 버린다(위 chart_rating 설명 참고 — 더 가는 단위를 유지할 근거가 없다).
+def average_rating(ratings: Sequence[Decimal | None], *, places: int = 2) -> Decimal | None:
+    """베스트30 평균, 신곡20 평균, 전체 레이팅(50으로 나눔)에 공통으로 쓴다. 입력은 이미
+    chart_rating()으로 둘째 자리까지 버려진 값들이다.
+
+    버리는 자리(`places`)는 쓰임에 따라 다르다(사용자 확인 2026-10-18): 곡 레이팅은 항상
+    둘째 자리 버림이 맞지만(위 chart_rating 설명), 50으로 나누는 전체 레이팅은 이미 둘째
+    자리인 값을 50으로 나누면 넷째 자리에서 정확히 끝나므로(분모 5000 = 2³×5⁴, 소수가
+    유한하게 끝난다) 거기까지 버린다(부르는 쪽이 `places=4`를 넘긴다). 베스트30/신곡20
+    평균은 분모(3000)에 3이 섞여 애초에 유한소수로 안 끝나므로 기존대로 둘째 자리에서
+    버린다(`places` 기본값).
+
     하나라도 "계산 불가"(None)면 평균도 None이다 — 일부만 계산해 그럴듯한 숫자를
     내지 않는다."""
     if not ratings:
-        return Decimal("0.00")
+        return Decimal(0).quantize(Decimal(1).scaleb(-places))
     known = [r for r in ratings if r is not None]
     if len(known) != len(ratings):
         return None
     total = sum(known, Decimal(0))
-    return (total / len(ratings)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    return (total / len(ratings)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_DOWN)
 
 
 def allowed_attacks(note_count: int | None, target_score: int) -> Decimal | None:
