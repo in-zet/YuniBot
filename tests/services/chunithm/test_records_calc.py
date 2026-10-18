@@ -32,26 +32,25 @@ def test_average_rating_with_any_unknown_is_none():
     assert average_rating([Decimal("15.00"), None, Decimal("16.00")]) is None
 
 
-def test_average_rating_divides_by_full_length_and_truncates_to_2dp():
+def test_average_rating_divides_by_full_length_and_truncates_to_4dp():
     ratings = [Decimal("14.65")] * 30 + [Decimal("14.00")] * 20
-    # (14.65*30 + 14.00*20) / 50 = (439.5 + 280) / 50 = 719.5/50 = 14.39
-    assert average_rating(ratings) == Decimal("14.39")
+    # (14.65*30 + 14.00*20) / 50 = (439.5 + 280) / 50 = 719.5/50 = 14.3900 (정확히 끝남)
+    assert average_rating(ratings) == Decimal("14.3900")
 
 
 def test_average_rating_truncates_not_rounds():
-    # 평균이 16.948로 나오는 경우, 버림이면 16.94, 반올림이면 16.95다. 반올림 쪽은
+    # 평균이 16.948로 나오는 경우, 버림이면 16.9480, 반올림이면 16.9500이다. 반올림 쪽은
     # 실제 CHUNITHM-NET 표시값과 저장본 검산에서 어긋났던 사례라 버림을 명시적으로 고정한다.
-    ratings = [Decimal("16.948")] * 50  # 합=847.40, 평균=16.948(이미 2dp보다 세밀한 입력)
-    assert average_rating(ratings) == Decimal("16.94")
+    ratings = [Decimal("16.948")] * 50  # 합=847.40, 평균=16.948(이미 4dp보다 세밀한 입력은 아님)
+    assert average_rating(ratings) == Decimal("16.9480")
 
 
-def test_average_rating_places_4_keeps_full_precision_for_computed_rating():
-    # 사용자 확인 2026-10-18: 곡 레이팅(이미 2dp)은 그대로 둘째 자리 버림이 맞지만, 50으로
-    # 나누는 전체 레이팅(computed_rating)은 넷째 자리까지 정확히 끝나므로 거기까지 버려야
-    # 한다 — 기존처럼 2dp로 자르면 실제로 존재하는 셋째·넷째 자리가 통째로 사라진다.
+def test_average_rating_places_4_is_default_for_all_three_metrics():
+    # 사용자 확인 2026-10-18: 베스트30 평균·신곡20 평균·전체 레이팅(computed_rating) 모두
+    # 넷째 자리에서 버린다 — 둘째 자리로 자르면 실제로 존재하는 셋째·넷째 자리가 사라진다.
     ratings = [Decimal("16.95")] * 49 + [Decimal("16.82")]  # 합=847.37, 평균=16.9474(정확히 끝남)
-    assert average_rating(ratings, places=4) == Decimal("16.9474")
-    assert average_rating(ratings) == Decimal("16.94")  # 기본(places=2)은 여전히 둘째 자리 버림
+    assert average_rating(ratings) == Decimal("16.9474")
+    assert average_rating(ratings, places=2) == Decimal("16.94")  # places를 명시하면 여전히 쓸 수 있다
 
 
 def test_allowed_attacks_matches_border_doc_examples():

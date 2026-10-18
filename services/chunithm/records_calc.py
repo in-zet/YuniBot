@@ -31,16 +31,14 @@ def chart_rating(score: int, const: float | None) -> Decimal | None:
     return calculate_rating(score, const)
 
 
-def average_rating(ratings: Sequence[Decimal | None], *, places: int = 2) -> Decimal | None:
+def average_rating(ratings: Sequence[Decimal | None], *, places: int = 4) -> Decimal | None:
     """베스트30 평균, 신곡20 평균, 전체 레이팅(50으로 나눔)에 공통으로 쓴다. 입력은 이미
     chart_rating()으로 둘째 자리까지 버려진 값들이다.
 
-    버리는 자리(`places`)는 쓰임에 따라 다르다(사용자 확인 2026-10-18): 곡 레이팅은 항상
-    둘째 자리 버림이 맞지만(위 chart_rating 설명), 50으로 나누는 전체 레이팅은 이미 둘째
-    자리인 값을 50으로 나누면 넷째 자리에서 정확히 끝나므로(분모 5000 = 2³×5⁴, 소수가
-    유한하게 끝난다) 거기까지 버린다(부르는 쪽이 `places=4`를 넘긴다). 베스트30/신곡20
-    평균은 분모(3000)에 3이 섞여 애초에 유한소수로 안 끝나므로 기존대로 둘째 자리에서
-    버린다(`places` 기본값).
+    넷째 자리에서 버린다(사용자 확인 2026-10-18). 전체 레이팅(분모 5000 = 2³×5⁴)과
+    신곡20 평균(분모 2000 = 2⁴×5³)은 넷째 자리에서 정확히 끝난다. 베스트30 평균(분모
+    3000 = 2³×3×5³)은 3이 섞여 애초에 유한소수로 안 끝나지만, 세 지표를 같은 자리수로
+    맞추기 위해 똑같이 넷째 자리에서 버린다.
 
     하나라도 "계산 불가"(None)면 평균도 None이다 — 일부만 계산해 그럴듯한 숫자를
     내지 않는다."""

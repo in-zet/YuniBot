@@ -137,7 +137,8 @@ async def test_computed_rating_matches_fixture_displayed_rating(conn) -> None:
     전체 레이팅은 CHUNITHM-NET이 숫자 이미지로 보여주는 실제 표시값(16.94, 둘째 자리까지만
     보여준다)과 둘째 자리에서 대조한다 — 우리가 들고 있는 계산값(16.9480, 넷째 자리까지
     정확히 끝난다)은 표시값보다 정밀하다(사용자 확인 2026-10-18, `records_calc.average_rating`
-    참고). 베스트30 평균(17.02)·신곡20 평균(16.83)은 CHUNITHM-NET이 텍스트로 따로 보여주는
+    참고). 베스트30 평균(17.0216)·신곡20 평균(16.8375)도 같은 넷째 자리 버림이다(사용자 확인
+    2026-10-18 — 세 지표를 같은 자리수로 통일). CHUNITHM-NET이 텍스트로 따로 보여주는
     페이지가 없어 저장본과 직접 대조할 수는 없지만, 공식대로(30곡·20곡 가중) 다시 합쳐 둘째
     자리로 버리면 표시 레이팅과 같아야 한다 — 이 일관성이 "베스트 평균"이 올바로 계산됐다는
     증거다. 아래 숫자는 지금 저장된 두 파일(2026-10-11)로 실제로 계산해 확인한 값이다 —
@@ -154,8 +155,8 @@ async def test_computed_rating_matches_fixture_displayed_rating(conn) -> None:
         f"계산값 {result.computed_rating} != 표시값 {result.displayed_rating}"
     )
     assert result.computed_rating == Decimal("16.9480")
-    assert result.best30_average == Decimal("17.02")
-    assert result.new20_average == Decimal("16.83")
+    assert result.best30_average == Decimal("17.0216")
+    assert result.new20_average == Decimal("16.8375")
 
     # 베스트 평균 일관성: 30곡·20곡 가중 재합산을 둘째 자리로 버리면 표시 레이팅과 같아야 한다.
     assert result.best30_average is not None and result.new20_average is not None
@@ -684,15 +685,15 @@ async def test_previous_ratings_come_from_previous_log_and_pb_frames(conn, monke
     diff = await service.sync_diff(result.sync_id)
     assert diff is not None
     assert diff.previous_computed_rating == Decimal("16.9480")
-    assert diff.previous_best30_average == Decimal("17.02")
-    assert diff.previous_new20_average == Decimal("16.83")
+    assert diff.previous_best30_average == Decimal("17.0216")
+    assert diff.previous_new20_average == Decimal("16.8375")
     # 지금값은 이번 저장본(갱신된 베스트30) 기준이다 — 이전값과 따로 계산된다.
     songdb = SongDbService()
     expected = average_rating(
         [chart_rating(pb.score, songdb.const_for(pb.song.title, pb.chart.difficulty.short())) for pb in fetch.best30]
     )
     assert result.best30_average == expected
-    assert result.new20_average == Decimal("16.83")
+    assert result.new20_average == Decimal("16.8375")
 
 
 async def test_all_personal_bests_outside_frames_are_saved(conn, monkeypatch) -> None:
@@ -806,8 +807,8 @@ async def test_latest_sync_summary(conn, monkeypatch) -> None:
     assert summary is not None
     assert summary.nickname == fetch.profile.username
     assert summary.computed_rating == Decimal("16.9480")
-    assert summary.best30_average == Decimal("17.02")
-    assert summary.new20_average == Decimal("16.83")
+    assert summary.best30_average == Decimal("17.0216")
+    assert summary.new20_average == Decimal("16.8375")
     assert summary.last_synced_at == _T1_UTC.isoformat()
 
 
@@ -894,7 +895,7 @@ async def test_rating_deltas_first_sync_has_no_previous(conn, monkeypatch) -> No
     assert deltas is not None
     assert deltas.has_previous is False
     assert (deltas.computed_rating, deltas.best30_average, deltas.new20_average) == (
-        Decimal("16.9480"), Decimal("17.02"), Decimal("16.83"),
+        Decimal("16.9480"), Decimal("17.0216"), Decimal("16.8375"),
     )
     assert (deltas.previous_computed_rating, deltas.previous_best30_average, deltas.previous_new20_average) == (
         None, None, None,
@@ -913,12 +914,12 @@ async def test_rating_deltas_second_sync_compares_with_previous_snapshot(conn, m
 
     assert deltas is not None and deltas.has_previous is True
     assert (deltas.previous_computed_rating, deltas.previous_best30_average, deltas.previous_new20_average) == (
-        Decimal("16.9480"), Decimal("17.02"), Decimal("16.83"),
+        Decimal("16.9480"), Decimal("17.0216"), Decimal("16.8375"),
     )
     assert deltas.computed_rating == result.computed_rating
     assert deltas.best30_average == result.best30_average
-    assert deltas.new20_average == Decimal("16.83")
-    assert deltas.best30_average is not None and deltas.best30_average > Decimal("17.02")
+    assert deltas.new20_average == Decimal("16.8375")
+    assert deltas.best30_average is not None and deltas.best30_average > Decimal("17.0216")
 
 
 async def test_snapshot_averages_store_unknown_as_not_computable(conn, monkeypatch) -> None:
@@ -939,6 +940,6 @@ async def test_snapshot_averages_store_unknown_as_not_computable(conn, monkeypat
     )
     row = await cursor.fetchone()
     assert row is not None
-    assert (row[0], row[1]) == ("17.02", "계산 불가")
+    assert (row[0], row[1]) == ("17.0216", "계산 불가")
     deltas = await service.rating_deltas(player_id)
     assert deltas is not None and deltas.new20_average is None
