@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, get_type_hints
 
@@ -28,6 +28,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 Stage = Literal["great", "good", "close", "rest"]
+_STAGE_PRIORITY: list[Stage] = ["great", "good", "close", "rest"]
+
+
+def highest_stage(stages: Iterable[Stage]) -> Stage | None:
+    """여러 조각의 stage 중 가장 높은 단계 하나(great > good > close > rest)를 고른다.
+    yuni 서비스의 한마디 선택과 여러 목표를 한 조각에서 판정하는 스킬이 같이 쓴다."""
+    found = list(stages)
+    return min(found, key=_STAGE_PRIORITY.index) if found else None
+
 
 _chain_depth: contextvars.ContextVar[int] = contextvars.ContextVar("yuni_event_chain_depth", default=0)
 

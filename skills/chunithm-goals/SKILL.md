@@ -8,9 +8,20 @@ examples:
 category: 목표
 game: chunithm
 version: 1
-services: [records, songdb, notify, players, yuni, db]
-listens: [chunithm.sync.completed, chunithm.song.viewed, chunithm.plan.requested]
-emits: [chunithm.goal.completed]
+services: [records, songdb, notify, players, settings, scheduler, yuni, db]
+listens: [chunithm.sync.completed, chunithm.song.viewed, chunithm.plan.requested, chunithm-goals.notify_due, chunithm-goals.final_deadline]
+emits: [chunithm.goal.completed, chunithm-goals.notify_due, chunithm-goals.final_deadline]
+settings:
+  - name: 알림 채널
+    kind: str
+    default: ""
+    description: 목표 기한 알림을 올릴 채널 id. 비우면 그 서버에서 만든 목표의 알림은 DM으로 간다.
+    scope: guild
+  - name: 알림 시각
+    kind: str
+    default: "10:00"
+    description: 목표 기한 알림을 보낼 시각(HH:MM, 서버 시간대 기준).
+    scope: guild
 ---
 
 스킬 자체의 태그 조건은 없다. 로그인하지 않아도 곡별 목표(`todo_*`)와 자유 목표
@@ -40,8 +51,13 @@ emits: [chunithm.goal.completed]
   `difficulty=None`을 지원한다).
 - 오버파워 목표는 전체(overall)만 지원한다. 폴더별 오버파워 퍼센트는 이번 단계 범위 밖이다 —
   요청받으면 아직 안 된다고 분명히 말한다.
-- `due_at`/`notify_offsets`는 데이터로만 저장한다. 기한 알림을 실제로 쏘는 예약은 다음 단계다.
-  `due_at`은 YYYY-MM-DD 날짜만 받고, 꼬리표를 안 주면 기한으로 단기/중기/장기를 정한다.
+- `due_at`은 YYYY-MM-DD 날짜만 받고, 꼬리표를 안 주면 기한으로 단기/중기/장기를 정한다.
+- 기한이 있으면 `notify_offsets`(기본 7·1·0일 전, 장기면 30일 전도)만큼 그 서버의 "알림 채널"에
+  (없으면 DM으로) 리마인더를 보낸다. 목표를 만들거나 기한/알림 수정한 자리의 서버가 그 목표의
+  알림 채널이 된다(DM에서 만들면 계속 DM).
+- 기한이 지나도 못 채운 목표는 동기화 결과로(또는 기한+4일까지 소식이 없으면 그때까지 아는
+  값으로) 자동으로 "기한 만료"가 되고, 달성률에 따라 good(80%↑)/close/rest(진행 거의 없음) 반응이
+  붙는다. 미달을 탓하지 않는다.
 - 레이팅·오버파워 목표는 지금 값보다 높아야 만들 수 있다(이미 달성했거나 내려가야 닿는 목표는 거절).
 - 남의 목표는 목표마다 고른 공개 여부(`public`)로 거른다. 다만 공개 목표라도 그 사람이 기록을
   비공개(`records_public` 꺼짐)로 해 두었으면 목표 정의만 보이고 현재값·달성률·남은 양은 빠진다

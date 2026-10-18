@@ -4,14 +4,14 @@ from __future__ import annotations
 import importlib.util
 import sys
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from core.decorators import on, tool
-from core.events import Section
+from core.events import Section, Stage, highest_stage
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -47,11 +47,21 @@ def _load_sibling(name: str) -> Any:
 models = _load_sibling("models")
 calc = _load_sibling("goals_calc")
 
+_SKILL_NAME = "chunithm-goals"
 _SYNCED_TAG = "chunithm-synced"
 _SYNC_SECTION_ORDER = 30
 _SONG_VIEW_ORDER = 10
 _PLAN_ORDER = 10
 _PLAN_LIMIT = 5
+
+_SETTING_CHANNEL = "알림 채널"
+_SETTING_HOUR = "알림 시각"
+_DEFAULT_NOTIFY_TIME = time(10, 0)
+_NOTIFY_DUE_EVENT = "chunithm-goals.notify_due"
+_FINAL_DEADLINE_EVENT = "chunithm-goals.final_deadline"
+_SCHEDULE_KIND_REMINDER = "reminder"
+_SCHEDULE_KIND_FINAL = "final_deadline"
+_FINAL_DEADLINE_DAYS = 4  # 기한 다음날 + 3일 대기(설계서 "기한 알림")
 
 
 class GoalKind(StrEnum):
@@ -168,6 +178,123 @@ def _default_notify_offsets(duration_tag: DurationTag | None) -> list[int]:
     if duration_tag == DurationTag.LONG:
         offsets = [30, *offsets]
     return offsets
+
+
+async def _guild_notify_time(ctx: ToolContext, guild_id: str | None) -> time:
+    """그 서버의 "알림 시각" 설정(HH:MM). 서버가 없거나(DM에서 만든 목표) 설정이 이상하면 기본값."""
+    if guild_id is None:
+        return _DEFAULT_NOTIFY_TIME
+    raw = await ctx.settings.get_value(
+        scope="guild", scope_id=guild_id, skill=_SKILL_NAME, name=_SETTING_HOUR,
+        default=_DEFAULT_NOTIFY_TIME.isoformat(timespec="minutes"),
+    )
+    try:
+        return time.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return _DEFAULT_NOTIFY_TIME
+
+
+async def _cancel_schedules(ctx: ToolContext, goal_id: str, *, kind: str | None = None) -> None:
+    """목표의 아직 안 쏜 예약(리마인더·최종 판정)을 취소한다. kind를 주면 그 종류만."""
+    assert ctx.scheduler is not None
+    for row in await models.list_schedules(ctx.db, goal_id, kind=kind):
+        await ctx.scheduler.cancel_once(row.schedule_id)
+    await models.delete_schedules(ctx.db, goal_id, kind=kind)
+
+
+async def _reschedule_reminders(ctx: ToolContext, goal: Any) -> None:
+    """목표의 리마인더 예약을 지우고 지금 값(기한·notify_offsets)으로 다시 건다. 기한이 없거나,
+    진행 중이 아니거나, 알림을 꺼 뒀으면(notify_offsets가 빔) 다시 걸지 않는다. 이미 지난 시각은
+    건너뛴다(만들 때 이미 7일 전이 지난 기한처럼)."""
+    await _cancel_schedules(ctx, goal.id, kind=_SCHEDULE_KIND_REMINDER)
+    if goal.due_at is None or goal.status != GoalStatus.IN_PROGRESS.value or not goal.notify_offsets:
+        return
+    due = date.fromisoformat(goal.due_at)
+    notify_time = await _guild_notify_time(ctx, goal.guild_id)
+    now = datetime.now()  # noqa: DTZ005 - 스케줄러·cron과 같은 서버 로컬 벽시계 기준(chunithm-updates의 _now()와 같은 이유)
+    assert ctx.scheduler is not None
+    for offset in goal.notify_offsets:
+        fire_at = datetime.combine(due - timedelta(days=offset), notify_time)
+        if fire_at <= now:
+            continue
+        schedule_id = await ctx.scheduler.schedule_once(
+            owner_skill=_SKILL_NAME, event_name=_NOTIFY_DUE_EVENT,
+            payload={"goal_id": goal.id, "offset_days": offset}, fire_at=fire_at, catch_up=True,
+        )
+        await models.insert_schedule(ctx.db, goal_id=goal.id, schedule_id=schedule_id, kind=_SCHEDULE_KIND_REMINDER)
+
+
+async def _reschedule_final_deadline(ctx: ToolContext, goal: Any) -> None:
+    """기한 다음 날부터 3일을 기다린 끝(기한+4일)의 최종 판정 예약을 다시 건다. 알림을 꺼 둬도
+    이건 건다 — 달성 알림처럼 한 번뿐인 결과 통지라 "리마인더 끄기"의 대상이 아니라고 봤다."""
+    await _cancel_schedules(ctx, goal.id, kind=_SCHEDULE_KIND_FINAL)
+    if goal.due_at is None or goal.status != GoalStatus.IN_PROGRESS.value:
+        return
+    due = date.fromisoformat(goal.due_at)
+    notify_time = await _guild_notify_time(ctx, goal.guild_id)
+    fire_at = datetime.combine(due + timedelta(days=_FINAL_DEADLINE_DAYS), notify_time)
+    assert ctx.scheduler is not None
+    schedule_id = await ctx.scheduler.schedule_once(
+        owner_skill=_SKILL_NAME, event_name=_FINAL_DEADLINE_EVENT,
+        payload={"goal_id": goal.id}, fire_at=fire_at, catch_up=True,
+    )
+    await models.insert_schedule(ctx.db, goal_id=goal.id, schedule_id=schedule_id, kind=_SCHEDULE_KIND_FINAL)
+
+
+async def _send_goal_notice(ctx: ToolContext, goal: Any, content: str) -> None:
+    """목표의 guild_id 서버에 "알림 채널"이 있으면 멘션해서 그 채널로, 없으면(DM에서 만든
+    목표 등) DM으로 보낸다."""
+    channel_id = ""
+    if goal.guild_id is not None:
+        channel_id = await ctx.settings.get_value(
+            scope="guild", scope_id=goal.guild_id, skill=_SKILL_NAME, name=_SETTING_CHANNEL, default="",
+        )
+    if channel_id:
+        mentioned = await ctx.notify.mention(goal.player_id, content)
+        await ctx.notify.post(channel_id, mentioned)
+    else:
+        await ctx.notify.dm(goal.player_id, content)
+
+
+def _remaining_only_text(goal: Any, summary: dict[str, Any]) -> str:
+    """기한 1일 전 알림용 — 남은 양만 짧게(설계서 "기한 알림")."""
+    if summary.get("progress_hidden"):
+        return _PROGRESS_HIDDEN
+    if "lamp_met" in summary:
+        return "이미 달성했어" if summary["lamp_met"] else "아직 달성 전이야"
+    if goal.kind == GoalKind.FOLDER.value:
+        return f"{summary.get('matched', 0)}/{summary.get('total', 0)}곡"
+    if goal.kind == GoalKind.SONG.value:
+        if summary.get("remaining_attacks") is None:
+            return "남은 양 계산 불가"
+        return f"남은 {summary['remaining_score']:,}점 ({summary['remaining_attacks']}어택)"
+    if "remaining" in summary:
+        return f"남은 {summary['remaining']}"
+    return "진행 정보 없음"
+
+
+async def _finalize_expired_goal(ctx: ToolContext, goal: Any) -> tuple[str, Stage]:
+    """기한이 지나도 못 채운 목표를 만료로 확정한다(상태 변경 + 안 쏜 예약 전부 취소).
+    (한 줄 요약, 반응 단계)를 돌려준다. 달성률 80% 이상이면 good, 진행이 없거나(0 이하)
+    뒤처졌으면 rest, 그 사이는 close다 — 램프 목표처럼 달성률을 잴 수 없으면 close로 둔다."""
+    summary = await _goal_summary(ctx, goal)
+    ratio_raw = summary.get("achievement_ratio")
+    stage: Stage
+    if ratio_raw is None:
+        stage = "close"
+    else:
+        ratio = Decimal(ratio_raw)
+        if ratio >= Decimal("0.8"):
+            stage = "good"
+        elif ratio > 0:
+            stage = "close"
+        else:
+            stage = "rest"
+    await models.update_goal(ctx.db, goal.id, status=GoalStatus.EXPIRED.value)
+    await _cancel_schedules(ctx, goal.id)
+    detail = _summary_text(goal, summary)
+    line = f"기한 만료  {_goal_label(goal)}{'  ' + detail if detail else ''}"
+    return line, stage
 
 
 _STATUS_LABELS: dict[str, str] = {
@@ -314,8 +441,10 @@ def _completed_payload(goal: Any) -> dict[str, Any]:
 
 
 async def _complete_goal(ctx: ToolContext, goal: Any) -> str:
-    """목표를 달성으로 바꾸고 chunithm.goal.completed를 낸다. 라벨을 돌려준다."""
+    """목표를 달성으로 바꾸고 chunithm.goal.completed를 낸다. 안 쏜 기한 알림 예약도 전부
+    취소한다(기한 전 달성 — 설계서 "기한 알림"). 라벨을 돌려준다."""
     await models.update_goal(ctx.db, goal.id, status=GoalStatus.ACHIEVED.value)
+    await _cancel_schedules(ctx, goal.id)
     payload = _completed_payload(goal)
     await ctx.emit("chunithm.goal.completed", payload)
     return payload["label"]
@@ -631,9 +760,13 @@ async def set_goal(
         ctx.db, id=goal_id, player_id=ctx.player_id, kind=kind.value, target_ref=target_ref,
         target_value=target_value, baseline_value=baseline_value, created_at=now, due_at=due_at,
         duration_tag=duration_tag.value if duration_tag is not None else None, parent_goal_id=parent_goal_id,
-        public=public, notify_offsets=_default_notify_offsets(duration_tag),
+        public=public, notify_offsets=_default_notify_offsets(duration_tag), guild_id=ctx.guild_id,
     )
-    label = _goal_label(await models.fetch_goal(ctx.db, goal_id))
+    created_goal = await models.fetch_goal(ctx.db, goal_id)
+    assert created_goal is not None
+    await _reschedule_reminders(ctx, created_goal)
+    await _reschedule_final_deadline(ctx, created_goal)
+    label = _goal_label(created_goal)
     return ToolResult(
         data={"goal_id": goal_id, "kind": kind.value, "target_ref": target_ref, "target_value": target_value},
         display=Display(content=f"목표를 만들었어. ({label})\nid {goal_id}"),
@@ -743,6 +876,14 @@ async def update(
         return ToolResult(error="바꿀 내용이 없어.")
 
     await models.update_goal(ctx.db, goal_id, **fields)
+    if {"due_at", "notify_offsets", "status"} & set(fields):
+        # 기한·알림 시점·상태가 바뀌면 안 쏜 예약을 지금 값으로 다시 건다(중단·달성이면
+        # 알아서 취소만 되고 새로 걸리지 않는다 — _reschedule_*의 status 확인).
+        updated_goal = await models.fetch_goal(ctx.db, goal_id)
+        assert updated_goal is not None
+        await _reschedule_reminders(ctx, updated_goal)
+        if "due_at" in fields or "status" in fields:
+            await _reschedule_final_deadline(ctx, updated_goal)
     return ToolResult(
         data={"goal_id": goal_id, "updated": sorted(fields)},
         display=Display(content="목표를 수정했어."),
@@ -819,6 +960,8 @@ async def delete(ctx: ToolContext, goal_ids: str, *, dry_run: bool = False) -> T
             display=Display(content=f"목표 {len(owned)}개를 지울게."),
             display_mode="optional",
         )
+    for gid in owned:
+        await _cancel_schedules(ctx, gid)
     count = await models.delete_goals(ctx.db, owned)
     return ToolResult(
         data={"deleted_count": count, "goal_ids": owned},
@@ -908,6 +1051,7 @@ async def todo_bulk(
             target_ref={"song_title": title, "difficulty": difficulty_code}, target_value=float(score),
             baseline_value=float(row.score) if row is not None else 0.0, created_at=now, due_at=None,
             duration_tag=None, parent_goal_id=None, public=public, notify_offsets=_default_notify_offsets(None),
+            guild_id=ctx.guild_id,
         )
         created.append(goal_id)
 
@@ -1048,12 +1192,16 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
     unchanged_by_key = {(u.song_title, u.difficulty): u for u in (diff.unchanged_plays if diff is not None else [])}
 
     completed: list[str] = []
+    completed_ids: set[str] = set()
     blocks: list[list[str]] = []
     rating_data: dict[str, Any] | None = None
 
     rating_goal = next((g for g in active if g.kind == GoalKind.RATING.value), None)
     if rating_goal is not None:
+        before = len(completed)
         rating_lines, rating_data = await _rating_goal_block(ctx, rating_goal, sync_id, completed)
+        if len(completed) > before:
+            completed_ids.add(rating_goal.id)
         if rating_lines:
             blocks.append(rating_lines)
 
@@ -1072,6 +1220,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
             lamp_text = _LAMP_LABELS.get(lamp, lamp)
             if _lamp_met(pb, lamp):
                 completed.append(await _complete_goal(ctx, g))
+                completed_ids.add(g.id)
                 song_lines.append(f"달성  {title} {dif}  {lamp_text}")
             elif chart_update is not None or unchanged_play is not None:
                 song_lines.append(
@@ -1081,6 +1230,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         target = int(g.target_value) if g.target_value is not None else 0
         if chart_update is not None and chart_update.new_score >= target:
             completed.append(await _complete_goal(ctx, g))
+            completed_ids.add(g.id)
             song_lines.append(f"달성  {title} {dif}  {target:,}점  (현재 {chart_update.new_score:,})")
         elif chart_update is not None:
             current = chart_update.new_score
@@ -1121,6 +1271,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         _ratio, label = await _record_progress_and_maybe_complete(ctx, g, sync_id, current_value)
         if label is not None:
             completed.append(label)
+            completed_ids.add(g.id)
             other_lines.append(f"달성  {label}")
 
     for g in (g for g in active if g.kind == GoalKind.FOLDER.value):
@@ -1134,20 +1285,83 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         if ratio is not None and ratio >= 1:
             label = await _complete_goal(ctx, g)
             completed.append(label)
+            completed_ids.add(g.id)
             other_lines.append(f"달성  {label}")
     if other_lines:
         blocks.append(other_lines)
 
+    today = datetime.now(UTC).date()
+    expired_lines: list[str] = []
+    expired: list[dict[str, Any]] = []
+    for g in active:
+        if g.id in completed_ids or g.due_at is None or date.fromisoformat(g.due_at) >= today:
+            continue
+        line, stage = await _finalize_expired_goal(ctx, g)
+        expired_lines.append(line)
+        expired.append({"goal_id": g.id, "stage": stage})
+    if expired_lines:
+        blocks.append(expired_lines)
+
     content = "\n\n".join("\n".join(b) for b in blocks) if blocks else "목표 변화 없음"
+    stages: list[Stage] = [*(["great"] if completed else []), *(e["stage"] for e in expired)]
     return Section(
         order=_SYNC_SECTION_ORDER,
         display=Display(content=content),
         data={
             "kind": "goal_check", "completed": completed, "rating_goal": rating_data,
-            "approached": approached, "unchanged": unchanged,
+            "approached": approached, "unchanged": unchanged, "expired": expired,
         },
-        stage="great" if completed else None,
+        stage=highest_stage(stages),
     )
+
+
+@on(_NOTIFY_DUE_EVENT)
+async def on_notify_due(ctx: ToolContext, payload: dict[str, Any]) -> None:
+    """예약된 기한 리마인더(30/7/1/0일 전)가 도착했다. 그 사이 끝난(달성·중단) 목표면 조용히
+    넘어간다 — 중복 발송 방지는 goal.status만 본다(상태 변경 자리에서 이미 예약을 취소한다)."""
+    goal_id = payload.get("goal_id")
+    offset = payload.get("offset_days")
+    if goal_id is None or offset is None:
+        return
+    goal = await models.fetch_goal(ctx.db, goal_id)
+    if goal is None or goal.status != GoalStatus.IN_PROGRESS.value:
+        return
+    offset = int(offset)
+    summary = await _goal_summary(ctx, goal)
+    label = _goal_label(goal)
+    if offset == 0:
+        detail = _summary_text(goal, summary)
+        content = f"오늘이 '{label}' 기한이야! 플레이하고 동기화해 줘."
+        if detail:
+            content += f"\n{detail}"
+    elif offset == 1:
+        content = f"'{label}' 기한이 1일 남았어. {_remaining_only_text(goal, summary)}"
+    else:
+        detail = _summary_text(goal, summary)
+        pace_text = ""
+        due = _parse_due(goal.due_at)
+        ratio_raw = summary.get("achievement_ratio")
+        if isinstance(due, date) and ratio_raw is not None:
+            created = datetime.fromisoformat(goal.created_at).date()
+            elapsed = calc.elapsed_ratio(created, due, datetime.now(UTC).date())
+            pace_text = f" · 페이스 {_PACE_LABELS[calc.pace(Decimal(ratio_raw), elapsed)]}"
+        content = f"'{label}' 기한이 {offset}일 남았어. {detail}{pace_text}"
+    await _send_goal_notice(ctx, goal, content)
+
+
+@on(_FINAL_DEADLINE_EVENT)
+async def on_final_deadline(ctx: ToolContext, payload: dict[str, Any]) -> None:
+    """기한+4일(다음 날부터 3일 대기)까지도 동기화로 끝나지 않은 목표를 마지막으로 아는
+    값으로 판정한다. 그 사이 동기화로 이미 끝났으면(달성·만료) 아무 일도 하지 않는다."""
+    goal_id = payload.get("goal_id")
+    if goal_id is None:
+        return
+    goal = await models.fetch_goal(ctx.db, goal_id)
+    if goal is None or goal.status != GoalStatus.IN_PROGRESS.value:
+        return
+    line, stage = await _finalize_expired_goal(ctx, goal)
+    yuni_line = await ctx.yuni.line([Section(order=0, stage=stage)])
+    await _send_goal_notice(ctx, goal, f"{line}\n{yuni_line}")
 
 
 @on("chunithm.song.viewed")

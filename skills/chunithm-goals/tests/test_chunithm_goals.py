@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
@@ -16,6 +17,7 @@ from core.events import EventBus
 from core.executor import ToolExecutor
 from core.permissions import InMemoryTagProvider
 from core.resolvers import ResolverRegistry
+from core.scheduler import Scheduler
 from core.tool_types import DifficultyRef, RankRef, ScoreRef, ToolContext
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import (
@@ -30,11 +32,16 @@ from services.chunithm.records_calc import remaining_to_target
 from services.chunithm.songdb import ChartRecord, SongRecord
 from services.chunithm.terms import ResolvedDifficulty, ResolvedRank, TermsService
 from services.common.players import PlayersService
+from services.common.settings import SettingsService
+from services.common.yuni import YuniService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CORE_PLAYERS_SQL = Path("migrations/core/001_players.sql").read_text()
 _CORE_PLAYER_TAGS_SQL = Path("migrations/core/002_player_tags.sql").read_text()
+_CORE_SETTINGS_SQL = Path("migrations/core/003_settings.sql").read_text()
+_CORE_SCHEDULES_SQL = Path("migrations/core/006_schedules.sql").read_text()
 _GOALS_SQL = Path(__file__).parent.parent / "migrations" / "001_init.sql"
+_GOALS_NOTIFY_SCHEDULE_SQL = Path(__file__).parent.parent / "migrations" / "002_notify_schedule.sql"
 
 
 def _load_skill() -> ModuleType:
@@ -56,7 +63,10 @@ async def db() -> AsyncGenerator[aiosqlite.Connection]:
     conn.row_factory = aiosqlite.Row
     await conn.executescript(_CORE_PLAYERS_SQL)
     await conn.executescript(_CORE_PLAYER_TAGS_SQL)
+    await conn.executescript(_CORE_SETTINGS_SQL)
+    await conn.executescript(_CORE_SCHEDULES_SQL)
     await conn.executescript(_GOALS_SQL.read_text())
+    await conn.executescript(_GOALS_NOTIFY_SCHEDULE_SQL.read_text())
     try:
         yield conn
     finally:
@@ -149,16 +159,36 @@ class _FakeSongDb:
         return [_Hit(title, difficulty or "MAS") for title in self.version_hits]
 
 
+@dataclass(slots=True, kw_only=True)
+class _FakeNotify:
+    posts: list[tuple[str, str]] = field(default_factory=list)
+    dms: list[tuple[str, str]] = field(default_factory=list)
+
+    async def post(self, channel_id: str, content: str) -> None:
+        self.posts.append((channel_id, content))
+
+    async def dm(self, player_id: str, content: str, *, view: Any | None = None) -> None:
+        self.dms.append((player_id, content))
+
+    async def mention(self, player_id: str, content: str) -> str:
+        return f"<@{player_id}> {content}"
+
+
 def _ctx(
     *, player_id: str = "p1", tags: frozenset[str] = frozenset(), db: aiosqlite.Connection,
     records: _FakeRecords | None = None, songdb: _FakeSongDb | None = None,
-    players: PlayersService | None = None,
+    players: PlayersService | None = None, notify: _FakeNotify | None = None,
+    guild_id: str | None = None,
 ) -> ToolContext:
     services: dict[str, object] = {
         "records": records or _FakeRecords(), "songdb": songdb or _FakeSongDb(),
-        "players": players or PlayersService(db),
+        "players": players or PlayersService(db), "notify": notify or _FakeNotify(),
+        "settings": SettingsService(db), "yuni": YuniService(),
     }
-    return ToolContext(player_id=player_id, tags=tags, services=services, db=db, event_bus=EventBus())
+    return ToolContext(
+        player_id=player_id, tags=tags, services=services, db=db, event_bus=EventBus(),
+        scheduler=Scheduler(db, quiet_start=time(2, 0), quiet_end=time(6, 0)), guild_id=guild_id,
+    )
 
 
 _SYNCED = frozenset({"chunithm-synced"})
@@ -1344,3 +1374,187 @@ async def test_other_players_public_goal_shows_progress_when_records_public(
     assert "달성률 50.00%" in (listed.display.content if listed.display is not None else "")
     progress = await skill.progress(me_ctx, goal_id)
     assert progress.data["current_value"] == "16.90"
+
+
+# ---------------------------------------------------------------- 9단계 Part 3: 기한 알림 예약
+
+
+def _rating_records(current: str, *, previous: str | None = None) -> _FakeRecords:
+    return _FakeRecords(deltas={"p1": RatingDeltas(
+        computed_rating=Decimal(current), best30_average=Decimal("17.0"), new20_average=Decimal("16.0"),
+        has_previous=previous is not None, previous_computed_rating=Decimal(previous) if previous else None,
+        previous_best30_average=None, previous_new20_average=None,
+    )})
+
+
+async def test_set_goal_schedules_reminders_and_final_deadline(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, tags=_SYNCED, records=_rating_records("16.80"))
+    created = await skill.set_goal(ctx, skill.GoalKind.RATING, target_value=17.0, due_at="2099-12-31")
+    goal_id = created.data["goal_id"]
+
+    reminders = await skill.models.list_schedules(db, goal_id, kind="reminder")
+    assert len(reminders) == 4  # 장기 목표(단기/중기/장기는 기한-만든날로 정해짐) 기본 알림: 30·7·1·0일 전
+
+    finals = await skill.models.list_schedules(db, goal_id, kind="final_deadline")
+    assert len(finals) == 1
+    cursor = await db.execute("SELECT fire_at FROM schedule_once WHERE id = ?", (finals[0].schedule_id,))
+    row = await cursor.fetchone()
+    assert row is not None
+    fire_at = datetime.fromisoformat(row[0])
+    assert fire_at.date() == date(2100, 1, 4)  # 2099-12-31 + 4일(다음 날 + 3일 대기)
+    assert fire_at.time() == time(10, 0)  # 기본 알림 시각
+
+
+async def test_reminder_schedule_avoids_quiet_hours(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    await SettingsService(db).set_value(
+        scope="guild", scope_id="g1", skill="chunithm-goals", name="알림 시각", value="03:00", updated_by="p1",
+    )
+    ctx = _ctx(db=db, tags=_SYNCED, records=_rating_records("16.80"), guild_id="g1")
+    created = await skill.set_goal(ctx, skill.GoalKind.RATING, target_value=17.0, due_at="2099-12-31")
+    goal_id = created.data["goal_id"]
+
+    reminders = await skill.models.list_schedules(db, goal_id, kind="reminder")
+    cursor = await db.execute("SELECT fire_at FROM schedule_once WHERE id = ?", (reminders[0].schedule_id,))
+    row = await cursor.fetchone()
+    assert row is not None
+    fire_at = datetime.fromisoformat(row[0])
+    assert fire_at.time() == time(6, 0)  # 02~06시 정지 시간대 끝으로 밀림(03시 설정)
+
+
+async def test_early_achievement_cancels_pending_schedules(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2099-12-31")
+    goal_id = created.data["goal_id"]
+    assert await skill.models.list_schedules(db, goal_id)
+
+    await skill.todo_done(ctx, goal_id)
+    assert await skill.models.list_schedules(db, goal_id) == []
+
+
+async def test_update_due_at_reschedules_final_deadline(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2099-12-31")
+    goal_id = created.data["goal_id"]
+    old_final = (await skill.models.list_schedules(db, goal_id, kind="final_deadline"))[0]
+
+    await skill.update(ctx, goal_id, due_at="2050-06-15")
+    finals = await skill.models.list_schedules(db, goal_id, kind="final_deadline")
+    assert len(finals) == 1
+    assert finals[0].schedule_id != old_final.schedule_id  # 옛 예약은 취소되고 새로 걸렸다
+
+    cursor = await db.execute("SELECT 1 FROM schedule_once WHERE id = ?", (old_final.schedule_id,))
+    assert await cursor.fetchone() is None  # cancel_once가 지웠다
+
+    cursor = await db.execute("SELECT fire_at FROM schedule_once WHERE id = ?", (finals[0].schedule_id,))
+    row = await cursor.fetchone()
+    assert row is not None
+    fire_at = datetime.fromisoformat(row[0])
+    assert fire_at.date() == date(2050, 6, 19)  # 2050-06-15 + 4일
+
+
+async def test_update_status_stopped_cancels_schedules(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2099-12-31")
+    goal_id = created.data["goal_id"]
+    assert await skill.models.list_schedules(db, goal_id)
+
+    await skill.update(ctx, goal_id, status=skill.GoalStatus.STOPPED)
+    assert await skill.models.list_schedules(db, goal_id) == []
+
+
+async def test_delete_cancels_schedules(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2099-12-31")
+    goal_id = created.data["goal_id"]
+    schedule_ids = [row.schedule_id for row in await skill.models.list_schedules(db, goal_id)]
+    assert schedule_ids
+
+    await skill.delete(ctx, goal_id)
+    assert await skill.models.list_schedules(db, goal_id) == []
+    for sid in schedule_ids:
+        cursor = await db.execute("SELECT 1 FROM schedule_once WHERE id = ?", (sid,))
+        assert await cursor.fetchone() is None
+
+
+async def test_on_sync_completed_finalizes_expired_rating_goal_as_good(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = _ctx(db=db, tags=_SYNCED, records=_rating_records("16.80"))
+    created = await skill.set_goal(ctx, skill.GoalKind.RATING, target_value=17.0, due_at="2020-01-01")
+    goal_id = created.data["goal_id"]
+
+    ctx2 = _ctx(db=db, tags=_SYNCED, records=_rating_records("16.96", previous="16.80"))
+    section = await skill.on_sync_completed(ctx2, {"player_id": "p1", "sync_id": "sync1"})
+    assert section is not None and section.stage == "good"  # 달성률 (16.96-16.80)/(17.00-16.80)=80%
+    assert any(e["goal_id"] == goal_id and e["stage"] == "good" for e in section.data["expired"])
+
+    goal = await skill.models.fetch_goal(db, goal_id)
+    assert goal.status == "expired"
+    assert await skill.models.list_schedules(db, goal_id) == []
+
+
+async def test_on_sync_completed_finalizes_expired_rating_goal_as_rest(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = _ctx(db=db, tags=_SYNCED, records=_rating_records("16.80"))
+    created = await skill.set_goal(ctx, skill.GoalKind.RATING, target_value=17.0, due_at="2020-01-01")
+    goal_id = created.data["goal_id"]
+
+    section = await skill.on_sync_completed(ctx, {"player_id": "p1", "sync_id": "sync1"})
+    assert section is not None and section.stage == "rest"  # 기준값에서 전혀 안 움직임
+    goal = await skill.models.fetch_goal(db, goal_id)
+    assert goal.status == "expired"
+
+
+async def test_final_deadline_handler_finalizes_with_last_known_value(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    notify = _FakeNotify()
+    ctx = _ctx(db=db, tags=frozenset(), notify=notify)
+    created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2020-01-01")
+    goal_id = created.data["goal_id"]
+
+    await skill.on_final_deadline(ctx, {"goal_id": goal_id})
+
+    goal = await skill.models.fetch_goal(db, goal_id)
+    assert goal.status == "expired"
+    assert notify.dms  # 채널 설정이 없어 DM으로 간다
+    assert await skill.models.list_schedules(db, goal_id) == []
+
+
+async def test_final_deadline_handler_noop_if_already_resolved(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    notify = _FakeNotify()
+    ctx = _ctx(db=db, tags=frozenset(), notify=notify)
+    created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2020-01-01")
+    goal_id = created.data["goal_id"]
+    await skill.todo_done(ctx, goal_id)  # 기한 전에 이미 끝남
+
+    await skill.on_final_deadline(ctx, {"goal_id": goal_id})
+
+    assert notify.dms == [] and notify.posts == []
+    goal = await skill.models.fetch_goal(db, goal_id)
+    assert goal.status == "achieved"  # expired로 덮어쓰지 않는다
+
+
+async def test_notify_due_handler_sends_due_day_message(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    notify = _FakeNotify()
+    ctx = _ctx(db=db, tags=frozenset(), notify=notify)
+    created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2099-12-31")
+    goal_id = created.data["goal_id"]
+
+    await skill.on_notify_due(ctx, {"goal_id": goal_id, "offset_days": 0})
+    assert notify.dms
+    assert "기한이야" in notify.dms[-1][1]
+
+
+async def test_notify_due_handler_skips_already_resolved_goal(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    notify = _FakeNotify()
+    ctx = _ctx(db=db, tags=frozenset(), notify=notify)
+    created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2099-12-31")
+    goal_id = created.data["goal_id"]
+    await skill.todo_done(ctx, goal_id)
+
+    await skill.on_notify_due(ctx, {"goal_id": goal_id, "offset_days": 0})
+    assert notify.dms == [] and notify.posts == []

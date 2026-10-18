@@ -9,7 +9,7 @@ import aiosqlite
 
 _GOAL_COLUMNS = (
     "id, player_id, game, kind, target_ref, target_value, baseline_value, created_at, "
-    "due_at, duration_tag, parent_goal_id, status, public, notify_offsets"
+    "due_at, duration_tag, parent_goal_id, status, public, notify_offsets, guild_id"
 )
 
 
@@ -29,6 +29,15 @@ class GoalRow:
     status: str
     public: bool
     notify_offsets: list[int] | None
+    guild_id: str | None
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class ScheduleRow:
+    id: int
+    goal_id: str
+    schedule_id: int
+    kind: str
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -57,6 +66,7 @@ def _goal_from_row(row: aiosqlite.Row) -> GoalRow:
         status=row["status"],
         public=bool(row["public"]),
         notify_offsets=json.loads(row["notify_offsets"]) if row["notify_offsets"] else None,
+        guild_id=row["guild_id"],
     )
 
 
@@ -88,14 +98,15 @@ async def insert_goal(
     status: str = "in_progress",
     public: bool = False,
     notify_offsets: list[int] | None = None,
+    guild_id: str | None = None,
 ) -> None:
     conn.row_factory = aiosqlite.Row
     await conn.execute(
-        f"INSERT INTO goals_goals ({_GOAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        f"INSERT INTO goals_goals ({_GOAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             id, player_id, game, kind, json.dumps(target_ref), target_value, baseline_value,
             created_at, due_at, duration_tag, parent_goal_id, status, int(public),
-            json.dumps(notify_offsets) if notify_offsets is not None else None,
+            json.dumps(notify_offsets) if notify_offsets is not None else None, guild_id,
         ),
     )
     await conn.commit()
@@ -208,3 +219,38 @@ async def list_progress(conn: aiosqlite.Connection, goal_id: str) -> list[Progre
         (goal_id,),
     )
     return [_progress_from_row(row) for row in await cursor.fetchall()]
+
+
+async def insert_schedule(conn: aiosqlite.Connection, *, goal_id: str, schedule_id: int, kind: str) -> None:
+    await conn.execute(
+        "INSERT INTO goals_notify_schedule (goal_id, schedule_id, kind) VALUES (?, ?, ?)",
+        (goal_id, schedule_id, kind),
+    )
+    await conn.commit()
+
+
+async def list_schedules(conn: aiosqlite.Connection, goal_id: str, *, kind: str | None = None) -> list[ScheduleRow]:
+    conn.row_factory = aiosqlite.Row
+    query = "SELECT id, goal_id, schedule_id, kind FROM goals_notify_schedule WHERE goal_id = ?"
+    params: list[Any] = [goal_id]
+    if kind is not None:
+        query += " AND kind = ?"
+        params.append(kind)
+    cursor = await conn.execute(query, params)
+    rows = await cursor.fetchall()
+    return [
+        ScheduleRow(id=row["id"], goal_id=row["goal_id"], schedule_id=row["schedule_id"], kind=row["kind"])
+        for row in rows
+    ]
+
+
+async def delete_schedules(conn: aiosqlite.Connection, goal_id: str, *, kind: str | None = None) -> None:
+    """목표의 예약 추적 행을 지운다(실제 schedule_once 취소는 호출하는 쪽이 먼저 한다).
+    kind를 주면 그 종류만."""
+    if kind is None:
+        await conn.execute("DELETE FROM goals_notify_schedule WHERE goal_id = ?", (goal_id,))
+    else:
+        await conn.execute(
+            "DELETE FROM goals_notify_schedule WHERE goal_id = ? AND kind = ?", (goal_id, kind)
+        )
+    await conn.commit()
