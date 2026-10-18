@@ -224,6 +224,29 @@ async def test_set_song_goal_allowed_without_sync(skill: ModuleType, db: aiosqli
     assert result.data["kind"] == "song"
 
 
+async def test_set_song_goal_without_pb_uses_margin_below_target_as_baseline(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """사용자 확인 2026-10-18: 안 쳐본 채보는 baseline이 0이면 달성률이 raw 점수 비율과
+    같아져(예: 990,000/1,007,500=98.3%) 실제보다 훨씬 더 달성한 것처럼 보인다. 목표 점수보다
+    15,000점 낮은 점수를 기준점으로 삼는다."""
+    ctx = _ctx(db=db, tags=frozenset())
+    result = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_007_500)
+    assert result.error is None
+    goal = await skill.models.fetch_goal(db, result.data["goal_id"])
+    assert goal.baseline_value == 1_007_500.0 - 15_000.0
+
+
+async def test_set_song_goal_without_pb_clamps_baseline_at_zero_for_low_target(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    result = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=10_000)
+    assert result.error is None
+    goal = await skill.models.fetch_goal(db, result.data["goal_id"])
+    assert goal.baseline_value == 0.0
+
+
 async def test_set_freeform_goal_allowed_without_sync(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
     result = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="손배치 연습 주 2회")
@@ -815,7 +838,7 @@ async def test_todo_list_sorts_by_remaining(skill: ModuleType, db: aiosqlite.Con
     result = await skill.todo_list(ctx, sort=skill.TodoSort.REMAINING)
     assert result.error is None
     assert len(result.data["todos"]) == 1
-    assert result.data["todos"][0]["remaining_attacks"] is not None
+    assert result.data["todos"][0]["remaining_score"] == 7_500
 
 
 async def test_todo_done_marks_achieved_and_emits_event(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -966,10 +989,8 @@ async def test_on_sync_completed_reports_approached_and_unchanged_song_goals(
     section = await skill.on_sync_completed(ctx, {"player_id": "p1", "sync_id": "sync1"})
     assert section is not None
     content = section.display.content or ""
-    expected = remaining_to_target(1000, 1_007_372, 1_007_500)
-    assert expected is not None
     assert "곡별 목표" in content
-    assert f"접근  곡C MAS  1,007,500점까지 128점 ({expected[1]}어택, 현재 1,007,372)" in content
+    assert "접근  곡C MAS  1,007,500점까지 128점 (현재 1,007,372)" in content
     assert "미갱신  곡D MAS  플레이 2회, 최고 기록 유지 (현재 1,006,950)" in content
     assert section.data["approached"][0]["remaining_score"] == 128
     assert section.data["unchanged"][0]["play_count"] == 2
@@ -1004,7 +1025,7 @@ async def test_on_song_viewed_returns_todo_status(skill: ModuleType, db: aiosqli
     section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": "곡A", "difficulty": "MAS"})
     assert section is not None
     assert len(section.data["todos"]) == 1
-    assert section.data["todos"][0]["remaining_attacks"] is not None
+    assert section.data["todos"][0]["remaining_score"] == 7_500
 
 
 async def test_on_song_viewed_chart_view_only_shows_that_difficulty(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -1021,6 +1042,8 @@ async def test_on_song_viewed_whole_song_view_aggregates_all_difficulties(
 ) -> None:
     """I3: `곡` 도구는 difficulty None으로 낸다 — 그 곡의 모든 난이도 투두를 보여준다."""
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0")]})
+    # EXP 노트 수를 몰라도(note_counts에 없음) 남은 점수는 계산된다 — 점수 차이만 쓰고
+    # 어택 환산(노트 수 필요)은 더 이상 안 한다(사용자 확인 2026-10-18).
     songdb = _FakeSongDb(note_counts={("곡A", "MAS"): 1000})
     ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
     await skill.todo_add(ctx, _chart("곡A", "MAS"), 1_007_500)
@@ -1033,8 +1056,7 @@ async def test_on_song_viewed_whole_song_view_aggregates_all_difficulties(
     content = section.display.content or ""
     assert "MAS" in content and "EXP" in content and "곡B" not in content
     exp = next(t for t in section.data["todos"] if t["difficulty"] == "EXP")
-    assert exp["remaining_attacks"] is None  # EXP 노트 수를 모른다 → 계산 불가
-    assert "계산 불가" in content
+    assert exp["remaining_score"] == 1_009_000
 
 
 async def test_on_song_viewed_returns_none_without_todo(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -1069,7 +1091,7 @@ async def test_on_plan_requested_returns_nearest_todos_via_event_bus(skill: Modu
     sections = await bus.emit_gather("chunithm.plan.requested", {"player_id": "p1"}, player_id="p1", guild_id=None)
     assert len(sections) == 1
     todos = sections[0].data["todos"]
-    assert todos[0]["song_title"] == "곡A"  # 남은 어택이 더 적은 쪽이 먼저다
+    assert todos[0]["song_title"] == "곡A"  # 남은 점수가 더 적은 쪽이 먼저다
 
 
 # ---------------------------------------------------------------- Step 8: 레이팅 목표의 예상 레이팅
@@ -1155,16 +1177,12 @@ async def test_progress_without_due_date_omits_pace(skill: ModuleType, db: aiosq
     assert result.data["pace"] is None
 
 
-async def test_song_goal_summary_has_remaining_score_and_attacks(skill: ModuleType, db: aiosqlite.Connection) -> None:
+async def test_song_goal_summary_has_remaining_score(skill: ModuleType, db: aiosqlite.Connection) -> None:
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0")]})
-    songdb = _FakeSongDb(note_counts={("곡A", "MAS"): 1000})
-    ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
+    ctx = _ctx(db=db, tags=frozenset(), records=records)
     created = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     result = await skill.progress(ctx, created.data["goal_id"])
-    expected = remaining_to_target(1000, 1_000_000, 1_007_500)
-    assert expected is not None
     assert result.data["remaining_score"] == 7_500
-    assert result.data["remaining_attacks"] == str(expected[1])
     assert result.data["current_value"] == "1000000"
 
 
@@ -1329,7 +1347,7 @@ async def test_lamp_goal_in_todo_list_and_song_view(skill: ModuleType, db: aiosq
     await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp.ALL_JUSTICE)
     listed = await skill.todo_list(ctx)
     assert listed.data["todos"][0]["lamp"] == "all_justice"
-    assert listed.data["todos"][0]["remaining_attacks"] is None
+    assert listed.data["todos"][0]["remaining_score"] is None
     assert "올 저스티스" in (listed.display.content if listed.display is not None else "")
     section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": "곡A", "difficulty": None})
     assert section is not None and "올 저스티스" in (section.display.content or "")

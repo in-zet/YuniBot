@@ -62,6 +62,10 @@ _FINAL_DEADLINE_EVENT = "chunithm-goals.final_deadline"
 _SCHEDULE_KIND_REMINDER = "reminder"
 _SCHEDULE_KIND_FINAL = "final_deadline"
 _FINAL_DEADLINE_DAYS = 4  # 기한 다음날 + 3일 대기(설계서 "기한 알림")
+# 안 쳐본 채보에 곡 목표를 세우면 기준점(baseline_value)이 0이라 달성률이 raw 점수 비율과
+# 같아져(예: 990,000/1,007,500=98.3%, 실제로는 한참 남았는데 거의 다 한 것처럼 보인다).
+# 대신 목표 점수보다 이 폭만큼 낮은 점수를 기준점으로 삼는다(사용자 확인 2026-10-18).
+_UNPLAYED_SONG_BASELINE_MARGIN = 15_000.0
 
 
 class GoalKind(StrEnum):
@@ -265,9 +269,9 @@ def _remaining_only_text(goal: Any, summary: dict[str, Any]) -> str:
     if goal.kind == GoalKind.FOLDER.value:
         return f"{summary.get('matched', 0)}/{summary.get('total', 0)}곡"
     if goal.kind == GoalKind.SONG.value:
-        if summary.get("remaining_attacks") is None:
+        if summary.get("remaining_score") is None:
             return "남은 양 계산 불가"
-        return f"남은 {summary['remaining_score']:,}점 ({summary['remaining_attacks']}어택)"
+        return f"남은 {summary['remaining_score']:,}점"
     if "remaining" in summary:
         return f"남은 {summary['remaining']}"
     return "진행 정보 없음"
@@ -520,11 +524,7 @@ async def _goal_summary(ctx: ToolContext, goal: Any) -> dict[str, Any]:
     elif goal.kind == GoalKind.OVERPOWER.value:
         summary["remaining"] = str(calc.truncate2(calc.rating_remaining(current, target)))
     elif goal.kind == GoalKind.SONG.value:
-        ref = goal.target_ref
-        note_count = ctx.songdb.note_count_for(ref["song_title"], ref["difficulty"])
-        remaining_pair = ctx.records.remaining_to_target(note_count, int(current), int(target))
-        summary["remaining_score"] = remaining_pair[0] if remaining_pair is not None else None
-        summary["remaining_attacks"] = str(remaining_pair[1]) if remaining_pair is not None else None
+        summary["remaining_score"] = int(calc.rating_remaining(current, target))
     return summary
 
 
@@ -557,10 +557,10 @@ def _summary_text(goal: Any, summary: dict[str, Any]) -> str:
         parts.append(f"{summary.get('matched', 0)}/{summary.get('total', 0)}곡")
     elif goal.kind == GoalKind.SONG.value and current is not None:
         parts.append(f"현재 {int(Decimal(current)):,}")
-        if summary.get("remaining_attacks") is None:
+        if summary.get("remaining_score") is None:
             parts.append("남은 양 계산 불가")
         else:
-            parts.append(f"남은 {summary['remaining_score']:,}점 ({summary['remaining_attacks']}어택)")
+            parts.append(f"남은 {summary['remaining_score']:,}점")
     elif goal.kind in (GoalKind.RATING.value, GoalKind.OVERPOWER.value) and current is not None:
         parts.append(f"현재 {calc.truncate2(Decimal(current))}")
         remaining_text = f"남은 {summary['remaining']}"
@@ -746,7 +746,10 @@ async def set_goal(
                 return ToolResult(error="이미 그 목표를 달성했어.")
             target_ref = {"song_title": song_title, "difficulty": difficulty}
             target_value = float(score)
-            baseline_value = float(row.score) if row is not None else 0.0
+            baseline_value = (
+                float(row.score) if row is not None
+                else max(0.0, float(score) - _UNPLAYED_SONG_BASELINE_MARGIN)
+            )
     else:
         if description is None:
             return ToolResult(error="자유 목표는 설명이 필요해.")
@@ -1076,7 +1079,7 @@ async def todo_bulk(
 
 @tool(slash="투두 목록")
 async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolResult:
-    """미완료 To-Do 목록을 상수순(const, 기본) 또는 남은 어택순(remaining)으로 보여준다. 각 투두의
+    """미완료 To-Do 목록을 상수순(const, 기본) 또는 남은 점수순(remaining)으로 보여준다. 각 투두의
     id(완료/삭제에 쓴다)도 함께 보여준다."""
     rows = await models.list_goals_for_player(
         ctx.db, ctx.player_id, kind=GoalKind.SONG.value, statuses=[GoalStatus.IN_PROGRESS.value]
@@ -1094,24 +1097,21 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
                     "goal_id": g.id, "song_title": title, "difficulty": dif, "const": const,
                     "current_score": current, "target_score": None, "lamp": lamp,
                     "current_lamp": pb.combo_lamp if pb is not None else None,
-                    "remaining_score": None, "remaining_attacks": None,
+                    "remaining_score": None,
                 }
             )
             continue
-        note_count = ctx.songdb.note_count_for(title, dif)
         target = int(g.target_value) if g.target_value is not None else 0
-        remaining = ctx.records.remaining_to_target(note_count, current, target)
         items.append(
             {
                 "goal_id": g.id, "song_title": title, "difficulty": dif, "const": const,
                 "current_score": current, "target_score": target, "lamp": None,
-                "remaining_score": remaining[0] if remaining is not None else None,
-                "remaining_attacks": str(remaining[1]) if remaining is not None else None,
+                "remaining_score": max(0, target - current),
             }
         )
 
     if sort == TodoSort.REMAINING:
-        items.sort(key=lambda i: (i["remaining_attacks"] is None, Decimal(i["remaining_attacks"] or "0")))
+        items.sort(key=lambda i: (i["remaining_score"] is None, i["remaining_score"] or 0))
     else:
         items.sort(key=lambda i: (i["const"] is None, -(i["const"] or 0.0)))
 
@@ -1122,13 +1122,9 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
                 f"{i['song_title']} {i['difficulty']}{const_text}  {_LAMP_LABELS.get(i['lamp'], i['lamp'])} 목표  "
                 f"(현재 램프 {i['current_lamp'] or '기록 없음'})\n  id {i['goal_id']}"
             )
-        attacks_text = (
-            "계산 불가" if i["remaining_attacks"] is None
-            else f"남은 {i['remaining_score']:,}점, {i['remaining_attacks']}어택"
-        )
         return (
             f"{i['song_title']} {i['difficulty']}{const_text}  "
-            f"{i['current_score']:,} → {i['target_score']:,}  ({attacks_text})\n  id {i['goal_id']}"
+            f"{i['current_score']:,} → {i['target_score']:,}  (남은 {i['remaining_score']:,}점)\n  id {i['goal_id']}"
         )
 
     lines = [_todo_line(i) for i in items]
@@ -1246,19 +1242,14 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
             song_lines.append(f"달성  {title} {dif}  {target:,}점  (현재 {chart_update.new_score:,})")
         elif chart_update is not None:
             current = chart_update.new_score
-            note_count = ctx.songdb.note_count_for(title, dif)
-            remaining = ctx.records.remaining_to_target(note_count, current, target)
-            if remaining is None:
-                song_lines.append(f"접근  {title} {dif}  {target:,}점까지 남은 양 계산 불가 (현재 {current:,})")
-            else:
-                song_lines.append(
-                    f"접근  {title} {dif}  {target:,}점까지 {remaining[0]:,}점 ({remaining[1]}어택, 현재 {current:,})"
-                )
+            remaining_score = max(0, target - current)
+            song_lines.append(
+                f"접근  {title} {dif}  {target:,}점까지 {remaining_score:,}점 (현재 {current:,})"
+            )
             approached.append(
                 {
                     "goal_id": g.id, "song_title": title, "difficulty": dif, "target_score": target,
-                    "current_score": current, "remaining_score": remaining[0] if remaining is not None else None,
-                    "remaining_attacks": str(remaining[1]) if remaining is not None else None,
+                    "current_score": current, "remaining_score": remaining_score,
                 }
             )
         elif unchanged_play is not None:
@@ -1378,7 +1369,7 @@ async def on_final_deadline(ctx: ToolContext, payload: dict[str, Any]) -> None:
 
 @on("chunithm.song.viewed")
 async def on_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
-    """그 곡에 내 To-Do가 있으면 상태와 남은 어택을 붙인다. difficulty가 None이면(곡 전체 보기)
+    """그 곡에 내 To-Do가 있으면 상태와 남은 점수를 붙인다. difficulty가 None이면(곡 전체 보기)
     그 곡의 모든 난이도 투두를, 난이도 코드면(채보 보기) 그 난이도 투두만 보여준다. 없으면 None."""
     player_id: str = payload["player_id"]
     title: str = payload["song_title"]
@@ -1408,24 +1399,17 @@ async def on_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section |
             todos.append(
                 {
                     "goal_id": goal.id, "difficulty": goal_dif, "current_score": current, "target_score": None,
-                    "lamp": lamp, "current_lamp": current_lamp, "remaining_score": None, "remaining_attacks": None,
+                    "lamp": lamp, "current_lamp": current_lamp, "remaining_score": None,
                 }
             )
             continue
-        note_count = ctx.songdb.note_count_for(title, goal_dif)
         target = int(goal.target_value) if goal.target_value is not None else 0
-        remaining = ctx.records.remaining_to_target(note_count, current, target)
-        if remaining is None:
-            lines.append(f"투두 {goal_dif} 목표 {target:,}점  (현재 {current:,}, 남은 양 계산 불가)")
-        else:
-            lines.append(
-                f"투두 {goal_dif} 목표 {target:,}점  남은 {remaining[0]:,}점 ({remaining[1]}어택, 현재 {current:,})"
-            )
+        remaining_score = max(0, target - current)
+        lines.append(f"투두 {goal_dif} 목표 {target:,}점  남은 {remaining_score:,}점 (현재 {current:,})")
         todos.append(
             {
                 "goal_id": goal.id, "difficulty": goal_dif, "current_score": current, "target_score": target,
-                "remaining_score": remaining[0] if remaining is not None else None,
-                "remaining_attacks": str(remaining[1]) if remaining is not None else None,
+                "remaining_score": remaining_score,
             }
         )
     return Section(
@@ -1437,7 +1421,7 @@ async def on_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section |
 
 @on("chunithm.plan.requested")
 async def on_plan_requested(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
-    """가까운(남은 어택이 작은 순) To-Do 몇 개를 보여준다."""
+    """가까운(남은 점수가 작은 순) To-Do 몇 개를 보여준다."""
     player_id: str = payload["player_id"]
     rows = await models.list_goals_for_player(
         ctx.db, player_id, kind=GoalKind.SONG.value, statuses=[GoalStatus.IN_PROGRESS.value]
@@ -1452,43 +1436,28 @@ async def on_plan_requested(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         current = pb.score if pb is not None else 0
         lamp = _song_lamp(g)
         if lamp is not None:
-            # 램프 목표는 남은 어택으로 잴 수 없어 맨 뒤로 간다.
+            # 램프 목표는 남은 점수로 잴 수 없어 맨 뒤로 간다.
             items.append(
                 {
                     "goal_id": g.id, "song_title": title, "difficulty": dif, "target_score": None, "lamp": lamp,
-                    "remaining_score": None, "remaining_attacks": None,
+                    "remaining_score": None,
                 }
             )
             continue
-        note_count = ctx.songdb.note_count_for(title, dif)
         target = int(g.target_value) if g.target_value is not None else 0
-        remaining = ctx.records.remaining_to_target(note_count, current, target)
         items.append(
             {
                 "goal_id": g.id, "song_title": title, "difficulty": dif, "target_score": target, "lamp": None,
-                "remaining_score": remaining[0] if remaining is not None else None,
-                "remaining_attacks": remaining[1] if remaining is not None else None,
+                "remaining_score": max(0, target - current),
             }
         )
-    items.sort(key=lambda i: (i["remaining_attacks"] is None, i["remaining_attacks"] or Decimal(0)))
+    items.sort(key=lambda i: (i["remaining_score"] is None, i["remaining_score"] or 0))
     top = items[:_PLAN_LIMIT]
 
     def _plan_line(i: dict[str, Any]) -> str:
         if i["lamp"] is not None:
             return f"{i['song_title']} {i['difficulty']}  {_LAMP_LABELS.get(i['lamp'], i['lamp'])} 목표"
-        remaining_text = (
-            "계산 불가"
-            if i["remaining_attacks"] is None
-            else f"{i['remaining_attacks']}어택 ({i['remaining_score']:,}점)"
-        )
-        return f"{i['song_title']} {i['difficulty']}  {i['target_score']:,}점까지 {remaining_text}"
+        return f"{i['song_title']} {i['difficulty']}  {i['target_score']:,}점까지 {i['remaining_score']:,}점"
 
     lines = [_plan_line(i) for i in top]
-    data = [
-        {
-            **i,
-            "remaining_attacks": str(i["remaining_attacks"]) if i["remaining_attacks"] is not None else None,
-        }
-        for i in top
-    ]
-    return Section(order=_PLAN_ORDER, display=Display(content="\n".join(lines)), data={"kind": "goal_plan", "todos": data})
+    return Section(order=_PLAN_ORDER, display=Display(content="\n".join(lines)), data={"kind": "goal_plan", "todos": top})
