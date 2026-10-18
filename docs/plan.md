@@ -57,7 +57,7 @@
 - [ ] 7. 기록 스킬
   - [x] Part 1: `chunithm-sync`·`chunithm-report`(서비스 확장 포함). 실기 미확인: 첫 동기화 기준점 → 플레이 후 리포트 → 비공개 DM → `/프로필`·`/베스트`·`/최근`·`/분석`·`/후보곡` → 변화 없음
   - [ ] Part 2: `chunithm-goals`·`chunithm-notes`(마이그레이션 `goals_goals`·`goals_progress`·`notes_notes`, 순수 함수 `goals_calc.py` 먼저)
-  - [ ] Part 3: `chunithm-session`(보관·조회만)
+  - [ ] Part 3: `chunithm-session`(보관·조회만) — 구현 완료(`list_sessions`·`get_session`·`delete_session`, `on_sync_reported`). 실기 미확인: 동기화 후 세션 보관 → `/세션 목록`·`/세션 보기`(날짜·오락실 지정 포함)·`/세션 삭제`
   - [ ] 다섯 스킬의 `examples`로 도구 선택 재평가
 - [ ] 8. 오락실 `chunithm-arcade` — CHUNITHM-NET 설정 페이지와 플레이 이력 상세 페이지 저장본이 `docs/reference/`에 있어야 시작한다
 - [ ] 9. 알림 `chunithm-updates`, 목표 기한 알림(운영 중 예약 확인 루프를 이때 `core/bot.py`에 더한다)

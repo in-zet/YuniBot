@@ -152,3 +152,11 @@ emits: [chunithm.session.closed, chunithm.session.viewed]
 - `chunithm.sync.reported`를 받아도 대화 스레드를 열지 않고 보관만 한다.
 - manifest `emits`에는 `chunithm.session.viewed`만 적는다. `chunithm.session.closed`는 후기 종료 코드가 생기는 12단계에 더한다.
 - 조회 도구는 본인을 조회할 때 공개 설정을 보지 않고, 남을 조회할 때만 그 사람의 공개 설정을 확인한다.
+
+## 구현 결정 (2026-10-18, Part 3 구현 중)
+
+- `chunithm-sync`의 `run()`은 `arcade: ArcadeRef`를 받아 `chunithm.sync.reported` payload에 `arcade_id`로 실어 보내지만, 그 값을 저장하는 코드가 없었다(죽은 값). `chunithm-session`의 `on_sync_reported`가 이 payload의 첫 소비자라, 여기서 `arcades.record_visit()`을 불러 그날 방문을 기록한다 — `chunithm-sync`는 그대로 두고(이미 배포된 스킬을 건드리지 않는다), `chunithm-session`이 arcades 서비스를 선언해 이어받는다.
+  - `record_visit`은 visited_at을 "지금"(동기화 시각, UTC)으로 남긴다. 플레이 날짜(새벽 4시 경계, 로컬)와 동기화 시각이 다를 수 있어(다음 날 아침에 동기화하는 경우 등), `get_session`/`list_sessions`가 오락실을 찾을 때 날짜가 살짝 어긋날 수 있다 — `chunithm-arcade`(8단계)가 생기기 전까지의 근사값으로 남겨 둔다.
+- 같은 세션(날짜)에 다시 동기화하면 `session_reports`는 세션당 한 행만 두므로 최신 리포트로 덮어쓴다(누적하지 않는다) — 테이블이 "세션 id, ..., 고정된 표시물" 단수 구조로 설계돼 있어 이 쪽이 스키마와 맞는다.
+- `get_session`은 설계서의 `latest: bool` 인자를 받지 않는다 — `date`를 안 주면 항상 최근(또는 arcade로 좁힌 범위의 최근)이라 의미가 같은 플래그를 따로 두지 않았다.
+- 오락실 "설정"(그날 게임 설정)은 설계서대로 `chunithm.session.viewed`로 모으기만 하고(8단계 전까지 빈 결과), "방문"(어느 오락실)은 공통 `arcades` 서비스를 직접 읽는다 — 방문은 오락실 스킬이 생기기 전에도 `arcades` 서비스 자체로 이미 존재하는 정보라 모으기를 거칠 필요가 없다.

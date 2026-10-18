@@ -58,6 +58,11 @@ class ArcadesService:
         await self._conn.commit()
         return Arcade(id=arcade_id, guild_id=guild_id, name=name, created_by=created_by, created_at=now)
 
+    async def get(self, arcade_id: str) -> Arcade | None:
+        cursor = await self._conn.execute("SELECT * FROM arcades WHERE id = ?", (arcade_id,))
+        row = await cursor.fetchone()
+        return _row_to_arcade(row) if row is not None else None
+
     async def list_for_guild(self, guild_id: str) -> list[Arcade]:
         cursor = await self._conn.execute(
             "SELECT * FROM arcades WHERE guild_id = ? ORDER BY name", (guild_id,)
