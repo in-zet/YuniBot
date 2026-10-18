@@ -614,6 +614,19 @@ class RecordsService:
         row = await cursor.fetchone()
         return row["synced_at"] if row is not None else None
 
+    async def latest_session(self, player_id: str) -> SessionInfo | None:
+        """가장 최근 플레이 세션(날짜 기준). `chunithm-arcade`의 `record_visit`이
+        날짜를 안 받았을 때 기본값("최근 세션")을 정하는 데 쓴다."""
+        cursor = await self._conn.execute(
+            "SELECT id, play_date, estimated FROM records_sessions WHERE player_id = ? AND game = ? "
+            "ORDER BY play_date DESC LIMIT 1",
+            (player_id, _GAME),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return SessionInfo(id=row["id"], play_date=row["play_date"], estimated=bool(row["estimated"]))
+
     @staticmethod
     def allowed_attacks(note_count: int | None, target_score: int) -> Decimal | None:
         """chunithm-border 스킬이 쓰는 순수 계산 패스스루(services/chunithm/records_calc.py)."""

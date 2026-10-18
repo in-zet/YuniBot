@@ -15,36 +15,39 @@ examples:
 category: 오락실
 game: chunithm
 version: 1
-services: [chunithm_net, arcades, records]
-listens: [chunithm.sync.completed, chunithm.session.viewed]
+services: [chunithm_net, arcades, records, db]
+listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.viewed]
 ```
 
 ## 저장하는 설정
 
-| 항목 | 비고 |
-| --- | --- |
-| 스피드 |  |
-| 필드 월 |  |
-| 판정 타이밍 A | −2.0부터 +2.0. 곡에 대한 채보 위치 조정 |
-| 판정 타이밍 B | −2.0부터 +2.0. 노트 판정 시점 조정 |
-| 가이드음 볼륨 | 0부터 10 |
+설정 페이지는 `/mobile/home/userOption/updateUserOption`, `<select>` 태그 값으로 저장돼 있다.
+
+| 항목 | `<select name>` | 비고 |
+| --- | --- | --- |
+| 스피드 | `speed` |  |
+| 필드 월 | `fieldWallPosition` |  |
+| 판정 타이밍 A | `playTimingOffset` | −2.0부터 +2.0. 곡에 대한 채보 위치 조정 |
+| 판정 타이밍 B | `judgeTimingOffset` | −2.0부터 +2.0. 노트 판정 시점 조정 |
+| 가이드음 볼륨 | `guideSound` | 0부터 10 |
 
 - 기체 종류는 구분하지 않는다. 국내에는 구기체만 있으므로 오락실마다 기체를 묻거나 기록하지 않는다.
 - 설정 페이지에 기체별 값이 두 벌로 보이면 국내 기체에 해당하는 쪽을 읽는다. 일본판은 별도 서버라 동기화 대상이 아니다.
-- 페이지에 보이는 나머지 설정도 통째로 함께 저장해 둔다. 나중에 보여 줄 항목을 늘릴 수 있다.
-- chuni-penguin 어댑터에는 게임 설정 페이지를 읽는 코드가 없다. 파서를 새로 만들어 `chunithm_net` 서비스에 더한다.
+- 페이지에 보이는 나머지 설정도 통째로 함께 저장해 둔다. 나중에 보여 줄 항목을 늘릴 수 있다. 판정 폭 세부 조정(`judgeCritical`/`judgeJustice`/`judgeAttack`) 등은 표에 따로 올리지 않고 이 "나머지" 취급으로 저장만 한다.
+- chuni-penguin 어댑터에는 게임 설정 페이지를 읽는 코드가 없다. 파서를 새로 만들어 `chunithm_net` 서비스에 더한다. 저장본: `docs/reference/chunithm-net/arcade_settings.html`.
 
 ## 동기화 때의 흐름
 
-1. 동기화 리포트에 새 플레이가 있으면, 이 스킬의 조각(order 50)이 어디서 쳤는지 묻는다. 최근에 간 오락실 세 곳, 다른 곳, 건너뛰기를 버튼으로 낸다.
-2. 다른 곳을 고르면 이름을 입력받아 아래의 이름 확인을 거친다.
-3. 오락실이 정해지면 `arcades` 서비스에 방문(세션 id, 마지막 플레이 날짜)을 남기고, CHUNITHM-NET의 현재 설정을 읽어 그 방문에 저장한다.
-4. 직전에 저장된 값과 달라진 항목이 있으면 버튼 응답에 한 줄로 짚는다.
+동기화 리포트는 조각들의 텍스트만 이어 붙여 보낸다(공개 채널·DM 모두 버튼을 실을 수 없다 — `chunithm-sync`의 `_render`가 `display.content`만 뽑는다). 그래서 오락실 선택은 버튼이 아니라 말로 받는다.
 
-- 새 플레이가 없으면 묻지 않는다.
-- 두 곳 이상에서 쳤다면 여러 곳을 고를 수 있다. 설정은 계정에 하나뿐이므로 마지막으로 친 곳에만 저장하고, 나머지는 방문만 남긴다.
-- 멘션에 오락실 이름이 이미 들어 있으면("겜플에서 친 거 동기화해 줘") 버튼 대신 이름 확인으로 바로 넘어간다.
-- 플레이 이력에 점포 이름이 표시된다면 묻는 대신 그 이름을 후보로 제안한다(표시 여부 미확인).
+1. `/동기화`에 `arcade: ArcadeRef`로 오락실을 같이 말했으면("겜플에서 친 거 동기화해 줘") 그대로 아래 이름 확인을 거쳐 방문을 남기고 설정을 저장한다.
+2. 말하지 않았고 새 플레이가 있으면, 이 스킬의 조각(order 50)이 "오락실을 말 안 했으면 다음 동기화 때 같이 말하거나 `/오락실 방문`으로 알려 달라"는 안내 문구만 리포트에 한 줄 더한다. 저장은 하지 않는다.
+3. 오락실이 정해지면(1번 경로, 또는 나중에 `/오락실 방문`) `arcades` 서비스에 방문(세션 id, 마지막 플레이 날짜)을 남기고, 가장 최근 세션일 때만 CHUNITHM-NET의 현재 설정을 읽어 그 방문에 저장한다.
+4. 직전에 저장된 값과 달라진 항목이 있으면 `/오락실 방문` 응답에 한 줄로 짚는다.
+
+- 새 플레이가 없으면 안내 문구를 내지 않는다.
+- 두 곳 이상에서 쳤다면 `/오락실 방문`을 여러 번 부른다. 설정은 계정에 하나뿐이므로 마지막 호출에만 저장되고, 나머지는 방문만 남는다.
+- 플레이 이력 상세 페이지(`/mobile/record/playlogDetail/`)에는 점포 이름이 없다. 자동으로 알아낼 길이 없으므로 항상 말로 받는다.
 
 ## 이름 확인 (`arcades` 서비스와 `ArcadeRef`가 하는 일)
 
@@ -77,20 +80,22 @@ listens: [chunithm.sync.completed, chunithm.session.viewed]
 | `record_visit` | 세션에 오락실 방문을 남기고 지금 설정을 저장. 도구 태그 chunithm-linked, cost network | `arcade: ArcadeRef`, 날짜(기본 최근 세션) | `/오락실 방문` | optional | never |
 | `set_privacy` | 방문 기록과 설정 공개 여부 | `public: bool` | 없음 | optional | never |
 
-`record_visit`는 동기화의 버튼 흐름과 같은 함수다. 설정 읽기는 가장 최근 세션에만 한다. 지난 날짜에 오락실을 채우는 경우는 그날 설정을 알 수 없으므로 방문만 남긴다.
+`record_visit` 도구와 `on_sync_reported`(동기화 때 이미 오락실을 말한 경우)는 "방문을 남기고, 최근 세션이면 설정을 읽어 저장하는" 같은 내부 함수를 같이 쓴다.
+설정 읽기는 가장 최근 세션에만 한다(`records.latest_session`과 비교). 지난 날짜에 오락실을 채우는 경우는 그날 설정을 알 수 없으므로 방문만 남긴다.
 
 ## 이벤트
 
 | 방향 | 이름 | 돌려주는 것 |
 | --- | --- | --- |
-| 받음 | `chunithm.sync.completed` (모으기) | 오락실 선택 버튼 조각. 새 플레이가 없으면 없음 |
-| 받음 | `chunithm.session.viewed` (모으기) | 그날 저장한 설정 조각 |
+| 받음 | `chunithm.sync.completed` (모으기) | 오락실을 안 말했을 때의 안내 문구 조각. 새 플레이가 없거나 이미 말했으면 없음 |
+| 받음 | `chunithm.sync.reported` (알림) | 없음 — `arcade_id`가 있으면 방문을 남기고 설정을 저장한다(`chunithm-session`이 이전엔 방문만 남겼었다, 구현 결정 참고) |
+| 받음 | `chunithm.session.viewed` (모으기) | 그날 저장한 설정 조각(본인이거나 `arcade_privacy`가 공개일 때만) |
 
 ## 데이터
 
 | 테이블 | 열 |
 | --- | --- |
-| `arcade_settings` | 방문 id(`arcades` 서비스), 스피드, 필드 월, 판정 A, 판정 B, 가이드음 볼륨, 나머지 설정 전체, 읽은 시각 |
+| `arcade_settings` | 방문 id(`arcades` 서비스), 플레이어, 오락실, 플레이 날짜, 스피드, 필드 월, 판정 A, 판정 B, 가이드음 볼륨, 나머지 설정 전체(JSON), 읽은 시각 |
 | `arcade_privacy` | 플레이어, 공개 여부 |
 
 `arcades` 서비스에는 오락실(이름, 지역, 등록한 플레이어), 별칭(플레이어, 별칭, 오락실), 방문(플레이어, game, 오락실, 세션 id, 마지막 플레이 날짜)이 있다.
@@ -108,7 +113,10 @@ listens: [chunithm.sync.completed, chunithm.session.viewed]
 - 여러 곳을 고른 경우 설정이 마지막 곳에만 저장되는지.
 - 차이 표시가 바뀐 항목만 나오는지.
 
-## 미확인 사항
+## 구현 결정 (2026-10-18)
 
-- 국제판 CHUNITHM-NET의 게임 설정 페이지 경로와 표시 항목. 로그인이 필요해 확인하지 못했다. 저장본을 받은 뒤 이 스킬을 시작한다.
-- 플레이 이력 상세 페이지에 점포 이름이 표시되는지.
+- chuni-penguin 어댑터에 설정 페이지를 읽는 메서드가 없어, `ChunithmNetAdapterLike` Protocol에 어댑터의 private `_request_as_soup`을 얹어 그대로 썼다(쿠키·인증·에러 훅을 다시 구현하는 중복을 피하려고). `services/chunithm/chunithm_net.py`의 `get_arcade_settings()`가 이 경로를 쓴다.
+- `arcade_visits`(공통 `arcades` 서비스)에는 원래 PK가 없었다 — `record_visit()`이 SQLite의 암묵적 rowid를 돌려주도록 바꿔(기존 호출부는 반환값을 안 썼으므로 무해) `arcade_settings.visit_id`가 그 값을 가리키게 했다.
+- `chunithm-session`(7단계 Part 3)의 `on_sync_reported`가 임시로 하던 `arcades.record_visit()` 호출을 이 스킬로 옮겼다 — 두 스킬이 같은 `arcade_id`를 보고 각자 기록하면 방문이 중복된다. 설정 읽기(네트워크 호출)도 방문 기록과 같은 순간에 해야 하므로 한 곳(이 스킬의 `on_sync_reported`)에 묶었다.
+- `arcade_settings`에 `play_date` 열을 둬서 `chunithm.session.viewed`가 날짜로 바로 찾을 수 있게 했다 — `chunithm-session`이 쓰는 `visited_at[:10]` 근사치보다 정확하다(동기화 payload의 `sessions[].play_date`를 그대로 쓴다).
+- 판정 폭 세부 조정(`judgeCritical`/`judgeJustice`/`judgeAttack`) 등 이름 안 붙은 항목은 `raw_json`에만 들어가고 표/도구 결과에는 안 나온다(저장만 해 둔다).

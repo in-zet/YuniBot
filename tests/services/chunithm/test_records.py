@@ -319,6 +319,38 @@ async def test_last_sync_at_returns_most_recent(conn, monkeypatch) -> None:
     assert await service.last_sync_at(player.id) == "2026-10-11T12:00:00+00:00"
 
 
+async def test_latest_session_returns_none_before_any_sync(conn) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
+
+    assert await service.latest_session(player.id) is None
+
+
+async def test_latest_session_returns_the_most_recent_play_date(conn, monkeypatch) -> None:
+    """세션은 recent_scores의 achieved_at으로 만들어진다 — _fixture_fetch()만 반복해서는
+    (recent_scores가 비어 있어) 생기지 않으므로, 실제 플레이가 있는 동기화 두 번으로 만든다."""
+    _, player_id, ctx, service = await _setup(conn)
+    target = _fixture_fetch().best30[4]
+
+    _freeze_now(monkeypatch, utc=datetime(2026, 10, 10, 12, 0, tzinfo=UTC), local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
+
+    first = _fixture_fetch()
+    first.recent_scores = [_recent(target.song.title, "MAS", target.score - 1000, datetime(2026, 10, 10, 21, 0, tzinfo=_JST))]
+    _freeze_now(monkeypatch, utc=datetime(2026, 10, 10, 13, 0, tzinfo=UTC), local=datetime(2026, 10, 10, 22, 0, tzinfo=UTC))
+    await service.save_sync(player_id, first, ctx)
+
+    second = _fixture_fetch()
+    second.recent_scores = [_recent(target.song.title, "MAS", target.score - 500, datetime(2026, 10, 11, 21, 0, tzinfo=_JST))]
+    _freeze_now(monkeypatch, utc=datetime(2026, 10, 11, 13, 0, tzinfo=UTC), local=datetime(2026, 10, 11, 22, 0, tzinfo=UTC))
+    await service.save_sync(player_id, second, ctx)
+
+    latest = await service.latest_session(player_id)
+    assert latest is not None
+    assert latest.play_date == "2026-10-11"
+
+
 async def test_allowed_attacks_and_remaining_to_target_are_exposed_passthroughs(conn) -> None:
     players = PlayersService(conn)
     service = RecordsService(conn=conn, songdb=SongDbService(), players=players)

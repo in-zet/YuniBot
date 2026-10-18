@@ -47,7 +47,7 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 | 10 | `chunithm-report` | 세션 요약(현재값과 변화량), 갱신 목록, 반응 단계 |
 | 30 | `chunithm-goals` | 최종 목표 점검, 곡별 목표 점검, 자동 완료 |
 | 40 | `chunithm-updates` | 지난 동기화 뒤 들어온 신곡 중 내 상수대에 맞는 것 |
-| 50 | `chunithm-arcade` | 어느 오락실에서 쳤는지 묻는 버튼 |
+| 50 | `chunithm-arcade` | 오락실을 안 말했을 때의 안내 문구(버튼 아님 — `_render`가 텍스트만 뽑는다) |
 | 표시물 없음 | `yuni-bond` | 유니에게 주는 귀띔만(마일스톤, 오랜만의 동기화) |
 
 유니의 한마디는 맨 위에 둔다. 스킬이 꺼져 있거나 태그 조건이 맞지 않으면 그 조각만 빠진다.

@@ -15,11 +15,13 @@ from chuni_penguin.adapters.errors import AuthenticationError
 from chuni_penguin.types import Difficulty
 
 from core.tool_types import ToolContext
+from services.chunithm.arcade_settings import ArcadeSettings, parse_arcade_settings
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
 
 if TYPE_CHECKING:
     from chuni_penguin.types import PersonalBest, Profile, RecentScore
+    from selectolax.lexbor import LexborHTMLParser
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,12 @@ class ChunithmNetAdapterLike(Protocol):
     async def get_detailed_recent_score(self, score: RecentScore) -> RecentScore: ...
     async def logout(self) -> None: ...
     async def aclose(self) -> None: ...
+
+    # chunithm-arcade 전용: 설정 페이지(get_profile 등과 달리 chuni-penguin에 메서드가
+    # 없다)를 읽으려고 어댑터의 공용 요청 메서드를 그대로 쓴다. 이름이 private(밑줄)인
+    # 건 third_party 내부 구현이라서다 — 쿠키·인증·에러 훅까지 다시 구현하는 중복을
+    # 피하려고 이 Protocol에 얹었다(docs/design/skills/chunithm-arcade.md 구현 결정).
+    async def _request_as_soup(self, method: str, url: str, **kwargs: object) -> LexborHTMLParser: ...
 
     @property
     def lwp_cookie_jar(self) -> str: ...
@@ -296,6 +304,25 @@ class ChunithmNetService:
         adapter = self._adapter_factory(cookie)
         try:
             return await adapter.get_recent_scores()
+        except AuthenticationError:
+            await self._expire_login(player_id, ctx)
+            raise
+        finally:
+            await adapter.aclose()
+
+    async def get_arcade_settings(
+        self, player_id: str, *, ctx: ToolContext | None = None
+    ) -> ArcadeSettings:
+        """지금 계정의 게임 설정 페이지를 읽는다(`chunithm-arcade` 전용). 인증 실패는
+        다른 메서드와 똑같이 만료로 처리하고 예외를 다시 던진다."""
+        cookie = await self._decrypted_cookie(player_id)
+        if cookie is None:
+            raise ConnectionError("로그인되어 있지 않다")
+
+        adapter = self._adapter_factory(cookie)
+        try:
+            soup = await adapter._request_as_soup("GET", "/mobile/home/userOption/updateUserOption")
+            return parse_arcade_settings(soup)
         except AuthenticationError:
             await self._expire_login(player_id, ctx)
             raise

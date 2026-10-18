@@ -25,6 +25,7 @@ from selectolax.lexbor import LexborHTMLParser
 
 from core.events import EventBus
 from core.tool_types import ToolContext
+from services.chunithm.arcade_settings import parse_arcade_settings
 from services.chunithm.chunithm_net import (
     ChunithmNetService,
     SyncFetch,
@@ -48,6 +49,7 @@ _COOKIES_MIGRATION = (
 _PROFILE_HTML = Path("docs/reference/chunithm-net/player_data.html").read_text(encoding="utf-8")
 _BEST_HTML = Path("docs/reference/chunithm-net/rating_detail_best.html").read_text(encoding="utf-8")
 _RECENT_HTML = Path("docs/reference/chunithm-net/rating_detail_recent.html").read_text(encoding="utf-8")
+_ARCADE_SETTINGS_HTML = Path("docs/reference/chunithm-net/arcade_settings.html").read_text(encoding="utf-8")
 
 
 def _fixture_profile():
@@ -134,6 +136,11 @@ class _FakeAdapter:
 
     async def aclose(self) -> None:
         pass
+
+    async def _request_as_soup(self, method: str, url: str, **kwargs: object) -> LexborHTMLParser:
+        if self.fails:
+            raise self.error
+        return LexborHTMLParser(_ARCADE_SETTINGS_HTML)
 
 
 @pytest.fixture
@@ -519,6 +526,27 @@ async def test_get_recent_scores_without_login_raises_connection_error(conn, sec
         await service.get_recent_scores(player.id)
 
 
+async def test_get_arcade_settings_returns_parsed_settings(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    result = await service.get_arcade_settings(player.id)
+
+    assert result == parse_arcade_settings(LexborHTMLParser(_ARCADE_SETTINGS_HTML))
+
+
+async def test_get_arcade_settings_without_login_raises_connection_error(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+
+    with pytest.raises(ConnectionError):
+        await service.get_arcade_settings(player.id)
+
+
 async def test_enrich_recent_with_detail_replaces_only_the_first_limit_items(conn, secrets) -> None:
     players = PlayersService(conn)
     player = await players.create_player()
@@ -567,6 +595,19 @@ async def test_get_recent_scores_on_auth_failure_expires_login(conn, secrets) ->
 
     with pytest.raises(AuthenticationError):
         await service.get_recent_scores(player.id, ctx=ctx_with_bus)
+    await bus.drain()
+
+    assert received == [(player.id, {"player_id": player.id})]
+    assert await players.tags_for(player.id) == set()
+
+
+async def test_get_arcade_settings_on_auth_failure_expires_login(conn, secrets) -> None:
+    players, player, bus, received = await _linked_player_with_expiry_bus(conn, secrets)
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(fails=True), players=players)
+    ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+
+    with pytest.raises(AuthenticationError):
+        await service.get_arcade_settings(player.id, ctx=ctx_with_bus)
     await bus.drain()
 
     assert received == [(player.id, {"player_id": player.id})]

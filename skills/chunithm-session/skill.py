@@ -328,8 +328,4 @@ async def on_sync_reported(ctx: ToolContext, payload: dict[str, Any]) -> None:
             ),
         )
 
-    arcade_id = payload.get("arcade_id")
-    if arcade_id is not None:
-        await ctx.arcades.record_visit(arcade_id, player_id=player_id, game=_GAME)
-
     await ctx.db.commit()
