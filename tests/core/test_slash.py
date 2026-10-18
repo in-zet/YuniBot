@@ -551,15 +551,19 @@ async def test_dispatch_gives_db_player_data_snapshot_only_to_skills_that_declar
     players = PlayersService(conn)
     player_data = PlayerDataScanner(conn=conn, table_names=())
     snapshot = RegistrySnapshot(skills=(), failures={"x": "y"})
+    fake_scheduler = object()
     executor = ToolExecutor(
         resolvers=ResolverRegistry(), tag_provider=players, tag_definitions={},
         services={"players": players}, player_data=player_data,
+        scheduler=fake_scheduler,  # pyright: ignore[reportArgumentType]
     )
     plan = build_slash_plan(
         [  # pyright: ignore[reportArgumentType]
             (_FakeSkillWithServices("plain", ["players"]), undeclared_tool.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
             (
-                _FakeSkillWithServices("core-ish", ["players", "db", "player_data", "registry_snapshot"]),
+                _FakeSkillWithServices(
+                    "core-ish", ["players", "db", "player_data", "registry_snapshot", "scheduler"]
+                ),
                 declared_tool.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
             ),
         ]
@@ -579,11 +583,13 @@ async def test_dispatch_gives_db_player_data_snapshot_only_to_skills_that_declar
         assert plain.db is None
         assert plain.player_data is None
         assert plain.registry_snapshot is None
+        assert plain.scheduler is None
 
         declared = seen["declared"]
         assert declared.db is conn
         assert declared.player_data is player_data
         assert declared.registry_snapshot is snapshot
+        assert declared.scheduler is fake_scheduler
     finally:
         await conn.close()
 

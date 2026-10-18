@@ -109,6 +109,7 @@ class AgentLoop:
             registry_snapshot=ctx.registry_snapshot,
             usage=ctx.usage,
             discord_id=ctx.discord_id,
+            scheduler=ctx.scheduler,
         )
 
         contents: list[LlmContent] = [LlmContent(role="user", parts=[LlmPart(text=user_text)])]
@@ -274,6 +275,7 @@ class AgentLoop:
                 registry_snapshot=ctx.registry_snapshot,
                 usage=ctx.usage,
                 discord_id=ctx.discord_id,
+                scheduler=ctx.scheduler,
             )
 
         declared = set(declared_services)
@@ -291,4 +293,5 @@ class AgentLoop:
             registry_snapshot=self._registry_snapshot if "registry_snapshot" in declared else None,
             usage=self._executor.services.get("usage") if "usage" in declared else None,  # pyright: ignore[reportArgumentType]
             discord_id=ctx.discord_id,
+            scheduler=self._executor.scheduler if "scheduler" in declared else None,
         )

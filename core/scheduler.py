@@ -10,19 +10,24 @@ import aiosqlite
 import croniter
 
 
+def _shift_past_quiet_hours(
+    candidate: datetime.datetime, *, quiet_start: datetime.time, quiet_end: datetime.time
+) -> datetime.datetime:
+    """새벽 정지 시간대(quiet_start <= t < quiet_end) 안에 걸리면 그 시간대가 끝나는 시각으로
+    민다. 정지 시간대가 자정을 걸치지 않는 경우만 다룬다(기본값 02~06시가 그렇다) — 자정을
+    걸치는 설정은 미확인 사항으로 남긴다."""
+    candidate_time = candidate.time()
+    if quiet_start <= candidate_time < quiet_end:
+        return candidate.replace(hour=quiet_end.hour, minute=quiet_end.minute, second=0, microsecond=0)
+    return candidate
+
+
 def next_fire_time(
     cron: str, after: datetime.datetime, *, quiet_start: datetime.time, quiet_end: datetime.time
 ) -> datetime.datetime:
-    """cron의 다음 실행 시각을 구하고, 새벽 정지 시간대(quiet_start <= t < quiet_end) 안에
-    걸리면 그 시간대가 끝나는 시각으로 민다. 정지 시간대가 자정을 걸치지 않는 경우만
-    다룬다(기본값 02~06시가 그렇다) — 자정을 걸치는 설정은 미확인 사항으로 남긴다."""
+    """cron의 다음 실행 시각을 구하고, 새벽 정지 시간대 밖으로 민다(_shift_past_quiet_hours)."""
     candidate = croniter.croniter(cron, after).get_next(datetime.datetime)
-    candidate_time = candidate.time()
-    if quiet_start <= candidate_time < quiet_end:
-        candidate = candidate.replace(
-            hour=quiet_end.hour, minute=quiet_end.minute, second=0, microsecond=0
-        )
-    return candidate
+    return _shift_past_quiet_hours(candidate, quiet_start=quiet_start, quiet_end=quiet_end)
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -98,6 +103,9 @@ class Scheduler:
         self, *, owner_skill: str, event_name: str, payload: dict[str, Any],
         fire_at: datetime.datetime, catch_up: bool,
     ) -> int:
+        """fire_at이 새벽 정지 시간대 안에 걸리면 그 시간대가 끝나는 시각으로 민다(recurring과
+        같은 규칙). 돌려주는 행 id로 나중에 cancel_once를 부를 수 있다(기한 전 달성 등)."""
+        fire_at = _shift_past_quiet_hours(fire_at, quiet_start=self._quiet_start, quiet_end=self._quiet_end)
         cursor = await self._conn.execute(
             "INSERT INTO schedule_once (owner_skill, event_name, payload, fire_at, catch_up, fired_at) "
             "VALUES (?, ?, ?, ?, ?, NULL)",
@@ -107,6 +115,14 @@ class Scheduler:
         row_id = cursor.lastrowid
         assert row_id is not None
         return row_id
+
+    async def cancel_once(self, schedule_id: int) -> None:
+        """아직 안 돈 한 번짜리 예약을 지운다(예: 목표가 기한 전에 달성돼 남은 알림이 필요
+        없어졌을 때). 이미 돈 것(fired_at이 찬 행)은 그대로 둔다 — 지울 대상이 아니다."""
+        await self._conn.execute(
+            "DELETE FROM schedule_once WHERE id = ? AND fired_at IS NULL", (schedule_id,)
+        )
+        await self._conn.commit()
 
     async def startup_catch_up_once(self, *, now: datetime.datetime) -> list[OnceSchedule]:
         """한 번 도는 예약 중 아직 안 돈 것을 본다. catch_up이 켜졌고 '오늘' 날짜로
@@ -126,6 +142,35 @@ class Scheduler:
                 due.append(
                     OnceSchedule(owner_skill=owner_skill, event_name=event_name, payload=json.loads(payload))
                 )
+            await self._conn.execute(
+                "UPDATE schedule_once SET fired_at = ? WHERE id = ?", (now.isoformat(), row_id)
+            )
+        await self._conn.commit()
+        return due
+
+    async def poll_due_recurring(self, *, now: datetime.datetime) -> list[tuple[str, str]]:
+        """운영 중 폴링 루프가 부른다(core/bot.py). startup_catch_up과 달리 '오늘' 제한이나
+        catch_up 플래그를 안 본다 — 지금 돌고 있는 중이라 밀린 게 아니라 제때 맞춰 도는
+        경우이기 때문이다. mark_run은 호출한 쪽이 실행 뒤에 직접 부른다."""
+        cursor = await self._conn.execute(
+            "SELECT owner_skill, fn_name FROM schedule_recurring WHERE next_run_at <= ?",
+            (now.isoformat(),),
+        )
+        rows = await cursor.fetchall()
+        return [(owner_skill, fn_name) for owner_skill, fn_name in rows]
+
+    async def poll_due_once(self, *, now: datetime.datetime) -> list[OnceSchedule]:
+        """운영 중 폴링 루프가 부른다. startup_catch_up_once와 달리 '오늘' 제한이나 catch_up
+        플래그 없이, 기한이 된 것을 전부 낸다(제때 도는 경우라 캐치업 규칙이 필요 없다)."""
+        cursor = await self._conn.execute(
+            "SELECT id, owner_skill, event_name, payload FROM schedule_once "
+            "WHERE fired_at IS NULL AND fire_at <= ?",
+            (now.isoformat(),),
+        )
+        rows = await cursor.fetchall()
+        due: list[OnceSchedule] = []
+        for row_id, owner_skill, event_name, payload in rows:
+            due.append(OnceSchedule(owner_skill=owner_skill, event_name=event_name, payload=json.loads(payload)))
             await self._conn.execute(
                 "UPDATE schedule_once SET fired_at = ? WHERE id = ?", (now.isoformat(), row_id)
             )

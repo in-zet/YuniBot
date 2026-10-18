@@ -60,7 +60,10 @@
   - [ ] Part 3: `chunithm-session`(보관·조회만) — 구현 완료(`list_sessions`·`get_session`·`delete_session`, `on_sync_reported`). 실기 미확인: 동기화 후 세션 보관 → `/세션 목록`·`/세션 보기`(날짜·오락실 지정 포함)·`/세션 삭제`
   - [x] 다섯 스킬의 `examples`로 도구 선택 재평가 — `gemini-3.8-flash`/`instructions` 모드, 등록된 스킬 전체(27건, `account-link`는 LLM 도구가 없어 제외) 도구 선택 오류 0건·숫자 규칙 위반 0건. `full` 모드·모델 비교는 안 함(§5 참고)
 - [x] 8. 오락실 `chunithm-arcade` — 구현 완료(`get_settings`·`history`·`record_visit`·`set_privacy`, `on_sync_completed`·`on_sync_reported`·`on_session_viewed`). 실기 미확인: 동기화 때 오락실 말하기 → 설정 저장 → `/오락실 설정`·`/오락실 기록`·`/오락실 방문`, 세션 조회에 그날 설정이 뜨는지, 공개 설정 전환
-- [ ] 9. 알림 `chunithm-updates`, 목표 기한 알림(운영 중 예약 확인 루프를 이때 `core/bot.py`에 더한다)
+- [ ] 9. 알림 `chunithm-updates`, 목표 기한 알림(운영 중 예약 확인 루프를 이때 `core/bot.py`에 더한다) — 세 파트로 나눔(2026-10-18)
+  - [x] Part 1: 코어. `ctx.scheduler`(`core/registry.py`의 `CTX_FIELD_SERVICE_NAMES`에 추가, db/player_data 등과 같은 결), `Scheduler.cancel_once`·`poll_due_recurring`·`poll_due_once`, `core/bot.py`의 `YuniClient._poll_schedules`(60초 폴링 루프, `discord.ext.tasks.loop`). 상세는 `00-core.md` "예약 작업"
+  - [ ] Part 2: `chunithm-updates` 스킬(공지·곡목록 확인, `catch_up`, `next`/`new_songs`/`configure`, 동기화 리포트 조각 order 40). 저장본 확인 완료(2026-10-18) — `docs/reference/chunithm-updates/`에 저장은 구현 때
+  - [ ] Part 3: `chunithm-goals` 기한 알림(목표 생성/수정 때 `notify_offsets`만큼 `schedule_once`, 기한 전 달성 시 취소, 기한 다음날 3일 대기 후 최종 판정)
 - [ ] 10. 검색 답변 `websearch` 서비스와 `web-qa`
 - [ ] 11. 유니 인격: `persona.md`, `yuni` 서비스의 한마디(LLM), 고정 문구(`core/fallback_messages.py`)
 - [ ] 12. 메모리와 관계: 자동 요약, 호칭 우선순위, `memory`·`yuni-bond`, 대화 스레드 후기, 펼친 스킬의 답장 사슬 간 유지

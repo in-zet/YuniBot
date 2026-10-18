@@ -316,7 +316,8 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 - 예약은 DB에 저장해서 재시작에도 남는다. 기한 알림처럼 한 번 도는 예약과, 공지 확인처럼 주기적으로 도는 예약을 같은 표에 둔다.
 - 예약 시각은 새벽 정지 시간대(설정값, 기본 02시\~06시) 밖으로 잡는다. 예기치 않게 꺼져 있었다면 켜질 때 `catch_up`이 켜진 예약 중 그날 것만 보낸다. 꺼져 있는 동안 온 멘션에는 켜진 뒤에도 답하지 않는다.
-- 구현 상태: 지금은 기동 때 `catch_up`만 돈다. 운영 중 주기 확인 루프는 예약을 쓰는 첫 스킬(`chunithm-goals` 기한 알림, 9단계)을 만들 때 `core/bot.py`에 더한다. 예약 상태는 `(스킬, 함수 이름)`으로 저장하고, 예약 작업의 `ctx.player_id`는 `"system"`이다. 자정을 걸치는 정지 시간대는 지원하지 않는다.
+- 구현 상태(9단계 Part 1): 기동 때 `catch_up`에 더해, `core/bot.py`의 `YuniClient`가 60초마다 도는 폴링 루프(`_poll_schedules`, `discord.ext.tasks.loop`)로 운영 중에도 돈다 — `startup_catch_up`류와 달리 "오늘" 제한·`catch_up` 플래그를 안 보고, 지금 된 것을 바로 돈다(`Scheduler.poll_due_recurring`/`poll_due_once`). 예약 상태는 `(스킬, 함수 이름)`으로 저장하고, 예약 작업의 `ctx.player_id`는 `"system"`이다. 자정을 걸치는 정지 시간대는 지원하지 않는다.
+- 스킬이 한 번짜리 예약을 걸려면(기한 알림 등) `ctx.scheduler`(`core/scheduler.py`의 `Scheduler`)를 쓴다. `db`/`player_data`/`registry_snapshot`/`usage`와 같은 ToolContext 전용 필드라, manifest의 `services`에 `scheduler`를 적어야 접근할 수 있다(`core/registry.py`의 `CTX_FIELD_SERVICE_NAMES`). `schedule_once(...)`가 돌려주는 행 id로 `cancel_once(id)`를 불러 기한 전 달성처럼 더는 필요 없어진 예약을 지울 수 있다. `schedule_once`도 `fire_at`이 정지 시간대에 걸리면 자동으로 민다.
 
 ## 데이터, 권한, 비밀 값
 

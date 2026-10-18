@@ -138,3 +138,76 @@ async def test_schedule_once_ignores_non_catch_up_even_same_day(conn: aiosqlite.
     same_day_wakeup = datetime.datetime(2026, 10, 10, 23, 0)
     due = await scheduler.startup_catch_up_once(now=same_day_wakeup)
     assert due == []  # catch_up=False라 같은 날이어도 돌지 않는다 — 그냥 닫힌다
+
+
+async def test_schedule_once_shifts_fire_at_past_quiet_hours(conn: aiosqlite.Connection) -> None:
+    scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
+    fire_at = datetime.datetime(2026, 10, 10, 3, 0)  # 정지 시간대(02~06시) 안
+    schedule_id = await scheduler.schedule_once(
+        owner_skill="chunithm-goals", event_name="chunithm.goal.due",
+        payload={"goal_id": "g1"}, fire_at=fire_at, catch_up=False,
+    )
+
+    cursor = await conn.execute("SELECT fire_at FROM schedule_once WHERE id = ?", (schedule_id,))
+    row = await cursor.fetchone()
+    assert row is not None
+    assert row[0] == datetime.datetime(2026, 10, 10, 6, 0).isoformat()
+
+
+async def test_cancel_once_removes_pending_row(conn: aiosqlite.Connection) -> None:
+    scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
+    fire_at = datetime.datetime(2026, 10, 10, 20, 0)
+    schedule_id = await scheduler.schedule_once(
+        owner_skill="chunithm-goals", event_name="chunithm.goal.due",
+        payload={"goal_id": "g1"}, fire_at=fire_at, catch_up=True,
+    )
+
+    await scheduler.cancel_once(schedule_id)
+
+    due = await scheduler.poll_due_once(now=datetime.datetime(2026, 10, 10, 20, 0))
+    assert due == []
+
+
+async def test_cancel_once_leaves_already_fired_row_alone(conn: aiosqlite.Connection) -> None:
+    # 이미 돈 예약(fired_at이 찬 행)을 취소해도 지우지 않는다 — 돈 사실 자체를 되돌릴 수 없다.
+    scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
+    fire_at = datetime.datetime(2026, 10, 10, 20, 0)
+    schedule_id = await scheduler.schedule_once(
+        owner_skill="chunithm-goals", event_name="chunithm.goal.due",
+        payload={"goal_id": "g1"}, fire_at=fire_at, catch_up=True,
+    )
+    await scheduler.poll_due_once(now=datetime.datetime(2026, 10, 10, 21, 0))
+
+    await scheduler.cancel_once(schedule_id)
+
+    cursor = await conn.execute("SELECT id FROM schedule_once WHERE id = ?", (schedule_id,))
+    assert await cursor.fetchone() is not None
+
+
+async def test_poll_due_recurring_fires_without_today_restriction(conn: aiosqlite.Connection) -> None:
+    # 운영 중 폴링은 startup_catch_up과 달리 '오늘' 제한이 없다 — 지금 막 된 것은 바로 돈다.
+    scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
+    now = datetime.datetime(2026, 10, 10, 1, 0)
+    await scheduler.sync_recurring([("chunithm-updates", "check_updates", "0 9 * * *", False)], now=now)
+
+    not_yet = await scheduler.poll_due_recurring(now=datetime.datetime(2026, 10, 10, 8, 59))
+    assert not_yet == []
+
+    due = await scheduler.poll_due_recurring(now=datetime.datetime(2026, 10, 10, 9, 0))
+    assert due == [("chunithm-updates", "check_updates")]
+
+
+async def test_poll_due_once_fires_regardless_of_catch_up_flag(conn: aiosqlite.Connection) -> None:
+    scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
+    fire_at = datetime.datetime(2026, 10, 10, 10, 0)
+    await scheduler.schedule_once(
+        owner_skill="chunithm-goals", event_name="chunithm.goal.due",
+        payload={"goal_id": "g1"}, fire_at=fire_at, catch_up=False,
+    )
+
+    due = await scheduler.poll_due_once(now=datetime.datetime(2026, 10, 10, 10, 0))
+    assert due == [
+        OnceSchedule(owner_skill="chunithm-goals", event_name="chunithm.goal.due", payload={"goal_id": "g1"})
+    ]
+    # 한 번 냈으니 다시 폴링해도 또 나오지 않는다.
+    assert await scheduler.poll_due_once(now=datetime.datetime(2026, 10, 10, 10, 1)) == []

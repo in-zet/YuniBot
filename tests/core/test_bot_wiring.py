@@ -157,6 +157,49 @@ async def test_register_event_handlers_scopes_ctx_to_skill_services_and_applies_
 
 
 @pytest.mark.asyncio
+async def test_register_event_handlers_exposes_scheduler_only_when_declared() -> None:
+    # scheduler는 db와 같은 ToolContext 전용 필드다(core/registry.py의 CTX_FIELD_SERVICE_NAMES) —
+    # manifest.services에 적지 않은 스킬의 이벤트 핸들러는 ctx.scheduler로 예약을 걸 수 없어야 한다.
+    seen: list[object] = []
+
+    async def handle(ctx: ToolContext, payload: dict[str, object]) -> None:
+        seen.append(ctx.scheduler)
+
+    code = SkillCode(event_handlers=[EventHandlerSpec(fn=handle, event_name="players.first_seen")])
+    declared_skill = LoadedSkill(
+        manifest=SkillManifest(
+            name="declared-skill", description="테스트용", examples=["예시"], category="메모",
+            game="common", version=1, services=["scheduler"],
+        ),
+        path=Path("."), code=code,
+    )
+    undeclared_skill = LoadedSkill(
+        manifest=SkillManifest(
+            name="undeclared-skill", description="테스트용", examples=["예시"], category="메모",
+            game="common", version=1, services=[],
+        ),
+        path=Path("."), code=code,
+    )
+    registry = SkillRegistry([])
+    registry._loaded = {"declared-skill": declared_skill, "undeclared-skill": undeclared_skill}  # pyright: ignore[reportPrivateUsage]
+
+    fake_scheduler = object()
+    bus = EventBus()
+    _register_event_handlers(bus, registry)
+    bus.bind_dispatch(
+        services={}, tag_provider=_FakeTagProvider({"p1": set()}), settings=None, scheduler=fake_scheduler,
+    )
+
+    await bus.emit_notify("players.first_seen", {}, player_id="p1", guild_id=None)
+    await bus.drain()
+
+    # 두 핸들러의 실행 순서는 보장되지 않으니(둘 다 asyncio.create_task로 뜬다) 집합으로 본다.
+    assert len(seen) == 2
+    assert fake_scheduler in seen
+    assert None in seen
+
+
+@pytest.mark.asyncio
 async def test_register_event_handlers_drops_handler_when_player_lacks_tag() -> None:
     received: list[str] = []
 
@@ -240,6 +283,88 @@ async def test_build_client_binds_event_bus_dispatch_to_live_services(tmp_path: 
         assert bound_services is executor.services
         assert executor.event_bus._tag_provider is not None  # pyright: ignore[reportPrivateUsage]
         assert executor.event_bus._settings is not None  # pyright: ignore[reportPrivateUsage]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_build_client_wires_scheduler_into_executor_and_event_bus(tmp_path: Path) -> None:
+    # Scheduler를 executor/event_bus보다 먼저 만들어 둘에 넘겼는지 — 스킬이 ctx.scheduler로
+    # 예약을 걸거나(슬래시/멘션 경로) 이벤트 핸들러 안에서 취소할 수 있으려면 둘 다 같은
+    # Scheduler 인스턴스를 봐야 한다.
+    config = _config(tmp_path)
+
+    client, _registry, executor = await build_client(config)
+    try:
+        assert executor.scheduler is not None
+        assert executor.event_bus._scheduler is executor.scheduler  # pyright: ignore[reportPrivateUsage]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_poll_schedules_runs_a_due_recurring_job_and_marks_it_run(tmp_path: Path) -> None:
+    # 운영 중 폴링 루프(YuniClient._poll_schedules)가 실제로 돌아 @schedule 함수를 부르고
+    # last_run_at을 남기는지 — 기동 시 캐치업과는 다른 경로(core/scheduler.py의
+    # poll_due_recurring)를 끝에서 끝으로 확인한다.
+    skills_root = tmp_path / "skills"
+    body = (
+        'from core.decorators import schedule\n\n\n'
+        '@schedule("* * * * *")\n'
+        "async def tick(ctx: ToolContext) -> None:\n"
+        "    pass\n"
+    )
+    write_skill(skills_root, "ticker", body)
+
+    client, _registry, _executor = await build_client(_config(tmp_path, skills_root))
+    try:
+        # sync_recurring이 기동 때 다음 분으로 잡아 뒀을 테니, 폴링이 반드시 집도록
+        # next_run_at을 확실한 과거로 되돌린다.
+        await client.conn.execute(
+            "UPDATE schedule_recurring SET next_run_at = '2000-01-01T00:00:00' "
+            "WHERE owner_skill = 'ticker' AND fn_name = 'tick'"
+        )
+        await client.conn.commit()
+
+        await client._poll_schedules()  # pyright: ignore[reportPrivateUsage]
+
+        cursor = await client.conn.execute(
+            "SELECT last_run_at FROM schedule_recurring WHERE owner_skill = 'ticker' AND fn_name = 'tick'"
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] is not None  # mark_run이 불렸다 — 실행됐다는 뜻
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_poll_schedules_emits_a_due_once_schedule(tmp_path: Path) -> None:
+    # 운영 중 폴링이 schedule_once도 집어서 이벤트로 낸다 — 목표 기한 알림(Part 3)이 바로
+    # 이 경로를 쓴다. 여기서는 core/scheduler.py를 직접 써서 미리 하나 심어 둔다.
+    config = _config(tmp_path)
+    client, _registry, executor = await build_client(config)
+    try:
+        assert executor.scheduler is not None
+        received: list[dict[str, object]] = []
+
+        async def _capture(event_name: str, payload: dict[str, object], **_: object) -> None:
+            received.append(payload)
+
+        # emit_notify를 직접 가로채 due_once가 실제로 그 이벤트 이름/payload로 나가는지 본다
+        # (받는 스킬이 없어도 emit은 일어난다 — 00-core.md "알림 이벤트").
+        executor.event_bus.emit_notify = _capture  # pyright: ignore[reportAttributeAccessIssue]
+
+        await executor.scheduler.schedule_once(
+            owner_skill="ticker", event_name="test.tick.due",
+            payload={"player_id": "p1", "goal_id": "g1"},
+            fire_at=datetime.datetime(2000, 1, 1),  # noqa: DTZ001 - 예약은 서버 로컬 벽시계 기준, 확실한 과거
+            catch_up=False,
+        )
+
+        await client._poll_schedules()  # pyright: ignore[reportPrivateUsage]
+
+        assert received == [{"player_id": "p1", "goal_id": "g1"}]
     finally:
         await client.close()
 

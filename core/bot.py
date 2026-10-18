@@ -11,6 +11,7 @@ from typing import cast
 import aiosqlite
 import discord
 from discord import app_commands
+from discord.ext import tasks
 
 from core.agent import AgentLoop
 from core.config import CoreConfig, load_config
@@ -30,7 +31,7 @@ from core.prompt import PromptAssembler
 from core.registry import LoadedSkill, SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
-from core.scheduler import Scheduler
+from core.scheduler import OnceSchedule, Scheduler
 from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
 from core.threads import ThreadManager
@@ -102,6 +103,9 @@ class _ScoreRefAdapter:
         return await self.terms.resolve_score(raw, ctx)
 
 
+_SCHEDULE_POLL_SECONDS = 60
+
+
 class YuniClient(discord.Client):
     def __init__(
         self,
@@ -113,6 +117,11 @@ class YuniClient(discord.Client):
         mention_entry: MentionEntry,
         known_skill_names: set[str],
         skill_loading_mode: str,
+        scheduler: Scheduler,
+        schedule_fns: dict[tuple[str, str], ScheduleSpec],
+        services: dict[str, object],
+        event_bus: EventBus,
+        player_data: PlayerDataScanner,
     ) -> None:
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
@@ -122,6 +131,11 @@ class YuniClient(discord.Client):
         self._mention_entry = mention_entry
         self._known_skill_names = known_skill_names
         self._skill_loading_mode = skill_loading_mode
+        self._scheduler = scheduler
+        self._schedule_fns = schedule_fns
+        self._services = services
+        self._event_bus = event_bus
+        self._player_data = player_data
 
     async def setup_hook(self) -> None:
         assert self.user is not None  # setup_hook은 로그인 뒤에만 불린다(discord.py의 보장)
@@ -132,6 +146,24 @@ class YuniClient(discord.Client):
             await self.tree.sync(guild=guild)
         else:
             await self.tree.sync()
+        self._poll_schedules.start()
+
+    @tasks.loop(seconds=_SCHEDULE_POLL_SECONDS)
+    async def _poll_schedules(self) -> None:
+        """운영 중 돌면서 밀린 게 아니라 "지금 막 된" 예약을 돈다(기동 시 캐치업과는 다른
+        경로 — core/scheduler.py의 poll_due_recurring/poll_due_once). 한 번의 폴링이 죽으면
+        discord.py가 루프 자체를 멈추므로, 안에서 무슨 일이 나도 다음 틱은 돌아야 한다."""
+        try:
+            now = datetime.datetime.now()  # noqa: DTZ005 - cron/정지 시간대는 서버 로컬 벽시계 시간 기준이다
+            due_recurring = await self._scheduler.poll_due_recurring(now=now)
+            await _run_due_recurring(
+                due_recurring, self._schedule_fns, scheduler=self._scheduler, services=self._services,
+                event_bus=self._event_bus, player_data=self._player_data, now=now,
+            )
+            due_once = await self._scheduler.poll_due_once(now=now)
+            await _emit_due_once(due_once, self._event_bus)
+        except Exception:
+            logger.warning("예약 폴링 실패, 다음 틱에 다시 시도한다", exc_info=True)
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.id == (self.user.id if self.user else None):
@@ -175,6 +207,9 @@ class YuniClient(discord.Client):
         )
 
     async def close(self) -> None:
+        # setup_hook에서 시작 안 했으면(테스트처럼 로그인 없이 build_client만 쓴 경우) 돌고 있지
+        # 않으니 cancel()은 아무 일도 안 한다.
+        self._poll_schedules.cancel()
         # http_service.aclose()는 hishel의 AsyncCacheTransport.aclose()를 거쳐 캐시용
         # SQLite 연결(anysqlite)까지 닫는다 — 코어 DB 연결을 닫는 아래 줄과 같은 역할이다.
         await self.http_service.aclose()
@@ -309,12 +344,27 @@ async def _run_due_recurring(
             spec = schedule_fns[(owner_skill, fn_name)]
             ctx = ToolContext(
                 player_id="system", tags=frozenset(), services=services, event_bus=event_bus,
-                player_data=player_data,
+                player_data=player_data, scheduler=scheduler,
             )
             await spec.fn(ctx)
             await scheduler.mark_run(owner_skill, fn_name, cron=spec.cron, ran_at=now)
         except Exception:  # 한 예약 작업의 어떤 실패도 기동 전체를 죽이면 안 된다
             logger.warning("밀린 예약 작업 '%s.%s' 실행 실패, 건너뛴다", owner_skill, fn_name, exc_info=True)
+
+
+async def _emit_due_once(due_once: list[OnceSchedule], event_bus: EventBus) -> None:
+    """기동 시 캐치업과 운영 중 폴링 루프가 똑같이 쓴다. OnceSchedule(core/scheduler.py)에는
+    player_id/guild_id 필드가 없다 — payload에 실어 보낸 쪽(예: 목표 기한 알림)의 책임이므로,
+    여기서는 방어적으로 꺼내고 없으면 "system"/길드 없음으로 떨어진다."""
+    for once in due_once:
+        player_id = str(once.payload.get("player_id", "system"))
+        guild_id_raw = once.payload.get("guild_id")
+        await event_bus.emit_notify(
+            once.event_name,
+            once.payload,
+            player_id=player_id,
+            guild_id=str(guild_id_raw) if guild_id_raw is not None else None,
+        )
 
 
 async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, ToolExecutor]:
@@ -341,6 +391,10 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     roots = _migration_roots(registry.enabled_skills())
     conn = await aiosqlite.connect(config.db_path)
     await run_migrations(conn, roots=roots)
+
+    # executor/event_bus보다 먼저 만든다 — 둘 다 생성 시점에 scheduler를 받아야 스킬이
+    # ctx.scheduler로 예약을 걸거나 취소할 수 있다(아래).
+    scheduler = Scheduler(conn, quiet_start=config.quiet_hours_start, quiet_end=config.quiet_hours_end)
 
     players = PlayersService(conn)
     await _sync_admin_bootstrap(players, config.admin_discord_ids)
@@ -395,11 +449,14 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         event_bus=event_bus,
         player_data=player_data,
         settings=settings_service,
+        scheduler=scheduler,
     )
     # services는 이 시점에 아직 notify/yuni/usage/http가 없지만, 같은 dict 객체를 그대로
     # 들고 있는다 — build_client()가 뒤에서 그 dict를 더 채우면(아래) EventBus도 같은
     # 참조를 보므로 최신 상태를 보게 된다(services 프로퍼티의 주석과 같은 이유).
-    event_bus.bind_dispatch(services=services, tag_provider=players, settings=settings_service, db=conn)
+    event_bus.bind_dispatch(
+        services=services, tag_provider=players, settings=settings_service, db=conn, scheduler=scheduler,
+    )
 
     # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야
     # 하기 때문이다(아래 YuniClient.close() 참고).
@@ -475,20 +532,27 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         known_skill_names=known_skill_names, skill_loading_mode=config.skill_loading_mode,
     )
 
+    schedule_fns = {
+        (skill.manifest.name, spec.fn.__name__): spec
+        for skill in registry.enabled_skills()
+        for spec in skill.code.schedules
+    }
+
     intents = discord.Intents.default()
     intents.message_content = True
     client = YuniClient(
         intents=intents, test_guild_id=config.test_guild_id, conn=conn, http_service=http_service,
         mention_entry=mention_entry, known_skill_names=known_skill_names,
         skill_loading_mode=config.skill_loading_mode,
+        scheduler=scheduler, schedule_fns=schedule_fns, services=services, event_bus=event_bus,
+        player_data=player_data,
     )
     client_holder.append(client)
 
     # 기동 시 한 번: 스킬의 @schedule을 DB와 맞추고, 꺼져 있던 동안 밀린 "오늘" 몫만 돌린다.
-    # 평상시 실시간 폴링 루프는 @schedule을 쓰는 스킬이 생기는 단계에서 더한다(지금은 없다).
+    # 평상시 실시간 폴링 루프(YuniClient._poll_schedules, setup_hook에서 시작)가 그 뒤를 잇는다.
     # services가 전부 채워진 뒤에 돌려야 한다 — 밀린 작업이 ctx.notify/http/yuni를 쓰면
     # ToolContext.__getattr__이 UndeclaredServiceError를 던져 build_client 전체가 죽는다.
-    scheduler = Scheduler(conn, quiet_start=config.quiet_hours_start, quiet_end=config.quiet_hours_end)
     now = datetime.datetime.now()  # noqa: DTZ005 - cron/정지 시간대는 서버 로컬 벽시계 시간 기준이다(UTC 타임스탬프가 아니다)
     recurring_specs = [
         (skill.manifest.name, spec.fn.__name__, spec.cron, spec.catch_up)
@@ -497,29 +561,13 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     ]
     await scheduler.sync_recurring(recurring_specs, now=now)
     due_recurring = await scheduler.startup_catch_up(now=now)
-    schedule_fns = {
-        (skill.manifest.name, spec.fn.__name__): spec
-        for skill in registry.enabled_skills()
-        for spec in skill.code.schedules
-    }
     await _run_due_recurring(
         due_recurring, schedule_fns, scheduler=scheduler, services=services, event_bus=event_bus,
         player_data=player_data, now=now,
     )
 
     due_once = await scheduler.startup_catch_up_once(now=now)
-    for once in due_once:
-        # OnceSchedule(core/scheduler.py)에는 player_id/guild_id 필드가 없다 — 어떤
-        # 스킬도 아직 schedule_once를 실제로 쓰지 않으므로(테스트에서만 쓴다), 방어적으로
-        # payload에서 뽑는다.
-        player_id = str(once.payload.get("player_id", "system"))
-        guild_id_raw = once.payload.get("guild_id")
-        await event_bus.emit_notify(
-            once.event_name,
-            once.payload,
-            player_id=player_id,
-            guild_id=str(guild_id_raw) if guild_id_raw is not None else None,
-        )
+    await _emit_due_once(due_once, event_bus)
 
     plan = build_slash_plan(registry.tool_specs())
     attach_to_tree(client.tree, plan, executor=executor, db=conn, registry_snapshot=snapshot)

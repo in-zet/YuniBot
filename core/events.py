@@ -66,6 +66,7 @@ class EventBus:
         self._tag_provider: TagProvider | None = None
         self._settings: SkillToggleProvider | None = None
         self._db: Any = None
+        self._scheduler: Any = None
 
     def bind_dispatch(
         self,
@@ -74,6 +75,7 @@ class EventBus:
         tag_provider: TagProvider,
         settings: SkillToggleProvider | None,
         db: Any = None,
+        scheduler: Any = None,
     ) -> None:
         """build_client()가 services/players/settings_service를 다 만든 뒤 한 번 부른다.
 
@@ -83,15 +85,16 @@ class EventBus:
         코드가 이미 이런 식으로 서비스를 늦게 채운다) EventBus가 보는 것도 같은 객체라
         최신 상태를 본다.
 
-        db는 core/slash.py의 _dispatch와 같은 이유로 services dict 밖에 있는 ToolContext
-        전용 필드다(core/registry.py의 CTX_FIELD_SERVICE_NAMES) — 자기 테이블을 직접 SQL로
-        건드리는 스킬(예: chunithm-goals)이 이벤트 핸들러 안에서도 그 접근을 그대로 쓰려면,
-        여기서도 슬래시 경로와 같은 db 연결을 핸들러의 manifest.services 선언에 따라 채워
-        줘야 한다(아래 _build_handler_ctx)."""
+        db/scheduler는 core/slash.py의 _dispatch와 같은 이유로 services dict 밖에 있는
+        ToolContext 전용 필드다(core/registry.py의 CTX_FIELD_SERVICE_NAMES) — 자기 테이블을
+        직접 SQL로 건드리는 스킬(예: chunithm-goals)이나 예약을 거는 스킬이 이벤트 핸들러
+        안에서도 그 접근을 그대로 쓰려면, 여기서도 슬래시 경로와 같은 연결을 핸들러의
+        manifest.services 선언에 따라 채워 줘야 한다(아래 _build_handler_ctx)."""
         self._services = services
         self._tag_provider = tag_provider
         self._settings = settings
         self._db = db
+        self._scheduler = scheduler
 
     def register_notify(
         self,
@@ -167,6 +170,7 @@ class EventBus:
             guild_id=guild_id,
             event_bus=self,
             db=self._db if "db" in handler.skill_services else None,
+            scheduler=self._scheduler if "scheduler" in handler.skill_services else None,
         )
 
     async def emit_notify(

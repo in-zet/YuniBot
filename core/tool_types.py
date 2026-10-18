@@ -10,6 +10,7 @@ import aiosqlite
 from core.events import EventBus, Section
 from core.player_data import PlayerDataScanner
 from core.registry_snapshot import RegistrySnapshot
+from core.scheduler import Scheduler
 from core.usage import UsageService
 
 
@@ -35,6 +36,7 @@ class ToolContext:
     registry_snapshot: RegistrySnapshot | None = None
     usage: UsageService | None = None
     discord_id: str | None = None
+    scheduler: Scheduler | None = None
 
     def __getattr__(self, name: str) -> Any:
         # dataclass가 정의한 필드(player_id, tags, services)는 정상 __getattribute__로 먼저 해석되므로
