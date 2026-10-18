@@ -157,8 +157,9 @@ class AgentLoop:
                 on_retry=on_retry,
             )
             logger.info(
-                "player %s: LLM 왕복 %d회차 %.2f초 (함수 호출 %d개)",
+                "player %s: LLM 왕복 %d회차 %.2f초 (함수 호출 %d개, 토큰 입력 %d/출력 %d)",
                 ctx.player_id, llm_turns, time.monotonic() - llm_started, len(turn.function_calls),
+                turn.usage.input_tokens, turn.usage.output_tokens,
             )
             result.usage = UsageInfo(
                 input_tokens=result.usage.input_tokens + turn.usage.input_tokens,
@@ -166,8 +167,9 @@ class AgentLoop:
             )
             if result.usage.input_tokens + result.usage.output_tokens > self._max_tokens:
                 logger.warning(
-                    "player %s: 토큰 상한(%d) 초과 — LLM 턴 %d회, 불린 도구 %s",
-                    ctx.player_id, self._max_tokens, llm_turns, tool_call_log,
+                    "player %s: 토큰 상한(%d) 초과(누적 입력 %d/출력 %d) — LLM 턴 %d회, 불린 도구 %s",
+                    ctx.player_id, self._max_tokens, result.usage.input_tokens, result.usage.output_tokens,
+                    llm_turns, tool_call_log,
                 )
                 result.hit_token_cap = True
                 result.text = turn.text
@@ -175,8 +177,9 @@ class AgentLoop:
 
             if not turn.function_calls:
                 logger.info(
-                    "player %s: 멘션 응답 종료 — LLM 턴 %d회, 도구 호출 %s",
+                    "player %s: 멘션 응답 종료 — LLM 턴 %d회, 도구 호출 %s, 누적 토큰 입력 %d/출력 %d",
                     ctx.player_id, llm_turns, tool_call_log,
+                    result.usage.input_tokens, result.usage.output_tokens,
                 )
                 result.text = turn.text
                 return result
