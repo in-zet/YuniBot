@@ -249,11 +249,11 @@ class RecordsService:
         # 다시 합치면 이미 저장본으로 검산된 computed_rating과 정확히 같아야 한다.
         best30_ratings = [self._rating_of(pb) for pb in fetch.best30]
         new20_ratings = [self._rating_of(pb) for pb in fetch.new20]
+        # 베스트30/신곡20 평균·전체 레이팅 모두 넷째 자리에서 버린다(average_rating 기본값,
+        # 사용자 확인 2026-10-18 — records_calc.average_rating 참고).
         best30_average = average_rating(best30_ratings)
         new20_average = average_rating(new20_ratings)
-        # 전체 레이팅은 50으로 나눠 넷째 자리까지 정확히 끝난다 — 둘째 자리에서 자르지
-        # 않는다(사용자 확인 2026-10-18, records_calc.average_rating 참고).
-        computed_rating = average_rating(best30_ratings + new20_ratings, places=4)
+        computed_rating = average_rating(best30_ratings + new20_ratings)
 
         displayed_rating = None
         if fetch.profile.rating_systems:
