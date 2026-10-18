@@ -34,6 +34,12 @@ class WebsearchService:
         self._cooldown_seconds = cooldown_seconds
         self._cooldown = CooldownTracker()
 
+    @property
+    def model(self) -> str:
+        """사용량 기록(usage.record의 model 인자)에 쓸 검색 모델 이름. 호출부가 설정값을 따로
+        들고 있지 않도록 서비스가 들고 있는 값을 그대로 돌려준다."""
+        return self._model
+
     async def search(
         self, *, query: str, player_id: str, now: datetime, on_retry: OnRetry | None = None
     ) -> SearchResult:

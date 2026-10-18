@@ -64,10 +64,10 @@
   - [x] Part 1: 코어. `ctx.scheduler`(`core/registry.py`의 `CTX_FIELD_SERVICE_NAMES`에 추가, db/player_data 등과 같은 결), `Scheduler.cancel_once`·`poll_due_recurring`·`poll_due_once`, `core/bot.py`의 `YuniClient._poll_schedules`(60초 폴링 루프, `discord.ext.tasks.loop`). 상세는 `00-core.md` "예약 작업"
   - [x] Part 2: `chunithm-updates` 스킬(공지·곡목록 확인, `catch_up`, `next`/`new_songs`/`configure`, 동기화 리포트 조각 order 40) 구현 완료. 저장본 `docs/reference/chunithm-updates/`에 저장. 구현 중 바뀐 점은 `chunithm-updates.md` "구현 결정" 참고. 실기 미확인: `/업데이트 설정`으로 채널 지정 → 실제 공지/곡목록 확인 주기가 돌아 채널에 알리는지, `/업데이트 일정`·`/신곡`, 버전업 DM, 동기화 리포트에 신곡 조각이 뜨는지
   - [x] Part 3: `chunithm-goals` 기한 알림(목표 생성/수정 때 `notify_offsets`만큼 `schedule_once`, 기한 전 달성 시 취소, 기한 다음날 3일 대기 후 최종 판정) 구현 완료. 상세는 `chunithm-goals.md` "구현 결정". 실기 미확인: 목표 기한을 가깝게 잡아 리마인더가 실제로 채널/DM에 오는지, 기한 전 달성 시 남은 알림이 끊기는지, 기한이 지난 목표의 최종 판정 메시지와 반응
-- [ ] 10. 검색 답변 `websearch` 서비스와 `web-qa` — 세 파트로 나눔(2026-10-18)
+- [x] 10. 검색 답변 `websearch` 서비스와 `web-qa` — 세 파트로 나눔(2026-10-18)
   - [x] Part 1: 코어. `core/decorators.py`의 `ToolSpec`에 `max_calls_per_turn`(도구별 응답당 호출 상한, 전역 `max_tool_calls_per_turn`보다 좁게) 추가, `core/agent.py`가 넘긴 호출만 에러로 돌리고 나머지 응답은 계속 돌게 적용. 아직 어느 스킬도 이 값을 쓰지 않는다(Part 3의 `web-qa.search`가 처음 쓴다)
   - [x] Part 2: `websearch` 공통 서비스. 어댑터 프로토콜(`core/search.py`)과 Gemini/Claude 구현(`core/search_gemini.py`·`core/search_claude.py`) + `services/common/websearch.py`(쿨다운·출처없음 검사). `WEBSEARCH_PROVIDER`(기본 gemini, `LLM_PROVIDER`와 독립)·`SEARCH_MODEL`·`WEBSEARCH_COOLDOWN_SECONDS`(기본 15초) 설정 추가. 상세는 `progress/2026-10-18.md`
-  - [ ] Part 3: `web-qa` 스킬(`weight: heavy` — 실시간 웹 검색이라 `chunithm-sync`·`chunithm-account`와 같은 결). 도구는 `search(question)`만 받는다(곡명·국제판/일본판 구분 인자 없음 — 곡별 위키 링크는 `songdb`에 접근할 수 없어 뺐고, 어느 판 기준인지는 모델이 검색 결과로 판단해 답에서 밝힌다). 응답당 검색 횟수 상한 기본 5회(`max_calls_per_turn`). 슬래시 없음, 테이블 없음, 출처는 `display_mode="required"`로 강제. `SKILL.md` 지침에 "검색"·"찾아봐" 같은 탐색 키워드가 있을 때만 쓴다는 기준 포함. 설계서 `web-qa.md` 갱신(곡별 위키·`song`/`region` 인자 제거, "미확인 사항"엔 함수 호출+검색 동시 지원 여부만 남김)
+  - [x] Part 3: `web-qa` 스킬. 구현 완료 — `search(question)` 도구 하나(`weight: heavy`, `services: [websearch, usage]`, `max_calls_per_turn=5`, 슬래시 없음, 테이블 없음, 출처는 `display_mode="required"`로 강제), 성공 시 도구 안에서 바로 `usage.record(kind="websearch")`. 상세는 `web-qa.md` "구현 결정". 실기 미확인(위 문서 "미확인 사항")
 - [ ] 11. 유니 인격: `persona.md`, `yuni` 서비스의 한마디(LLM), 고정 문구(`core/fallback_messages.py`)
 - [ ] 12. 메모리와 관계: 자동 요약, 호칭 우선순위, `memory`·`yuni-bond`, 대화 스레드 후기, 펼친 스킬의 답장 사슬 간 유지
 

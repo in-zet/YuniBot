@@ -62,7 +62,17 @@ services: [websearch]
 - 응답당 검색 횟수 상한.
 - 상수 질문을 이 스킬이 아니라 `chunithm-song`으로 보내는지(도구 선택 평가에 포함).
 
+## 구현 결정
+
+- `services` 선언은 `[websearch, usage]`다. `usage`는 `core/registry.py`의 `CTX_FIELD_SERVICE_NAMES`에 들어 있는 전용 필드라 `admin`과 같은 방식으로 manifest에 적어야 접근할 수 있다.
+- `search` 도구가 성공하면 그 안에서 바로 `ctx.usage.record(kind="websearch", model=ctx.websearch.model, ...)`를 부른다(`core/mention.py`가 멘션 LLM 호출 뒤에 하는 것과 같은 모양, `kind`만 다르다). `ctx.usage`가 없으면(시험 등) 기록을 건너뛴다.
+- `WebsearchService`에 읽기전용 `model` 프로퍼티를 추가했다 — 도구가 설정값을 따로 들지 않고 서비스가 들고 있는 모델명을 그대로 사용량 기록에 쓴다.
+- `on_retry`(503/429 재시도 안내)는 이번엔 `ctx`에 배선하지 않았다. 재시도 자체는 `core/gemini_retry.py`가 어댑터 안에서 그대로 하므로 검색은 실패하지 않지만, heavy 스킬이라 이미 나가는 "확인하고 있다" 안내와 별개로 "지금 응답이 늦네" 재시도 전용 안내는 이번 도구 호출에선 안 뜬다. 필요해지면 `ToolContext`에 `on_retry` 필드를 추가하는 코어 변경이 따로 필요하다.
+- 사용량 기록의 `guild_id`는 `ctx.guild_id or "dm"`이다(`core/mention.py`의 DM 스코프와 같은 값, 다만 그 상수는 private이라 그대로 가져오지 않고 리터럴로 썼다).
+- 마이그레이션 폴더는 두지 않았다(테이블 없음).
+
 ## 미확인 사항
 
 - 최종적으로 고른 Gemini 모델에서 함수 호출과 Google 검색을 한 요청에 함께 쓸 수 있는지, 검색 대상 사이트를 좁힐 수 있는지. 함께 못 쓰면 `websearch` 서비스가 검색 전용 호출을 따로 한다.
 - 츄니즘 위키는 봇 차단으로 직접 열기가 실패한 적이 있다. 검색 도구의 결과 요약에 의존한다.
+- 실기 미확인: 실제 검색이 출처와 함께 돌아오는지, 상수·용어 질문을 이 스킬 대신 `chunithm-song`/`chunithm-terms`로 돌리는지, `max_calls_per_turn=5`를 넘겼을 때 거절 후 턴이 계속 이어지는지.
