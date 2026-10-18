@@ -117,7 +117,7 @@ emits: [chunithm.goal.completed]
 | 함수 | 하는 일 | 슬래시 | 태그 | display | confirm |
 | --- | --- | --- | --- | --- | --- |
 | `set` | 목표 만들기 (종류, 대상, 목표값, 기한, 꼬리표, 상위 목표, 공개) | `/목표 추가` | 없음 (레이팅·오버파워·폴더 목표만 함수 안에서 `chunithm-synced` 확인) | optional | never |
-| `list` | 목표 목록과 달성률 | `/목표 목록` | 없음 | required | never |
+| `list` | 목표 목록과 달성률 | `/목표 목록` | 없음 | optional | never |
 | `update` | 목표값·기한·알림 변경, 중단, 자유 목표 진행 기록 | `/목표 수정` | 없음 | optional | never |
 | `progress` | 목표 하나의 진행 기록과 페이스 | `/목표 진행` | 없음 | optional | never |
 | `todo_add` | 곡별 목표 한 건 | `/투두 추가` | 없음 | optional | never |
@@ -185,7 +185,8 @@ emits: [chunithm.goal.completed]
 
 ## 구현 결정 (2026-10-18, 실기에서 드러난 버그)
 
-- `update()`에 `target_score: ScoreRef | None`을 추가했다. 곡 목표의 목표값을 랭크 이름("트리플" 등)으로 바꿔 달라고 하면, 기존엔 `target_value: float`만 받아 모델이 점수를 직접 계산해 넘겨야 했다 — 실기에서 "트리플(SSS)"을 1,000,000점(SS)으로 잘못 기억해 넘긴 사례가 나왔다(CLAUDE.md "숫자는 코드가 계산한다" 위반). `set_goal()`과 같은 `_score()`/`terms.resolve_score` 해석 경로를 타게 했다. `target_value`와 함께 줄 수 없고, 곡 목표가 아니면 거절한다.
+- `update()`에 `target_score: ScoreRef | None`을 추가했다. 곡 목표의 목표값을 랭크 이름("트리플" 등)으로 바꿔 달라고 하면, 기존엔 `target_value: float`만 받아 모델이 점수를 직접 계산해 넘겨야 했다 — 실기에서 "트리플(SSS)"을 1,000,000점(SS)으로 잘못 기억해 넘긴 사례가 나왔다(CLAUDE.md "숫자는 코드가 계산한다" 위반). `set_goal()`과 같은 `_score()`/`terms.resolve_score` 해석 경로를 타게 했다. `target_value`와 함께 줄 수 없고, 곡 목표가 아니면 거절한다. 같은 날 `target_value`가 곡 목표에 여전히 열려 있어서 모델이 또 그쪽으로 숫자를 직접 넘긴 사례가 재현됐다 — 곡 목표는 `target_value`를 코드로 아예 거절하게 바꿨다(`target_score`만).
+- `list`의 `display_mode`를 `required`에서 `optional`로 바꿨다(2026-10-18, 멘션 UX 미세 수정) — required였던 탓에 멘션에서 모델이 뭐라 답하든 목표 목록 전체(각 줄의 UUID `id`까지)가 항상 그대로 붙어 나갔다. 슬래시(`/목표 목록`)는 `display_mode`와 무관하게 항상 전체를 보여주므로 바뀌지 않는다 — 거긴 자동완성이 없어 다음 `/목표 수정`·`/목표 삭제`에 쓸 id를 사용자가 직접 봐야 한다.
 
 ## 구현 결정 (2026-10-18, 9단계 Part 3: 기한 알림)
 

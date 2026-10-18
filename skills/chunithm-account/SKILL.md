@@ -7,6 +7,7 @@ examples:
 category: 계정 연결
 game: chunithm
 version: 1
+weight: heavy
 services: [chunithm_net, secrets, players, notify, records]
 listens: [chunithm.login.expired]
 defines_tags:

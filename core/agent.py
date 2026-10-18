@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,6 +29,10 @@ from core.tool_types import Display, ToolContext, ToolResult
 logger = logging.getLogger(__name__)
 
 _CORE_TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in CORE_TOOL_SPECS}
+
+# 이번 턴에서 heavy 스킬(manifest.weight == "heavy")의 도구를 처음 부르기 직전에 한 번
+# 불린다 — core/mention.py가 이걸로 "확인하고 있다"를 시간 기다리지 않고 바로 보낸다.
+OnHeavyCall = Callable[[], Awaitable[None]]
 
 
 @dataclass(slots=True, kw_only=True)
@@ -89,6 +93,14 @@ class AgentLoop:
                         return spec, skill.manifest.name
         return None
 
+    def _skill_weight(self, skill_name: str | None) -> str:
+        if skill_name is None:
+            return "light"  # core 도구(open_skill/remember 등)는 네트워크 스크래핑이 없다
+        for skill in self._registry_skills():
+            if skill.manifest.name == skill_name:
+                return skill.manifest.weight
+        return "light"
+
     async def run(
         self,
         *,
@@ -97,6 +109,7 @@ class AgentLoop:
         user_text: str,
         prompt_context_snippets: list[str],
         on_retry: OnRetry | None = None,
+        on_heavy_call: OnHeavyCall | None = None,
     ) -> AgentTurnResult:
         inner_ctx = ToolContext(
             player_id=ctx.player_id,
@@ -117,6 +130,7 @@ class AgentLoop:
         tool_calls_made = 0
         tool_call_log: list[str] = []
         llm_turns = 0
+        heavy_notified = False
 
         while True:
             llm_turns += 1
@@ -183,6 +197,11 @@ class AgentLoop:
                     "player %s: 도구 호출 %d/%d '%s' args=%s",
                     ctx.player_id, tool_calls_made, self._max_tool_calls, call.name, call.args,
                 )
+                if not heavy_notified and on_heavy_call is not None:
+                    found = self._find_spec(call.name)
+                    if found is not None and self._skill_weight(found[1]) == "heavy":
+                        heavy_notified = True
+                        await on_heavy_call()
                 tool_started = time.monotonic()
                 tool_result = await self._invoke(inner_ctx, call.name, call.args)
                 logger.info(

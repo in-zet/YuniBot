@@ -554,12 +554,48 @@ class _SlowLlmAdapter:
         return self._final_turn
 
 
+_HEAVY_TOOL_BODY = (
+    "@tool()\n"
+    "async def do_heavy(ctx: ToolContext) -> ToolResult:\n"
+    '    """테스트용: heavy 스킬의 도구."""\n'
+    "    return ToolResult(data={})\n"
+)
+
+
 @pytest.mark.asyncio
-async def test_mention_sends_working_message_when_agent_is_slow(monkeypatch: pytest.MonkeyPatch) -> None:
-    """실기 2026-10-18: 도구 호출이 여러 번 이어지는 동안 타이핑 표시만 뜨고 몇 분씩 아무
-    말이 없어 응답이 멈춘 것처럼 보였다. SLOW_RESPONSE_NOTICE_SECONDS를 넘기면 최종 답
-    전에 WORKING_MESSAGE를 한 번 보낸다."""
-    monkeypatch.setattr("core.mention.SLOW_RESPONSE_NOTICE_SECONDS", 0.01)
+async def test_mention_sends_working_message_when_heavy_skill_tool_is_called(tmp_path: Path) -> None:
+    """2026-10-18: "기다려 달라" 안내를 시간 기다렸다가(타이머) 보내던 걸 없애고, manifest에
+    weight: heavy로 표시한 스킬의 도구를 부르는 순간 바로 보낸다."""
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "test-heavy", _HEAVY_TOOL_BODY, weight="heavy")
+
+    call_heavy = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="test-heavy_do_heavy", args={})],
+    )
+    answer = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="다 됐다")]), text="다 됐다")
+    entry, _usage = _mention_entry([call_heavy, answer], extra_skill_dirs=(skills_root,))
+
+    sent: list[str] = []
+
+    async def _record_send(text: str, displays: list[Display]) -> None:
+        del displays
+        sent.append(text)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="해 줘", mentions_bot=True)
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 18, tzinfo=UTC),
+        send=_record_send, typing=_NoopTyping(),
+    )
+
+    assert sent == [WORKING_MESSAGE, "다 됐다"]
+
+
+@pytest.mark.asyncio
+async def test_mention_does_not_send_working_message_for_light_only_slow_turn() -> None:
+    """light 스킬(기본값)만 쓰는 턴은 LLM 응답이 느려도 "기다려 달라"를 보내지 않는다 —
+    시간 기반 타이머를 없앤 뒤의 핵심 회귀(그 전엔 도구 2개 이상 부르는 평범한 턴에도
+    거의 매번 떴다)."""
     registry = _registry()
     bus = EventBus()
     executor = ToolExecutor(
@@ -594,4 +630,4 @@ async def test_mention_sends_working_message_when_agent_is_slow(monkeypatch: pyt
         send=_record_send, typing=_NoopTyping(),
     )
 
-    assert sent == [WORKING_MESSAGE, "다 됐다"]
+    assert sent == ["다 됐다"]

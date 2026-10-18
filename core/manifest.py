@@ -64,6 +64,10 @@ class SkillManifest(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
     listens: list[str] = []
     settings: list[SettingSpec] = []
     enabled: bool = True
+    # heavy는 CHUNITHM-NET을 실시간으로 스크래핑하는 등 오래 걸릴 걸로 예상되는 스킬이다
+    # (core/mention.py가 이 스킬의 도구를 처음 부를 때 "확인하고 있다" 안내를 바로 보낸다).
+    # light(기본)인 스킬만 쓰인 턴은 아무리 오래 걸려도 그 안내를 보내지 않는다.
+    weight: Literal["light", "heavy"] = "light"
 
 
 def parse_manifest(text: str) -> SkillManifest:

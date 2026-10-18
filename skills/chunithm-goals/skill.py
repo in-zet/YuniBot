@@ -807,6 +807,11 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
     return ToolResult(
         data={"player_id": target.id, "goals": items},
         display=Display(content="\n".join(lines) if lines else "목표가 없어."),
+        # optional — required면 모델이 뭐라 답하든 id 포함 전체 목록이 항상 붙는다(멘션에서
+        # "id xxxxx"가 매번 보이던 원인, 실기 2026-10-18). 슬래시(/목표 목록)는 core/slash.py의
+        # render_result가 display_mode와 무관하게 항상 보여주므로 id는 그대로 보인다 — 거기엔
+        # 자동완성이 없어 다음 /목표 수정·삭제에 그 id를 그대로 타이핑해야 한다.
+        display_mode="optional",
     )
 
 

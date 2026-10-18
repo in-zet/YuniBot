@@ -18,7 +18,7 @@ category: 메모
 game: common
 version: 1
 services: []
----
+{weight}---
 
 테스트용.
 """
@@ -31,15 +31,19 @@ _ = (slash_only, tool)
 """
 
 
-def write_skill(root: Path, name: str, body: str, *, manifest_name: str | None = None) -> Path:
+def write_skill(
+    root: Path, name: str, body: str, *, manifest_name: str | None = None, weight: str | None = None
+) -> Path:
     """root/<name>/ 아래에 스킬을 만든다. body는 skill.py의 import 뒤에 붙는 코드다.
 
     manifest_name을 주면 폴더 이름 대신 그 값을 manifest의 name으로 쓴다(잘못된 이름 시험용).
+    weight를 주면("heavy") manifest에 그 줄을 추가한다(기본은 생략 — manifest의 기본값 light).
     """
     skill_dir = root / name
     skill_dir.mkdir(parents=True)
     manifest_value = json.dumps(manifest_name if manifest_name is not None else name)  # YAML 큰따옴표 문자열
-    (skill_dir / "SKILL.md").write_text(_MANIFEST.format(name=manifest_value))
+    weight_line = f"weight: {weight}\n" if weight is not None else ""
+    (skill_dir / "SKILL.md").write_text(_MANIFEST.format(name=manifest_value, weight=weight_line))
     (skill_dir / "skill.py").write_text(_HEADER + body)
     return skill_dir
 

@@ -7,6 +7,7 @@ examples:
 category: 기록과 리포트
 game: chunithm
 version: 1
+weight: heavy
 services: [chunithm_net, records, settings, yuni, notify, players]
 tags: [chunithm-linked]
 emits: [chunithm.sync.completed, chunithm.sync.reported]
