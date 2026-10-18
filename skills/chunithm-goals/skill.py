@@ -224,7 +224,8 @@ def _goal_label(goal: Any) -> str:
         condition = ref["condition"]
         if condition == FolderCondition.RANK.value and ref.get("rank"):
             condition = f"{ref['rank']} 이상"
-        return f"폴더({scope} {ref['difficulty']})  {condition}"
+        difficulty_label = ref["difficulty"] or "전체 난이도"
+        return f"폴더({scope} {difficulty_label})  {condition}"
     return ref.get("description", "자유 목표")
 
 
@@ -271,10 +272,10 @@ def _row_matches_condition(row: PbRow, condition: FolderCondition, rank_min_scor
 
 
 def _folder_hits(ctx: ToolContext, target_ref: dict[str, Any]) -> list[Any]:
-    """폴더 정의(상수 범위/표기 레벨/수록 버전 중 하나 + 난이도)에 맞는 채보를 songdb에서
-    찾는다. 설계서("폴더 정의"는 이 셋 중 하나에 난이도를 조합한다, 장르는 이번 범위 밖)에
-    맞춰 difficulty는 항상 요구한다 — songdb.find_by_version 자체는 difficulty를 비워
-    "그 버전 전체 난이도"도 찾을 수 있지만, 폴더 목표에서는 쓰지 않는다."""
+    """폴더 정의(상수 범위/표기 레벨/수록 버전 중 하나 + 선택적 난이도)에 맞는 채보를
+    songdb에서 찾는다. difficulty가 None이면 난이도를 가리지 않고 전부 찾는다(2026-10-18
+    결정 — 상수·레벨은 채보 단위로 이미 정해지는 값이라 난이도로 좁힐 필요가 없다는
+    실기 피드백. 버전은 애초에 songdb.find_by_version이 그렇게 지원했다)."""
     selector = target_ref["selector"]
     difficulty = target_ref["difficulty"]
     if selector == "const":
@@ -298,7 +299,7 @@ async def _folder_counts(ctx: ToolContext, target_ref: dict[str, Any], *, player
     matched = sum(
         1
         for hit in hits
-        if (row := rows_by_key.get((hit.song.title, target_ref["difficulty"]))) is not None
+        if (row := rows_by_key.get((hit.song.title, hit.chart.difficulty))) is not None
         and _row_matches_condition(row, condition, rank_min_score)
     )
     return total, matched
@@ -494,8 +495,9 @@ async def set_goal(
 ) -> ToolResult:
     """목표를 만든다. kind별로 필요한 인자: rating은 metric+target_value(현재값보다 커야 한다),
     overpower는 overpower_mode+target_value(전체만 지원, overpower_scope=folder는 아직 안 됨,
-    현재값보다 커야 한다), folder는 folder_difficulty + (folder_min_const와 folder_max_const) 또는
-    folder_level 또는 folder_version 중 하나(+folder_condition, rank 조건이면 folder_rank), song은
+    현재값보다 커야 한다), folder는 (folder_min_const와 folder_max_const) 또는 folder_level 또는
+    folder_version 중 하나 + 선택적 folder_difficulty(비우면 난이도를 가리지 않고 전부 묶는다)
+    (+folder_condition, rank 조건이면 folder_rank), song은
     chart(곡+난이도 원문 그대로, 예: "크로노 마스")에 target_score(점수 숫자나 랭크 이름을 원문
     그대로 — 점수 환산은 해석기가 한다) 또는 lamp(full_combo/all_justice) 중 하나(이미 달성했으면
     에러), freeform은 description.
@@ -553,9 +555,7 @@ async def set_goal(
         target_ref = {"mode": overpower_mode.value}
         baseline_value = float(current)
     elif kind == GoalKind.FOLDER:
-        if folder_difficulty is None:
-            return ToolResult(error="폴더는 난이도(folder_difficulty)가 필요해.")
-        difficulty_code = _difficulty_code(folder_difficulty)
+        difficulty_code = _difficulty_code(folder_difficulty) if folder_difficulty is not None else None
         rank = _rank(folder_rank)
         rank_fields: dict[str, Any] = {
             "condition": folder_condition.value,

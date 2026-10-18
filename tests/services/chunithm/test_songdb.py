@@ -191,6 +191,14 @@ async def test_find_by_const_excludes_unavailable_songs(songdb: SongDbService) -
     assert all(hit.song.title != "天体観測" for hit in hits)  # 국제판 미수록곡은 제외
 
 
+async def test_find_by_const_without_difficulty_returns_all_difficulties(songdb: SongDbService) -> None:
+    # 2026-10-18 결정: 상수는 채보 단위로 이미 유일하게 정해지는 값이라, 난이도를 비우면
+    # 그 범위에 드는 모든 난이도의 채보를 묶어야 한다("15.0 폴더" 같은 실기 요청).
+    hits = songdb.find_by_const(min_const=10.0, max_const=13.7)
+    target_hits = [h for h in hits if h.song.title == "B.B.K.K.B.K.K."]
+    assert {"EXP", "MAS", "ULT"}.issubset({h.chart.difficulty for h in target_hits})
+
+
 async def test_find_by_level_returns_matching_hits(songdb: SongDbService) -> None:
     hits = songdb.find_by_level(level="12+", difficulty="MAS")
     assert hits
@@ -210,6 +218,11 @@ async def test_find_by_level_excludes_unavailable_song() -> None:
 async def test_find_by_level_returns_empty_when_nothing_matches(songdb: SongDbService) -> None:
     hits = songdb.find_by_level(level="그런레벨없음", difficulty="MAS")
     assert hits == []
+
+
+async def test_find_by_level_without_difficulty_returns_all_difficulties(songdb: SongDbService) -> None:
+    hits = songdb.find_by_level(level="12+")
+    assert {"ADV", "EXP", "MAS", "ULT"}.issubset({h.chart.difficulty for h in hits})
 
 
 async def test_find_by_version_with_difficulty_filters_to_one_chart(songdb: SongDbService) -> None:

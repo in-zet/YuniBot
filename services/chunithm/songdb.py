@@ -263,35 +263,41 @@ class SongDbService:
         return song.is_new if song is not None else False
 
     def find_by_const(
-        self, *, min_const: float, max_const: float, difficulty: str
+        self, *, min_const: float, max_const: float, difficulty: str | None = None
     ) -> list[ConstRangeHit]:
-        """상수 범위(양끝 포함)와 난이도 코드로, 지금 국제판에서 고를 수 있는 채보를
-        상수 오름차순(같으면 제목순)으로 찾는다. difficulty는 짧은 코드("MAS" 등)다."""
+        """상수 범위(양끝 포함)로, 지금 국제판에서 고를 수 있는 채보를 상수 오름차순(같으면
+        제목순)으로 찾는다. difficulty는 짧은 코드("MAS" 등)다. 비우면 난이도를 가리지 않고
+        그 상수 범위에 드는 채보를 전부 찾는다(2026-10-18 결정 — 상수는 채보 단위로 이미
+        유일하게 정해지므로 난이도로 좁힐 필요가 없다는 실기 피드백)."""
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():
             if title not in self._available_intl:
                 continue
-            chart = song.charts.get(difficulty)
-            if chart is None or not chart.is_available or chart.const is None:
-                continue
-            if min_const <= chart.const <= max_const:
-                hits.append(ConstRangeHit(song=song, chart=chart))
+            codes = [difficulty] if difficulty is not None else list(song.charts)
+            for code in codes:
+                chart = song.charts.get(code)
+                if chart is None or not chart.is_available or chart.const is None:
+                    continue
+                if min_const <= chart.const <= max_const:
+                    hits.append(ConstRangeHit(song=song, chart=chart))
         hits.sort(key=lambda hit: (hit.chart.const, hit.song.title))
         return hits
 
-    def find_by_level(self, *, level: str, difficulty: str) -> list[ConstRangeHit]:
-        """표기 레벨(문자열 그대로 비교, 예: "14+")과 난이도 코드로, 지금 국제판에서 고를 수
-        있는 채보를 찾는다. find_by_const와 같은 가용성 규칙을 쓰고, 정렬도 상수 오름차순
-        (같으면 제목순)으로 맞춘다 — 상수를 모르는 채보는 뒤로 보낸다(표시에는 상수도 같이
-        쓸 수 있으니 숨기지 않는다)."""
+    def find_by_level(self, *, level: str, difficulty: str | None = None) -> list[ConstRangeHit]:
+        """표기 레벨(문자열 그대로 비교, 예: "14+")로, 지금 국제판에서 고를 수 있는 채보를
+        찾는다. find_by_const와 같은 가용성 규칙·difficulty 생략 의미(전체 난이도)·정렬을
+        쓴다 — 상수를 모르는 채보는 뒤로 보낸다(표시에는 상수도 같이 쓸 수 있으니 숨기지
+        않는다)."""
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():
             if title not in self._available_intl:
                 continue
-            chart = song.charts.get(difficulty)
-            if chart is None or not chart.is_available or chart.level != level:
-                continue
-            hits.append(ConstRangeHit(song=song, chart=chart))
+            codes = [difficulty] if difficulty is not None else list(song.charts)
+            for code in codes:
+                chart = song.charts.get(code)
+                if chart is None or not chart.is_available or chart.level != level:
+                    continue
+                hits.append(ConstRangeHit(song=song, chart=chart))
         hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
         return hits
 

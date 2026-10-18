@@ -31,12 +31,13 @@ emits: [chunithm.goal.completed]
   "이미 그 목표를 달성했어."라고 바로 알린다 — `todo_bulk`가 이미 조건을 채운 채보를 조용히
   빼는 것과 달리, 한 건짜리 도구는 플레이어가 고른 그 채보 하나를 콕 집어 물은 것이므로
   침묵보다 분명한 에러가 맞다고 판단했다.
-- 폴더 정의는 **상수 범위, 표기 레벨, 수록 버전 중 하나 + 난이도**를 지원한다(장르는 songdb에
-  그 필드가 없어 이번 범위 밖). `set_goal(kind="folder")`는 `folder_min_const`+`folder_max_const`,
-  `folder_level`, `folder_version` 중 정확히 하나와 `folder_difficulty`를 받는다. 버전으로 "그
-  버전의 모든 난이도"를 한 번에 묶는 건 songdb 서비스 자체(`find_by_version(difficulty=None)`)는
-  할 수 있지만, 이 스킬의 폴더 목표는 설계서("폴더 정의는 ~ 중 하나에 난이도를 조합한다")를 따라
-  난이도를 항상 요구한다 — 쓰지 않는다.
+- 폴더 정의는 **상수 범위, 표기 레벨, 수록 버전 중 하나 + 선택적 난이도**를 지원한다(장르는
+  songdb에 그 필드가 없어 이번 범위 밖). `set_goal(kind="folder")`는 `folder_min_const`+
+  `folder_max_const`, `folder_level`, `folder_version` 중 정확히 하나와 `folder_difficulty`(선택)를
+  받는다. `folder_difficulty`를 비우면 난이도를 가리지 않고 그 상수/레벨/버전에 맞는 채보를 전부
+  묶는다(2026-10-18 결정 — 상수·레벨은 채보 단위로 이미 유일하게 정해지는 값이라 난이도로 좁힐
+  이유가 없다는 실기 피드백. `songdb.find_by_const`/`find_by_level`/`find_by_version` 모두
+  `difficulty=None`을 지원한다).
 - 오버파워 목표는 전체(overall)만 지원한다. 폴더별 오버파워 퍼센트는 이번 단계 범위 밖이다 —
   요청받으면 아직 안 된다고 분명히 말한다.
 - `due_at`/`notify_offsets`는 데이터로만 저장한다. 기한 알림을 실제로 쏘는 예약은 다음 단계다.

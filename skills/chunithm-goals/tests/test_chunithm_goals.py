@@ -111,8 +111,9 @@ class _FakeRecords:
 
 
 class _Hit:
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, difficulty: str = "MAS") -> None:
         self.song = type("S", (), {"title": title})()
+        self.chart = type("C", (), {"difficulty": difficulty})()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -120,9 +121,12 @@ class _FakeSongDb:
     consts: dict[tuple[str, str], float] = field(default_factory=dict)
     note_counts: dict[tuple[str, str], int] = field(default_factory=dict)
     new_songs: set[str] = field(default_factory=set)
-    const_range_hits: list[str] = field(default_factory=list)  # 제목만
+    const_range_hits: list[str] = field(default_factory=list)  # 난이도를 지정했을 때 쓰는 제목만
     level_hits: list[str] = field(default_factory=list)
     version_hits: list[str] = field(default_factory=list)
+    # 난이도를 생략(difficulty=None)했을 때만 쓰는 (제목, 난이도) 쌍 — 실제 songdb는 그 상수/
+    # 레벨에 맞는 모든 난이도의 채보를 돌려주므로, 여러 난이도가 섞인 경우를 흉내 낸다.
+    const_range_hits_any_difficulty: list[tuple[str, str]] = field(default_factory=list)
 
     def const_for(self, title: str, difficulty: str) -> float | None:
         return self.consts.get((title, difficulty))
@@ -133,14 +137,16 @@ class _FakeSongDb:
     def is_new_for(self, title: str) -> bool:
         return title in self.new_songs
 
-    def find_by_const(self, *, min_const: float, max_const: float, difficulty: str) -> list[Any]:
-        return [_Hit(title) for title in self.const_range_hits]
+    def find_by_const(self, *, min_const: float, max_const: float, difficulty: str | None = None) -> list[Any]:
+        if difficulty is None:
+            return [_Hit(title, dif) for title, dif in self.const_range_hits_any_difficulty]
+        return [_Hit(title, difficulty) for title in self.const_range_hits]
 
-    def find_by_level(self, *, level: str, difficulty: str) -> list[Any]:
-        return [_Hit(title) for title in self.level_hits]
+    def find_by_level(self, *, level: str, difficulty: str | None = None) -> list[Any]:
+        return [_Hit(title, difficulty or "MAS") for title in self.level_hits]
 
     def find_by_version(self, *, version: str, difficulty: str | None = None) -> list[Any]:
-        return [_Hit(title) for title in self.version_hits]
+        return [_Hit(title, difficulty or "MAS") for title in self.version_hits]
 
 
 def _ctx(
@@ -278,6 +284,46 @@ async def test_set_folder_goal_by_version_succeeds_and_counts_total(skill: Modul
     assert result.data["target_value"] == 3.0
     assert result.data["target_ref"]["selector"] == "version"
     assert result.data["target_ref"]["version"] == "LUMINOUS"
+
+
+async def test_set_folder_goal_without_difficulty_spans_all_difficulties(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """실기 2026-10-18: "15.0 폴더 더블플 목표"처럼 난이도 없이 상수만 주면, 그 상수를
+    만족하는 모든 난이도(MAS·ULT 등)의 채보를 묶어야 한다 — 상수는 채보 단위로 이미
+    유일하게 정해지는 값이라 난이도로 좁힐 이유가 없다는 사용자 결정."""
+    songdb = _FakeSongDb(const_range_hits_any_difficulty=[("곡A", "MAS"), ("곡B", "ULT")])
+    ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
+    result = await skill.set_goal(
+        ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3,
+        folder_condition=skill.FolderCondition.CLEARED,
+    )
+    assert result.error is None
+    assert result.data["target_value"] == 2.0
+    assert result.data["target_ref"]["difficulty"] is None
+
+
+async def test_folder_goal_without_difficulty_counts_progress_across_difficulties(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    songdb = _FakeSongDb(const_range_hits_any_difficulty=[("곡A", "MAS"), ("곡B", "ULT")])
+    ctx = _ctx(db=db, tags=_SYNCED, songdb=songdb)
+    created = await skill.set_goal(
+        ctx, skill.GoalKind.FOLDER, folder_min_const=15.0, folder_max_const=15.3,
+        folder_condition=skill.FolderCondition.CLEARED,
+    )
+    goal_id = created.data["goal_id"]
+
+    records = _FakeRecords(pbs={"p1": [
+        _pb("곡A", "MAS", 1_000_000, "SS", 15.0, "15.0", clear="CLEAR"),
+        _pb("곡B", "ULT", 1_000_000, "SS", 15.0, "15.0", clear="CLEAR"),
+    ]})
+    ctx2 = _ctx(db=db, tags=_SYNCED, records=records, songdb=songdb)
+    await skill.on_sync_completed(ctx2, {"player_id": "p1", "sync_id": "sync1"})
+
+    history = await skill.models.list_progress(db, goal_id)
+    assert len(history) == 1
+    assert history[0].value == 2.0  # 곡A(MAS)·곡B(ULT) 둘 다 매치
 
 
 async def test_set_folder_goal_rejects_more_than_one_selector(skill: ModuleType, db: aiosqlite.Connection) -> None:
