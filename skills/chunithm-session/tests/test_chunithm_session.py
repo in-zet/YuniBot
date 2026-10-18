@@ -165,21 +165,6 @@ async def test_on_sync_reported_same_session_overwrites(skill: ModuleType, db: a
     assert rows[0]["rendered_text"] == "두 번째 리포트"
 
 
-async def test_on_sync_reported_records_arcade_visit(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    arcades = _FakeArcades()
-    ctx = _ctx(db=db, player_id="p1", arcades=arcades)
-    await skill.on_sync_reported(ctx, _reported_payload(player_id="p1", arcade_id="ar1"))
-
-    assert arcades.recorded == [("ar1", "p1")]
-
-
-async def test_on_sync_reported_without_arcade_id_records_nothing(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    arcades = _FakeArcades()
-    ctx = _ctx(db=db, player_id="p1", arcades=arcades)
-    await skill.on_sync_reported(ctx, _reported_payload(player_id="p1", arcade_id=None))
-
-    assert arcades.recorded == []
-
 
 # ---------------------------------------------------------------- list_sessions / get_session
 # (본인 조회 경로는 _target_player가 ctx.players.get_player(ctx.player_id)를 실제로 불러,
@@ -287,10 +272,13 @@ async def test_get_session_arcade_filter_no_match_lists_visited_arcades(
 
 
 async def test_get_session_filters_by_arcade(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    """방문 기록은 chunithm-arcade의 on_sync_reported가 남긴다(이 스킬은 더 이상 기록하지
+    않는다) — 여기서는 이미 방문이 있다고 가정하고 arcades.record_visit()으로 직접 심는다."""
     me, players = await _me(db)
     arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", guild_id="g1", name="겜플", created_by=me.id, created_at="x")})
     ctx = _ctx(db=db, player_id=me.id, players=players, arcades=arcades)
-    await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id, arcade_id="ar1"))
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id))
+    await arcades.record_visit("ar1", player_id=me.id, game="chunithm")
 
     result = await skill.get_session(ctx, arcade=arcades.arcades["ar1"])
     assert result.error is None

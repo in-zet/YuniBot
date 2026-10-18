@@ -26,6 +26,10 @@ class ArcadeVisit:
     player_id: str
     game: str
     visited_at: str
+    # arcade_visits에는 따로 PK가 없어 SQLite의 암묵적 rowid를 쓴다(record_visit()이 그대로
+    # 돌려주는 값). 기본값 0은 기존 호출부(테스트 더미)가 깨지지 않게 하기 위함 — 실제 저장된
+    # 행은 항상 양수 rowid를 받는다.
+    id: int = 0
 
 
 def _row_to_arcade(row: aiosqlite.Row) -> Arcade:
@@ -79,24 +83,28 @@ class ArcadesService:
         )
         await self._conn.commit()
 
-    async def record_visit(self, arcade_id: str, *, player_id: str, game: str) -> None:
+    async def record_visit(self, arcade_id: str, *, player_id: str, game: str) -> int:
+        """새 방문을 남기고 그 행의 rowid를 돌려준다. `chunithm-arcade`가 그날 읽은
+        설정을 이 방문에 매달려고 쓴다(arcade_visits에 따로 PK가 없어 rowid를 쓴다)."""
         now = datetime.now(UTC).isoformat()
-        await self._conn.execute(
+        cursor = await self._conn.execute(
             "INSERT INTO arcade_visits (arcade_id, player_id, game, visited_at) VALUES (?, ?, ?, ?)",
             (arcade_id, player_id, game, now),
         )
         await self._conn.commit()
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
 
     async def visits_for(self, *, player_id: str, game: str) -> list[ArcadeVisit]:
         cursor = await self._conn.execute(
-            "SELECT * FROM arcade_visits WHERE player_id = ? AND game = ? ORDER BY visited_at",
+            "SELECT rowid AS id, * FROM arcade_visits WHERE player_id = ? AND game = ? ORDER BY visited_at",
             (player_id, game),
         )
         rows = await cursor.fetchall()
         return [
             ArcadeVisit(
-                arcade_id=row["arcade_id"], player_id=row["player_id"], game=row["game"],
-                visited_at=row["visited_at"],
+                id=row["id"], arcade_id=row["arcade_id"], player_id=row["player_id"],
+                game=row["game"], visited_at=row["visited_at"],
             )
             for row in rows
         ]

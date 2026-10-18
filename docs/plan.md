@@ -12,7 +12,7 @@
 | chunithm-account, chunithm-song, chunithm-border, chunithm-terms | 5 | 구현 |
 | chunithm-sync, chunithm-report | 7 | 구현 |
 | chunithm-goals, chunithm-notes, chunithm-session | 7 | 미착수 |
-| chunithm-arcade | 8 | 미착수 |
+| chunithm-arcade | 8 | 구현 |
 | chunithm-updates | 9 | 미착수 |
 | web-qa | 10 | 미착수 |
 | memory, yuni-bond | 12 | 미착수 |
@@ -59,7 +59,7 @@
   - [ ] Part 2: `chunithm-goals`·`chunithm-notes`(마이그레이션 `goals_goals`·`goals_progress`·`notes_notes`, 순수 함수 `goals_calc.py` 먼저)
   - [ ] Part 3: `chunithm-session`(보관·조회만) — 구현 완료(`list_sessions`·`get_session`·`delete_session`, `on_sync_reported`). 실기 미확인: 동기화 후 세션 보관 → `/세션 목록`·`/세션 보기`(날짜·오락실 지정 포함)·`/세션 삭제`
   - [ ] 다섯 스킬의 `examples`로 도구 선택 재평가
-- [ ] 8. 오락실 `chunithm-arcade` — CHUNITHM-NET 설정 페이지와 플레이 이력 상세 페이지 저장본이 `docs/reference/`에 있어야 시작한다
+- [x] 8. 오락실 `chunithm-arcade` — 구현 완료(`get_settings`·`history`·`record_visit`·`set_privacy`, `on_sync_completed`·`on_sync_reported`·`on_session_viewed`). 실기 미확인: 동기화 때 오락실 말하기 → 설정 저장 → `/오락실 설정`·`/오락실 기록`·`/오락실 방문`, 세션 조회에 그날 설정이 뜨는지, 공개 설정 전환
 - [ ] 9. 알림 `chunithm-updates`, 목표 기한 알림(운영 중 예약 확인 루프를 이때 `core/bot.py`에 더한다)
 - [ ] 10. 검색 답변 `websearch` 서비스와 `web-qa`
 - [ ] 11. 유니 인격: `persona.md`, `yuni` 서비스의 한마디(LLM), 고정 문구(`core/fallback_messages.py`)
