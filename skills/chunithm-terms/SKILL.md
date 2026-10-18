@@ -8,10 +8,11 @@ examples:
 category: 질문 답변
 game: chunithm
 version: 1
-services: [terms, players, notify]
+services: [terms, players, notify, settings]
 ---
 
 - 용어 뜻은 사전에 있는 내용만 말한다. 사전에 없으면 `web-qa`를 펼친다.
 - 랭크·램프의 점수 기준은 도구 결과의 값만 쓴다.
 - 서버 은어를 설명할 때는 이 서버에서 쓰는 말이라고 밝힌다.
 - 플레이어가 모르는 은어를 써서 해석에 실패하면, 뜻을 물어보고 용어 제안을 권할 수 있다.
+- `/용어 제안`은 승인을 기다리지 않고 바로 반영된다(신고제). 등록했다고만 말하고, "admin 승인을 기다린다" 같은 말은 하지 않는다.

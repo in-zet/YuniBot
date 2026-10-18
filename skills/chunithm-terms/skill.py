@@ -46,31 +46,46 @@ async def list(ctx: ToolContext, category: str | None = None) -> ToolResult:
     )
 
 
-@tool(slash="용어 제안")
+_REPORT_CHANNEL_SETTING_SKILL = "admin"
+_REPORT_CHANNEL_SETTING_NAME = "보고 채널"
+
+
+@tool(slash="용어 제안", mutates=True)
 async def suggest(ctx: ToolContext, term: str, meaning: str, aliases: str) -> ToolResult:
-    """서버 은어를 제안한다. admin이 승인해야 반영된다."""
+    """서버 은어를 등록한다. 승인을 기다리지 않고 바로 반영되고, admin의 보고 채널이
+    설정돼 있으면 거기로 알린다. 부적절하면 admin이 나중에 끌 수 있다."""
     if ctx.guild_id is None:
-        return ToolResult(error="서버 안에서만 용어를 제안할 수 있다")
+        return ToolResult(error="서버 안에서만 용어를 등록할 수 있다")
     alias_list = [a.strip() for a in aliases.split(",") if a.strip()]
     proposal_id = await ctx.terms.propose(
         guild_id=ctx.guild_id, term=term, meaning=meaning, aliases=alias_list, suggested_by=ctx.player_id
     )
+    report_channel = await ctx.settings.get_value(
+        scope="guild", scope_id=ctx.guild_id, skill=_REPORT_CHANNEL_SETTING_SKILL,
+        name=_REPORT_CHANNEL_SETTING_NAME, default="",
+    )
+    if report_channel:
+        alias_text = f" (별칭: {', '.join(alias_list)})" if alias_list else ""
+        await ctx.notify.post(
+            report_channel,
+            f"서버 은어 등록: '{term}' — {meaning}{alias_text}\n등록한 플레이어: {ctx.player_id}\nid: {proposal_id}",
+        )
     return ToolResult(
         data={"proposal_id": proposal_id},
-        display=Display(content=f"'{term}' 제안을 등록했다. admin 승인을 기다린다. (제안 id: {proposal_id})"),
+        display=Display(content=f"'{term}' 은어를 등록했어. (id: {proposal_id})"),
         display_mode="optional",
     )
 
 
-@tool(slash="용어 승인", tags=["admin"], mutates=True, confirm="always")
+@tool(slash="용어 반영여부", tags=["admin"], mutates=True, confirm="always")
 async def review(ctx: ToolContext, proposal_id: str, approve: bool) -> ToolResult:
-    """제안을 승인하거나 거절한다."""
+    """등록된 은어를 끄거나(approve=False, 철회) 다시 켠다(approve=True, 되돌리기)."""
     proposal = await ctx.terms.review(proposal_id, approve=approve, reviewed_by=ctx.player_id)
     if proposal is None:
-        return ToolResult(error="그런 제안이 없거나 이미 처리됐다")
-    status_text = "승인" if approve else "거절"
+        return ToolResult(error="그런 등록이 없다")
+    status_text = "켰다" if approve else "껐다"
     return ToolResult(
         data={"proposal_id": proposal_id, "status": proposal.status},
-        display=Display(content=f"'{proposal.term}' 제안을 {status_text}했다."),
+        display=Display(content=f"'{proposal.term}' 등록을 {status_text}."),
         display_mode="optional",
     )

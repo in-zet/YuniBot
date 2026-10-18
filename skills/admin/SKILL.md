@@ -20,6 +20,11 @@ settings:
     default: 10
     description: 플레이어별 도구 호출 쿨다운(초)
     scope: guild
+  - name: 보고 채널
+    kind: str
+    default: ""
+    description: 서버 은어 자동 등록 같은, admin이 사후 검토할 일을 올리는 채널(id). 비우면 안 보낸다.
+    scope: guild
 ---
 
 ## SKILL.md 본문

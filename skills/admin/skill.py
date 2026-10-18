@@ -1,11 +1,26 @@
 # skills/admin/skill.py
 from __future__ import annotations
 
+import re
+
 from core.decorators import tool
 from core.tool_types import Display, PlayerRef, ToolContext, ToolResult
 from services.common.players import Player
 
 _UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
+_CHANNEL_MENTION_RE = re.compile(r"^<#(\d{15,25})>$")
+_BARE_CHANNEL_ID_RE = re.compile(r"^\d{15,25}$")
+
+
+def _parse_channel_id(raw: str) -> str | None:
+    """#채널 멘션(<#id>)이나 맨 숫자 id를 채널 id로 바꾼다. 못 읽으면 None."""
+    text = raw.strip()
+    mention = _CHANNEL_MENTION_RE.match(text)
+    if mention:
+        return mention.group(1)
+    if _BARE_CHANNEL_ID_RE.match(text):
+        return text
+    return None
 
 
 @tool(slash="관리 사용량")
@@ -108,3 +123,19 @@ async def set_limits(ctx: ToolContext, monthly_cost_cap: float, player_cooldown_
         data={"monthly_cost_cap": monthly_cost_cap, "player_cooldown_seconds": player_cooldown_seconds},
         display=Display(ephemeral=True),
     )
+
+
+@tool(slash="관리 보고채널", mutates=True, confirm="always")
+async def set_report_channel(ctx: ToolContext, channel: str) -> ToolResult:
+    """서버 은어 자동 등록 같은, admin이 사후 검토할 일을 올릴 채널을 정한다. #채널 멘션이나
+    채널 id로 준다. 빈 문자열이면 끈다(아무 데도 안 보낸다)."""
+    if ctx.guild_id is None:
+        return ToolResult(error="서버 안에서만 쓸 수 있다")
+    channel_id = _parse_channel_id(channel) if channel else ""
+    if channel and channel_id is None:
+        return ToolResult(error="채널을 못 읽었어. #채널 멘션이나 채널 id로 줘.")
+    await ctx.settings.set_value(
+        scope="guild", scope_id=ctx.guild_id, skill="admin", name="보고 채널",
+        value=channel_id, updated_by=ctx.player_id,
+    )
+    return ToolResult(data={"channel_id": channel_id or None}, display=Display(ephemeral=True))

@@ -181,6 +181,52 @@ async def test_set_limits_stores_guild_scoped_values(admin_env) -> None:
     ) == 5
 
 
+async def test_set_report_channel_stores_bare_id(admin_env) -> None:
+    skill, _, settings, make_ctx = admin_env
+    ctx = make_ctx("admin1", guild_id="g1")
+
+    result = await skill.set_report_channel(ctx, channel="123456789012345678")
+
+    assert result.error is None
+    assert await settings.get_value(
+        scope="guild", scope_id="g1", skill="admin", name="보고 채널", default=""
+    ) == "123456789012345678"
+
+
+async def test_set_report_channel_parses_channel_mention(admin_env) -> None:
+    skill, _, settings, make_ctx = admin_env
+    ctx = make_ctx("admin1", guild_id="g1")
+
+    result = await skill.set_report_channel(ctx, channel="<#123456789012345678>")
+
+    assert result.error is None
+    assert await settings.get_value(
+        scope="guild", scope_id="g1", skill="admin", name="보고 채널", default=""
+    ) == "123456789012345678"
+
+
+async def test_set_report_channel_empty_string_turns_it_off(admin_env) -> None:
+    skill, _, settings, make_ctx = admin_env
+    ctx = make_ctx("admin1", guild_id="g1")
+    await skill.set_report_channel(ctx, channel="123456789012345678")
+
+    result = await skill.set_report_channel(ctx, channel="")
+
+    assert result.error is None
+    assert await settings.get_value(
+        scope="guild", scope_id="g1", skill="admin", name="보고 채널", default="missing"
+    ) == ""
+
+
+async def test_set_report_channel_rejects_unreadable_value(admin_env) -> None:
+    skill, _, _, make_ctx = admin_env
+    ctx = make_ctx("admin1", guild_id="g1")
+
+    result = await skill.set_report_channel(ctx, channel="그냥텍스트")
+
+    assert result.error is not None
+
+
 async def test_usage_returns_zero_when_no_calls_recorded(admin_env) -> None:
     skill, _, _, make_ctx = admin_env
     ctx = make_ctx("admin1", usage=cast(UsageService, cast(object, _FakeUsageService(UsageSummary(total_usd=0.0)))))

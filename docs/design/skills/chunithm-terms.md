@@ -16,10 +16,10 @@ examples:
 category: 질문 답변
 game: chunithm
 version: 1
-services: [terms, players, notify]
+services: [terms, players, notify, settings]
 ```
 
-태그 조건은 없다. 서버 은어 승인 도구만 `admin`이 필요하다.
+태그 조건은 없다. 서버 은어 등록을 끄거나 되돌리는 도구만 `admin`이 필요하다.
 
 ## 용어의 두 종류
 
@@ -71,8 +71,8 @@ services: [terms, players, notify]
 
 ## 서버 은어
 
-- 플레이어는 `/용어 제안`이나 유니에게 말로 개념 용어를 제안할 수 있다. 제안은 바로 반영되지 않고, `admin` 태그를 가진 플레이어가 승인해야 반영된다.
-- 값 용어의 별칭은 서버에서 추가할 수 없다. 제안이 들어오면 관리자에게 `terms.yaml`에 넣을 후보로 알린다.
+- 플레이어는 `/용어 제안`이나 유니에게 말로 개념 용어를 제안할 수 있다. 신고제라 승인을 기다리지 않고 바로 반영되고, admin의 "보고 채널"(`admin` 스킬 설정)이 있으면 거기로 알린다. `admin`은 나중에 부적절한 등록을 끄거나 되돌릴 수 있다(구현 결정 참고).
+- 값 용어의 별칭은 서버에서 추가할 수 없다.
 - 서버 은어는 그 서버에서만 쓴다. 전역 용어와 충돌하면 전역 용어가 이긴다.
 
 ## 다른 스킬과의 관계
@@ -86,8 +86,8 @@ services: [terms, players, notify]
 | --- | --- | --- | --- | --- | --- | --- |
 | `explain` | 용어의 뜻, 별칭, 값, 출처 | `term` | `/용어 뜻` | 없음 | optional | never |
 | `list` | 분류별 용어 목록 | `category`(선택) | `/용어 목록` | 없음 | required | never |
-| `suggest` | 서버 은어 제안 | `term`, `meaning`, `aliases` | `/용어 제안` | 없음 | optional | never |
-| `review` | 제안 승인·거절 | 제안 id, 결정 | `/용어 승인` | `admin` | optional | always |
+| `suggest` | 서버 은어 등록(즉시 반영) | `term`, `meaning`, `aliases` | `/용어 제안` | 없음 | optional | never |
+| `review` | 등록 끄기·되돌리기 | 제안 id, 켤지 | `/용어 반영여부` | `admin` | optional | always |
 
 ## 이벤트
 
@@ -98,7 +98,7 @@ services: [terms, players, notify]
 | 위치 | 내용 |
 | --- | --- |
 | `services/chunithm/data/terms.yaml` | 전역 용어(값 용어와 개념 용어). 저장소에서 검토해 고친다 |
-| `terms_server` 테이블 (`terms` 서비스 소유, `migrations/core/`에서 만든다) | 서버, 용어, 뜻, 별칭, 제안한 플레이어, 상태(제안·승인·거절), 승인한 플레이어 |
+| `terms_server` 테이블 (`terms` 서비스 소유, `migrations/core/`에서 만든다) | 서버, 용어, 뜻, 별칭, 등록한 플레이어, 상태(approved·rejected, 기본 approved), 반영여부를 바꾼 플레이어 |
 
 ## 유니 지침 (SKILL.md 본문 초안)
 
@@ -112,8 +112,14 @@ services: [terms, players, notify]
 - 별칭이 같은 정식 값으로 풀리는지(`RankRef`, `LampRef` 등).
 - 점수 표현 여러 형식의 해석.
 - 값 용어의 별칭을 서버에서 추가할 수 없는지.
-- 승인 전 제안이 해석과 설명에 쓰이지 않는지.
+- 등록이 바로 해석과 설명에 쓰이는지, admin이 끄면 안 쓰이는지.
 - 서버 용어가 다른 서버에서 보이지 않는지.
+
+## 구현 결정 (2026-10-18, 실기에서 받은 요청)
+
+- 서버 은어 등록을 허가제(admin 승인 전까지 비공개)에서 신고제(즉시 반영 + admin 보고 채널에 알림)로 바꿨다. 이유: 은어 하나 등록하는 데마다 admin을 기다려야 하는 게 체감 마찰이 크고, 잘못 등록된 것은 사후에 꺼도 충분하다는 판단.
+- `admin` 스킬에 서버별 "보고 채널" 설정(`/관리 보고채널`)을 추가했다 — 비어 있으면 아무 데도 안 보낸다. 이 채널은 서버 은어 외에 앞으로 다른 admin 사후 검토 보고에도 재사용할 수 있다.
+- `review()`는 "한 번만 심사"에서 "껐다 켰다 하는 토글"로 바뀌었다 — 되돌리기도 가능하다.
 
 ## 미확인 사항
 

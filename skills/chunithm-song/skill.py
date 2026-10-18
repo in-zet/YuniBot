@@ -16,7 +16,10 @@ from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, SongRecord
 from services.chunithm.terms import ResolvedDifficulty
 
 _DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
-_MAX_LISTED = 25
+# 실기 2026-10-18: 25는 너무 작아서 상수 범위 하나에도 다 못 보여주는 경우가 흔했다(폴더
+# 목표에 54곡짜리 범위도 실제로 있다) — data["titles"]도 이 상한에 걸려 모델이 26번째
+# 곡부터는 아예 몰랐다.
+_MAX_LISTED = 60
 
 
 def _with_sections(head: str, sections: list[Section]) -> str:

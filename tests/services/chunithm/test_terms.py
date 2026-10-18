@@ -175,21 +175,23 @@ async def test_list_terms_without_category_returns_everything(terms: TermsServic
     assert len(all_items) > len(rank_items)
 
 
-async def test_propose_and_explain_before_approval_is_not_visible(terms_with_conn: TermsService) -> None:
+async def test_propose_is_immediately_visible(terms_with_conn: TermsService) -> None:
+    """신고제(2026-10-18): 승인을 기다리지 않고 바로 explain에 보인다."""
     guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
     await terms_with_conn.propose(
         guild_id="g1", term="테스트은어", meaning="테스트용 뜻", aliases=["테스트별칭"], suggested_by="p1"
     )
 
-    assert await terms_with_conn.explain("테스트은어", guild_ctx) is None
+    explanation = await terms_with_conn.explain("테스트은어", guild_ctx)
+    assert explanation is not None
+    assert explanation.scope == "이 서버"
 
 
 async def test_approved_server_term_is_explained_and_listed(terms_with_conn: TermsService) -> None:
     guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
-    proposal_id = await terms_with_conn.propose(
+    await terms_with_conn.propose(
         guild_id="g1", term="테스트은어", meaning="테스트용 뜻", aliases=["테스트별칭"], suggested_by="p1"
     )
-    await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
 
     explanation = await terms_with_conn.explain("테스트별칭", guild_ctx)
     assert explanation is not None
@@ -201,20 +203,18 @@ async def test_approved_server_term_is_explained_and_listed(terms_with_conn: Ter
 
 
 async def test_server_term_is_not_visible_in_another_guild(terms_with_conn: TermsService) -> None:
-    proposal_id = await terms_with_conn.propose(
+    await terms_with_conn.propose(
         guild_id="g1", term="테스트은어", meaning="테스트용 뜻", aliases=[], suggested_by="p1"
     )
-    await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
 
     other_guild_ctx = ToolContext(player_id="p2", tags=frozenset(), services={}, guild_id="g2")
     assert await terms_with_conn.explain("테스트은어", other_guild_ctx) is None
 
 
 async def test_global_term_wins_over_same_named_server_term(terms_with_conn: TermsService) -> None:
-    proposal_id = await terms_with_conn.propose(
+    await terms_with_conn.propose(
         guild_id="g1", term="SSS+", meaning="서버에서 다르게 부르는 뜻", aliases=[], suggested_by="p1"
     )
-    await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
 
     guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
     explanation = await terms_with_conn.explain("SSS+", guild_ctx)
@@ -233,20 +233,22 @@ async def test_review_reject_keeps_term_invisible(terms_with_conn: TermsService)
     assert await terms_with_conn.explain("테스트은어", guild_ctx) is None
 
 
-async def test_review_already_reviewed_proposal_returns_none(terms_with_conn: TermsService) -> None:
+async def test_review_toggles_back_and_forth(terms_with_conn: TermsService) -> None:
+    """신고제(2026-10-18): review는 더 이상 "한 번만 심사"가 아니라 켜고 끄는 토글이다 —
+    admin이 철회했다가 되돌리는 흐름을 여러 번 반복할 수 있다."""
     proposal_id = await terms_with_conn.propose(
         guild_id="g1", term="테스트은어", meaning="뜻", aliases=[], suggested_by="p1"
     )
-    first = await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin1")
-    assert first is not None and first.status == "approved"
+    revoked = await terms_with_conn.review(proposal_id, approve=False, reviewed_by="admin1")
+    assert revoked is not None and revoked.status == "rejected"
 
-    # 서로 다른 결정으로 다시 심사를 시도해도(동시 승인/거절 경쟁을 흉내낸 것) 무시된다.
-    second = await terms_with_conn.review(proposal_id, approve=False, reviewed_by="admin2")
-    assert second is None
+    restored = await terms_with_conn.review(proposal_id, approve=True, reviewed_by="admin2")
+    assert restored is not None and restored.status == "approved"
+    assert restored.reviewed_by == "admin2"
 
-    # 두 번째 호출이 UPDATE의 WHERE status = 'suggested' 조건에 막혀 행 자체를 바꾸지
-    # 못했는지 확인한다(원자적 UPDATE가 실제로 경쟁을 막는지, 반환값만 보고는 알 수 없다).
     stored = await terms_with_conn.get_proposal(proposal_id)
-    assert stored is not None
-    assert stored.status == "approved"
-    assert stored.reviewed_by == "admin1"
+    assert stored is not None and stored.status == "approved"
+
+
+async def test_review_unknown_proposal_returns_none(terms_with_conn: TermsService) -> None:
+    assert await terms_with_conn.review("없는id", approve=True, reviewed_by="admin1") is None
