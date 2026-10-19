@@ -37,6 +37,10 @@ _UNKNOWN_RATING = "계산 불가"
 _DIFF_CACHE_LIMIT = 200
 _BEST_FRAME_SIZE = 30
 _NEW_FRAME_SIZE = 20
+# 후보곡 추천 대역: 프레임 안 3~8위 레이팅 사이(양끝 포함). SSS를 냈을 때 그 정도 곡 레이팅이 되는
+# 채보만 "닿을 만한" 후보로 본다(2026-10-19 사용자 결정).
+_CANDIDATE_BAND_FIRST_RANK = 3
+_CANDIDATE_BAND_LAST_RANK = 8
 # 후보곡 상승폭·남은 점수의 기준점은 SSS다(chunithm-report.md "후보곡").
 _SSS_SCORE = 1_007_500
 _DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
@@ -187,6 +191,16 @@ def _frame_floor(frame: list[PbRow], size: int) -> Decimal:
     if len(frame) < size or not known:
         return Decimal("0.00")
     return min(known)
+
+
+def _candidate_band(frame: list[PbRow]) -> tuple[Decimal, Decimal] | None:
+    """프레임 3~8위 레이팅의 (하한, 상한). 프레임이 8곡에 못 미치면 있는 곳까지만 쓰고, 3곡도
+    없으면 대역을 못 잡아 None이다. `frame`은 레이팅 내림차순이다(`_frames`)."""
+    ratings = [r.rating for r in frame if r.rating is not None]
+    band = ratings[_CANDIDATE_BAND_FIRST_RANK - 1 : _CANDIDATE_BAND_LAST_RANK]
+    if not band:
+        return None
+    return min(band), max(band)
 
 
 def _known_min(ratings: list[Decimal | None]) -> Decimal | None:
@@ -558,14 +572,17 @@ class RecordsService:
         self, player_id: str, *, min_const: float | None, max_const: float | None, count: int
     ) -> list[CandidateHit]:
         """레이팅을 올릴 후보곡. 상수 범위 안에서 지금 프레임(베스트30/신곡20, records_pb
-        기준) 밖에 있는 채보를, SSS를 냈을 때 그 채보가 속할 프레임 최저점을 얼마나 넘는지
-        (candidate_upside) 내림차순으로 count개까지 돌려준다. 상승폭이 0 이하인
+        기준) 밖에 있는 채보 중, SSS를 냈을 때의 곡 레이팅(상수+2.00)이 그 채보가 속할 프레임의
+        3~8위 레이팅 사이(`_candidate_band`)인 것만, SSS를 냈을 때 프레임 최저점을 얼마나
+        넘는지(candidate_upside) 내림차순으로 count개까지 돌려준다. 상승폭이 0 이하인
         채보는 뺀다. 안 친 채보는 현재 점수 0으로 본다."""
         rows = await self.all_pb_rows(player_id)
         best, new = self._frames(rows)
         frame_keys = {(r.song_title, r.difficulty) for r in (*best, *new)}
         best_floor = _frame_floor(best, _BEST_FRAME_SIZE)
         new_floor = _frame_floor(new, _NEW_FRAME_SIZE)
+        best_band = _candidate_band(best)
+        new_band = _candidate_band(new)
         rows_by_key = {(r.song_title, r.difficulty): r for r in rows}
         low = min_const if min_const is not None else 0.0
         high = max_const if max_const is not None else 99.0
@@ -577,9 +594,14 @@ class RecordsService:
                 const = hit.chart.const
                 if key in frame_keys or const is None:
                     continue
-                floor = new_floor if self._songdb.is_new_for(hit.song.title) else best_floor
+                is_new = self._songdb.is_new_for(hit.song.title)
+                floor = new_floor if is_new else best_floor
+                band = new_band if is_new else best_band
                 upside = candidate_upside(const, floor)
-                if upside <= 0:
+                if band is None or upside <= 0:
+                    continue
+                sss_rating = upside + floor  # = 상수 + 2.00
+                if not band[0] <= sss_rating <= band[1]:
                     continue
                 current_score = rows_by_key[key].score if key in rows_by_key else 0
                 remaining = remaining_to_target(hit.chart.note_count, current_score, _SSS_SCORE)

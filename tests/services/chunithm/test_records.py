@@ -812,7 +812,7 @@ async def test_latest_sync_summary(conn, monkeypatch) -> None:
     assert summary.last_synced_at == _T1_UTC.isoformat()
 
 
-async def test_candidates_exclude_frame_and_sort_by_upside(conn) -> None:
+async def test_candidates_stay_in_rank_3_to_8_band_exclude_frame_and_sort_by_upside(conn) -> None:
     songdb = SongDbService()
     _, player_id, ctx, service = await _setup(conn, songdb=songdb)
     await service.save_sync(player_id, _fixture_fetch(), ctx)
@@ -820,23 +820,28 @@ async def test_candidates_exclude_frame_and_sort_by_upside(conn) -> None:
     # Chunimaru 덧씌우기 없는 songdb라 신곡이 없다 → 베스트 프레임 = records_pb 레이팅 상위 30.
     known = sorted((r for r in rows if r.rating is not None), key=lambda r: r.rating or Decimal(0), reverse=True)
     frame_keys = {(r.song_title, r.difficulty) for r in known[:30]}
+    scores = {(r.song_title, r.difficulty): r.score for r in rows}
     floor = known[29].rating
-    assert floor is not None
+    band = [r.rating for r in known[2:8]]  # 프레임 3~8위 레이팅
+    assert floor is not None and all(r is not None for r in band)
+    band_low, band_high = min(band), max(band)  # pyright: ignore[reportArgumentType]
 
-    hits = await service.candidates(player_id, min_const=14.0, max_const=15.5, count=10)
+    hits = await service.candidates(player_id, min_const=14.0, max_const=17.0, count=500)
 
-    assert 0 < len(hits) <= 10
+    assert 0 < len(hits)
     hit_keys = {(h.song_title, h.difficulty) for h in hits}
     assert not hit_keys & frame_keys
     assert ("Wizdomiot", "MAS") not in hit_keys  # 상수 15.0, 프레임 안
     upsides = [h.upside for h in hits]
     assert upsides == sorted(upsides, reverse=True)
     for hit in hits:
-        assert 14.0 <= hit.const <= 15.5
+        assert band_low <= Decimal(str(hit.const)) + Decimal("2.00") <= band_high
         assert hit.upside == candidate_upside(hit.const, floor)
         assert hit.upside > 0
-        assert hit.current_score == 0
-        expected = remaining_to_target(songdb.note_count_for(hit.song_title, hit.difficulty), 0, 1_007_500)
+        assert hit.current_score == scores.get((hit.song_title, hit.difficulty), 0)
+        expected = remaining_to_target(
+            songdb.note_count_for(hit.song_title, hit.difficulty), hit.current_score, 1_007_500
+        )
         assert (hit.remaining_score, hit.remaining_attacks) == (expected if expected else (None, None))
 
 
