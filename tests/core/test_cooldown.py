@@ -1,4 +1,5 @@
 # tests/core/test_cooldown.py
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -69,3 +70,28 @@ async def test_check_monthly_cap_exceeded() -> None:
         usage=_FakeUsage(10.5), settings=_FakeSettings(10.0), guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC),
     )
     assert status.exceeded is True
+
+
+@pytest.mark.asyncio
+async def test_check_monthly_cap_uses_utc_month_not_server_local_month(monkeypatch: pytest.MonkeyPatch) -> None:
+    """core/usage.py는 기록 시각을 UTC로 저장한다. 서버가 UTC+9(KST)면 로컬 11월 1일 00:30은
+    UTC로 아직 10월 31일이라 "이번 달" 집계도 UTC 기준 10월이어야 한다(그렇지 않으면 월
+    경계 몇 시간 동안 비용 상한 집행이 실제 저장된 달과 어긋난다)."""
+    monkeypatch.setenv("TZ", "Asia/Seoul")
+    time.tzset()
+    try:
+        captured: dict[str, str] = {}
+
+        class _CapturingUsage:
+            async def month_total_usd(self, *, guild_id: str, year_month: str) -> float:
+                captured["year_month"] = year_month
+                return 0.0
+
+        naive_local_now = datetime(2026, 11, 1, 0, 30, 0)  # noqa: DTZ001 - 실제 호출부(core/mention.py)처럼 일부러 naive(서버 로컬)다. KST 기준, UTC로는 10월 31일 15:30
+        await check_monthly_cap(
+            usage=_CapturingUsage(), settings=_FakeSettings(10.0), guild_id="g1", now=naive_local_now,
+        )
+        assert captured["year_month"] == "2026-10"
+    finally:
+        monkeypatch.delenv("TZ", raising=False)
+        time.tzset()
