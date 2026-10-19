@@ -2,14 +2,13 @@
 """LLM 호출 실패/상한/쿨다운 때 쓰는 고정 문구.
 
 00-core.md "멘션 에이전트 규칙": "LLM 호출이 실패하거나 월 상한에 닿으면 유니 말투의 고정
-문구로 슬래시 명령을 안내한다." 지금은 persona.md가 건조한 임시 말투이므로
-이 문자열들도 평서체다. 11단계(유니 인격)에서 유니 말투로 바꿀 때 이 파일만 고치면 된다.
+문구로 슬래시 명령을 안내한다." 말투는 prompts/persona.md를 따른다(밝은 반말).
 """
 from __future__ import annotations
 
-LLM_FAILURE_MESSAGE = "지금 응답을 만들 수 없다. 슬래시 명령(/도움말 등)은 그대로 쓸 수 있다."
-MONTHLY_CAP_REACHED_MESSAGE = "이번 달 LLM 사용량 상한에 도달했다. 슬래시 명령(/도움말 등)은 계속 쓸 수 있다."
-COOLDOWN_ACTIVE_MESSAGE = "요청이 너무 잦다. 잠시 후 다시 멘션해 달라."
-TOOL_CALL_CAP_MESSAGE = "이번 요청에서 도구를 너무 많이 불렀다. 질문을 나눠서 다시 말해 달라."
-RETRY_WAIT_MESSAGE = "지금 응답이 늦네. 잠깐만 기다려 달라."
-WORKING_MESSAGE = "확인하고 있다. 잠깐만 기다려 달라."
+LLM_FAILURE_MESSAGE = "미안, 지금은 대답을 만들 수가 없어. 슬래시 명령(/도움말 등)은 그대로 쓸 수 있으니까 그걸로 해 줘!"
+MONTHLY_CAP_REACHED_MESSAGE = "이번 달에 쓸 수 있는 양을 다 써 버렸어. 슬래시 명령(/도움말 등)은 계속 쓸 수 있어!"
+COOLDOWN_ACTIVE_MESSAGE = "잠깐, 너무 빨라! 조금만 있다가 다시 불러 줘."
+TOOL_CALL_CAP_MESSAGE = "이번 요청에서 이것저것 너무 많이 찾아봤어. 질문을 나눠서 다시 말해 줄래?"
+RETRY_WAIT_MESSAGE = "지금 답이 좀 늦네. 잠깐만 기다려 줘!"
+WORKING_MESSAGE = "찾아보는 중이야, 잠깐만 기다려 줘!"

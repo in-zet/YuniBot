@@ -69,7 +69,7 @@
   - [X] Part 1: 코어. `core/decorators.py`의 `ToolSpec`에 `max_calls_per_turn`(도구별 응답당 호출 상한, 전역 `max_tool_calls_per_turn`보다 좁게) 추가, `core/agent.py`가 넘긴 호출만 에러로 돌리고 나머지 응답은 계속 돌게 적용. 아직 어느 스킬도 이 값을 쓰지 않는다(Part 3의 `web-qa.search`가 처음 쓴다)
   - [X] Part 2: `websearch` 공통 서비스. 어댑터 프로토콜(`core/search.py`)과 Gemini/Claude 구현(`core/search_gemini.py`·`core/search_claude.py`) + `services/common/websearch.py`(쿨다운·출처없음 검사). `WEBSEARCH_PROVIDER`(기본 gemini, `LLM_PROVIDER`와 독립)·`SEARCH_MODEL`·`WEBSEARCH_COOLDOWN_SECONDS`(기본 15초) 설정 추가. 상세는 `progress/2026-10-18.md`
   - [X] Part 3: `web-qa` 스킬. 구현 완료 — `search(question)` 도구 하나(`weight: heavy`, `services: [websearch, usage]`, `max_calls_per_turn=5`, 슬래시 없음, 테이블 없음, 출처는 `display_mode="required"`로 강제), 성공 시 도구 안에서 바로 `usage.record(kind="websearch")`. 상세는 `web-qa.md` "구현 결정". 실기 미확인(위 문서 "미확인 사항")
-- [ ] 11. 유니 인격: `persona.md`, `yuni` 서비스의 한마디(LLM), 고정 문구(`core/fallback_messages.py`)
+- [X] 11. 유니 인격: `persona.md`, `yuni` 서비스의 한마디(LLM), 고정 문구(`core/fallback_messages.py`) — 구현 완료(2026-10-19, 밝은 반말). 실기 미확인: 동기화 리포트·목표 알림·업데이트 알림의 한마디가 말투대로 나오는지, 한마디 사용량이 `/관리 사용량`에 잡히는지, 멘션 응답 말투
 - [ ] 12. 메모리와 관계: 자동 요약, 호칭 우선순위, `memory`·`yuni-bond`, 대화 스레드 후기, 펼친 스킬의 답장 사슬 간 유지
 
 고정 원칙: 5단계까지는 LLM 없이 슬래시로 동작한다. `yuni` 서비스는 11단계 전까지 정해진 문구를 돌려주고, 7~10단계 스킬은 이 인터페이스만 쓴다.

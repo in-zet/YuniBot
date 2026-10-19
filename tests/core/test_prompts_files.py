@@ -8,8 +8,9 @@ def test_rules_md_exists_and_mentions_numeric_rule() -> None:
     assert len(text) > 0
 
 
-def test_persona_md_exists_and_is_short() -> None:
+def test_persona_md_is_yuni_voice_and_stays_short() -> None:
     text = Path("prompts/persona.md").read_text()
-    assert len(text) > 0
-    # 11단계 전까지는 건조한 임시 말투라 짧아야 한다(대사집을 미리 채우지 않는다).
-    assert len(text) < 2000
+    assert "유니" in text
+    assert "반말" in text
+    # 대사집을 통째로 넣지 않는다(예시 몇 개만) — 00-core.md "프롬프트 파일".
+    assert len(text) < 3000

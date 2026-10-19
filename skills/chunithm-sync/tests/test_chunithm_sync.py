@@ -107,9 +107,13 @@ class _FakeSettings:
 class _FakeYuni:
     def __init__(self) -> None:
         self.calls: list[list[Section]] = []
+        self.usage_scopes: list[tuple[str | None, str | None]] = []
 
-    async def line(self, sections: list[Section]) -> str:
+    async def line(
+        self, sections: list[Section], *, player_id: str | None = None, guild_id: str | None = None
+    ) -> str:
         self.calls.append(sections)
+        self.usage_scopes.append((player_id, guild_id))
         return "유니 한마디"
 
 
@@ -346,6 +350,8 @@ async def test_run_public_report_returns_full_text_in_display(skill: ModuleType)
     # 유니 한마디는 요청당 한 번, 모든 조각(표시물 없는 것 포함)을 넘긴다.
     assert len(f.yuni.calls) == 1
     assert f.yuni.calls[0] == _REPORT_SECTIONS
+    # 한마디 호출 비용을 이 플레이어·서버에 기록할 수 있게 둘을 넘긴다.
+    assert f.yuni.usage_scopes[0][0] == f.ctx.player_id
 
 
 async def test_run_public_report_without_any_section_still_answers(skill: ModuleType) -> None:

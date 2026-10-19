@@ -1363,7 +1363,9 @@ async def on_final_deadline(ctx: ToolContext, payload: dict[str, Any]) -> None:
     if goal is None or goal.status != GoalStatus.IN_PROGRESS.value:
         return
     line, stage = await _finalize_expired_goal(ctx, goal)
-    yuni_line = await ctx.yuni.line([Section(order=0, stage=stage)])
+    yuni_line = await ctx.yuni.line(
+        [Section(order=0, stage=stage)], player_id=ctx.player_id, guild_id=ctx.guild_id
+    )
     await _send_goal_notice(ctx, goal, f"{line}\n{yuni_line}")
 
 

@@ -120,7 +120,7 @@ async def run(
 
     # 변화가 없어도 모은다 — 받는 쪽이 has_new_plays를 보고 현재값만 돌려준다.
     sections = await ctx.emit_gather("chunithm.sync.completed", completed)
-    yuni_line = "" if quiet else await ctx.yuni.line(sections)
+    yuni_line = "" if quiet else await ctx.yuni.line(sections, player_id=ctx.player_id, guild_id=ctx.guild_id)
 
     footer: str | None = None
     if result.rating_mismatch:

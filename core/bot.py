@@ -484,20 +484,16 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         settings=settings_service,
         threads=ThreadManager(),
     )
-    yuni_service = YuniService()
 
     services["http"] = http_service
     services["notify"] = notify_service
-    services["yuni"] = yuni_service
 
     usage_service = UsageService(conn)
     services["usage"] = usage_service
 
-    prompt_assembler = PromptAssembler(
-        rules_text=Path("prompts/rules.md").read_text(),
-        persona_text=Path("prompts/persona.md").read_text(),
-        registry=registry,
-    )
+    rules_text = Path("prompts/rules.md").read_text()
+    persona_text = Path("prompts/persona.md").read_text()
+    prompt_assembler = PromptAssembler(rules_text=rules_text, persona_text=persona_text, registry=registry)
     # 제공자(Gemini/Claude)는 부팅 시점 설정값이다(LLM_PROVIDER, 런타임 전환 없음).
     # google-genai의 Client(api_key="")는 "네트워크 없이 어댑터 객체만 만든다"가 아니라,
     # 생성 시점에 키가 비어 있으면 바로 ValueError를 던진다 — 테스트처럼 키 없이
@@ -516,6 +512,13 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
                 "GEMINI_API_KEY가 비어 있다 - 설정 전까지 모든 멘션이 실패한다"
             )
         llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
+
+    # 유니의 한마디는 싼 모델(SUMMARY_MODEL)로 만든다. 규칙이 말투보다 앞선다(rules.md가 먼저).
+    yuni_service = YuniService(
+        llm=llm_adapter, model=config.summary_model, usage=usage_service, thinking_level=config.thinking_level,
+        system_prompt=f"{rules_text}\n\n{persona_text}",
+    )
+    services["yuni"] = yuni_service
 
     # websearch_provider는 llm_provider와 독립이다 — 메인 에이전트와 검색이 다른 제공자를
     # 쓸 수 있다(00-core.md "websearch" 서비스, docs/plan.md §4 10단계 Part 2). 위 llm_adapter와

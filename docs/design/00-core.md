@@ -424,7 +424,8 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - Linked VERSE 스토리는 플레이어가 묻기 전에는 꺼내지 않는다.
 - 나비는 화자로 나오지 않는다. 유니가 이름을 언급하는 것은 된다.
 - 한국어 말투는 직접 정한다. 국제판에 공식 한국어 대사가 있는지는 확인하지 못했다. 말투 파일의 예시로 쓸 원문은 저장본에서 직접 옮긴다.
-- LLM 장애 때 나가는 고정 문구도 미리 유니 말투로 써 둔다(지금은 건조한 평서체이고, 11단계에서 `core/fallback_messages.py`의 문자열만 바꾼다).
+- LLM 장애 때 나가는 고정 문구(`core/fallback_messages.py`)도 유니 말투로 써 둔다.
+- **구현 결정 (2026-10-19, 11단계)**: 말투는 밝은 반말로 정했다(원작이 반말이고 지인 서버라서). 한마디는 `yuni` 서비스가 `SUMMARY_MODEL`로 만든다. 프롬프트는 `rules.md` + `persona.md` + 한마디 지침이고, 입력은 조각의 `stage`·`data`·`hint` JSON이다. 호출이 실패하거나, 빈 응답이거나, 200자를 넘거나, `data`에 없는 숫자가 있으면 정해진 문구(`_STAGE_LINES`)로 되돌린다. 사용량은 `kind="yuni_line"`으로 기록하며 `line()`에 `player_id`·`guild_id`를 넘긴 호출만 기록한다(`chunithm-sync`·`chunithm-goals`는 넘긴다. 서버 전체 알림인 `chunithm-updates`는 플레이어가 없어 기록하지 않는다). 호칭("~상")은 persona.md에 규칙만 있고 실제 호칭을 넘기는 일은 12단계다.
 
 * 표시물은 항상 정식 표기(SSS+, MAS)를 쓴다. 유니의 말은 플레이어가 쓴 표현을 따라갈 수 있다. 예: "트플플까지 3.20어택이에요."
 
