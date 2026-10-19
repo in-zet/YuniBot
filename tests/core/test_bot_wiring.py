@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import aiosqlite
 import discord
@@ -519,7 +519,9 @@ async def test_failing_catch_up_job_is_isolated_and_others_still_run(caplog: pyt
     async def boom(ctx: object) -> None:
         raise RuntimeError("예약 작업 실패")
 
-    async def ok(ctx: object) -> None:
+    async def ok(ctx: Any) -> None:
+        # 예약 작업이 ctx.db를 쓸 수 있어야 한다(chunithm-updates가 db 없이 죽었던 적이 있다).
+        assert ctx.db is not None
         ran.append("ok")
 
     class _FakeScheduler:
@@ -533,7 +535,7 @@ async def test_failing_catch_up_job_is_isolated_and_others_still_run(caplog: pyt
                 [("a", "boom"), ("b", "ok")],
                 {("a", "boom"): ScheduleSpec(fn=boom, cron="0 9 * * *"), ("b", "ok"): ScheduleSpec(fn=ok, cron="0 9 * * *")},
                 scheduler=_FakeScheduler(),  # pyright: ignore[reportArgumentType]
-                services={}, event_bus=EventBus(), player_data=PlayerDataScanner(conn=conn, table_names=()),
+                services={}, event_bus=EventBus(), player_data=PlayerDataScanner(conn=conn, table_names=()), db=conn,
                 now=datetime.datetime(2026, 10, 10, 9, 0),  # noqa: DTZ001 - 예약은 서버 로컬 벽시계 기준(core/bot.py)
             )
     finally:

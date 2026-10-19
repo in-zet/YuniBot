@@ -28,6 +28,7 @@ from core.llm import LlmAdapter
 from core.llm_claude import ClaudeLlmAdapter
 from core.llm_gemini import GeminiLlmAdapter
 from core.mention import ChannelMessage, MentionEntry, is_mention_eligible
+from core.message_split import split_message
 from core.migrations import run_migrations
 from core.player_data import PlayerDataScanner, discover_skill_tables
 from core.prompt import PromptAssembler
@@ -181,7 +182,7 @@ class YuniClient(discord.Client):
             due_recurring = await self._scheduler.poll_due_recurring(now=now)
             await _run_due_recurring(
                 due_recurring, self._schedule_fns, scheduler=self._scheduler, services=self._services,
-                event_bus=self._event_bus, player_data=self._player_data, now=now,
+                event_bus=self._event_bus, player_data=self._player_data, db=self.conn, now=now,
             )
             due_once = await self._scheduler.poll_due_once(now=now)
             await _emit_due_once(due_once, self._event_bus)
@@ -253,7 +254,12 @@ class YuniClient(discord.Client):
             embeds = [embed for display in displays for embed in display.embeds]
             extra_content = [display.content for display in displays if display.content is not None]
             full_text = "\n\n".join([text, *extra_content])
-            sent = await message.reply(full_text, embeds=embeds, mention_author=False)
+            # 2000자를 넘으면 디스코드가 통째로 거절해 답이 아예 안 나간다 — 줄 경계에서 나눠 첫 조각만
+            # 답장으로, 나머지는 이어서 보낸다.
+            chunks = split_message(full_text)
+            sent = await message.reply(chunks[0], embeds=embeds, mention_author=False)
+            for extra in chunks[1:]:
+                await message.channel.send(extra)
             return str(sent.id)
 
         await self._mention_entry.handle(
@@ -425,6 +431,7 @@ async def _run_due_recurring(
     services: dict[str, object],
     event_bus: EventBus,
     player_data: PlayerDataScanner,
+    db: aiosqlite.Connection,
     now: datetime.datetime,
 ) -> None:
     """기동 시 밀린 반복 예약을 하나씩 돌린다. 한 작업이 실패해도 경고만 남기고 다음 작업으로
@@ -435,7 +442,7 @@ async def _run_due_recurring(
             spec = schedule_fns[(owner_skill, fn_name)]
             ctx = ToolContext(
                 player_id="system", tags=frozenset(), services=services, event_bus=event_bus,
-                player_data=player_data, scheduler=scheduler,
+                player_data=player_data, scheduler=scheduler, db=db,
             )
             await spec.fn(ctx)
             await scheduler.mark_run(owner_skill, fn_name, cron=spec.cron, ran_at=now)
@@ -711,7 +718,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     due_recurring = await scheduler.startup_catch_up(now=now)
     await _run_due_recurring(
         due_recurring, schedule_fns, scheduler=scheduler, services=services, event_bus=event_bus,
-        player_data=player_data, now=now,
+        player_data=player_data, db=conn, now=now,
     )
 
     due_once = await scheduler.startup_catch_up_once(now=now)
