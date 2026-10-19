@@ -154,6 +154,27 @@ async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     )
 
 
+@tool(slash="현재설정", tags=["chunithm-linked"], cost="network")
+async def current_settings(ctx: ToolContext) -> ToolResult:
+    """지금 내 계정의 인게임 설정을 CHUNITHM-NET에서 바로 읽어 보여준다. 오락실을 말하지 않아도 된다.
+    아무것도 저장하지 않는다."""
+    try:
+        settings = await ctx.chunithm_net.get_arcade_settings(ctx.player_id, ctx=ctx)
+    except ConnectionError:
+        return ToolResult(error="로그인이 안 돼 있어서 설정을 못 읽었어.")
+    except MaintenanceError:
+        return ToolResult(error="CHUNITHM-NET이 점검 중이라 설정을 못 읽었어.")
+    except AuthenticationError:
+        return ToolResult(error="로그인이 만료돼서 설정을 못 읽었어. 다시 연결해 줘.")
+
+    named = _named_from_settings(settings)
+    return ToolResult(
+        data={"settings": named},
+        display=Display(content=_settings_line(named)),
+        display_mode="optional",
+    )
+
+
 @tool(slash="오락실 기록")
 async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     """그 오락실에서 저장된 설정 변화를 날짜순으로 보여준다."""
