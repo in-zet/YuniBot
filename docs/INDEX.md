@@ -25,5 +25,5 @@
 | `third_party/patches/` | 가져온 코드에 자동 적용하는 패치와 이유 | **관리대상** |
 | `.claude/settings.json` | 프로젝트 Claude Code 설정 — `songs.json` 읽기 차단 | **관리대상** |
 | `Dockerfile` · `docker-compose.yml` · `pyproject.toml` · `uv.lock` · `.env.example` | 빌드·운영·의존성·환경 변수 틀(값 없음) | **관리대상** |
-| `data/` | 운영 DB·캐시(`yuni.db`, `http_cache.sqlite`) — git 제외 | 보존(운영) |
+| `data/` | 운영 DB·캐시·로그(`yuni.db`, `http_cache.sqlite`, `logs/yuni.log` — 5MB씩 6개 돌려 씀) — git 제외 | 보존(운영) |
 | `temp/` | 임시 파일·컨텍스트 스냅샷 — git 제외 | 재생성 가능 |

@@ -27,6 +27,7 @@ from core.help_slash import build_help_command
 from core.llm import LlmAdapter
 from core.llm_claude import ClaudeLlmAdapter
 from core.llm_gemini import GeminiLlmAdapter
+from core.log_setup import configure_logging
 from core.mention import ChannelMessage, MentionEntry, is_mention_eligible
 from core.message_split import split_message
 from core.migrations import run_migrations
@@ -728,8 +729,8 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO)
     config = load_config()
+    configure_logging(config.db_path.parent / "logs")
     client, _registry, _executor = await build_client(config)
     try:
         await client.start(config.discord_token)
