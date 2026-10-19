@@ -15,6 +15,7 @@ CORE_OWNED_TABLES: frozenset[str] = frozenset(
         "settings_values",
         "settings_skill_toggles",
         "player_memory",
+        "player_memory_pending",
         "arcades",
         "arcade_aliases",
         "arcade_visits",

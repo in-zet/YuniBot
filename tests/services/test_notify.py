@@ -21,12 +21,16 @@ class _FakeGateway:
     def __init__(self) -> None:
         self.channel_messages: list[tuple[str, str]] = []
         self.dms: list[tuple[str, str, object]] = []
+        self.reactions: list[tuple[str, str, str]] = []
 
     async def send_channel_message(self, channel_id: str, content: str) -> None:
         self.channel_messages.append((channel_id, content))
 
     async def send_dm(self, discord_id: str, content: str, *, view: object | None = None) -> None:
         self.dms.append((discord_id, content, view))
+
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
+        self.reactions.append((channel_id, message_id, emoji))
 
 
 @pytest.fixture
@@ -161,3 +165,9 @@ async def test_open_thread_delegates_to_thread_manager(env) -> None:
 
     assert session.skill_name == "chunithm-session"
     assert session.player_id == player.id
+
+
+async def test_react_forwards_to_the_gateway(env) -> None:
+    notify, gateway = env[0], env[-1]
+    await notify.react("c1", "m1", "📝")
+    assert gateway.reactions == [("c1", "m1", "📝")]

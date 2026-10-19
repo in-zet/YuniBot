@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from core.fallback_messages import (
     COOLDOWN_ACTIVE_MESSAGE,
     LLM_FAILURE_MESSAGE,
     MONTHLY_CAP_REACHED_MESSAGE,
+    PRIVATE_DM_FAILED_MESSAGE,
     RETRY_WAIT_MESSAGE,
     TOOL_CALL_CAP_MESSAGE,
     WORKING_MESSAGE,
@@ -22,6 +24,7 @@ from core.fallback_messages import (
 from core.response_assembly import assemble_response
 from core.skill_loading import Mode, SkillLoadState
 from core.tool_types import Display, ToolContext
+from services.common.memory import PendingMessage
 from services.common.notify import NotifyService
 from services.common.players import DiscordAccount, Player
 
@@ -31,6 +34,8 @@ from services.common.players import DiscordAccount, Player
 _DM_SCOPE = "dm"
 
 MAX_CONTEXT_MESSAGES = 6
+
+_MENTION_TOKEN = re.compile(r"<@[!&]?\d+>")
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +52,26 @@ class _PlayersLike(Protocol):
 
 
 class _MemoryLike(Protocol):
-    """MemoryService가 구조적으로 맞추는 부분 집합 — 플레이어 메모리를 읽어 프롬프트에
-    넣는 데만 쓴다(core.remember 도구가 쓰는 set은 ctx.memory를 통해 직접 부른다)."""
+    """MemoryService가 구조적으로 맞추는 부분 집합 — 플레이어 메모리를 읽어 프롬프트에 넣고, 이번 대화에서
+    본인이 쓴 글을 자동 요약 대기 목록에 쌓는다(core.remember 도구가 쓰는 set은 ctx.memory를 통해
+    직접 부른다)."""
 
     async def get(self, player_id: str) -> str: ...
+
+    async def enqueue(
+        self,
+        player_id: str,
+        *,
+        messages: list[PendingMessage],
+        guild_id: str | None,
+        channel_id: str | None,
+        message_id: str | None,
+        now: float,
+    ) -> bool: ...
+
+
+class _AddressLike(Protocol):
+    async def resolve(self, player_id: str, *, discord_name: str | None = None) -> str | None: ...
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -61,6 +82,9 @@ class ChannelMessage:
     content: str
     reference_id: str | None = None
     mentions_bot: bool = False
+    channel_id: str | None = None
+    # 디스코드 서버 닉네임(서버 밖이면 표시 이름). 호칭의 3순위로 쓴다.
+    author_display_name: str | None = None
 
 
 def is_mention_eligible(*, trigger: ChannelMessage, bot_discord_id: str) -> bool:
@@ -123,6 +147,7 @@ class MentionEntry:
         event_bus: EventBus,
         known_skill_names: set[str],
         skill_loading_mode: str,
+        address: _AddressLike | None = None,
     ) -> None:
         self._agent = agent
         self._players = players
@@ -143,6 +168,7 @@ class MentionEntry:
         self._event_bus = event_bus
         self._known_skill_names = known_skill_names
         self._skill_loading_mode = skill_loading_mode
+        self._address = address
 
     async def handle(
         self,
@@ -206,11 +232,15 @@ class MentionEntry:
         if is_new_player:
             prompt_context_snippets.append("이 플레이어는 유니를 처음 멘션했다.")
 
-        # 저장된 플레이어 메모리를 읽어 프롬프트에 넣는다(remember 도구는 저장만 한다).
-        # 00-core.md "주입 범위: 요청한 본인의 메모리만 프롬프트에 넣는다"를 그대로 따른다.
+        # 요청한 본인의 호칭과 메모리만 프롬프트에 넣는다(00-core.md "주입 범위"). 호칭은 코드가 정한
+        # 최종 이름이고, 모델은 "상"을 직접 붙이지 않는다.
+        if self._address is not None:
+            address = await self._address.resolve(player.id, discord_name=trigger.author_display_name)
+            if address is not None:
+                prompt_context_snippets.append(f"이 플레이어를 부를 이름: {address}")
         memory_text = await self._memory.get(player.id)
         if memory_text:
-            prompt_context_snippets.append(f"[참고: 이 플레이어가 기억해 달라고 한 내용]\n{memory_text}")
+            prompt_context_snippets.append(f"[참고: 유니가 이 플레이어에 대해 기억하고 있는 내용]\n{memory_text}")
 
         tags = await self._players.tags_for(player.id)
         ctx = ToolContext(
@@ -264,9 +294,56 @@ class MentionEntry:
             input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
         )
 
+        await self._queue_memory_summary(
+            player_id=player.id, guild_id=guild_id, trigger=trigger, context=context,
+            player_discord_ids=player_discord_ids, now=now,
+        )
+
         if result.hit_tool_call_cap and result.text is None:
             await send(TOOL_CALL_CAP_MESSAGE, [])
             return
 
         assembled = assemble_response(result)
-        await send(assembled.text or LLM_FAILURE_MESSAGE, assembled.displays)
+        # private 표시물(본인에게만 보여야 하는 내용)은 채널 답장에 붙이지 않고 DM으로 보낸다.
+        public_displays: list[Display] = []
+        dm_failed = False
+        for display in assembled.displays:
+            if display.private:
+                if display.content:
+                    dm_failed = not await self._send_private(player.id, display.content) or dm_failed
+            else:
+                public_displays.append(display)
+        text = assembled.text or LLM_FAILURE_MESSAGE
+        await send(f"{text}\n{PRIVATE_DM_FAILED_MESSAGE}" if dm_failed else text, public_displays)
+
+    async def _send_private(self, player_id: str, content: str) -> bool:
+        try:
+            await self._notify.dm(player_id, content)
+        except Exception:
+            logger.warning("플레이어 %s에게 비공개 DM을 보내지 못했다", player_id, exc_info=True)
+            return False
+        return True
+
+    async def _queue_memory_summary(
+        self,
+        *,
+        player_id: str,
+        guild_id: str | None,
+        trigger: ChannelMessage,
+        context: list[ChannelMessage],
+        player_discord_ids: set[str],
+        now: datetime,
+    ) -> None:
+        """이 대화에서 본인(연결된 계정 포함)이 쓴 글만 요약 대기 목록에 쌓는다. 유니와 남의 말은 넣지 않는다."""
+        own = [
+            PendingMessage(id=m.message_id, text=_MENTION_TOKEN.sub("", m.content).strip())
+            for m in context
+            if not m.is_bot and m.author_discord_id in player_discord_ids
+        ]
+        try:
+            _ = await self._memory.enqueue(
+                player_id, messages=own, guild_id=guild_id, channel_id=trigger.channel_id,
+                message_id=trigger.message_id, now=now.timestamp(),
+            )
+        except Exception:
+            logger.warning("플레이어 %s의 메모리 요약 대기 등록 실패", player_id, exc_info=True)

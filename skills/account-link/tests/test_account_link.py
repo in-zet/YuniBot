@@ -21,6 +21,7 @@ _CORE_MIGRATIONS = [
     Path("migrations/core/001_players.sql").read_text(),
     Path("migrations/core/002_player_tags.sql").read_text(),
     Path("migrations/core/004_memory.sql").read_text(),
+    Path("migrations/core/015_memory_nickname_pending.sql").read_text(),
 ]
 _SKILL_MIGRATION = Path(__file__).parent.parent / "migrations" / "001_init.sql"
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"

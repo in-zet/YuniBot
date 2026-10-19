@@ -21,6 +21,7 @@ from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
 from core.skill_loading import Mode, SkillLoadState
 from core.tool_types import ToolContext
+from services.common.memory import RememberResult
 from tests.core.skill_factory import write_skill
 from tests.support.fake_llm import FakeLlmAdapter
 
@@ -364,6 +365,13 @@ class _FakeMemoryService:
 
     async def set(self, player_id: str, content: str) -> None:
         self.saved[player_id] = content
+
+    async def remember(
+        self, player_id: str, *, content: str | None = None, nickname: str | None = None
+    ) -> RememberResult:
+        if content is not None:
+            self.saved[player_id] = content
+        return RememberResult(content_saved=content, nickname_saved=nickname)
 
 
 @pytest.mark.asyncio

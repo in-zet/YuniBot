@@ -65,6 +65,9 @@ class Display:
     embeds: list[Any] = field(default_factory=list)
     view: Any | None = None
     ephemeral: bool = False
+    # 본인에게만 보여야 하는 내용. 멘션 응답은 채널 답장이라 ephemeral이 없으므로, 이 표시물은 채널에
+    # 붙이지 않고 요청한 플레이어에게 DM으로 보낸다(content만). 슬래시는 ephemeral을 따로 켠다.
+    private: bool = False
 
 
 @dataclass(slots=True, kw_only=True)

@@ -5,6 +5,12 @@ import pytest
 from core.events import Section
 from core.llm import GenerationTurn, LlmContent, LlmPart, UsageInfo
 from core.threads import ThreadTranscript
+from services.common.memory import (
+    MemoryMerge,
+    MemoryState,
+    PendingMessage,
+    PendingSummary,
+)
 from services.common.yuni import YuniService
 from tests.support.fake_llm import FakeLlmAdapter
 
@@ -150,3 +156,87 @@ async def test_line_does_not_record_usage_without_player_and_survives_usage_fail
 
     failing = _service(FakeLlmAdapter([_turn("좋아!")]), usage=_RecordingUsage(fail=True))
     assert await failing.line([Section(stage="good")], player_id="p1") == "좋아!"
+
+
+# ---- 12단계: 호칭과 메모리 요약
+
+
+async def test_line_passes_address_to_the_model_and_allows_digits_in_it() -> None:
+    llm = FakeLlmAdapter([_turn("디짐2상, 대단해!")])
+    async def address(player_id: str) -> str | None:
+        return "디짐2상"
+
+    service = YuniService(llm=llm, model="cheap-model", system_prompt="규칙과 말투", address=address)  # pyright: ignore[reportArgumentType]
+    text = await service.line([Section(stage="great", data={"x": 1})], player_id="p1")
+
+    assert text == "디짐2상, 대단해!"
+    payload = json.loads(llm.calls[0][2][0].parts[0].text or "")
+    assert payload["address"] == "디짐2상"
+
+
+async def test_line_omits_address_without_player_or_when_lookup_fails() -> None:
+    async def broken(player_id: str) -> str | None:
+        raise RuntimeError("db")
+
+    llm = FakeLlmAdapter([_turn("좋아!"), _turn("좋아!")])
+    service = YuniService(llm=llm, model="cheap-model", address=broken)  # pyright: ignore[reportArgumentType]
+    sections = [Section(stage="good", data={"x": 1})]
+    await service.line(sections)
+    await service.line(sections, player_id="p1")
+    for call in llm.calls:
+        assert "address" not in json.loads(call[2][0].parts[0].text or "")
+
+
+def _state(**kw: object) -> MemoryState:
+    return MemoryState(**kw)  # pyright: ignore[reportArgumentType]
+
+
+def _pending(*texts: str, guild_id: str | None = "g1") -> PendingSummary:
+    return PendingSummary(
+        player_id="p1", messages=[PendingMessage(id=str(i), text=t) for i, t in enumerate(texts)],
+        guild_id=guild_id, channel_id="c1", message_id="9", due_at=1.0, attempts=0,
+    )
+
+
+async def test_merge_memory_sends_state_and_own_messages_and_parses_json() -> None:
+    reply = '```json\n{"content": "왼손이 약하다", "nickname": "디짐"}\n```'
+    llm = FakeLlmAdapter([_turn(reply)])
+    usage = _RecordingUsage()
+    service = _service(llm, usage=usage)
+
+    merged = await service.merge_memory(
+        _state(content="기존", nickname="옛호칭", forgotten="지운것"), _pending("나 왼손 약해"),
+    )
+
+    assert merged == MemoryMerge(content="왼손이 약하다", nickname="디짐")
+    model, system, contents, tools = llm.calls[0]
+    assert model == "cheap-model" and tools == []
+    assert "플레이어 메모리 갱신" in system and "규칙과 말투" not in system
+    assert json.loads(contents[0].parts[0].text or "") == {
+        "memory": "기존", "nickname": "옛호칭", "forgotten": ["지운것"], "messages": ["나 왼손 약해"],
+    }
+    assert usage.records[0]["kind"] == "memory_summary" and usage.records[0]["guild_id"] == "g1"
+    assert usage.records[0]["player_id"] == "p1"
+
+
+async def test_merge_memory_null_nickname_means_unchanged() -> None:
+    service = _service(FakeLlmAdapter([_turn('{"content": "x", "nickname": null}')]))
+    assert await service.merge_memory(_state(), _pending("a")) == MemoryMerge(content="x", nickname=None)
+
+
+@pytest.mark.parametrize("reply", [None, "", "JSON이 아니다", "{깨진", '{"nickname": "x"}', '["x"]', '{"content": 3}'])
+async def test_merge_memory_returns_none_for_unusable_reply(reply: str | None) -> None:
+    service = _service(FakeLlmAdapter([_turn(reply)]))
+    assert await service.merge_memory(_state(), _pending("a")) is None
+
+
+async def test_merge_memory_returns_none_when_llm_fails_or_is_missing() -> None:
+    assert await _service(_FailingLlm()).merge_memory(_state(), _pending("a")) is None
+    assert await YuniService().merge_memory(_state(), _pending("a")) is None
+
+
+async def test_merge_memory_dm_scope_usage_when_no_guild() -> None:
+    usage = _RecordingUsage()
+    service = _service(FakeLlmAdapter([_turn('{"content": "x"}')]), usage=usage)
+    await service.merge_memory(_state(), _pending("a", guild_id=None))
+    assert usage.records[0]["guild_id"] == "dm"

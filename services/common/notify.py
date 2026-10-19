@@ -35,6 +35,7 @@ class DiscordGateway(Protocol):
 
     async def send_channel_message(self, channel_id: str, content: str) -> None: ...
     async def send_dm(self, discord_id: str, content: str, *, view: Any | None = None) -> None: ...
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None: ...
 
 
 class NotifyService:
@@ -59,6 +60,9 @@ class NotifyService:
         if player is None or player.primary_discord_id is None:
             return
         await self._gateway.send_dm(player.primary_discord_id, content, view=view)
+
+    async def react(self, channel_id: str, message_id: str, emoji: str) -> None:
+        await self._gateway.add_reaction(channel_id, message_id, emoji)
 
     async def mention(self, player_id: str, content: str) -> str:
         """알림 멘션 설정(account-link의 '알림을 받을 계정')을 반영해 멘션 문자열을 만든다."""

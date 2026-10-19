@@ -15,7 +15,8 @@
 | chunithm-arcade                                                  | 8    | 구현   |
 | chunithm-updates                                                 | 9    | 구현   |
 | web-qa                                                           | 10   | 구현   |
-| memory, yuni-bond                                                | 12   | 미착수 |
+| memory                                                           | 12   | 구현   |
+| yuni-bond                                                        | 12   | 미착수 |
 
 **제외** (검토하고 버린 안 — 재논의 전까지 다시 제안하지 않는다)
 
@@ -70,7 +71,9 @@
   - [X] Part 2: `websearch` 공통 서비스. 어댑터 프로토콜(`core/search.py`)과 Gemini/Claude 구현(`core/search_gemini.py`·`core/search_claude.py`) + `services/common/websearch.py`(쿨다운·출처없음 검사). `WEBSEARCH_PROVIDER`(기본 gemini, `LLM_PROVIDER`와 독립)·`SEARCH_MODEL`·`WEBSEARCH_COOLDOWN_SECONDS`(기본 15초) 설정 추가. 상세는 `progress/2026-10-18.md`
   - [X] Part 3: `web-qa` 스킬. 구현 완료 — `search(question)` 도구 하나(`weight: heavy`, `services: [websearch, usage]`, `max_calls_per_turn=5`, 슬래시 없음, 테이블 없음, 출처는 `display_mode="required"`로 강제), 성공 시 도구 안에서 바로 `usage.record(kind="websearch")`. 상세는 `web-qa.md` "구현 결정". 실기 미확인(위 문서 "미확인 사항")
 - [X] 11. 유니 인격: `persona.md`, `yuni` 서비스의 한마디(LLM), 고정 문구(`core/fallback_messages.py`) — 구현 완료(2026-10-19, 밝은 반말). 실기 미확인: 동기화 리포트·목표 알림·업데이트 알림의 한마디가 말투대로 나오는지, 한마디 사용량이 `/관리 사용량`에 잡히는지, 멘션 응답 말투
-- [ ] 12. 메모리와 관계: 자동 요약, 호칭 우선순위, `memory`·`yuni-bond`, 대화 스레드 후기, 펼친 스킬의 답장 사슬 간 유지
+- [ ] 12. 메모리와 관계 — 두 부분으로 나눔(2026-10-19)
+  - [X] Part 1: 메모리 전체. 호칭 칸(`player_memory.nickname`)과 호칭 우선순위(`core/address.py`), 자동 요약(5분 대기 목록 `player_memory_pending`, `YuniService.merge_memory`), `remember`의 `nickname`, 요약 반영 반응(📝), 표시물 `private`(멘션에서 DM), `memory` 스킬(`view`·`forget`·`set_auto`). 상세는 `00-core.md` "플레이어 메모리"와 `memory.md` "구현 결정". 실기 미확인: "호칭은 ○○로 해 줘" 후 호칭 사용, 5분 뒤 📝 반응과 메모리 반영, `/메모리 보기`(본인에게만)·멘션으로 "뭐 기억해?"(DM), `/메모리 지우기` 확인 버튼, 지운 항목이 다음 요약에서 되살아나지 않는지, `/메모리 자동저장` 끄면 요약이 안 도는지, 동기화 리포트 한마디에 호칭이 들어가는지
+  - [ ] Part 2: 대화 상태와 `yuni-bond`. 펼친 스킬의 답장 사슬 간 유지, 대화 스레드를 `on_message`·유휴 점검에 연결하고 닫힐 때 후기·메모리 요약, `yuni-bond`(테이블 2개, 도구 5개, `chunithm.plan.requested` 발신)
 
 고정 원칙: 5단계까지는 LLM 없이 슬래시로 동작한다. `yuni` 서비스는 11단계 전까지 정해진 문구를 돌려주고, 7~10단계 스킬은 이 인터페이스만 쓴다.
 

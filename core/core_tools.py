@@ -27,16 +27,18 @@ async def open_skill(ctx: ToolContext, skill_name: str) -> ToolResult:
 
 
 @tool()
-async def remember(ctx: ToolContext, content: str) -> ToolResult:
-    """플레이어가 "이거 기억해 줘"라고 직접 요청한 내용을 플레이어 메모리에 바로 저장한다."""
-    existing = await ctx.memory.get(ctx.player_id)
-    lines = [line for line in existing.splitlines() if line.strip()]
-    lines.append(content.strip())
-    # 00-core.md "플레이어 메모리": 상한 1500자, 넘으면 오래된 것부터 줄인다.
-    while len("\n".join(lines)) > 1500 and len(lines) > 1:
-        lines.pop(0)
-    await ctx.memory.set(ctx.player_id, "\n".join(lines)[:1500])
-    return ToolResult(data={"saved": content}, display=Display(content="기억했다.", ephemeral=True))
+async def remember(ctx: ToolContext, content: str | None = None, nickname: str | None = None) -> ToolResult:
+    """플레이어가 "이거 기억해 줘"라고 직접 요청한 내용을 플레이어 메모리에 바로 저장한다. 한 줄에 사실
+    하나로 짧게 쓴다. 플레이어가 자기를 부를 이름을 정해 주면 content가 아니라 nickname에 그 이름만 넣는다."""
+    if not (content and content.strip()) and not (nickname and nickname.strip()):
+        return ToolResult(error="기억할 내용이나 호칭이 필요하다")
+    saved = await ctx.memory.remember(ctx.player_id, content=content, nickname=nickname)
+    if saved.content_saved is None and saved.nickname_saved is None:
+        return ToolResult(error="저장할 수 있는 내용이 없다")
+    return ToolResult(
+        data={"saved": saved.content_saved, "nickname": saved.nickname_saved},
+        display=Display(content="기억했다.", ephemeral=True),
+    )
 
 
 @tool()

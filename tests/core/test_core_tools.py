@@ -1,6 +1,11 @@
+from pathlib import Path
+
+import aiosqlite
+
 from core.core_tools import CORE_TOOL_SPECS, list_capabilities, open_skill, remember
 from core.skill_loading import SkillLoadState
 from core.tool_types import ToolContext
+from services.common.memory import MemoryService
 
 
 def test_core_tool_specs_contains_all_three() -> None:
@@ -29,17 +34,41 @@ async def test_open_skill_rejects_unknown_skill() -> None:
     assert result.error is not None
 
 
-async def test_remember_appends_to_memory(monkeypatch) -> None:
-    saved: dict[str, str] = {}
+async def _memory_ctx() -> tuple[ToolContext, MemoryService, aiosqlite.Connection]:
+    conn = await aiosqlite.connect(":memory:")
+    for name in ("004_memory.sql", "015_memory_nickname_pending.sql"):
+        await conn.executescript(Path("migrations/core", name).read_text())
+    memory = MemoryService(conn)
+    return ToolContext(player_id="p1", tags=frozenset(), services={"memory": memory}), memory, conn
 
-    class _FakeMemory:
-        async def get(self, player_id: str) -> str:
-            return saved.get(player_id, "")
 
-        async def set(self, player_id: str, content: str) -> None:
-            saved[player_id] = content
+async def test_remember_appends_to_memory() -> None:
+    ctx, memory, conn = await _memory_ctx()
+    try:
+        result = await remember(ctx, content="왼손이 약하다")
+        assert result.error is None
+        assert result.data == {"saved": "왼손이 약하다", "nickname": None}
+        assert await memory.get("p1") == "왼손이 약하다"
+    finally:
+        await conn.close()
 
-    ctx = ToolContext(player_id="p1", tags=frozenset(), services={"memory": _FakeMemory()})
-    result = await remember(ctx, content="호칭은 유니상")
-    assert result.error is None
-    assert "호칭은 유니상" in saved["p1"]
+
+async def test_remember_nickname_goes_to_the_nickname_slot() -> None:
+    ctx, memory, conn = await _memory_ctx()
+    try:
+        result = await remember(ctx, nickname="디짐")
+        assert result.error is None
+        assert result.data == {"saved": None, "nickname": "디짐"}
+        assert await memory.get_nickname("p1") == "디짐"
+        assert await memory.get("p1") == ""
+    finally:
+        await conn.close()
+
+
+async def test_remember_rejects_empty_input() -> None:
+    ctx, _memory, conn = await _memory_ctx()
+    try:
+        assert (await remember(ctx)).error is not None
+        assert (await remember(ctx, content="  ", nickname="@")).error is not None
+    finally:
+        await conn.close()

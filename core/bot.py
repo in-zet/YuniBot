@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -13,6 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+from core.address import AddressResolver, NicknameSource
 from core.agent import AgentLoop
 from core.config import CoreConfig, load_config
 from core.contract_checks import run_all_contract_checks
@@ -58,7 +59,7 @@ from services.chunithm.songdb import SongDbService
 from services.chunithm.terms import TermsService
 from services.common.arcades import ArcadesService
 from services.common.http import HttpService, build_http_service
-from services.common.memory import MemoryService
+from services.common.memory import MemoryService, PendingSummary
 from services.common.notify import NotifyService
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
@@ -108,6 +109,8 @@ class _ScoreRefAdapter:
 
 
 _SCHEDULE_POLL_SECONDS = 60
+# 자동 요약이 메모리를 바꿨을 때 그 대화의 마지막 메시지에 다는 반응.
+_MEMORY_SAVED_EMOJI = "📝"
 
 
 class YuniClient(discord.Client):
@@ -127,6 +130,7 @@ class YuniClient(discord.Client):
         services: dict[str, object],
         event_bus: EventBus,
         player_data: PlayerDataScanner,
+        memory_flush: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
@@ -142,6 +146,8 @@ class YuniClient(discord.Client):
         self._services = services
         self._event_bus = event_bus
         self._player_data = player_data
+        # 시각이 된 메모리 자동 요약을 반영하는 콜러블(epoch 초를 받는다). 시험처럼 없으면 요약은 돌지 않는다.
+        self._memory_flush = memory_flush
 
     async def setup_hook(self) -> None:
         assert self.user is not None  # setup_hook은 로그인 뒤에만 불린다(discord.py의 보장)
@@ -170,6 +176,11 @@ class YuniClient(discord.Client):
             await _emit_due_once(due_once, self._event_bus)
         except Exception:
             logger.warning("예약 폴링 실패, 다음 틱에 다시 시도한다", exc_info=True)
+        if self._memory_flush is not None:
+            try:
+                await self._memory_flush(datetime.datetime.now().timestamp())  # noqa: DTZ005 - 멘션 경로의 now.timestamp()와 같은 서버 로컬 시간 기준
+            except Exception:
+                logger.warning("메모리 요약 폴링 실패, 다음 틱에 다시 시도한다", exc_info=True)
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.id == (self.user.id if self.user else None):
@@ -178,6 +189,7 @@ class YuniClient(discord.Client):
             message_id=str(message.id), author_discord_id=str(message.author.id), is_bot=message.author.bot,
             content=message.content, reference_id=str(message.reference.message_id) if message.reference else None,
             mentions_bot=self.user in message.mentions if self.user else False,
+            channel_id=str(message.channel.id), author_display_name=message.author.display_name,
         )
         if not is_mention_eligible(trigger=trigger, bot_discord_id=str(self.user.id) if self.user else ""):
             return
@@ -254,6 +266,12 @@ class _BotDiscordGateway:
             await user.send(content, view=view)
         else:
             await user.send(content)
+
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
+        channel = self._get_client().get_channel(int(channel_id))
+        if isinstance(channel, discord.abc.Messageable):
+            message = await channel.fetch_message(int(message_id))
+            await message.add_reaction(emoji)
 
 
 def _migration_roots(skills: list[LoadedSkill]) -> list[tuple[str, Path]]:
@@ -513,10 +531,21 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
             )
         llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
 
-    # 유니의 한마디는 싼 모델(SUMMARY_MODEL)로 만든다. 규칙이 말투보다 앞선다(rules.md가 먼저).
+    # 호칭: 메모리의 호칭 칸 → CHUNITHM-NET 닉네임 → (멘션이면) 디스코드 서버 닉네임. 게임 쪽 닉네임은 소스로 받는다.
+    address_sources: list[NicknameSource] = []
+    if chunithm_net_service is not None:
+        net_service = chunithm_net_service
+
+        async def _net_nickname(player_id: str) -> str | None:
+            return (await net_service.status(player_id)).nickname
+
+        address_sources.append(_net_nickname)
+    address_resolver = AddressResolver(memory=memory_service, sources=address_sources)
+
+    # 유니의 한마디와 메모리 요약은 싼 모델(SUMMARY_MODEL)로 만든다. 규칙이 말투보다 앞선다(rules.md가 먼저).
     yuni_service = YuniService(
         llm=llm_adapter, model=config.summary_model, usage=usage_service, thinking_level=config.thinking_level,
-        system_prompt=f"{rules_text}\n\n{persona_text}",
+        system_prompt=f"{rules_text}\n\n{persona_text}", address=address_resolver.resolve,
     )
     services["yuni"] = yuni_service
 
@@ -562,7 +591,15 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         # 핸들러에 닿는다(M1) — executor도 이 event_bus 변수로 만들어졌으니 같은 객체다.
         event_bus=event_bus,
         known_skill_names=known_skill_names, skill_loading_mode=config.skill_loading_mode,
+        address=address_resolver,
     )
+
+    async def _react_memory_saved(pending: PendingSummary) -> None:
+        if pending.channel_id and pending.message_id:
+            await notify_service.react(pending.channel_id, pending.message_id, _MEMORY_SAVED_EMOJI)
+
+    async def flush_memory(now: float) -> None:
+        _ = await memory_service.flush_due(now=now, merge=yuni_service.merge_memory, on_changed=_react_memory_saved)
 
     schedule_fns = {
         (skill.manifest.name, spec.fn.__name__): spec
@@ -578,7 +615,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         mention_entry=mention_entry, known_skill_names=known_skill_names,
         skill_loading_mode=config.skill_loading_mode,
         scheduler=scheduler, schedule_fns=schedule_fns, services=services, event_bus=event_bus,
-        player_data=player_data,
+        player_data=player_data, memory_flush=flush_memory,
     )
     client_holder.append(client)
 

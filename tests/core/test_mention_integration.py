@@ -14,6 +14,7 @@ from core.events import EventBus
 from core.executor import ToolExecutor
 from core.fallback_messages import (
     COOLDOWN_ACTIVE_MESSAGE,
+    PRIVATE_DM_FAILED_MESSAGE,
     RETRY_WAIT_MESSAGE,
     WORKING_MESSAGE,
 )
@@ -97,12 +98,35 @@ class _FakeNewPlayers:
 class _FakeMemory:
     def __init__(self) -> None:
         self.store: dict[str, str] = {}
+        self.enqueued: list[dict[str, Any]] = []
 
     async def get(self, player_id: str) -> str:
         return self.store.get(player_id, "")
 
     async def set(self, player_id: str, content: str) -> None:
         self.store[player_id] = content
+
+    async def enqueue(self, player_id: str, **kwargs: Any) -> bool:
+        self.enqueued.append({"player_id": player_id, **kwargs})
+        return True
+
+
+class _FakeAddress:
+    def __init__(self, name: str | None) -> None:
+        self.name = name
+        self.discord_names: list[str | None] = []
+
+    async def resolve(self, player_id: str, *, discord_name: str | None = None) -> str | None:
+        self.discord_names.append(discord_name)
+        return self.name
+
+
+class _FakeDmNotify:
+    def __init__(self) -> None:
+        self.dms: list[tuple[str, str]] = []
+
+    async def dm(self, player_id: str, content: str, *, view: object | None = None) -> None:
+        self.dms.append((player_id, content))
 
 
 class _FakeUsage:
@@ -159,6 +183,8 @@ def _mention_entry(
     players: Any | None = None,
     usage: _FakeUsage | None = None,
     registry_snapshot_enabled: bool = False,
+    address: _FakeAddress | None = None,
+    notify: Any | None = None,
 ) -> tuple[MentionEntry, _FakeUsage]:
     registry = _registry(*extra_skill_dirs)
     bus = event_bus if event_bus is not None else EventBus()
@@ -177,10 +203,12 @@ def _mention_entry(
         players_obj.tags = player_tags
     usage_obj = usage if usage is not None else _FakeUsage()
     entry = MentionEntry(
-        agent=agent, players=players_obj, notify=NotifyService.__new__(NotifyService), cooldown=CooldownTracker(),
+        agent=agent, players=players_obj, notify=notify if notify is not None else NotifyService.__new__(NotifyService),
+        cooldown=CooldownTracker(),
         settings=_FakeSettings(), usage=usage_obj, bot_discord_id="bot", agent_model=agent_model,
         memory=memory if memory is not None else _FakeMemory(), event_bus=bus,
         known_skill_names={s.manifest.name for s in registry.enabled_skills()}, skill_loading_mode="instructions",
+        address=address,
     )
     return entry, usage_obj
 
@@ -437,6 +465,139 @@ async def test_mention_entry_injects_player_memory_into_system_instruction() -> 
     assert llm.calls
     system_instruction = llm.calls[0][1]
     assert "민트초코를 좋아한다" in system_instruction
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_injects_resolved_address_with_the_authors_discord_name() -> None:
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+    address = _FakeAddress("디짐상")
+    entry, _usage = _mention_entry(script, address=address)
+
+    trigger = ChannelMessage(
+        message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True,
+        author_display_name="서버닉",
+    )
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_ignore, typing=_NoopTyping())
+
+    llm = cast("FakeLlmAdapter", entry._agent._llm)  # pyright: ignore[reportPrivateUsage]
+    assert "이 플레이어를 부를 이름: 디짐상" in llm.calls[0][1]
+    assert address.discord_names == ["서버닉"]
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_omits_address_line_when_unknown() -> None:
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+    entry, _usage = _mention_entry(script, address=_FakeAddress(None))
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_ignore, typing=_NoopTyping())
+
+    llm = cast("FakeLlmAdapter", entry._agent._llm)  # pyright: ignore[reportPrivateUsage]
+    assert "이 플레이어를 부를 이름:" not in llm.calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_queues_only_the_players_own_messages_for_summary() -> None:
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+    memory = _FakeMemory()
+    entry, _usage = _mention_entry(script, memory=memory)
+
+    earlier = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="나 왼손이 약해")
+    bot_reply = ChannelMessage(message_id="2", author_discord_id="bot", is_bot=True, content="유니의 말")
+    other = ChannelMessage(message_id="3", author_discord_id="p2", is_bot=False, content="쟤는 왼손 약해")
+    trigger = ChannelMessage(
+        message_id="4", author_discord_id="p1", is_bot=False, content="<@999> 호칭은 디짐으로 해 줘", mentions_bot=True,
+        channel_id="c9",
+    )
+    now = datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC)
+    await entry.handle(
+        trigger=trigger, history=[earlier, bot_reply, other, trigger], guild_id="g1", now=now,
+        send=_ignore, typing=_NoopTyping(),
+    )
+
+    [queued] = memory.enqueued
+    assert queued["player_id"] == "p1"
+    assert [(m.id, m.text) for m in queued["messages"]] == [("1", "나 왼손이 약해"), ("4", "호칭은 디짐으로 해 줘")]
+    assert queued["guild_id"] == "g1" and queued["channel_id"] == "c9" and queued["message_id"] == "4"
+    assert queued["now"] == now.timestamp()
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_survives_summary_queue_failure() -> None:
+    class _BrokenMemory(_FakeMemory):
+        async def enqueue(self, player_id: str, **kwargs: Any) -> bool:
+            raise RuntimeError("db")
+
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+    entry, _usage = _mention_entry(script, memory=_BrokenMemory())
+    sent: list[str] = []
+
+    async def _collect(text: str, displays: list[Display]) -> None:
+        sent.append(text)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_collect, typing=_NoopTyping())
+    assert sent == ["답"]
+
+
+_PRIVATE_TOOL_BODY = (
+    "from core.tool_types import Display\n\n\n"
+    "@tool()\n"
+    "async def show_secret(ctx: ToolContext) -> ToolResult:\n"
+    '    """테스트용: 본인에게만 보여야 하는 표시물을 낸다."""\n'
+    "    return ToolResult(\n"
+    "        data={},\n"
+    "        display=Display(content=\"비밀 내용\", ephemeral=True, private=True),\n"
+    "    )\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_private_display_goes_to_dm_instead_of_the_channel_reply(tmp_path: Path) -> None:
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "test-private", _PRIVATE_TOOL_BODY)
+    call = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="test-private_show_secret", args={})],
+    )
+    answer = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="DM으로 보냈어.")]), text="DM으로 보냈어.")
+    notify = _FakeDmNotify()
+    entry, _usage = _mention_entry([call, answer], extra_skill_dirs=(skills_root,), notify=notify)
+    sent: list[tuple[str, list[Display]]] = []
+
+    async def _collect(text: str, displays: list[Display]) -> None:
+        sent.append((text, displays))
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="보여 줘", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_collect, typing=_NoopTyping())
+
+    assert notify.dms == [("p1", "비밀 내용")]
+    assert sent == [("DM으로 보냈어.", [])]
+
+
+@pytest.mark.asyncio
+async def test_private_display_tells_the_player_when_the_dm_cannot_be_sent(tmp_path: Path) -> None:
+    class _BrokenDm:
+        async def dm(self, player_id: str, content: str, *, view: object | None = None) -> None:
+            raise RuntimeError("Cannot send messages to this user")
+
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "test-private", _PRIVATE_TOOL_BODY)
+    call = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="test-private_show_secret", args={})],
+    )
+    answer = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="DM으로 보냈어.")]), text="DM으로 보냈어.")
+    entry, _usage = _mention_entry([call, answer], extra_skill_dirs=(skills_root,), notify=_BrokenDm())
+    sent: list[tuple[str, list[Display]]] = []
+
+    async def _collect(text: str, displays: list[Display]) -> None:
+        sent.append((text, displays))
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="보여 줘", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_collect, typing=_NoopTyping())
+
+    [(text, displays)] = sent
+    assert PRIVATE_DM_FAILED_MESSAGE in text and displays == []
 
 
 _EMIT_TOOL_BODY = (

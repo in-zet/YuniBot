@@ -110,6 +110,9 @@ class _FakeMemory:
     async def set(self, player_id: str, content: str) -> None:
         return None
 
+    async def enqueue(self, player_id: str, **kwargs) -> bool:
+        return True
+
 
 class _FakeUsage:
     async def month_total_usd(self, *, guild_id: str, year_month: str) -> float:

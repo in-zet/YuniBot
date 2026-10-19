@@ -12,3 +12,4 @@ COOLDOWN_ACTIVE_MESSAGE = "잠깐, 너무 빨라! 조금만 있다가 다시 불
 TOOL_CALL_CAP_MESSAGE = "이번 요청에서 이것저것 너무 많이 찾아봤어. 질문을 나눠서 다시 말해 줄래?"
 RETRY_WAIT_MESSAGE = "지금 답이 좀 늦네. 잠깐만 기다려 줘!"
 WORKING_MESSAGE = "찾아보는 중이야, 잠깐만 기다려 줘!"
+PRIVATE_DM_FAILED_MESSAGE = "DM을 보내지 못했어. 디스코드 설정에서 DM을 받을 수 있게 해 주거나, 슬래시 명령으로 다시 불러 줘."
