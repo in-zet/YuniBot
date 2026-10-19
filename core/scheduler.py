@@ -51,11 +51,19 @@ class Scheduler:
     ) -> None:
         for owner_skill, fn_name, cron, catch_up in specs:
             cursor = await self._conn.execute(
-                "SELECT cron FROM schedule_recurring WHERE owner_skill = ? AND fn_name = ?",
+                "SELECT cron, catch_up FROM schedule_recurring WHERE owner_skill = ? AND fn_name = ?",
                 (owner_skill, fn_name),
             )
             row = await cursor.fetchone()
             if row is not None and row[0] == cron:
+                # cron은 그대로지만 코드의 catch_up 값이 바뀌었을 수 있다 — next_run_at은
+                # 건드리지 않고 catch_up만 맞춘다(안 그러면 catch_up만 바꿔 배포해도 DB엔
+                # 영영 반영되지 않는다).
+                if row[1] != int(catch_up):
+                    await self._conn.execute(
+                        "UPDATE schedule_recurring SET catch_up = ? WHERE owner_skill = ? AND fn_name = ?",
+                        (int(catch_up), owner_skill, fn_name),
+                    )
                 continue
             next_run = next_fire_time(cron, now, quiet_start=self._quiet_start, quiet_end=self._quiet_end)
             await self._conn.execute(

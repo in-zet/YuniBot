@@ -70,6 +70,23 @@ async def test_sync_recurring_is_idempotent_across_restarts(conn: aiosqlite.Conn
     assert len(rows) == 1
 
 
+async def test_sync_recurring_updates_catch_up_when_cron_unchanged(conn: aiosqlite.Connection) -> None:
+    """cron 문자열은 그대로 두고 catch_up만 바꿔 배포해도 DB에 반영돼야 한다."""
+    scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
+    now = datetime.datetime(2026, 10, 10, 1, 0)
+
+    await scheduler.sync_recurring([("chunithm-updates", "check_updates", "0 9 * * *", True)], now=now)
+    await scheduler.sync_recurring([("chunithm-updates", "check_updates", "0 9 * * *", False)], now=now)
+
+    cursor = await conn.execute(
+        "SELECT catch_up FROM schedule_recurring WHERE owner_skill = ? AND fn_name = ?",
+        ("chunithm-updates", "check_updates"),
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    assert row[0] == 0
+
+
 async def test_startup_catch_up_runs_only_todays_missed_schedule(conn: aiosqlite.Connection) -> None:
     scheduler = Scheduler(conn, quiet_start=QUIET_START, quiet_end=QUIET_END)
     boot_day1 = datetime.datetime(2026, 10, 9, 1, 0)
