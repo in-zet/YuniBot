@@ -7,13 +7,19 @@ def test_extract_numbers_reads_integers_and_decimals_with_commas() -> None:
     assert extract_numbers("1,007,500점, 3.20어택") == {1007500.0, 3.20}
 
 
+def test_extract_numbers_ignores_small_plain_integers() -> None:
+    # 순위 번호·프레임 크기·날짜 같은 작은 정수는 대조 대상이 아니다. 소수와 큰 수는 그대로다.
+    assert extract_numbers("1. 곡 A 2. 곡 B, 베스트 30, 신곡 20, 10월 5일") == set()
+    assert extract_numbers("레이팅 16.9726, 51곡, 점수 1,007,500") == {16.9726, 51.0, 1007500.0}
+
+
 def test_extract_numbers_ignores_zero_and_one() -> None:
     assert extract_numbers("한 번에 0개 남음, 1등") == set()
 
 
 def test_flatten_numbers_walks_nested_dicts_and_lists() -> None:
-    data = [{"borders": {"SSS+": "12"}, "scores": [1007500, 3.2]}]
-    assert flatten_numbers(data) == {12.0, 1007500.0, 3.2}
+    data = [{"borders": {"SSS+": "12.5"}, "scores": [1007500, 3.2]}]
+    assert flatten_numbers(data) == {12.5, 1007500.0, 3.2}
 
 
 def test_assemble_response_passes_when_all_numbers_in_data() -> None:
@@ -32,7 +38,7 @@ def test_assemble_response_violation_does_not_force_optional_displays() -> None:
     # 위반이라는 이유로 통째로 새어 나왔다 — 위반은 경고 로그로만 남고, 표시물은 여전히
     # [[show:..]]로 모델이 직접 고른 것만 붙는다.
     result = AgentTurnResult(
-        text="보더는 15어택이다.",  # 15는 data에 없는 숫자
+        text="보더는 15.5어택이다.",  # 15.5는 data에 없는 숫자
         collected_data=[{"borders": {"SSS+": 12}}],
         optional_displays={"d1": Display(content="표1"), "d2": Display(content="표2")},
     )
@@ -70,7 +76,7 @@ def test_assemble_response_required_displays_survive_violation_without_show_tag(
     # 숫자 위반이 나도 required 표시물은 그대로 붙는다. optional 표시물은 [[show:..]]가
     # 없으면 위반 여부와 무관하게 안 붙는다.
     result = AgentTurnResult(
-        text="15어택이다.",  # data에 없는 숫자 — 위반
+        text="15.5어택이다.",  # data에 없는 숫자 — 위반
         collected_data=[{"borders": {"SSS+": 12}}],
         required_displays=[Display(content="필수 표")],
         optional_displays={"d1": Display(content="표1")},

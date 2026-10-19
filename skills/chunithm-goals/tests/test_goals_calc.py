@@ -160,6 +160,18 @@ def test_ratio_percent_truncates_to_two_decimals() -> None:
     assert calc.ratio_percent(D("-0.0507")) == D("-5.07")
 
 
+def test_truncate4_keeps_four_decimals_and_drops_the_rest() -> None:
+    assert calc.truncate4(D("0.02749")) == D("0.0274")
+    assert str(calc.truncate4(D("0.1"))) == "0.1000"
+
+
+def test_rating_remaining_to_17_keeps_four_decimals() -> None:
+    remaining = calc.rating_remaining(D("16.9726"), D("17"))
+
+    assert calc.truncate4(remaining) == D("0.0274")
+    assert calc.truncate4(calc.rating_gap_to_song_rating_sum(remaining)) == D("1.3700")
+
+
 def test_truncate2_drops_third_decimal() -> None:
     assert calc.truncate2(D("16.8199")) == D("16.81")
     assert calc.truncate2(D("7.85")) == D("7.85")

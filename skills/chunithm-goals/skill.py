@@ -340,7 +340,7 @@ def _goal_label(goal: Any) -> str:
     if goal.kind == "song":
         return f"{ref['song_title']} {ref['difficulty']}  {_song_target_text(goal)}"
     if goal.kind == "rating":
-        target_text = calc.truncate2(_dec(goal.target_value)) if goal.target_value is not None else "?"
+        target_text = calc.truncate4(_dec(goal.target_value)) if goal.target_value is not None else "?"
         return f"레이팅 {target_text}"
     if goal.kind == "overpower":
         return f"오버파워 {goal.target_value}"
@@ -519,8 +519,8 @@ async def _goal_summary(ctx: ToolContext, goal: Any) -> dict[str, Any]:
 
     if goal.kind == GoalKind.RATING.value:
         remaining = calc.rating_remaining(current, target)
-        summary["remaining"] = str(calc.truncate2(remaining))
-        summary["song_rating_sum_needed"] = str(calc.truncate2(calc.rating_gap_to_song_rating_sum(remaining)))
+        summary["remaining"] = str(calc.truncate4(remaining))
+        summary["song_rating_sum_needed"] = str(calc.truncate4(calc.rating_gap_to_song_rating_sum(remaining)))
     elif goal.kind == GoalKind.OVERPOWER.value:
         summary["remaining"] = str(calc.truncate2(calc.rating_remaining(current, target)))
     elif goal.kind == GoalKind.SONG.value:
@@ -562,7 +562,8 @@ def _summary_text(goal: Any, summary: dict[str, Any]) -> str:
         else:
             parts.append(f"남은 {summary['remaining_score']:,}점")
     elif goal.kind in (GoalKind.RATING.value, GoalKind.OVERPOWER.value) and current is not None:
-        parts.append(f"현재 {calc.truncate2(Decimal(current))}")
+        trunc = calc.truncate4 if goal.kind == GoalKind.RATING.value else calc.truncate2
+        parts.append(f"현재 {trunc(Decimal(current))}")
         remaining_text = f"남은 {summary['remaining']}"
         if goal.kind == GoalKind.RATING.value:
             remaining_text += f" (곡 레이팅 합 {summary['song_rating_sum_needed']})"
@@ -951,7 +952,7 @@ async def progress(ctx: ToolContext, goal_id: str) -> ToolResult:
         projected = await _project_rating_for(ctx, goal.player_id)
         data["projected_rating"] = str(projected) if projected is not None else None
         if projected is not None:
-            lines.append(f"곡별 목표를 모두 달성하면 예상 레이팅 {calc.truncate2(projected)}")
+            lines.append(f"곡별 목표를 모두 달성하면 예상 레이팅 {calc.truncate4(projected)}")
 
     lines.append(f"id {goal.id}")
     return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
@@ -1164,13 +1165,13 @@ async def _rating_goal_block(
         return [], None
     ratio, label = await _record_progress_and_maybe_complete(ctx, goal, sync_id, current)
     target = _dec(goal.target_value)
-    remaining = calc.truncate2(calc.rating_remaining(current, target))
+    remaining = calc.truncate4(calc.rating_remaining(current, target))
     change = calc.value_change(current, _previous_metric_value(deltas, metric))
     change_text = _NO_PREVIOUS if change is None else f"이번 동기화 {change:+}"
     lines = [
-        f"최종 목표 {calc.truncate2(target)}",
+        f"최종 목표 {calc.truncate4(target)}",
         (
-            f"현재 {calc.truncate2(current)} · 남은 레이팅 {remaining} · {change_text} · "
+            f"현재 {calc.truncate4(current)} · 남은 레이팅 {remaining} · {change_text} · "
             f"달성률 {calc.ratio_percent(ratio)}%"
         ),
     ]

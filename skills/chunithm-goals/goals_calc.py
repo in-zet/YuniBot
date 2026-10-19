@@ -8,6 +8,7 @@ _BEST_FRAME = 30
 _NEW_FRAME = 20
 _RATING_DIVISOR = Decimal(50)
 _HUNDREDTH = Decimal("0.01")
+_TEN_THOUSANDTH = Decimal("0.0001")
 # 설계서 "기간과 묶음": 2주 이내는 단기, 3개월 이내는 중기, 그보다 길면 장기.
 _SHORT_DAYS = 14
 _MID_DAYS = 90
@@ -60,8 +61,14 @@ def value_change(current: Decimal, previous: Decimal | None) -> Decimal | None:
 
 
 def truncate2(value: Decimal) -> Decimal:
-    """표시용으로 소수 둘째 자리까지 남기고 셋째 자리에서 버린다(레이팅 표시와 같은 규칙)."""
+    """표시용으로 소수 둘째 자리까지 남기고 셋째 자리에서 버린다(오버파워·퍼센트용)."""
     return value.quantize(_HUNDREDTH, rounding=ROUND_DOWN)
+
+
+def truncate4(value: Decimal) -> Decimal:
+    """레이팅 표시용: 소수 넷째 자리까지 남기고 다섯째 자리에서 버린다. 곡 하나의 레이팅이 아닌 값
+    (전체 레이팅, 베스트30·신곡20 평균, 남은 레이팅, 곡 레이팅 합)은 넷째 자리까지가 원칙이다."""
+    return value.quantize(_TEN_THOUSANDTH, rounding=ROUND_DOWN)
 
 
 def ratio_percent(ratio: Decimal) -> Decimal:

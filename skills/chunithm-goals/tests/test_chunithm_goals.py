@@ -1008,8 +1008,8 @@ async def test_on_sync_completed_shows_rating_goal_remaining_and_change(skill: M
     assert section is not None
     content = section.display.content or ""
     assert "최종 목표 17.00" in content
-    assert "현재 16.90 · 남은 레이팅 0.10 · 이번 동기화 +0.10 · 달성률 50.00%" in content
-    assert section.data["rating_goal"]["remaining"] == "0.10"
+    assert "현재 16.9000 · 남은 레이팅 0.1000 · 이번 동기화 +0.10 · 달성률 50.00%" in content
+    assert section.data["rating_goal"]["remaining"] == "0.1000"
     assert section.data["rating_goal"]["change"] == "0.10"
 
 
@@ -1145,8 +1145,8 @@ async def test_list_goals_shows_rating_goal_achievement_ratio_and_remaining(
     assert goal["goal_id"] == created.data["goal_id"]
     assert goal["current_value"] == "16.90"
     assert Decimal(goal["achievement_ratio"]) == Decimal("0.5")
-    assert goal["remaining"] == "0.10"
-    assert goal["song_rating_sum_needed"] == "5.00"
+    assert goal["remaining"] == "0.1000"
+    assert goal["song_rating_sum_needed"] == "5.0000"
     content = result.display.content if result.display is not None else ""
     assert "달성률 50.00%" in content
     assert created.data["goal_id"] in content  # I8: 슬래시 사용자가 id를 볼 수 있다
@@ -1163,7 +1163,7 @@ async def test_progress_computes_ratio_for_fresh_rating_goal_without_progress_ro
     result = await skill.progress(ctx, created.data["goal_id"])
     assert result.data["history"] == []
     assert Decimal(result.data["achievement_ratio"]) == Decimal("0.25")
-    assert result.data["remaining"] == "0.15"
+    assert result.data["remaining"] == "0.1500"
     assert result.data["pace"] == "ahead"  # 기한이 아주 멀어 경과율은 거의 0이다
     content = result.display.content if result.display is not None else ""
     assert "달성률 25.00%" in content

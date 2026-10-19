@@ -13,14 +13,22 @@ logger = logging.getLogger(__name__)
 _NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 _SHOW_TAG_RE = re.compile(r"\[\[show:([A-Za-z0-9_-]+)\]\]")
 _IGNORED = {0.0, 1.0}
+# 소수점·쉼표 없는 작은 정수(순위 번호, "베스트 30"·"신곡 20" 같은 프레임 크기, 날짜, 곡 수)는 유니가
+# 계산해 만들어 낸 숫자가 아니라 말투·목록의 일부라 대조에서 뺀다(2026-10-19: 목록 번호와 프레임 크기가
+# 매번 위반으로 잡혔다). 점수·레이팅·상수·허용 어택은 소수나 큰 수라 그대로 대조한다.
+_MAX_FREE_INTEGER = 50
 
 
 def extract_numbers(text: str) -> set[float]:
     numbers: set[float] = set()
     for match in _NUMBER_RE.finditer(text):
-        value = float(match.group().replace(",", ""))
-        if value not in _IGNORED:
-            numbers.add(value)
+        raw = match.group().rstrip(",")  # "30, 20"의 쉼표가 숫자에 붙어 잡히는 것을 막는다
+        value = float(raw.replace(",", ""))
+        if value in _IGNORED:
+            continue
+        if raw.lstrip("-").isdigit() and abs(value) <= _MAX_FREE_INTEGER:
+            continue
+        numbers.add(value)
     return numbers
 
 
