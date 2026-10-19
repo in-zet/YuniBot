@@ -525,6 +525,27 @@ async def test_mention_entry_queues_only_the_players_own_messages_for_summary() 
 
 
 @pytest.mark.asyncio
+async def test_turn_that_used_an_admin_tool_is_not_queued_for_memory_summary() -> None:
+    call_admin = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="admin_skills", args={})],
+    )
+    answer = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="봤다.")]), text="봤다.")
+    memory = _FakeMemory()
+    entry, _usage = _mention_entry(
+        [call_admin, answer], player_tags={"admin"}, registry_snapshot_enabled=True, memory=memory,
+    )
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="관리 스킬 보여줘", mentions_bot=True)
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC),
+        send=_ignore, typing=_NoopTyping(),
+    )
+
+    assert memory.enqueued == []
+
+
+@pytest.mark.asyncio
 async def test_mention_entry_survives_summary_queue_failure() -> None:
     class _BrokenMemory(_FakeMemory):
         async def enqueue(self, player_id: str, **kwargs: Any) -> bool:

@@ -66,3 +66,5 @@ services: [memory]
 - **2026-10-19 (12단계 Part 1)**: 도구 셋과 슬래시는 위 표 그대로다. `forget`은 `confirm="bulk"`라서 지울 항목이 2개 이상이면 슬래시는 확인 버튼을 거치고, 멘션은 요청 자체를 확인으로 보고 바로 지운다(`core/agent.py`의 기존 결정). `set_auto`의 인자는 `on: bool`이다.
 - `view`는 표시물에 `private=True`를 켠다. 슬래시는 `ephemeral`로 본인에게만 보이고, 멘션은 코어(`core/mention.py`)가 채널 답장에 붙이지 않고 DM으로 보낸다. DM을 못 보내면 그 사실을 답에 덧붙인다(`PRIVATE_DM_FAILED_MESSAGE`). 모델에는 줄 수만 `data`로 주고 전문은 주지 않는다.
 - 호칭 칸은 `forget`의 `what`이 `호칭`이거나 호칭 값일 때 지운다(항목 표기는 `호칭: ○○`).
+
+- **관리 대화 제외 (2026-10-20)**: admin 태그가 필요한 도구를 부른 턴은 자동 요약 대기 목록에 넣지 않는다. 명시적 `remember`는 그대로 저장한다.

@@ -45,6 +45,8 @@ class AgentTurnResult:
     usage: UsageInfo = field(default_factory=lambda: UsageInfo(input_tokens=0, output_tokens=0))
     hit_tool_call_cap: bool = False
     hit_token_cap: bool = False
+    # admin 태그가 필요한 도구를 부른 턴 — 관리 대화는 플레이어 메모리에 남기지 않는다.
+    used_admin_tool: bool = False
 
 
 class AgentLoop:
@@ -93,6 +95,16 @@ class AgentLoop:
                     if spec.name == fn_name:
                         return spec, skill.manifest.name
         return None
+
+    def _requires_admin(self, spec: ToolSpec, skill_name: str | None) -> bool:
+        if "admin" in spec.tags or "admin" in spec.tags_any:
+            return True
+        if skill_name is None:
+            return False
+        return any(
+            skill.manifest.name == skill_name and ("admin" in skill.manifest.tags or "admin" in skill.manifest.tags_any)
+            for skill in self._registry_skills()
+        )
 
     def _max_calls_for(self, tool_name: str) -> int | None:
         found = self._find_spec(tool_name)
@@ -243,6 +255,8 @@ class AgentLoop:
                 found = self._find_spec(call.name)
                 if found is not None and found[1] is not None:
                     skill_state.touch(found[1])
+                if found is not None and self._requires_admin(found[0], found[1]):
+                    result.used_admin_tool = True
                 if (
                     not heavy_notified and on_heavy_call is not None
                     and found is not None and self._skill_weight(found[1]) == "heavy"

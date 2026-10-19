@@ -342,7 +342,8 @@ class MentionEntry:
         )
 
         # 스레드 대화는 닫힐 때 전문으로 한 번에 요약 대기 목록에 들어간다(core/threads.py).
-        if thread is None:
+        # 관리 도구를 쓴 턴은 메모리에 남기지 않는다.
+        if thread is None and not result.used_admin_tool:
             await self._queue_memory_summary(
                 player_id=player.id, guild_id=guild_id, trigger=trigger, context=context,
                 player_discord_ids=player_discord_ids, now=now,
