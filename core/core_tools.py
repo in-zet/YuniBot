@@ -3,7 +3,7 @@ from __future__ import annotations
 from core.decorators import tool
 from core.skill_loading import SkillLoadState
 from core.threads import ThreadEndRequest
-from core.tool_types import Display, ToolContext, ToolResult
+from core.tool_types import ToolContext, ToolResult
 
 
 def _load_state(ctx: ToolContext) -> SkillLoadState | None:
@@ -36,10 +36,8 @@ async def remember(ctx: ToolContext, content: str | None = None, nickname: str |
     saved = await ctx.memory.remember(ctx.player_id, content=content, nickname=nickname)
     if saved.content_saved is None and saved.nickname_saved is None:
         return ToolResult(error="저장할 수 있는 내용이 없다")
-    return ToolResult(
-        data={"saved": saved.content_saved, "nickname": saved.nickname_saved},
-        display=Display(content="기억했다.", ephemeral=True),
-    )
+    # 확인 말은 유니가 직접 하므로 고정 문구 Display를 붙이지 않는다(답 뒤에 어색하게 덧붙는다).
+    return ToolResult(data={"saved": saved.content_saved, "nickname": saved.nickname_saved})
 
 
 @tool()
