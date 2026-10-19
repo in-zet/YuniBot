@@ -842,7 +842,7 @@ async def test_candidates_stay_in_rank_3_to_8_band_exclude_frame_and_sort_by_ups
         expected = remaining_to_target(
             songdb.note_count_for(hit.song_title, hit.difficulty), hit.current_score, 1_007_500
         )
-        assert (hit.remaining_score, hit.remaining_attacks) == (expected if expected else (None, None))
+        assert hit.remaining_score == (expected[0] if expected else None)
 
 
 async def test_diff_cache_keeps_only_newest(conn, monkeypatch) -> None:

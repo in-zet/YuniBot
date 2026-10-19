@@ -334,13 +334,12 @@ async def analyze(
 async def candidates(
     ctx: ToolContext, min_const: float | None = None, max_const: float | None = None, count: int = 10
 ) -> ToolResult:
-    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 보여준다. SSS를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. SSS까지 남은 점수와 어택을 붙인다. 상수 범위로 거를 수 있다."""
+    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 보여준다. SSS를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. SSS까지 남은 점수를 붙인다. 상수 범위로 거를 수 있다."""
     hits = await ctx.records.candidates(ctx.player_id, min_const=min_const, max_const=max_const, count=max(1, count))
     items = [
         {
             "song_title": h.song_title, "difficulty": h.difficulty, "const": h.const, "upside": str(h.upside),
             "current_score": h.current_score, "remaining_score": h.remaining_score,
-            "remaining_attacks": None if h.remaining_attacks is None else str(h.remaining_attacks),
         }
         for h in hits
     ]
@@ -349,7 +348,7 @@ async def candidates(
         if h.remaining_score is None:
             remaining = f"SSS까지 {_UNKNOWN}"
         else:
-            remaining = f"SSS까지 {_score(h.remaining_score)}점 ({h.remaining_attacks}어택)"
+            remaining = f"SSS까지 {_score(h.remaining_score)}점"
         lines.append(
             f"{i}. {h.song_title} {h.difficulty} {h.const}  현재 {_score(h.current_score)}  {remaining}  "
             f"상승폭 +{h.upside}"

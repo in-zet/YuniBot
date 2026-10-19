@@ -513,7 +513,7 @@ async def test_analyze_of_private_other_is_refused(skill: ModuleType) -> None:
 def _hit(title: str, upside: str, *, remaining: int | None = 7_500) -> CandidateHit:
     return CandidateHit(
         song_title=title, difficulty="MAS", const=15.0, upside=Decimal(upside), current_score=1_000_000,
-        remaining_score=remaining, remaining_attacks=Decimal("75.00") if remaining is not None else None,
+        remaining_score=remaining,
     )
 
 

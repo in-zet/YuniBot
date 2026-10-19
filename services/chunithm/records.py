@@ -178,7 +178,6 @@ class CandidateHit:
     upside: Decimal  # candidate_upside() 결과
     current_score: int  # 안 쳤으면 0
     remaining_score: int | None  # SSS 기준, 노트 수 없으면 None
-    remaining_attacks: Decimal | None
 
 
 def _frame_sort_key(row: PbRow) -> tuple[bool, Decimal, str, str]:
@@ -624,7 +623,6 @@ class RecordsService:
                         upside=upside,
                         current_score=current_score,
                         remaining_score=remaining[0] if remaining is not None else None,
-                        remaining_attacks=remaining[1] if remaining is not None else None,
                     )
                 )
         hits.sort(key=lambda h: (-h.upside, -h.const, h.song_title, h.difficulty))
