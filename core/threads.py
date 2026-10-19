@@ -10,7 +10,7 @@ from typing import Literal, Protocol
 
 logger = logging.getLogger(__name__)
 
-ClosedReason = Literal["explicit", "timeout"]
+ClosedReason = Literal["explicit", "timeout", "shutdown"]
 
 
 class ThreadTransport(Protocol):
@@ -22,6 +22,8 @@ class ThreadMessage:
     player_id: str
     content: str
     at: datetime
+    # 디스코드 메시지 id. 메모리 요약 대기 목록의 중복 제거와 📝 반응에 쓴다.
+    message_id: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -30,6 +32,8 @@ class ThreadTranscript:
     player_id: str
     messages: list[ThreadMessage]
     closed_reason: ClosedReason
+    skill_name: str = ""
+    channel_id: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -38,6 +42,8 @@ class ThreadSession:
     skill_name: str
     player_id: str
     transport: ThreadTransport
+    # 스레드(또는 DM)의 디스코드 채널 id. 들어온 메시지가 이 대화의 것인지 가리는 열쇠다.
+    channel_id: str
     idle_timeout: float
     close_timeout: float
     on_close: Callable[[ThreadTranscript], None | Awaitable[None]]
@@ -45,11 +51,18 @@ class ThreadSession:
     last_activity: datetime = field(default_factory=lambda: datetime.min.replace(tzinfo=UTC))
     state: Literal["open", "checking", "closed"] = "open"
     checked_at: datetime | None = None
+    # 이 대화에서 펼쳐 둔 스킬(오래 안 쓴 순). 메시지마다 이어받는다.
+    opened_skills: list[str] = field(default_factory=list)
+
+
+OnClosed = Callable[[ThreadTranscript], Awaitable[None]]
 
 
 class ThreadManager:
-    def __init__(self) -> None:
+    def __init__(self, *, on_closed: OnClosed | None = None) -> None:
         self._sessions: dict[str, ThreadSession] = {}
+        # 어느 스킬이 연 스레드든 닫힐 때 코어가 한 번 부르는 처리(메모리 요약 등). 연 스킬의 on_close보다 먼저 돈다.
+        self._on_closed = on_closed
 
     async def open(
         self,
@@ -57,6 +70,7 @@ class ThreadManager:
         skill_name: str,
         player_id: str,
         transport: ThreadTransport,
+        channel_id: str,
         on_close: Callable[[ThreadTranscript], None | Awaitable[None]],
         idle_timeout: float = 300.0,
         close_timeout: float = 300.0,
@@ -67,6 +81,7 @@ class ThreadManager:
             skill_name=skill_name,
             player_id=player_id,
             transport=transport,
+            channel_id=channel_id,
             idle_timeout=idle_timeout,
             close_timeout=close_timeout,
             on_close=on_close,
@@ -75,13 +90,22 @@ class ThreadManager:
         self._sessions[session.thread_id] = session
         return session
 
-    async def receive(self, thread_id: str, player_id: str, content: str, *, now: datetime) -> None:
+    def session_for_channel(self, channel_id: str) -> ThreadSession | None:
+        """이 채널에서 아직 닫히지 않은 대화를 찾는다."""
+        for session in self._sessions.values():
+            if session.channel_id == channel_id and session.state != "closed":
+                return session
+        return None
+
+    async def receive(
+        self, thread_id: str, player_id: str, content: str, *, now: datetime, message_id: str | None = None
+    ) -> None:
         session = self._sessions.get(thread_id)
         if session is None or session.state == "closed":
             return
         if player_id != session.player_id:
             return
-        session.transcript.append(ThreadMessage(player_id=player_id, content=content, at=now))
+        session.transcript.append(ThreadMessage(player_id=player_id, content=content, at=now, message_id=message_id))
         session.last_activity = now
         session.state = "open"
         session.checked_at = None
@@ -117,7 +141,22 @@ class ThreadManager:
             player_id=session.player_id,
             messages=list(session.transcript),
             closed_reason=reason,
+            skill_name=session.skill_name,
+            channel_id=session.channel_id,
         )
+        del self._sessions[thread_id]
+        if self._on_closed is not None:
+            try:
+                await self._on_closed(transcript)
+            except Exception:
+                logger.exception("thread close hook failed for %s", thread_id)
         result = session.on_close(transcript)
         if result is not None:
             await result
+
+    async def close_all(self, *, reason: ClosedReason) -> None:
+        for thread_id in list(self._sessions):
+            try:
+                await self.close(thread_id, reason=reason)
+            except Exception:
+                logger.exception("thread close failed for %s", thread_id)

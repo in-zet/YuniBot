@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -32,6 +32,7 @@ from core.prompt import PromptAssembler
 from core.registry import SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
+from core.threads import ThreadSession
 from core.tool_types import Display, ToolContext
 from services.common.notify import NotifyService
 from tests.core.skill_factory import write_skill
@@ -185,6 +186,7 @@ def _mention_entry(
     registry_snapshot_enabled: bool = False,
     address: _FakeAddress | None = None,
     notify: Any | None = None,
+    conversation_skills: Any | None = None,
 ) -> tuple[MentionEntry, _FakeUsage]:
     registry = _registry(*extra_skill_dirs)
     bus = event_bus if event_bus is not None else EventBus()
@@ -208,7 +210,7 @@ def _mention_entry(
         settings=_FakeSettings(), usage=usage_obj, bot_discord_id="bot", agent_model=agent_model,
         memory=memory if memory is not None else _FakeMemory(), event_bus=bus,
         known_skill_names={s.manifest.name for s in registry.enabled_skills()}, skill_loading_mode="instructions",
-        address=address,
+        address=address, conversation_skills=conversation_skills,
     )
     return entry, usage_obj
 
@@ -792,3 +794,147 @@ async def test_mention_does_not_send_working_message_for_light_only_slow_turn() 
     )
 
     assert sent == ["다 됐다"]
+
+
+class _FakeSkillStore:
+    def __init__(self) -> None:
+        self.saved: dict[str, list[str]] = {}
+
+    async def save(self, message_id: str, skills: list[str], *, now: float) -> None:
+        if skills:
+            self.saved[message_id] = skills
+
+    async def get(self, message_id: str) -> list[str]:
+        return self.saved.get(message_id, [])
+
+
+def _open_skill_turns(skill: str) -> list[GenerationTurn]:
+    call = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="open_skill", args={"skill_name": skill})],
+    )
+    return [call, GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+
+
+def _sender(reply_id: str, sent: list[str]):
+    async def _send(text: str, displays: list[Display]) -> str | None:
+        sent.append(text)
+        return reply_id
+
+    return _send
+
+
+_NOW = datetime(2026, 10, 12, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_skills_opened_in_a_reply_are_carried_to_the_next_reply_in_the_chain() -> None:
+    store = _FakeSkillStore()
+    plain = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답2")]), text="답2")
+    entry, _usage = _mention_entry([*_open_skill_turns("chunithm-border"), plain], conversation_skills=store)
+
+    first = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="보더", mentions_bot=True)
+    await entry.handle(trigger=first, history=[first], guild_id="g1", now=_NOW, send=_sender("b1", []), typing=_NoopTyping())
+    assert store.saved == {"b1": ["chunithm-border"]}
+
+    bot_reply = ChannelMessage(message_id="b1", author_discord_id="bot", is_bot=True, content="답")
+    second = ChannelMessage(
+        message_id="2", author_discord_id="p1", is_bot=False, content="그럼 이건?", mentions_bot=True, reference_id="b1",
+    )
+    await entry.handle(
+        trigger=second, history=[first, bot_reply, second], guild_id="g1", now=_NOW + timedelta(minutes=1),
+        send=_sender("b2", []), typing=_NoopTyping(),
+    )
+
+    # 두 번째 답에서는 open_skill을 부르지 않았는데도 펼친 채로 이어받는다.
+    assert store.saved["b2"] == ["chunithm-border"]
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_mention_does_not_inherit_opened_skills() -> None:
+    store = _FakeSkillStore()
+    store.saved["b1"] = ["chunithm-border"]
+    plain = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")
+    entry, _usage = _mention_entry([plain], conversation_skills=store)
+
+    trigger = ChannelMessage(message_id="2", author_discord_id="p1", is_bot=False, content="안녕", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=_NOW, send=_sender("b2", []), typing=_NoopTyping())
+
+    assert "b2" not in store.saved
+
+
+@pytest.mark.asyncio
+async def test_store_failure_does_not_break_the_reply() -> None:
+    class _BrokenStore(_FakeSkillStore):
+        async def save(self, message_id: str, skills: list[str], *, now: float) -> None:
+            raise RuntimeError("db")
+
+        async def get(self, message_id: str) -> list[str]:
+            raise RuntimeError("db")
+
+    entry, _usage = _mention_entry(_open_skill_turns("chunithm-border"), conversation_skills=_BrokenStore())
+    sent: list[str] = []
+    trigger = ChannelMessage(
+        message_id="2", author_discord_id="p1", is_bot=False, content="안녕", mentions_bot=True, reference_id="b1",
+    )
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=_NOW, send=_sender("b2", sent), typing=_NoopTyping())
+
+    assert sent == ["답"]
+
+
+def _thread_session(*, player_id: str = "p1") -> ThreadSession:
+    class _Transport:
+        async def send_message(self, text: str) -> None:
+            pass
+
+    return ThreadSession(
+        thread_id="t1", skill_name="chunithm-border", player_id=player_id, transport=_Transport(),
+        channel_id="c1", idle_timeout=300.0, close_timeout=300.0, on_close=lambda t: None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_thread_message_is_answered_without_a_mention_and_keeps_the_threads_skills() -> None:
+    plain = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")
+    store = _FakeSkillStore()
+    memory = _FakeMemory()
+    entry, _usage = _mention_entry([plain], conversation_skills=store, memory=memory)
+    thread = _thread_session()
+    sent: list[str] = []
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="오늘 어땠냐면", channel_id="c1")
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id="g1", now=_NOW, send=_sender("b1", sent), typing=_NoopTyping(),
+        thread=thread,
+    )
+
+    assert sent == ["답"]
+    assert thread.opened_skills == ["chunithm-border"]
+    # 스레드 대화는 닫힐 때 한 번에 요약되므로 답장마다 대기 목록에 쌓지 않고, 답장 사슬 저장소도 쓰지 않는다.
+    assert memory.enqueued == []
+    assert store.saved == {}
+
+
+@pytest.mark.asyncio
+async def test_thread_message_from_another_player_is_ignored() -> None:
+    entry, _usage = _mention_entry([])
+    sent: list[str] = []
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="안녕", channel_id="c1")
+
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id="g1", now=_NOW, send=_sender("b1", sent), typing=_NoopTyping(),
+        thread=_thread_session(player_id="someone-else"),
+    )
+
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_message_without_mention_or_thread_is_ignored() -> None:
+    entry, _usage = _mention_entry([])
+    sent: list[str] = []
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="안녕", channel_id="c1")
+
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=_NOW, send=_sender("b1", sent), typing=_NoopTyping())
+
+    assert sent == []

@@ -159,6 +159,7 @@ async def test_open_thread_delegates_to_thread_manager(env) -> None:
         skill_name="chunithm-session",
         player_id=player.id,
         transport=_Transport(),
+        channel_id="c1",
         on_close=closed.append,
         now=datetime.now(UTC),
     )

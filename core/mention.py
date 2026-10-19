@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from datetime import datetime
 from typing import Protocol, cast
 
 from core.agent import AgentLoop
+from core.conversation_skills import ConversationSkillStore
 from core.cooldown import CooldownTracker, check_monthly_cap
 from core.events import EventBus
 from core.fallback_messages import (
@@ -23,8 +23,9 @@ from core.fallback_messages import (
 )
 from core.response_assembly import assemble_response
 from core.skill_loading import Mode, SkillLoadState
+from core.threads import ThreadSession
 from core.tool_types import Display, ToolContext
-from services.common.memory import PendingMessage
+from services.common.memory import PendingMessage, strip_mentions
 from services.common.notify import NotifyService
 from services.common.players import DiscordAccount, Player
 
@@ -34,8 +35,6 @@ from services.common.players import DiscordAccount, Player
 _DM_SCOPE = "dm"
 
 MAX_CONTEXT_MESSAGES = 6
-
-_MENTION_TOKEN = re.compile(r"<@[!&]?\d+>")
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +147,7 @@ class MentionEntry:
         known_skill_names: set[str],
         skill_loading_mode: str,
         address: _AddressLike | None = None,
+        conversation_skills: ConversationSkillStore | None = None,
     ) -> None:
         self._agent = agent
         self._players = players
@@ -169,6 +169,21 @@ class MentionEntry:
         self._known_skill_names = known_skill_names
         self._skill_loading_mode = skill_loading_mode
         self._address = address
+        self._conversation_skills = conversation_skills
+
+    async def _carried_skills(self, trigger: ChannelMessage, context: list[ChannelMessage]) -> list[str]:
+        """답장 사슬에서 가장 가까운 유니 메시지가 남긴 '펼쳐 둔 스킬'을 찾는다. 답장이 아니면 새 대화다."""
+        if self._conversation_skills is None or trigger.reference_id is None:
+            return []
+        candidates = [trigger.reference_id, *(m.message_id for m in reversed(context) if m.is_bot)]
+        try:
+            for message_id in candidates:
+                skills = await self._conversation_skills.get(message_id)
+                if skills:
+                    return skills
+        except Exception:
+            logger.warning("펼친 스킬 목록 조회 실패, 새로 시작한다", exc_info=True)
+        return []
 
     async def handle(
         self,
@@ -177,10 +192,16 @@ class MentionEntry:
         history: list[ChannelMessage],
         guild_id: str | None,
         now: datetime,
-        send: Callable[[str, list[Display]], Awaitable[None]],
+        send: Callable[[str, list[Display]], Awaitable[str | None]],
         typing: AbstractAsyncContextManager[None],
+        thread: ThreadSession | None = None,
     ) -> None:
-        if not is_mention_eligible(trigger=trigger, bot_discord_id=self._bot_discord_id):
+        """thread가 있으면 스킬이 연 대화 스레드 안의 메시지다 — 멘션 없이 응답하고 그 스레드의 스킬을 이어 쓴다.
+        누구의 메시지인지는 호출하는 쪽(core/bot.py)이 이미 확인했다."""
+        if thread is None:
+            if not is_mention_eligible(trigger=trigger, bot_discord_id=self._bot_discord_id):
+                return
+        elif trigger.is_bot or trigger.author_discord_id == self._bot_discord_id:
             return
 
         player = await self._players.player_for_discord(trigger.author_discord_id)
@@ -198,6 +219,8 @@ class MentionEntry:
             await self._event_bus.emit_notify(
                 "players.first_seen", {"player_id": player.id}, player_id=player.id, guild_id=guild_id
             )
+        if thread is not None and player.id != thread.player_id:
+            return
 
         # 쿨다운은 guild/DM을 가리지 않고 건다 — DM에는 서버 설정이 없으니 admin 스킬의
         # "플레이어 쿨다운" 기본값(10초)을 그대로 쓴다. 월 상한은 서버별 설정(/관리 상한)뿐이라
@@ -251,9 +274,26 @@ class MentionEntry:
         # Literal["instructions", "full"]이지만, MentionEntry의 공개 인터페이스를 core/skill_loading에
         # 묶어 두지 않으려고 여기서만 좁혀 쓴다 — 잘못된 문자열은 SkillLoadState.level_for가
         # "instructions"가 아닌 모든 값을 "card"로 접어 안전하게 처리한다).
-        skill_state = SkillLoadState(
-            mode=cast("Mode", self._skill_loading_mode), known_skills=self._known_skill_names
+        carried = (
+            [thread.skill_name, *thread.opened_skills] if thread is not None
+            else await self._carried_skills(trigger, context)
         )
+        skill_state = SkillLoadState(
+            mode=cast("Mode", self._skill_loading_mode), known_skills=self._known_skill_names, opened=carried,
+        )
+
+        async def reply(text: str, displays: list[Display]) -> None:
+            # 이 답장에 단 답장이 같은 스킬을 펼친 채 시작하도록, 유니가 보낸 메시지 id에 목록을 남긴다.
+            sent_id = await send(text, displays)
+            if thread is not None:
+                thread.opened_skills = skill_state.ordered_skills()
+            elif sent_id is not None and self._conversation_skills is not None:
+                try:
+                    await self._conversation_skills.save(
+                        sent_id, skill_state.ordered_skills(), now=now.timestamp()
+                    )
+                except Exception:
+                    logger.warning("펼친 스킬 목록 저장 실패", exc_info=True)
 
         # RETRY_WAIT_MESSAGE(503 재시도)와 WORKING_MESSAGE(heavy 스킬)는 같은 "잠깐만
         # 기다려 달라" 취지라 이번 요청에서 둘 중 하나만, 한 번만 보낸다 — 실기 2026-10-18:
@@ -294,13 +334,15 @@ class MentionEntry:
             input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
         )
 
-        await self._queue_memory_summary(
-            player_id=player.id, guild_id=guild_id, trigger=trigger, context=context,
-            player_discord_ids=player_discord_ids, now=now,
-        )
+        # 스레드 대화는 닫힐 때 전문으로 한 번에 요약 대기 목록에 들어간다(core/threads.py).
+        if thread is None:
+            await self._queue_memory_summary(
+                player_id=player.id, guild_id=guild_id, trigger=trigger, context=context,
+                player_discord_ids=player_discord_ids, now=now,
+            )
 
         if result.hit_tool_call_cap and result.text is None:
-            await send(TOOL_CALL_CAP_MESSAGE, [])
+            await reply(TOOL_CALL_CAP_MESSAGE, [])
             return
 
         assembled = assemble_response(result)
@@ -314,7 +356,7 @@ class MentionEntry:
             else:
                 public_displays.append(display)
         text = assembled.text or LLM_FAILURE_MESSAGE
-        await send(f"{text}\n{PRIVATE_DM_FAILED_MESSAGE}" if dm_failed else text, public_displays)
+        await reply(f"{text}\n{PRIVATE_DM_FAILED_MESSAGE}" if dm_failed else text, public_displays)
 
     async def _send_private(self, player_id: str, content: str) -> bool:
         try:
@@ -336,7 +378,7 @@ class MentionEntry:
     ) -> None:
         """이 대화에서 본인(연결된 계정 포함)이 쓴 글만 요약 대기 목록에 쌓는다. 유니와 남의 말은 넣지 않는다."""
         own = [
-            PendingMessage(id=m.message_id, text=_MENTION_TOKEN.sub("", m.content).strip())
+            PendingMessage(id=m.message_id, text=strip_mentions(m.content))
             for m in context
             if not m.is_bot and m.author_discord_id in player_discord_ids
         ]

@@ -500,3 +500,53 @@ async def test_agent_loop_does_not_leak_undeclared_services_into_skill_tool_ctx(
     response = seen_function_responses[0]
     assert "error" not in response
     assert response["services"] == ["terms"]  # "players"/"settings"는 선언 안 했으니 안 보여야 한다
+
+
+_PROMPT_CONTEXT_BODY = (
+    "from core.decorators import prompt_context\n\n\n"
+    "@prompt_context(max_chars=20)\n"
+    "async def remembers(ctx: ToolContext) -> str | None:\n"
+    '    """테스트용 맥락."""\n'
+    "    return '가' * 50\n\n\n"
+    "@prompt_context()\n"
+    "async def quiet(ctx: ToolContext) -> str | None:\n"
+    '    """테스트용: 할 말이 없다."""\n'
+    "    return None\n\n\n"
+    "@prompt_context()\n"
+    "async def broken(ctx: ToolContext) -> str | None:\n"
+    '    """테스트용: 실패한다."""\n'
+    '    raise RuntimeError("boom")\n'
+)
+
+
+async def _prompt_context_system_instruction(tmp_path: Path) -> str:
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "test-context", _PROMPT_CONTEXT_BODY)
+    registry = SkillRegistry([skills_root])
+    registry.load()
+    llm = FakeLlmAdapter(
+        [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+    )
+    loop = AgentLoop(
+        llm=llm, executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    _ = await loop.run(ctx=_ctx(), skill_state=_state(registry), user_text="안녕", prompt_context_snippets=["기존 맥락"])
+    return llm.calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_skill_prompt_context_is_added_and_capped(tmp_path: Path) -> None:
+    system_instruction = await _prompt_context_system_instruction(tmp_path)
+
+    assert "기존 맥락" in system_instruction
+    assert "가" * 20 in system_instruction
+    assert "가" * 21 not in system_instruction
+
+
+@pytest.mark.asyncio
+async def test_a_failing_or_silent_prompt_context_does_not_stop_the_reply(tmp_path: Path) -> None:
+    system_instruction = await _prompt_context_system_instruction(tmp_path)
+
+    assert "boom" not in system_instruction

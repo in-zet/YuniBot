@@ -7,7 +7,6 @@ from collections.abc import Awaitable, Callable
 from core.events import Section, Stage, highest_stage
 from core.llm import LlmAdapter, LlmContent, LlmPart
 from core.response_assembly import extract_numbers, flatten_numbers
-from core.threads import ThreadTranscript
 from core.usage import UsageService
 from services.common.memory import MemoryMerge, MemoryState, PendingSummary
 
@@ -174,10 +173,6 @@ class YuniService:
             "memory_summary", turn.usage.input_tokens, turn.usage.output_tokens, pending.player_id, pending.guild_id
         )
         return _parse_memory_merge(turn.text or "")
-
-    async def summarize_conversation(self, transcript: ThreadTranscript) -> str:  # pyright: ignore[reportUnusedParameter]
-        """대화 전문을 요약한다. 12단계(메모리와 관계)에서 싼 모델 호출로 바뀐다 — 지금은 자리만 만든다."""
-        return ""
 
 
 def _parse_memory_merge(text: str) -> MemoryMerge | None:

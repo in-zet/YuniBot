@@ -92,12 +92,13 @@ class NotifyService:
         skill_name: str,
         player_id: str,
         transport: ThreadTransport,
+        channel_id: str,
         on_close: Callable[[ThreadTranscript], None | Awaitable[None]],
         idle_timeout: float = 300.0,
         close_timeout: float = 300.0,
         now: datetime,
     ) -> ThreadSession:
         return await self._threads.open(
-            skill_name=skill_name, player_id=player_id, transport=transport, on_close=on_close,
+            skill_name=skill_name, player_id=player_id, transport=transport, channel_id=channel_id, on_close=on_close,
             idle_timeout=idle_timeout, close_timeout=close_timeout, now=now,
         )

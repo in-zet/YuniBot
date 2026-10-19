@@ -1,6 +1,7 @@
 # core/bot.py
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 from collections.abc import Awaitable, Callable
@@ -17,6 +18,7 @@ from core.address import AddressResolver, NicknameSource
 from core.agent import AgentLoop
 from core.config import CoreConfig, load_config
 from core.contract_checks import run_all_contract_checks
+from core.conversation_skills import ConversationSkillStore
 from core.cooldown import CooldownTracker
 from core.decorators import ScheduleSpec
 from core.events import EventBus, handler_kind
@@ -38,7 +40,8 @@ from core.search_claude import ClaudeSearchAdapter
 from core.search_gemini import GeminiSearchAdapter
 from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
-from core.threads import ThreadManager
+from core.thread_memory import queue_thread_memory
+from core.threads import ThreadManager, ThreadSession, ThreadTranscript
 from core.tool_types import (
     ArcadeRef,
     ChartRef,
@@ -59,7 +62,7 @@ from services.chunithm.songdb import SongDbService
 from services.chunithm.terms import TermsService
 from services.common.arcades import ArcadesService
 from services.common.http import HttpService, build_http_service
-from services.common.memory import MemoryService, PendingSummary
+from services.common.memory import SUMMARY_DELAY_SECONDS, MemoryService, PendingSummary
 from services.common.notify import NotifyService
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
@@ -109,6 +112,8 @@ class _ScoreRefAdapter:
 
 
 _SCHEDULE_POLL_SECONDS = 60
+# 종료 직전 남은 메모리 요약을 마저 처리하는 데 기다리는 최대 시간(초). 못 끝낸 것은 DB에 남아 다음 기동에서 이어진다.
+_SHUTDOWN_MEMORY_FLUSH_SECONDS = 20
 # 자동 요약이 메모리를 바꿨을 때 그 대화의 마지막 메시지에 다는 반응.
 _MEMORY_SAVED_EMOJI = "📝"
 
@@ -131,6 +136,8 @@ class YuniClient(discord.Client):
         event_bus: EventBus,
         player_data: PlayerDataScanner,
         memory_flush: Callable[[float], Awaitable[None]] | None = None,
+        threads: ThreadManager | None = None,
+        housekeeping: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
@@ -148,6 +155,9 @@ class YuniClient(discord.Client):
         self._player_data = player_data
         # 시각이 된 메모리 자동 요약을 반영하는 콜러블(epoch 초를 받는다). 시험처럼 없으면 요약은 돌지 않는다.
         self._memory_flush = memory_flush
+        self._threads = threads
+        # 오래된 대화 상태 정리처럼 폴링 때마다 돌리는 잡일(epoch 초를 받는다).
+        self._housekeeping = housekeeping
 
     async def setup_hook(self) -> None:
         assert self.user is not None  # setup_hook은 로그인 뒤에만 불린다(discord.py의 보장)
@@ -176,11 +186,30 @@ class YuniClient(discord.Client):
             await _emit_due_once(due_once, self._event_bus)
         except Exception:
             logger.warning("예약 폴링 실패, 다음 틱에 다시 시도한다", exc_info=True)
+        if self._threads is not None:
+            # 무응답 대화 스레드에 "다 끝났나요?"를 묻고, 그 뒤로도 말이 없으면 닫는다. 닫힐 때 메모리 요약 대기 목록에 들어간다.
+            await self._threads.check_idle(now=datetime.datetime.now(datetime.UTC))
+        if self._housekeeping is not None:
+            try:
+                await self._housekeeping(datetime.datetime.now().timestamp())  # noqa: DTZ005 - 멘션 경로의 now.timestamp()와 같은 서버 로컬 시간 기준
+            except Exception:
+                logger.warning("대화 상태 정리 실패, 다음 틱에 다시 시도한다", exc_info=True)
         if self._memory_flush is not None:
             try:
                 await self._memory_flush(datetime.datetime.now().timestamp())  # noqa: DTZ005 - 멘션 경로의 now.timestamp()와 같은 서버 로컬 시간 기준
             except Exception:
                 logger.warning("메모리 요약 폴링 실패, 다음 틱에 다시 시도한다", exc_info=True)
+
+    async def _thread_for(self, message: discord.Message) -> ThreadSession | None:
+        """이 메시지가 스킬이 연 대화 스레드(또는 DM) 안에서 그 대화의 플레이어가 쓴 것이면 그 대화를 돌려준다."""
+        if self._threads is None or message.author.bot:
+            return None
+        session = self._threads.session_for_channel(str(message.channel.id))
+        if session is None:
+            return None
+        players = cast("PlayersService", self._services["players"])
+        author = await players.player_for_discord(str(message.author.id))
+        return session if author is not None and author.id == session.player_id else None
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.id == (self.user.id if self.user else None):
@@ -191,8 +220,16 @@ class YuniClient(discord.Client):
             mentions_bot=self.user in message.mentions if self.user else False,
             channel_id=str(message.channel.id), author_display_name=message.author.display_name,
         )
-        if not is_mention_eligible(trigger=trigger, bot_discord_id=str(self.user.id) if self.user else ""):
+        thread = await self._thread_for(message)
+        if thread is None and not is_mention_eligible(
+            trigger=trigger, bot_discord_id=str(self.user.id) if self.user else ""
+        ):
             return
+        if thread is not None and self._threads is not None:
+            await self._threads.receive(
+                thread.thread_id, thread.player_id, message.content,
+                now=datetime.datetime.now(datetime.UTC), message_id=str(message.id),
+            )
 
         history_messages = [
             msg async for msg in message.channel.history(limit=20, before=message)
@@ -206,7 +243,7 @@ class YuniClient(discord.Client):
             for m in reversed(history_messages)
         ] + [trigger]
 
-        async def _send(text: str, displays: list[Display]) -> None:
+        async def _send(text: str, displays: list[Display]) -> str | None:
             # 강제 표시물(숫자 규칙 위반 시 모은 전체 표시물, 또는 모델이 [[show:id]]로 직접
             # 고른 표시물)을 실제 디스코드 메시지에 붙인다. 멘션 경로는 인터랙션 응답이 아니라
             # 메시지 답장이라 ephemeral 개념이 없고(Display.ephemeral은 무시),
@@ -215,19 +252,35 @@ class YuniClient(discord.Client):
             embeds = [embed for display in displays for embed in display.embeds]
             extra_content = [display.content for display in displays if display.content is not None]
             full_text = "\n\n".join([text, *extra_content])
-            await message.reply(full_text, embeds=embeds, mention_author=False)
+            sent = await message.reply(full_text, embeds=embeds, mention_author=False)
+            return str(sent.id)
 
         await self._mention_entry.handle(
             trigger=trigger, history=history,
             guild_id=str(message.guild.id) if message.guild else None,
             now=datetime.datetime.now(),  # noqa: DTZ005 - 쿨다운/정지 시간대와 같은 서버 로컬 시간 기준
-            send=_send, typing=message.channel.typing(),
+            send=_send, typing=message.channel.typing(), thread=thread,
         )
+
+    async def _wind_down(self) -> None:
+        """꺼지기 직전: 열린 대화 스레드를 중단으로 닫아 전문을 넘기고, 대기 중인 메모리 요약을 마저 돌린다.
+        요약이 늦으면 포기한다 — 대기 목록은 DB에 남아 다음 기동에서 이어진다."""
+        if self._threads is not None:
+            await self._threads.close_all(reason="shutdown")
+        if self._memory_flush is None:
+            return
+        # 모든 대기 행이 '지금' 돌게 요약 대기 시간만큼 앞선 시각을 넘긴다. 실패한 행의 재시도 시각은 거기서 다시 밀린다.
+        later = datetime.datetime.now().timestamp() + SUMMARY_DELAY_SECONDS  # noqa: DTZ005 - 멘션 경로의 now.timestamp()와 같은 서버 로컬 시간 기준
+        try:
+            await asyncio.wait_for(self._memory_flush(later), timeout=_SHUTDOWN_MEMORY_FLUSH_SECONDS)
+        except Exception:
+            logger.warning("종료 직전 메모리 요약을 끝내지 못했다, 다음 기동에서 이어간다", exc_info=True)
 
     async def close(self) -> None:
         # setup_hook에서 시작 안 했으면(테스트처럼 로그인 없이 build_client만 쓴 경우) 돌고 있지
         # 않으니 cancel()은 아무 일도 안 한다.
         self._poll_schedules.cancel()
+        await self._wind_down()
         # http_service.aclose()는 hishel의 AsyncCacheTransport.aclose()를 거쳐 캐시용
         # SQLite 연결(anysqlite)까지 닫는다 — 코어 DB 연결을 닫는 아래 줄과 같은 역할이다.
         await self.http_service.aclose()
@@ -496,11 +549,18 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     # 순환을 끊으려고, notify_service의 게이트웨이는 client를 바로 쥐지 않고 아래
     # client_holder(런타임에만 채워지는 한 칸짜리 상자)를 통해 늦게 참조한다.
     client_holder: list[YuniClient] = []
+
+    async def _on_thread_closed(transcript: ThreadTranscript) -> None:
+        await queue_thread_memory(
+            memory_service, transcript, now=datetime.datetime.now().timestamp()  # noqa: DTZ005 - 멘션 경로의 now.timestamp()와 같은 서버 로컬 시간 기준
+        )
+
+    thread_manager = ThreadManager(on_closed=_on_thread_closed)
     notify_service = NotifyService(
         gateway=_BotDiscordGateway(lambda: client_holder[0]),
         players=players,
         settings=settings_service,
-        threads=ThreadManager(),
+        threads=thread_manager,
     )
 
     services["http"] = http_service
@@ -583,6 +643,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         db=conn, registry_snapshot=snapshot,
     )
     known_skill_names = {s.manifest.name for s in registry.enabled_skills()}
+    conversation_skills = ConversationSkillStore(conn)
     mention_entry = MentionEntry(
         agent=agent_loop, players=players, notify=notify_service, cooldown=CooldownTracker(),
         settings=settings_service, usage=usage_service, bot_discord_id="",  # client.user가 생기기 전이라 setup_hook에서 채운다
@@ -591,12 +652,15 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         # 핸들러에 닿는다(M1) — executor도 이 event_bus 변수로 만들어졌으니 같은 객체다.
         event_bus=event_bus,
         known_skill_names=known_skill_names, skill_loading_mode=config.skill_loading_mode,
-        address=address_resolver,
+        address=address_resolver, conversation_skills=conversation_skills,
     )
 
     async def _react_memory_saved(pending: PendingSummary) -> None:
         if pending.channel_id and pending.message_id:
             await notify_service.react(pending.channel_id, pending.message_id, _MEMORY_SAVED_EMOJI)
+
+    async def housekeeping(now: float) -> None:
+        await conversation_skills.purge(now=now)
 
     async def flush_memory(now: float) -> None:
         _ = await memory_service.flush_due(now=now, merge=yuni_service.merge_memory, on_changed=_react_memory_saved)
@@ -615,7 +679,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         mention_entry=mention_entry, known_skill_names=known_skill_names,
         skill_loading_mode=config.skill_loading_mode,
         scheduler=scheduler, schedule_fns=schedule_fns, services=services, event_bus=event_bus,
-        player_data=player_data, memory_flush=flush_memory,
+        player_data=player_data, memory_flush=flush_memory, threads=thread_manager, housekeeping=housekeeping,
     )
     client_holder.append(client)
 

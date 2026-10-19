@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -30,6 +31,14 @@ def clean_nickname(raw: str) -> str:
     쓰이는 문자(`@ < > 백틱)를 뺀다. 비면 빈 문자열이다."""
     kept = "".join(ch for ch in raw if ch not in _NICKNAME_BLOCKED and (ch.isprintable() or ch.isspace()))
     return " ".join(kept.split())[:MAX_NICKNAME_LENGTH].strip()
+
+
+_MENTION_TOKEN = re.compile(r"<@[!&]?\d+>")
+
+
+def strip_mentions(content: str) -> str:
+    """디스코드 멘션 토큰을 빼고 앞뒤 공백을 다듬는다. 요약 대기 목록에는 사람이 쓴 말만 넣는다."""
+    return _MENTION_TOKEN.sub("", content).strip()
 
 
 def _normalize(text: str) -> str:

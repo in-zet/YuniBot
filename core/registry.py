@@ -32,10 +32,9 @@ KNOWN_SERVICE_NAMES: frozenset[str] = frozenset(
 # 00-core.md "이벤트 목록"에서 코어/서비스가 내는 것으로 적힌 이벤트.
 # 스킬 manifest의 emits에는 없으므로 여기서 "정의된 이벤트"로 등록한다.
 # 3~4단계 전까지는 실제로 내는 코드가 없어도 "정의된 이벤트"로 취급한다.
-# chunithm.plan.requested는 00-core.md 이벤트 목록이 낸다고 적어 둔 쪽이 `yuni-bond`다 —
-# 그 스킬은 아직 없다(7단계 범위 밖). `chunithm-goals`(7단계)가 먼저 이 이벤트를 구독해야
-# 하므로, yuni-bond가 들어오기 전까지는 이 목록에 core가 "정의는 됐다"고 적어 둔다(같은
-# 패턴을 players.first_seen/chunithm.login.expired에도 이미 쓴다).
+# chunithm.plan.requested는 `yuni-bond`가 낸다. 그 스킬을 설치에서 뺀 경우에도 구독하는
+# `chunithm-goals`·`chunithm-notes`가 뜨도록 "정의는 됐다"고 여기에도 적어 둔다(같은
+# 패턴을 players.first_seen/chunithm.login.expired에도 쓴다).
 CORE_EMITTED_EVENTS: frozenset[str] = frozenset(
     {"players.first_seen", "chunithm.login.expired", "chunithm.plan.requested"}
 )

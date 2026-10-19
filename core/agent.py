@@ -105,6 +105,32 @@ class AgentLoop:
                 return skill.manifest.weight
         return "light"
 
+    async def _skill_prompt_snippets(self, ctx: ToolContext) -> list[str]:
+        """스킬의 `@prompt_context`가 내는 짧은 맥락(예: 열린 약속)을 모은다. 스킬이 펼쳐지지 않아도 들어가고,
+        스킬당 `max_chars`를 넘는 부분은 자른다. 한 스킬이 실패해도 응답은 막지 않는다."""
+        snippets: list[str] = []
+        settings = self._executor.settings
+        for skill in self._prompt.visible_skill_cards(player_tags=set(ctx.tags)):
+            if not skill.code.prompt_contexts:
+                continue
+            if (
+                ctx.guild_id is not None and settings is not None
+                and not await settings.is_skill_enabled(guild_id=ctx.guild_id, skill=skill.manifest.name)
+            ):
+                continue
+            scoped = self._scoped_ctx(
+                ctx, skill_name=skill.manifest.name, declared_services=list(skill.manifest.services)
+            )
+            for spec in skill.code.prompt_contexts:
+                try:
+                    text = await spec.fn(scoped)
+                except Exception:
+                    logger.warning("스킬 '%s'의 프롬프트 맥락 실패, 건너뛴다", skill.manifest.name, exc_info=True)
+                    continue
+                if isinstance(text, str) and text.strip():
+                    snippets.append(text.strip()[: spec.max_chars])
+        return snippets
+
     async def run(
         self,
         *,
@@ -129,6 +155,7 @@ class AgentLoop:
             scheduler=ctx.scheduler,
         )
 
+        prompt_context_snippets = [*prompt_context_snippets, *await self._skill_prompt_snippets(ctx)]
         contents: list[LlmContent] = [LlmContent(role="user", parts=[LlmPart(text=user_text)])]
         result = AgentTurnResult()
         tool_calls_made = 0
@@ -205,11 +232,15 @@ class AgentLoop:
                     "player %s: 도구 호출 %d/%d '%s' args=%s",
                     ctx.player_id, tool_calls_made, self._max_tool_calls, call.name, call.args,
                 )
-                if not heavy_notified and on_heavy_call is not None:
-                    found = self._find_spec(call.name)
-                    if found is not None and self._skill_weight(found[1]) == "heavy":
-                        heavy_notified = True
-                        await on_heavy_call()
+                found = self._find_spec(call.name)
+                if found is not None and found[1] is not None:
+                    skill_state.touch(found[1])
+                if (
+                    not heavy_notified and on_heavy_call is not None
+                    and found is not None and self._skill_weight(found[1]) == "heavy"
+                ):
+                    heavy_notified = True
+                    await on_heavy_call()
 
                 tool_call_counts[call.name] = tool_call_counts.get(call.name, 0) + 1
                 per_tool_cap = self._max_calls_for(call.name)

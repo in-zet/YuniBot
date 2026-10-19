@@ -21,6 +21,7 @@ from core.decorators import EventHandlerSpec, ScheduleSpec, SkillCode
 from core.events import EventBus
 from core.manifest import SkillManifest
 from core.registry import LoadedSkill, SkillRegistry
+from core.threads import ThreadTranscript
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -646,5 +647,143 @@ async def test_build_client_wires_claude_search_adapter_when_websearch_provider_
         websearch = cast("WebsearchService", executor.services["websearch"])
         search_adapter = websearch._adapter  # pyright: ignore[reportPrivateUsage]
         assert type(search_adapter).__name__ == "ClaudeSearchAdapter"
+    finally:
+        await client.close()
+
+
+class _Transport:
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    async def send_message(self, text: str) -> None:
+        self.sent.append(text)
+
+
+async def _open_test_thread(client, *, player_id: str, closed: list[ThreadTranscript], **kwargs):
+    notify = client._services["notify"]  # pyright: ignore[reportPrivateUsage]
+    transport = _Transport()
+    session = await notify.open_thread(
+        skill_name="practice", player_id=player_id, transport=transport, channel_id="thread-1",
+        on_close=closed.append, now=datetime.datetime.now(datetime.UTC), **kwargs,
+    )
+    return session, transport
+
+
+@pytest.mark.asyncio
+async def test_poll_schedules_closes_an_idle_thread_and_queues_its_transcript_for_the_memory_summary(
+    tmp_path: Path,
+) -> None:
+    client, _registry, _executor = await build_client(_config(tmp_path))
+    try:
+        closed: list[ThreadTranscript] = []
+        session, transport = await _open_test_thread(
+            client, player_id="p1", closed=closed, idle_timeout=0.0, close_timeout=0.0
+        )
+        assert client._threads is not None  # pyright: ignore[reportPrivateUsage]
+        await client._threads.receive(  # pyright: ignore[reportPrivateUsage]
+            session.thread_id, "p1", "<@1> 크로노 연습할게", now=datetime.datetime.now(datetime.UTC), message_id="m1"
+        )
+
+        await client._poll_schedules()  # pyright: ignore[reportPrivateUsage]
+        assert transport.sent == ["다 끝났나요?"]
+        await client._poll_schedules()  # pyright: ignore[reportPrivateUsage]
+
+        assert [t.closed_reason for t in closed] == ["timeout"]
+        cursor = await client.conn.execute("SELECT messages, channel_id, message_id FROM player_memory_pending")
+        row = await cursor.fetchone()
+        assert row is not None
+        assert "크로노 연습할게" in row[0] and "<@1>" not in row[0]
+        assert (row[1], row[2]) == ("thread-1", "m1")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_closing_the_client_closes_open_threads_as_shutdown(tmp_path: Path) -> None:
+    client, _registry, _executor = await build_client(_config(tmp_path))
+    closed: list[ThreadTranscript] = []
+    _ = await _open_test_thread(client, player_id="p1", closed=closed)
+
+    await client.close()
+
+    assert [t.closed_reason for t in closed] == ["shutdown"]
+
+
+@pytest.mark.asyncio
+async def test_thread_for_matches_only_the_threads_player_in_the_threads_channel(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    client, _registry, _executor = await build_client(_config(tmp_path))
+    try:
+        players = cast("PlayersService", client._services["players"])  # pyright: ignore[reportPrivateUsage]
+        owner = await players.create_player()
+        await players.link_account(owner.id, "111")
+        other = await players.create_player()
+        await players.link_account(other.id, "222")
+        session, _ = await _open_test_thread(client, player_id=owner.id, closed=[])
+
+        def message(*, author_id: int, channel_id: str, bot: bool = False):
+            return SimpleNamespace(author=SimpleNamespace(id=author_id, bot=bot), channel=SimpleNamespace(id=channel_id))
+
+        find = client._thread_for  # pyright: ignore[reportPrivateUsage]
+        assert await find(message(author_id=111, channel_id="thread-1")) is session  # pyright: ignore[reportArgumentType]
+        assert await find(message(author_id=222, channel_id="thread-1")) is None  # pyright: ignore[reportArgumentType]
+        assert await find(message(author_id=111, channel_id="elsewhere")) is None  # pyright: ignore[reportArgumentType]
+        assert await find(message(author_id=111, channel_id="thread-1", bot=True)) is None  # pyright: ignore[reportArgumentType]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_poll_schedules_purges_old_conversation_skill_rows(tmp_path: Path) -> None:
+    client, _registry, _executor = await build_client(_config(tmp_path))
+    try:
+        await client.conn.execute(
+            "INSERT INTO conversation_skills (message_id, skills, created_at) VALUES ('old', '[\"a\"]', 0)"
+        )
+        await client.conn.commit()
+
+        await client._poll_schedules()  # pyright: ignore[reportPrivateUsage]
+
+        cursor = await client.conn.execute("SELECT COUNT(*) FROM conversation_skills")
+        row = await cursor.fetchone()
+        assert row is not None and row[0] == 0
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_yuni_bond_records_first_met_through_the_real_event_bus_and_adds_its_prompt_context(
+    tmp_path: Path,
+) -> None:
+    from core.tool_types import ToolContext
+
+    client, registry, executor = await build_client(_config(tmp_path, Path("skills")))
+    try:
+        assert "yuni-bond" in {s.manifest.name for s in registry.enabled_skills()}
+        players = cast("PlayersService", client._services["players"])  # pyright: ignore[reportPrivateUsage]
+        player = await players.create_player()
+
+        await executor.event_bus.emit_notify(
+            "players.first_seen", {"player_id": player.id}, player_id=player.id, guild_id=None
+        )
+        await executor.event_bus.drain()
+
+        cursor = await client.conn.execute(
+            "SELECT kind FROM yuni_bond_milestones WHERE player_id = ?", (player.id,)
+        )
+        assert [row[0] for row in await cursor.fetchall()] == ["first_met"]
+
+        # 열린 약속이 있으면 멘션 에이전트가 프롬프트 맥락으로 읽는다.
+        agent = client._mention_entry._agent  # pyright: ignore[reportPrivateUsage]
+        await client.conn.execute(
+            "INSERT INTO yuni_bond_promises (id, player_id, text, created_on) VALUES ('x', ?, '크로노 연습', ?)",
+            (player.id, datetime.datetime.now().date().isoformat()),  # noqa: DTZ005 - 스킬의 오늘 날짜와 같은 서버 로컬 기준
+        )
+        await client.conn.commit()
+        snippets = await agent._skill_prompt_snippets(  # pyright: ignore[reportPrivateUsage]
+            ToolContext(player_id=player.id, tags=frozenset(), services={}, guild_id=None)
+        )
+        assert any("크로노 연습" in s for s in snippets)
     finally:
         await client.close()

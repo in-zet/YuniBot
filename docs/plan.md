@@ -71,9 +71,10 @@
   - [X] Part 2: `websearch` 공통 서비스. 어댑터 프로토콜(`core/search.py`)과 Gemini/Claude 구현(`core/search_gemini.py`·`core/search_claude.py`) + `services/common/websearch.py`(쿨다운·출처없음 검사). `WEBSEARCH_PROVIDER`(기본 gemini, `LLM_PROVIDER`와 독립)·`SEARCH_MODEL`·`WEBSEARCH_COOLDOWN_SECONDS`(기본 15초) 설정 추가. 상세는 `progress/2026-10-18.md`
   - [X] Part 3: `web-qa` 스킬. 구현 완료 — `search(question)` 도구 하나(`weight: heavy`, `services: [websearch, usage]`, `max_calls_per_turn=5`, 슬래시 없음, 테이블 없음, 출처는 `display_mode="required"`로 강제), 성공 시 도구 안에서 바로 `usage.record(kind="websearch")`. 상세는 `web-qa.md` "구현 결정". 실기 미확인(위 문서 "미확인 사항")
 - [X] 11. 유니 인격: `persona.md`, `yuni` 서비스의 한마디(LLM), 고정 문구(`core/fallback_messages.py`) — 구현 완료(2026-10-19, 밝은 반말). 실기 미확인: 동기화 리포트·목표 알림·업데이트 알림의 한마디가 말투대로 나오는지, 한마디 사용량이 `/관리 사용량`에 잡히는지, 멘션 응답 말투
-- [ ] 12. 메모리와 관계 — 두 부분으로 나눔(2026-10-19)
+- [ ] 12. 메모리와 관계 — 세 부분으로 나눔(2026-10-19)
   - [X] Part 1: 메모리 전체. 호칭 칸(`player_memory.nickname`)과 호칭 우선순위(`core/address.py`), 자동 요약(5분 대기 목록 `player_memory_pending`, `YuniService.merge_memory`), `remember`의 `nickname`, 요약 반영 반응(📝), 표시물 `private`(멘션에서 DM), `memory` 스킬(`view`·`forget`·`set_auto`). 상세는 `00-core.md` "플레이어 메모리"와 `memory.md` "구현 결정". 실기 미확인: "호칭은 ○○로 해 줘" 후 호칭 사용, 5분 뒤 📝 반응과 메모리 반영, `/메모리 보기`(본인에게만)·멘션으로 "뭐 기억해?"(DM), `/메모리 지우기` 확인 버튼, 지운 항목이 다음 요약에서 되살아나지 않는지, `/메모리 자동저장` 끄면 요약이 안 도는지, 동기화 리포트 한마디에 호칭이 들어가는지
-  - [ ] Part 2: 대화 상태와 `yuni-bond`. 펼친 스킬의 답장 사슬 간 유지, 대화 스레드를 `on_message`·유휴 점검에 연결하고 닫힐 때 후기·메모리 요약, `yuni-bond`(테이블 2개, 도구 5개, `chunithm.plan.requested` 발신)
+  - [X] Part 2: 대화 상태와 `yuni-bond`. 펼친 스킬의 답장 사슬 유지(`conversation_skills` 테이블, 동시 5개 상한), 대화 스레드를 `on_message`·유휴 점검(60초 폴링)·종료에 연결하고 닫힐 때 메모리 요약 대기 목록에 전문 등록(`YuniService.summarize_conversation`은 없앰), 코어가 `@prompt_context`를 프롬프트에 넣음, `yuni-bond`(테이블 2개, 도구 5개, 이벤트 4개 수신, `chunithm.plan.requested` 발신, 슬래시 `/기록들`·`/오늘계획`·`/약속`, 설정 2개). 상세는 `00-core.md` 구현 결정(Part 2)과 `yuni-bond.md` "구현 결정". 올 저스티스 첫 달성은 램프 변화 자료가 없어 뺌. 실기 미확인: 유니 답장에 답장했을 때 펼친 스킬이 이어지는지(로그의 도구 호출 수), 동기화 뒤 리포트 한마디에 마일스톤·첫 SSS·오랜만 귀띔이 들어가는지, `/기록들`·`/오늘계획`(To-Do·메모·채보 링크)·`/약속`, "다음엔 크로노 연습할게"로 약속 저장 후 다음 멘션에서 유니가 한 번 꺼내는지, 약속 속 곡을 동기화로 갱신하면 약속이 닫히는지, `/설정`에 "동기화 때 덧붙이는 말"이 보이고 끄면 귀띔이 빠지는지
+  - [ ] Part 3: `chunithm-session`의 후기(`review_open`·후기 저장·`chunithm.session.closed`). 후기 스레드를 여는 쪽이 이 부분에 있다(2026-10-19 Part 2에서 분리)
 
 고정 원칙: 5단계까지는 LLM 없이 슬래시로 동작한다. `yuni` 서비스는 11단계 전까지 정해진 문구를 돌려주고, 7~10단계 스킬은 이 인터페이스만 쓴다.
 

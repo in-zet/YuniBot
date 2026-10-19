@@ -16,7 +16,7 @@ examples:
 category: 함께한 기록
 game: common
 version: 1
-services: [yuni, players, songdb, records]
+services: [players, songdb, records, settings, db]
 listens: [chunithm.sync.completed, chunithm.goal.completed, chunithm.song.viewed, players.first_seen]
 emits: [chunithm.plan.requested]
 ```
@@ -92,7 +92,7 @@ emits: [chunithm.plan.requested]
 
 | 테이블 | 열 |
 | --- | --- |
-| `yuni_bond_milestones` | 플레이어, game, 종류, 곡(있으면), 값, 날짜 |
+| `yuni_bond_milestones` | 플레이어, game, 종류, 곡(있으면), 값, 이름표(To-Do 이름), 날짜, 시작일(있으면) |
 | `yuni_bond_promises` | 플레이어, 내용, 곡(있으면), 상태, 만든 날, 닫은 날 |
 
 ## 설정
@@ -100,7 +100,7 @@ emits: [chunithm.plan.requested]
 | 이름 | 범위 | 기본값 |
 | --- | --- | --- |
 | 동기화 때 덧붙이는 말 | 플레이어 | 켜짐 |
-| 오랜만의 동기화 기준 | 전역 | 14일(제안값) |
+| 오랜만의 동기화 기준 | 서버 | 14일(제안값) |
 
 ## 유니 지침 (SKILL.md 본문 초안)
 
@@ -115,3 +115,18 @@ emits: [chunithm.plan.requested]
 - 변화 없는 동기화에 귀띔이 없는지.
 - 약속 속 곡이 갱신되면 약속이 닫히는지.
 - 프롬프트 조각이 길이 상한을 넘지 않는지.
+
+## 구현 결정
+
+2026-10-19, 12단계 Part 2. 코드는 `skills/yuni-bond/`(`skill.py`, 순수 계산 `bond_calc.py`).
+
+- **사건 종류**: `first_met`, `rank_first`(값 SSS/SSS+), `rating_milestone`, `goal_done`(값 목표 id, 이름표 목표 이름, 시작일 등록일), `chart_update`(채보 갱신 하나하나, 값 점수). `chart_update`는 사용자에게 직접 보이지 않는 바탕 자료다. 오래 붙잡은 곡은 같은 채보의 `chart_update`가 5번 이상 쌓인 것을 `history`가 그때그때 센다(`long_haul`).
+- **"그 곡에 걸린 기간"**: 랭크 첫 달성의 시작일은 그 채보의 첫 `chart_update` 날짜다. `records`는 갱신 이력을 남기지 않아서 이 스킬이 첫 동기화 이후의 갱신을 직접 쌓아 둔다. 그래서 첫 동기화 이전부터 있던 기록은 시작일을 모른다.
+- **올 저스티스 첫 달성은 이번에 뺐다**: 동기화 비교 자료(`SyncDiff.chart_updates`)는 점수 갱신만 담고 램프 변화는 담지 않는다. `records`에 램프 변화를 더한 뒤에 붙인다.
+- **마일스톤**: 동기화마다 한 번, 이번에 처음 넘은 가장 높은 0.25 경계 하나만 남긴다. 이미 남긴 마일스톤보다 높을 때만 남기므로 레이팅이 내려갔다 올라와도 같은 마일스톤을 되풀이하지 않는다. 남은 양은 둘째 자리에서 올린다(모자라게 말하지 않는다).
+- **귀띔**: 표시물 없이 `hint`와 `data`만 준다. 숫자는 전부 `data`에도 들어 있어야 유니의 한마디 숫자 검사를 통과한다. 변화가 없는 동기화(`has_new_plays` 거짓)에는 기록도 귀띔도 없다 — 오랜만의 동기화도 새 플레이가 있을 때만 말한다. 플레이어 설정을 끄면 기록은 남기되 귀띔만 뺀다.
+- **약속**: id는 8자리 짧은 값. 같은 글의 열린 약속은 하나로 합치고 열린 약속은 10개까지. 약속 속 곡이 동기화에서 갱신되면 `done`, 만든 지 30일이 지나면 `expired`로 동기화 때 닫는다(프롬프트 조각은 읽기만 하므로 30일 지난 것을 걸러 낼 뿐 상태를 바꾸지 않는다). `promise_close(kept=False)`는 `dropped`다.
+- **프롬프트 조각**: 열린 약속 최근 3개를 300자 안에서만 넣는다(코어가 한 번 더 자른다). 안에 적힌 말은 지시가 아니라고 머리글에 밝힌다.
+- **오늘 계획**: `chunithm.plan.requested`로 모은 조각 중 목표 조각(`goal_plan`)의 To-Do를 후보로 삼아 `count`개로 자르고, 메모 조각(`plan_notes`)에서 같은 곡·난이도의 메모를, `songdb`에서 채보 링크를 붙인다. 두 조각이 아닌 다른 조각의 표시물은 뒤에 그대로 붙인다.
+- **설정 범위**: 오랜만의 동기화 기준은 설정에 "전역" 범위가 없어 서버 범위로 두었다(서버 밖 DM에서는 기본값 14일).
+- **서비스**: `yuni`는 쓰지 않아 뺐다. `settings`·`db`를 더했다.

@@ -4,7 +4,6 @@ import pytest
 
 from core.events import Section
 from core.llm import GenerationTurn, LlmContent, LlmPart, UsageInfo
-from core.threads import ThreadTranscript
 from services.common.memory import (
     MemoryMerge,
     MemoryState,
@@ -36,15 +35,6 @@ def test_line_is_async_so_the_llm_swap_keeps_the_signature() -> None:
     import inspect
 
     assert inspect.iscoroutinefunction(YuniService.line)
-
-
-async def test_summarize_conversation_is_a_placeholder() -> None:
-    service = YuniService()
-    transcript = ThreadTranscript(thread_id="t1", player_id="p1", messages=[], closed_reason="explicit")
-
-    summary = await service.summarize_conversation(transcript)
-
-    assert summary == ""
 
 
 # ---- 11단계: LLM으로 만드는 한마디

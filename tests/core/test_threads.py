@@ -25,6 +25,7 @@ async def test_receive_appends_transcript_and_resets_idle_timer() -> None:
         skill_name="chunithm-session",
         player_id="p1",
         transport=transport,
+        channel_id="c1",
         idle_timeout=300.0,
         close_timeout=300.0,
         on_close=lambda t: closed.append(t),
@@ -51,6 +52,7 @@ async def test_idle_timeout_asks_then_closes() -> None:
         skill_name="chunithm-session",
         player_id="p1",
         transport=transport,
+        channel_id="c1",
         idle_timeout=300.0,
         close_timeout=300.0,
         on_close=lambda t: closed.append(t),
@@ -76,6 +78,7 @@ async def test_message_during_check_phase_cancels_close() -> None:
         skill_name="chunithm-session",
         player_id="p1",
         transport=transport,
+        channel_id="c1",
         idle_timeout=300.0,
         close_timeout=300.0,
         on_close=lambda t: closed.append(t),
@@ -100,6 +103,7 @@ async def test_explicit_close_delivers_transcript_immediately() -> None:
         skill_name="chunithm-session",
         player_id="p1",
         transport=transport,
+        channel_id="c1",
         on_close=lambda t: closed.append(t),
         now=base,
     )
@@ -128,6 +132,7 @@ async def test_message_from_other_player_is_rejected() -> None:
         skill_name="chunithm-session",
         player_id="p1",
         transport=transport,
+        channel_id="c1",
         idle_timeout=300.0,
         close_timeout=300.0,
         on_close=lambda t: closed.append(t),
@@ -154,6 +159,7 @@ async def test_receive_on_unknown_or_closed_thread_is_noop() -> None:
         skill_name="chunithm-session",
         player_id="p1",
         transport=transport,
+        channel_id="c1",
         on_close=lambda t: closed.append(t),
         now=base,
     )
@@ -175,6 +181,7 @@ async def test_double_close_delivers_transcript_once() -> None:
         skill_name="chunithm-session",
         player_id="p1",
         transport=transport,
+        channel_id="c1",
         on_close=lambda t: closed.append(t),
         now=base,
     )
@@ -196,6 +203,7 @@ async def test_failing_session_does_not_block_other_sessions() -> None:
         skill_name="chunithm-session",
         player_id="p1",
         transport=_RaisingTransport(),
+        channel_id="c1",
         on_close=lambda t: None,
         now=base,
     )
@@ -203,6 +211,7 @@ async def test_failing_session_does_not_block_other_sessions() -> None:
         skill_name="chunithm-session",
         player_id="p2",
         transport=good_transport,
+        channel_id="c2",
         on_close=lambda t: closed.append(t),
         now=base,
     )
@@ -216,3 +225,72 @@ async def test_failing_session_does_not_block_other_sessions() -> None:
     await manager.check_idle(now=base + timedelta(seconds=602))
     assert len(closed) == 1
     assert closed[0].closed_reason == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_session_for_channel_finds_only_open_sessions() -> None:
+    manager = ThreadManager()
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    session = await manager.open(
+        skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id="c9",
+        on_close=lambda t: None, now=base,
+    )
+
+    assert manager.session_for_channel("c9") is session
+    assert manager.session_for_channel("other") is None
+
+    await manager.close(session.thread_id, reason="explicit")
+    assert manager.session_for_channel("c9") is None
+
+
+@pytest.mark.asyncio
+async def test_receive_keeps_discord_message_id_in_transcript() -> None:
+    manager = ThreadManager()
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    closed: list[ThreadTranscript] = []
+    session = await manager.open(
+        skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
+        on_close=closed.append, now=base,
+    )
+    await manager.receive(session.thread_id, "p1", "안녕", now=base, message_id="m1")
+    await manager.close(session.thread_id, reason="explicit")
+
+    assert closed[0].messages[0].message_id == "m1"
+    assert closed[0].channel_id == "c1"
+    assert closed[0].skill_name == "chunithm-session"
+
+
+@pytest.mark.asyncio
+async def test_core_close_hook_runs_before_skill_callback_and_survives_failure() -> None:
+    order: list[str] = []
+
+    async def hook(transcript: ThreadTranscript) -> None:
+        order.append(f"hook:{transcript.closed_reason}")
+        raise RuntimeError("요약 대기 등록 실패")
+
+    manager = ThreadManager(on_closed=hook)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    session = await manager.open(
+        skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
+        on_close=lambda t: order.append("skill"), now=base,
+    )
+    await manager.close(session.thread_id, reason="explicit")
+
+    assert order == ["hook:explicit", "skill"]
+
+
+@pytest.mark.asyncio
+async def test_close_all_closes_every_open_session_as_shutdown() -> None:
+    manager = ThreadManager()
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    closed: list[ThreadTranscript] = []
+    for channel in ("c1", "c2"):
+        _ = await manager.open(
+            skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id=channel,
+            on_close=closed.append, now=base,
+        )
+
+    await manager.close_all(reason="shutdown")
+
+    assert [t.closed_reason for t in closed] == ["shutdown", "shutdown"]
+    assert manager.session_for_channel("c1") is None
