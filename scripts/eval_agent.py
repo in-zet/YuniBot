@@ -1,33 +1,43 @@
 """도구 선택 정확도와 숫자 규칙 위반을 재는 평가 명령. 실제 Gemini API를 부르므로
 GEMINI_API_KEY가 필요하다. uv run pytest에는 수집되지 않는다.
 
+운영과 같은 배선(core.bot.build_client)을 임시 DB로 띄워 실제 서비스·도구를 그대로 쓴다.
+운영 DB(DB_PATH)는 건드리지 않는다. CHUNITHM-NET에는 연결된 쿠키가 없어 접속하지 않지만,
+`web-qa` 같은 검색 도구는 실제 검색 API를 부른다.
+
 사용법:
-    uv run python3 scripts/eval_agent.py --compare-models gemini-3.8-flash,gemini-3.5-flash-lite
-    uv run python3 scripts/eval_agent.py --compare-modes --model gemini-3.8-flash
+    PYTHONPATH=.:third_party uv run python3 scripts/eval_agent.py --compare-models gemini-3.8-flash,gemini-3.5-flash-lite
+    PYTHONPATH=.:third_party uv run python3 scripts/eval_agent.py --compare-modes --model gemini-3.8-flash
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime
 import os
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
+from dotenv import load_dotenv
 from google.genai.errors import ServerError
 
 from core.agent import AgentLoop, AgentTurnResult
+from core.bot import YuniClient, build_client
+from core.config import CoreConfig
 from core.executor import ToolExecutor
 from core.llm_gemini import GeminiLlmAdapter
 from core.llm_pricing import estimate_cost_usd
-from core.permissions import InMemoryTagProvider
 from core.prompt import PromptAssembler
 from core.registry import SkillRegistry
-from core.resolvers import ResolverRegistry
+from core.registry_snapshot import build_snapshot
 from core.response_assembly import assemble_response
 from core.skill_loading import SkillLoadState
 from core.tool_types import ToolContext
+from core.usage import UsageService
+from services.common.players import PlayersService
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -98,7 +108,8 @@ async def _run_with_retry(
     for attempt in range(4):
         try:
             return await loop.run(ctx=ctx, skill_state=state, user_text=question, prompt_context_snippets=[])
-        except ServerError:
+        except ServerError as exc:
+            print(f"  [재시도 {attempt + 1}/3] {exc}", flush=True)
             if attempt == 3:
                 raise
             await asyncio.sleep(20 * (attempt + 1))
@@ -106,7 +117,8 @@ async def _run_with_retry(
 
 
 async def run_eval(
-    *, model: str, mode: Literal["instructions", "full"], registry: SkillRegistry, executor: ToolExecutor, api_key: str
+    *, model: str, mode: Literal["instructions", "full"], client: YuniClient, registry: SkillRegistry,
+    executor: ToolExecutor, api_key: str,
 ) -> EvalReport:
     report = EvalReport()
     llm = GeminiLlmAdapter(api_key=api_key)
@@ -116,17 +128,29 @@ async def run_eval(
     )
     known_skills = {s.manifest.name for s in registry.enabled_skills()}
     eval_tags = all_manifest_tags(registry)
+    players = cast("PlayersService", executor.services["players"])
+    usage = cast("UsageService", executor.services["usage"])
+    player = await players.create_player()
+    snapshot = build_snapshot(registry)
 
     for case in collect_eval_cases(registry):
         loop = _RecordingAgentLoop(
             llm=llm, executor=executor, prompt=prompt, model=model, thinking_level="low",
-            max_tool_calls=5, max_tokens=50000,
+            max_tool_calls=5, max_tokens=50000, db=client.conn, registry_snapshot=snapshot,
         )
-        ctx = ToolContext(player_id="eval", tags=eval_tags, services={})
+        ctx = ToolContext(
+            player_id=player.id, tags=eval_tags, services={}, event_bus=executor.event_bus,
+            usage=usage,
+        )
         state = SkillLoadState(mode=mode, known_skills=known_skills)
         started = time.monotonic()
         result = await _run_with_retry(loop, ctx=ctx, state=state, question=case.question)
-        report.latencies_seconds.append(time.monotonic() - started)
+        elapsed = time.monotonic() - started
+        report.latencies_seconds.append(elapsed)
+        print(
+            f"  [{report.total + 1}] {elapsed:5.1f}s {case.skill_name}: {case.question!r} "
+            f"-> {loop.first_tool_name!r}", flush=True,
+        )
         report.total += 1
         report.estimated_cost_usd += estimate_cost_usd(
             model, input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens
@@ -162,13 +186,24 @@ async def _main() -> None:
     parser.add_argument("--compare-modes", action="store_true")
     args = parser.parse_args()
 
+    load_dotenv(override=False)
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         raise SystemExit("GEMINI_API_KEY가 없다")
 
-    registry = SkillRegistry([Path("skills")])
-    registry.load()
-    executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions=registry.tag_definitions())
+    with tempfile.TemporaryDirectory(prefix="yuni_eval_") as tmp:
+        await _run_all(args, api_key=api_key, db_path=Path(tmp) / "eval.db")
+
+
+async def _run_all(args: argparse.Namespace, *, api_key: str, db_path: Path) -> None:
+    config = CoreConfig(
+        discord_token="eval", skills_dirs=[Path("skills")], db_path=db_path, test_guild_id=None,
+        admin_discord_ids=frozenset(), quiet_hours_start=datetime.time(2, 0), quiet_hours_end=datetime.time(6, 0),
+        cookie_encryption_key=os.environ.get("COOKIE_ENCRYPTION_KEY", "").encode(),
+        fetch_chunimaru_on_startup=False, gemini_api_key=api_key,
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+    )
+    client, registry, executor = await build_client(config)
 
     runs: list[tuple[str, Literal["instructions", "full"]]] = []
     if args.compare_models:
@@ -178,9 +213,14 @@ async def _main() -> None:
     else:
         runs = [(args.model, args.mode)]
 
-    for model, mode in runs:
-        report = await run_eval(model=model, mode=mode, registry=registry, executor=executor, api_key=api_key)
-        _print_report(f"{model}/{mode}", report)
+    try:
+        for model, mode in runs:
+            report = await run_eval(
+                model=model, mode=mode, client=client, registry=registry, executor=executor, api_key=api_key,
+            )
+            _print_report(f"{model}/{mode}", report)
+    finally:
+        await client.close()
 
 
 if __name__ == "__main__":
