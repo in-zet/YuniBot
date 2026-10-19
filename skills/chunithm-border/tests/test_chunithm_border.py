@@ -77,7 +77,7 @@ async def test_lookup_unknown_note_count_is_not_computable() -> None:
     assert all(v == "계산 불가" for v in result.data["borders"].values())
 
 
-async def test_remaining_reports_score_and_attacks() -> None:
+async def test_remaining_reports_score_only_by_default() -> None:
     skill = _load_skill()
     result = await skill.remaining(
         _ctx(_FakeRecords(best_score=1_000_000)), chart=_chart(3000),
@@ -86,7 +86,20 @@ async def test_remaining_reports_score_and_attacks() -> None:
 
     assert result.error is None
     assert result.data["remaining_score"] == 7_500
+    assert "remaining_attacks" not in result.data
+    assert result.display is not None and "어택" not in (result.display.content or "")
+    assert "어택" in (result.display.slash_content or "")  # /남은어택은 어택을 명시한 명령이다
+
+
+async def test_remaining_adds_attacks_when_asked() -> None:
+    skill = _load_skill()
+    result = await skill.remaining(
+        _ctx(_FakeRecords(best_score=1_000_000)), chart=_chart(3000),
+        rank=ResolvedRank(canonical="SSS", min_score=1_007_500), include_attacks=True,
+    )
+
     assert Decimal(result.data["remaining_attacks"]) > 0
+    assert result.display is not None and "어택" in (result.display.content or "")
 
 
 async def test_remaining_when_already_past_target() -> None:
@@ -98,7 +111,7 @@ async def test_remaining_when_already_past_target() -> None:
 
     assert result.error is None
     assert result.data["already_achieved"] is True
-    assert result.data["remaining_attacks"] == "0.00"
+    assert result.data["remaining_score"] <= 0
 
 
 async def test_remaining_without_any_play_record_is_an_error() -> None:

@@ -9,7 +9,7 @@ def test_collect_eval_cases_includes_all_examples() -> None:
     registry.load()
     cases = collect_eval_cases(registry)
     border_cases = [c for c in cases if c.skill_name == "chunithm-border"]
-    assert len(border_cases) == 2  # chunithm-border/SKILL.md의 examples 2개
+    assert len(border_cases) == 3  # chunithm-border/SKILL.md의 examples 3개
 
 
 def test_score_tool_choice_full_mode_requires_open_skill_first() -> None:

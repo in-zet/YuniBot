@@ -36,8 +36,11 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 
 @tool(slash="남은어택", tags=["chunithm-synced"])
-async def remaining(ctx: ToolContext, chart: ChartRef, rank: RankRef) -> ToolResult:
-    """내 최고 점수에서 목표 랭크까지 남은 점수와 어택을 계산한다."""
+async def remaining(
+    ctx: ToolContext, chart: ChartRef, rank: RankRef, include_attacks: bool = False
+) -> ToolResult:
+    """내 최고 점수에서 목표 랭크까지 남은 점수를 계산한다. 플레이어가 질문에 "어택"을 명시했을 때만
+    include_attacks를 켜서 남은 어택도 함께 낸다."""
     assert isinstance(chart, ResolvedChart)
     assert isinstance(rank, ResolvedRank)
     best_score = await ctx.records.best_score(
@@ -53,14 +56,21 @@ async def remaining(ctx: ToolContext, chart: ChartRef, rank: RankRef) -> ToolRes
     remaining_score, attacks = result
     already_achieved = remaining_score <= 0
 
-    data = {
+    data: dict[str, object] = {
         "song": chart.song.title, "difficulty": chart.chart.difficulty, "rank": rank.canonical,
-        "best_score": best_score, "remaining_score": remaining_score,
-        "remaining_attacks": str(attacks), "already_achieved": already_achieved,
+        "best_score": best_score, "remaining_score": remaining_score, "already_achieved": already_achieved,
     }
+    if include_attacks:
+        data["remaining_attacks"] = str(attacks)
+    head = f"{chart.song.title} {chart.chart.difficulty} — "
     if already_achieved:
-        content = f"{chart.song.title} {chart.chart.difficulty} — 이미 {rank.canonical}를 달성했다."
+        content = f"{head}이미 {rank.canonical}를 달성했다."
+        slash_content = None
     else:
-        content = f"{chart.song.title} {chart.chart.difficulty} — {rank.canonical}까지 {remaining_score}점 ({attacks}어택)."
+        content = f"{head}{rank.canonical}까지 {remaining_score}점" + (f" ({attacks}어택)." if include_attacks else ".")
+        # /남은어택은 이름부터 어택을 명시한 명령이라 슬래시에서는 어택을 같이 보여 준다.
+        slash_content = f"{head}{rank.canonical}까지 {remaining_score}점 ({attacks}어택)."
 
-    return ToolResult(data=data, display=Display(content=content), display_mode="optional")
+    return ToolResult(
+        data=data, display=Display(content=content, slash_content=slash_content), display_mode="optional"
+    )
