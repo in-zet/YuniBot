@@ -371,13 +371,6 @@ async def _sync_admin_bootstrap(players: PlayersService, admin_discord_ids: froz
             await players.link_account(player.id, discord_id)
         await players.grant_tag(player.id, "admin", source="env_bootstrap")
 
-    current_accounts: set[str] = set()
-    for discord_id in admin_discord_ids:
-        player = await players.player_for_discord(discord_id)
-        if player is not None:
-            for account in await players.accounts_for(player.id):
-                current_accounts.add(account.discord_id)
-
     for player_id in await players.players_with_tag("admin", source="env_bootstrap"):
         accounts = await players.accounts_for(player_id)
         if any(a.discord_id in admin_discord_ids for a in accounts):

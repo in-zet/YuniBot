@@ -10,6 +10,7 @@ category: 세션과 후기
 game: chunithm
 version: 1
 services: [records, arcades, players, notify, settings, yuni, db]
+tags: [chunithm-synced]
 listens: [chunithm.sync.reported]
 emits: [chunithm.session.viewed, chunithm.session.closed]
 settings:
@@ -30,7 +31,7 @@ settings:
     scope: guild
 ---
 
-태그 조건은 없다(chunithm-report와 같다) — 공개된 남의 세션은 로그인 여부와 무관하게 볼 수 있다.
+`chunithm-synced` 태그가 필요하다(chunithm-report와 같다). 태그가 있으면 공개된 남의 세션은 로그인 여부와 무관하게 볼 수 있다.
 
 - 날짜 표현("지난달", "10월 초")은 지금 날짜 기준으로 실제 ISO 날짜(YYYY-MM-DD)나 start/end로 바꿔 넘긴다. 세션을 찾는 것 자체는 도구가 한다.
 - `get_session`이 돌려주는 `rendered_text`는 그날 저장된 리포트 그대로다 — 다시 설명하거나 숫자를 바꿔 말하지 않는다.

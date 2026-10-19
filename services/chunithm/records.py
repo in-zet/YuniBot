@@ -1,6 +1,7 @@
 # services/chunithm/records.py
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
@@ -237,8 +238,18 @@ class RecordsService:
         self._songdb = songdb
         self._players = players
         self._diff_cache: dict[str, SyncDiff] = {}
+        # 같은 플레이어의 save_sync를 직렬화한다 — 여러 await 지점을 거치는 쓰기 묶음이라,
+        # 같은 플레이어의 동기화가(중복 클릭 등으로) 겹치면 공유 커넥션의 같은 트랜잭션
+        # 위에서 한쪽의 rollback이 다른 쪽의 커밋 안 된 쓰기까지 지울 수 있다.
+        self._sync_locks: dict[str, asyncio.Lock] = {}
 
     async def save_sync(self, player_id: str, fetch: SyncFetch, ctx: ToolContext) -> SyncResult:
+        """동기화 결과를 저장한다. 같은 플레이어의 동시 호출은 직렬화된다(아래 참고)."""
+        lock = self._sync_locks.setdefault(player_id, asyncio.Lock())
+        async with lock:
+            return await self._save_sync_locked(player_id, fetch, ctx)
+
+    async def _save_sync_locked(self, player_id: str, fetch: SyncFetch, ctx: ToolContext) -> SyncResult:
         """동기화 결과를 저장한다. 베스트30·신곡20·전체 PB를 records_pb에 합쳐 넣고
         (점수가 오른 채보만 행 전체를 바꾼다), 첫 동기화가 아니면 직전 상태와 비교한
         diff를 계산해 메모리 캐시에 둔다(sync_diff로 읽는다, chunithm-sync.md "구현 결정").

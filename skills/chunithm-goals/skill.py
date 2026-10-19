@@ -223,7 +223,8 @@ async def _reschedule_reminders(ctx: ToolContext, goal: Any) -> None:
             continue
         schedule_id = await ctx.scheduler.schedule_once(
             owner_skill=_SKILL_NAME, event_name=_NOTIFY_DUE_EVENT,
-            payload={"goal_id": goal.id, "offset_days": offset}, fire_at=fire_at, catch_up=True,
+            payload={"goal_id": goal.id, "offset_days": offset, "player_id": goal.player_id, "guild_id": goal.guild_id},
+            fire_at=fire_at, catch_up=True,
         )
         await models.insert_schedule(ctx.db, goal_id=goal.id, schedule_id=schedule_id, kind=_SCHEDULE_KIND_REMINDER)
 
@@ -240,7 +241,8 @@ async def _reschedule_final_deadline(ctx: ToolContext, goal: Any) -> None:
     assert ctx.scheduler is not None
     schedule_id = await ctx.scheduler.schedule_once(
         owner_skill=_SKILL_NAME, event_name=_FINAL_DEADLINE_EVENT,
-        payload={"goal_id": goal.id}, fire_at=fire_at, catch_up=True,
+        payload={"goal_id": goal.id, "player_id": goal.player_id, "guild_id": goal.guild_id},
+        fire_at=fire_at, catch_up=True,
     )
     await models.insert_schedule(ctx.db, goal_id=goal.id, schedule_id=schedule_id, kind=_SCHEDULE_KIND_FINAL)
 
@@ -856,6 +858,15 @@ async def update(
             return ToolResult(error="target_score는 곡 목표에만 쓸 수 있어. 레이팅·오버파워는 target_value를 줘.")
         score = _score(target_score)
         assert score is not None
+        # set_goal의 "이미 그 목표를 달성했어" 검사와 같은 기준 — 없으면 PB보다 낮게 내린
+        # 목표가 그 채보를 다시 플레이할 때까지 영원히 in_progress로 남는다(achievement_ratio
+        # 분모도 음수가 된다).
+        song_title = goal.target_ref.get("song_title")
+        difficulty = goal.target_ref.get("difficulty")
+        if song_title is not None and difficulty is not None:
+            row = await ctx.records.pb_row(ctx.player_id, song_title=song_title, difficulty=difficulty)
+            if row is not None and row.score >= score:
+                return ToolResult(error="이미 그 목표를 달성했어.")
         target_value = float(score)
 
     duration_tag = DurationTag(duration_tag) if duration_tag is not None else None

@@ -112,8 +112,10 @@ async def wrong_attempt_count(conn: aiosqlite.Connection, discord_id: str, *, no
     row = await cursor.fetchone()
     if row is None:
         return 0
-    if row["locked_until"] and row["locked_until"] > now.isoformat():
-        return 999  # 잠겨 있는 동안은 횟수와 무관하게 막힌 것으로 본다
+    if row["locked_until"]:
+        if row["locked_until"] > now.isoformat():
+            return 999  # 잠겨 있는 동안은 횟수와 무관하게 막힌 것으로 본다
+        return 0  # 잠금 기간이 지났으면 새로 다섯 번을 준다(안 그러면 영구 잠금이 된다)
     return row["wrong_count"]
 
 
@@ -122,10 +124,14 @@ async def record_wrong_attempt(
 ) -> int:
     conn.row_factory = aiosqlite.Row
     cursor = await conn.execute(
-        "SELECT wrong_count FROM account_link_attempts WHERE discord_id = ?", (discord_id,)
+        "SELECT wrong_count, locked_until FROM account_link_attempts WHERE discord_id = ?", (discord_id,)
     )
     row = await cursor.fetchone()
-    count = (row["wrong_count"] if row else 0) + 1
+    # 잠금 기간이 지났으면 쌓인 횟수를 이어받지 않는다(wrong_attempt_count와 같은 기준) —
+    # 안 그러면 다음 한 번만 틀려도 바로 다시 잠긴다(사실상 영구 잠금).
+    lock_expired = bool(row and row["locked_until"] and row["locked_until"] <= now.isoformat())
+    previous_count = 0 if (row is None or lock_expired) else row["wrong_count"]
+    count = previous_count + 1
     locked_until = (now + cooldown).isoformat() if count >= lock_after else None
     await conn.execute(
         "INSERT INTO account_link_attempts (discord_id, wrong_count, locked_until) VALUES (?, ?, ?) "

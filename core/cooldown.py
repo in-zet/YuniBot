@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol
 
 
@@ -44,7 +44,11 @@ async def check_monthly_cap(
     cap = await settings.get_value(
         scope="guild", scope_id=guild_id, skill="admin", name="월 비용 상한", default=10.0
     )
-    year_month = now.strftime("%Y-%m")
+    # core/usage.py는 기록 시각을 UTC로 저장한다(datetime.now(UTC)) — now는 서버 로컬
+    # 벽시계(naive)라 그대로 strftime하면 UTC가 아닌 타임존에서 월 경계 앞뒤 몇 시간
+    # 동안 "이번 달" 집계가 실제 저장된 달과 어긋난다. naive datetime의 astimezone()은
+    # 시스템 로컬 시간으로 해석해 변환하므로 이걸로 맞춘다.
+    year_month = now.astimezone(UTC).strftime("%Y-%m")
     spent = await usage.month_total_usd(guild_id=guild_id, year_month=year_month)
     cap_f = float(cap)  # pyright: ignore[reportArgumentType]
     return MonthlyCapStatus(

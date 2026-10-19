@@ -74,12 +74,12 @@ class ArcadesService:
         rows = await cursor.fetchall()
         return [_row_to_arcade(row) for row in rows]
 
-    async def add_alias(self, arcade_id: str, *, player_id: str, alias: str) -> None:
+    async def add_alias(self, arcade_id: str, *, guild_id: str, player_id: str, alias: str) -> None:
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
-            "INSERT INTO arcade_aliases (arcade_id, player_id, alias, created_at) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT (player_id, alias) DO UPDATE SET arcade_id = excluded.arcade_id",
-            (arcade_id, player_id, alias, now),
+            "INSERT INTO arcade_aliases (arcade_id, guild_id, player_id, alias, created_at) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT (guild_id, player_id, alias) DO UPDATE SET arcade_id = excluded.arcade_id",
+            (arcade_id, guild_id, player_id, alias, now),
         )
         await self._conn.commit()
 
@@ -125,7 +125,7 @@ class ArcadesService:
 
         alias_cursor = await self._conn.execute(
             "SELECT a.* FROM arcades a JOIN arcade_aliases al ON al.arcade_id = a.id "
-            "WHERE a.guild_id = ? AND al.player_id = ? AND al.alias = ?",
+            "WHERE al.guild_id = ? AND al.player_id = ? AND al.alias = ?",
             (ctx.guild_id, ctx.player_id, text),
         )
         alias_hit = await alias_cursor.fetchone()

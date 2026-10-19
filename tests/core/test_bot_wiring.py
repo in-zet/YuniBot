@@ -825,6 +825,10 @@ async def test_session_review_flow_runs_through_the_real_bus_notify_and_thread_m
         players = cast("PlayersService", client._services["players"])  # pyright: ignore[reportPrivateUsage]
         player = await players.create_player()
         await players.link_account(player.id, "111")
+        # 실제 경로에서는 이 이벤트가 나갈 때 이미 최소 한 번 동기화를 마친 뒤다
+        # (records.save_sync가 첫 동기화 때 이 태그를 붙인다) — chunithm-session이
+        # chunithm-synced를 요구하므로 여기서도 그 전제를 맞춰 준다.
+        await players.set_status_tag(player.id, "chunithm-synced", source="records:first_sync")
         await executor.event_bus.emit_notify(
             "chunithm.sync.reported",
             {
