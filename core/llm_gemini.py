@@ -3,7 +3,7 @@ from __future__ import annotations
 from google import genai
 from google.genai import types
 
-from core.gemini_retry import call_with_retry
+from core.gemini_retry import LLM_REQUEST_TIMEOUT_SECONDS, call_with_retry, http_options
 from core.llm import (
     FunctionCallRequest,
     GenerationTurn,
@@ -85,7 +85,7 @@ class GeminiLlmAdapter:
     """LlmAdapter 프로토콜의 유일한 실제 구현. google.genai.types를 아는 유일한 모듈이다."""
 
     def __init__(self, *, api_key: str) -> None:
-        self._client = genai.Client(api_key=api_key)
+        self._client = genai.Client(api_key=api_key, http_options=http_options(LLM_REQUEST_TIMEOUT_SECONDS))
 
     async def generate(
         self,

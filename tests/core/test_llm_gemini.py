@@ -178,6 +178,33 @@ async def test_generate_gives_up_after_max_retries(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_generate_retries_deadline_exceeded_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-19: gemini-3.8-flash가 응답 없이 멈췄다. 요청 타임아웃에 걸린 504는 다시 불러도
+    같은 시간을 또 기다릴 가능성이 커서 503보다 적게(한 번만) 재시도한다."""
+    monkeypatch.setattr("core.gemini_retry.asyncio.sleep", lambda _delay: _NoopAwaitable())
+    adapter = GeminiLlmAdapter(api_key="fake")
+    fake_models = _FlakyModelsApi(to_raise=[_server_error(504)] * 10)
+    adapter._client.aio._models = fake_models  # pyright: ignore[reportAttributeAccessIssue]
+
+    with pytest.raises(genai_errors.ServerError):
+        await adapter.generate(
+            model="gemini-3.8-flash", system_instruction="규칙",
+            contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="low",
+        )
+    assert fake_models.call_count == 2  # 첫 시도 + 재시도 1번
+
+
+def test_adapters_set_request_timeout() -> None:
+    """타임아웃이 없으면 모델이 멈출 때 멘션 처리가 끝없이 기다린다."""
+    from core.search_gemini import GeminiSearchAdapter
+
+    llm = GeminiLlmAdapter(api_key="fake")
+    search = GeminiSearchAdapter(api_key="fake")
+    assert llm._client._api_client._http_options.timeout == 30_000  # pyright: ignore[reportPrivateUsage]
+    assert search._client._api_client._http_options.timeout == 60_000  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
 async def test_generate_does_not_retry_non_retryable_client_error() -> None:
     adapter = GeminiLlmAdapter(api_key="fake")
     not_found = genai_errors.ClientError(404, {"message": "model not found", "status": "NOT_FOUND"})

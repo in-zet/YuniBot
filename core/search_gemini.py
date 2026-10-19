@@ -4,7 +4,11 @@ from __future__ import annotations
 from google import genai
 from google.genai import types
 
-from core.gemini_retry import call_with_retry
+from core.gemini_retry import (
+    SEARCH_REQUEST_TIMEOUT_SECONDS,
+    call_with_retry,
+    http_options,
+)
 from core.llm import OnRetry
 from core.search import SearchResult, SearchSource, SearchUsage
 
@@ -49,7 +53,7 @@ class GeminiSearchAdapter:
     합칠 이유가 없다(web-qa.md "미확인 사항" — 합쳐 쓸 수 있게 되면 그때 바꾼다)."""
 
     def __init__(self, *, api_key: str) -> None:
-        self._client = genai.Client(api_key=api_key)
+        self._client = genai.Client(api_key=api_key, http_options=http_options(SEARCH_REQUEST_TIMEOUT_SECONDS))
 
     async def search(self, *, model: str, query: str, on_retry: OnRetry | None = None) -> SearchResult:
         config = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])

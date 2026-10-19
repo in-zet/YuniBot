@@ -6,6 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from google.genai import errors as genai_errors
+from google.genai import types
 
 from core.llm import OnRetry
 
@@ -18,7 +19,20 @@ logger = logging.getLogger(__name__)
 # (복사 금지 — 두 어댑터 모두 같은 google-genai 클라이언트를 같은 이유로 재시도해야 한다).
 _RETRYABLE_CODES = frozenset({429, 500, 502, 503, 504})
 _MAX_RETRIES = 3
+# 504(DEADLINE_EXCEEDED)는 요청 타임아웃에 걸렸다는 뜻이다. 모델이 응답 없이 멈춘 것이라(2026-10-19
+# gemini-3.8-flash가 25초 넘게 무응답) 다시 불러도 같은 시간을 또 기다릴 가능성이 커서 한 번만 재시도한다.
+_MAX_RETRIES_BY_CODE = {504: 1}
 _RETRY_BASE_DELAY_SECONDS = 2.0  # 시도마다 2배로 늘린다(2초, 4초, 8초).
+
+# 요청 타임아웃. 없으면 모델이 응답 없이 멈출 때 멘션 처리가 끝없이 기다린다. 서버가 10초 미만
+# 마감은 400으로 거절하고, 초과하면 504로 끊어 준다(위 재시도 경로로 들어간다).
+LLM_REQUEST_TIMEOUT_SECONDS = 30
+SEARCH_REQUEST_TIMEOUT_SECONDS = 60  # Google 검색을 거치는 호출이라 더 오래 걸린다.
+
+
+def http_options(timeout_seconds: int) -> types.HttpOptions:
+    """genai.Client(http_options=...)에 넘길 요청 타임아웃. 두 Gemini 어댑터가 같이 쓴다."""
+    return types.HttpOptions(timeout=timeout_seconds * 1000)
 
 
 async def call_with_retry[T](call: Callable[[], Awaitable[T]], *, on_retry: OnRetry | None = None) -> T:
@@ -28,7 +42,7 @@ async def call_with_retry[T](call: Callable[[], Awaitable[T]], *, on_retry: OnRe
             return await call()
         except genai_errors.APIError as exc:
             attempt += 1
-            if exc.code not in _RETRYABLE_CODES or attempt > _MAX_RETRIES:
+            if exc.code not in _RETRYABLE_CODES or attempt > _MAX_RETRIES_BY_CODE.get(exc.code, _MAX_RETRIES):
                 raise
             delay = _RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
             logger.warning(
