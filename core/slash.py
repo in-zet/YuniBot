@@ -4,7 +4,7 @@ from __future__ import annotations
 import enum
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, get_type_hints
 
 import aiosqlite
@@ -244,6 +244,8 @@ def render_result(result: ToolResult) -> dict[str, Any]:
         return {"content": result.error[:_DISCORD_CONTENT_LIMIT], "ephemeral": True}
 
     display = result.display
+    if display is not None and display.slash_content is not None:
+        display = replace(display, content=display.slash_content)
     if display is not None and (display.content or display.embeds or display.view is not None):
         kwargs: dict[str, Any] = {"content": display.content, "embeds": list(display.embeds)}
         if display.view is not None:

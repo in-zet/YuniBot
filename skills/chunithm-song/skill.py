@@ -87,7 +87,7 @@ async def find_by_const(
 
     return ToolResult(
         data={"count": len(hits), "titles": [hit.song.title for hit in hits]},
-        display=Display(content="\n".join(lines) if lines else "해당 범위의 채보가 없다."),
+        display=Display(content="\n".join(lines) if lines else "해당 범위의 채보가 없다.", omittable=True),
     )
 
 

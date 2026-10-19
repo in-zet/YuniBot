@@ -171,7 +171,7 @@ async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind
             for i, r in enumerate(rows, start=1)
         ]
         blocks.append("\n".join(lines))
-    return ToolResult(data=data, display=Display(content="\n\n".join(blocks)))
+    return ToolResult(data=data, display=Display(content="\n\n".join(blocks), omittable=True))
 
 
 def _recent_data(score: RecentScore) -> dict[str, Any]:
@@ -225,7 +225,7 @@ async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int =
         lines.append(f"판정 수는 앞 {_DETAIL_LIMIT}개에만 있어.")
     return ToolResult(
         data={"player_id": target.id, "plays": plays, "detail_limit": _DETAIL_LIMIT},
-        display=Display(content="\n".join(lines)),
+        display=Display(content="\n".join(lines), omittable=True),
     )
 
 
@@ -326,7 +326,7 @@ async def analyze(
             ],
             "unknown_const_count": unknown,
         },
-        display=Display(content="\n".join(lines)),
+        display=Display(content="\n".join(lines), omittable=True),
     )
 
 
@@ -358,7 +358,7 @@ async def candidates(
         lines.append("지금 조건으로는 레이팅을 올릴 후보곡이 없어.")
     return ToolResult(
         data={"min_const": min_const, "max_const": max_const, "candidates": items},
-        display=Display(content="\n".join(lines)),
+        display=Display(content="\n".join(lines), omittable=True),
     )
 
 

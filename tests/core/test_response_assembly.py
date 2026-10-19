@@ -84,3 +84,24 @@ def test_assemble_response_required_displays_survive_violation_without_show_tag(
     assembled = assemble_response(result)
     assert assembled.numeric_violation is True
     assert assembled.displays == [Display(content="필수 표")]
+
+
+def test_no_table_tag_drops_omittable_required_displays_only() -> None:
+    result = AgentTurnResult(
+        text="17 넘는 곡은 세 곡이야. [[no_table]]",
+        collected_data=[{"rating": 17.27}],
+        required_displays=[
+            Display(content="전체 표", omittable=True),
+            Display(content="출처", omittable=False),
+        ],
+    )
+    assembled = assemble_response(result)
+    assert "[[no_table]]" not in assembled.text
+    assert assembled.displays == [Display(content="출처")]
+
+
+def test_required_displays_stay_without_no_table_tag() -> None:
+    result = AgentTurnResult(
+        text="목록이야.", collected_data=[], required_displays=[Display(content="전체 표", omittable=True)]
+    )
+    assert assemble_response(result).displays == [Display(content="전체 표", omittable=True)]

@@ -209,7 +209,9 @@ async def list_sessions(
         arcade_part = f"  {arcade_name}" if arcade_name else ""
         lines.append(f"{play_date}{suffix}{arcade_part}  갱신 {updated_count}채보")
 
-    return ToolResult(data={"player_id": target.id, "sessions": items}, display=Display(content="\n".join(lines)))
+    return ToolResult(
+        data={"player_id": target.id, "sessions": items}, display=Display(content="\n".join(lines), omittable=True)
+    )
 
 
 @tool(slash="세션 보기")

@@ -775,7 +775,9 @@ async def set_goal(
     label = _goal_label(created_goal)
     return ToolResult(
         data={"goal_id": goal_id, "kind": kind.value, "target_ref": target_ref, "target_value": target_value},
-        display=Display(content=f"목표를 만들었어. ({label})\nid {goal_id}"),
+        display=Display(
+            content=f"목표를 만들었어. ({label})", slash_content=f"목표를 만들었어. ({label})\nid {goal_id}"
+        ),
         display_mode="optional",
     )
 
@@ -797,6 +799,7 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
     show_progress = await _progress_visible(ctx, target.id)
     items: list[dict[str, Any]] = []
     lines: list[str] = []
+    slash_lines: list[str] = []  # 슬래시용: 목표마다 id가 붙는다(멘션 답에는 id를 안 보인다)
     for r in rows:
         summary = await _goal_summary(ctx, r) if show_progress else _hidden_summary()
         items.append(
@@ -809,10 +812,15 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
         status = _STATUS_LABELS.get(r.status, r.status)
         detail = _summary_text(r, summary)
         due = f"  기한 {r.due_at}" if r.due_at else ""
-        lines.append(f"[{status}] {_goal_label(r)}{'  ' + detail if detail else ''}{due}\n  id {r.id}")
+        line = f"[{status}] {_goal_label(r)}{'  ' + detail if detail else ''}{due}"
+        lines.append(line)
+        slash_lines.append(f"{line}\n  id {r.id}")
     return ToolResult(
         data={"player_id": target.id, "goals": items},
-        display=Display(content="\n".join(lines) if lines else "목표가 없어."),
+        display=Display(
+            content="\n".join(lines) if lines else "목표가 없어.",
+            slash_content="\n".join(slash_lines) if slash_lines else None,
+        ),
         # optional — required면 모델이 뭐라 답하든 id 포함 전체 목록이 항상 붙는다(멘션에서
         # "id xxxxx"가 매번 보이던 원인, 실기 2026-10-18). 슬래시(/목표 목록)는 core/slash.py의
         # render_result가 display_mode와 무관하게 항상 보여주므로 id는 그대로 보인다 — 거기엔
@@ -965,8 +973,12 @@ async def progress(ctx: ToolContext, goal_id: str) -> ToolResult:
         if projected is not None:
             lines.append(f"곡별 목표를 모두 달성하면 예상 레이팅 {calc.truncate4(projected)}")
 
-    lines.append(f"id {goal.id}")
-    return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
+    # id는 다음 /목표 수정·삭제에 타이핑할 때만 필요하다 — 멘션 답에는 슬래시 본문에만 붙인다.
+    return ToolResult(
+        data=data,
+        display=Display(content="\n".join(lines), slash_content="\n".join([*lines, f"id {goal.id}"])),
+        display_mode="optional",
+    )
 
 
 @tool(slash="목표 삭제", mutates=True, confirm="bulk")
@@ -1132,16 +1144,22 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
         if i["lamp"] is not None:
             return (
                 f"{i['song_title']} {i['difficulty']}{const_text}  {_LAMP_LABELS.get(i['lamp'], i['lamp'])} 목표  "
-                f"(현재 램프 {i['current_lamp'] or '기록 없음'})\n  id {i['goal_id']}"
+                f"(현재 램프 {i['current_lamp'] or '기록 없음'})"
             )
         return (
             f"{i['song_title']} {i['difficulty']}{const_text}  "
-            f"{i['current_score']:,} → {i['target_score']:,}  (남은 {i['remaining_score']:,}점)\n  id {i['goal_id']}"
+            f"{i['current_score']:,} → {i['target_score']:,}  (남은 {i['remaining_score']:,}점)"
         )
 
     lines = [_todo_line(i) for i in items]
+    slash_lines = [f"{line}\n  id {i['goal_id']}" for line, i in zip(lines, items, strict=True)]
     return ToolResult(
-        data={"todos": items}, display=Display(content="\n".join(lines) if lines else "투두가 없어."),
+        data={"todos": items},
+        display=Display(
+            content="\n".join(lines) if lines else "투두가 없어.",
+            slash_content="\n".join(slash_lines) if slash_lines else None,
+            omittable=True,
+        ),
         display_mode="required",
     )
 

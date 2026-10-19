@@ -68,6 +68,12 @@ class Display:
     # 본인에게만 보여야 하는 내용. 멘션 응답은 채널 답장이라 ephemeral이 없으므로, 이 표시물은 채널에
     # 붙이지 않고 요청한 플레이어에게 DM으로 보낸다(content만). 슬래시는 ephemeral을 따로 켠다.
     private: bool = False
+    # 슬래시에서만 쓰는 본문. 있으면 슬래시 응답이 content 대신 이것을 보낸다(멘션은 content만 쓴다).
+    # 다음 슬래시 명령에 타이핑할 id처럼 사람이 직접 봐야 하지만 멘션 답에는 군더더기인 것을 담는다.
+    slash_content: str | None = None
+    # required 표시물 중 질문이 표 전체가 아니라 조건에 맞는 일부일 때 유니가 `[[no_table]]`로 뺄 수 있는 것.
+    # 출처처럼 반드시 붙어야 하는 표시물에는 켜지 않는다.
+    omittable: bool = False
 
 
 @dataclass(slots=True, kw_only=True)

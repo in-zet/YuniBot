@@ -321,6 +321,13 @@ def _practice_command(tree: discord.app_commands.CommandTree[Any], sub: str) -> 
     return command
 
 
+def test_render_result_prefers_slash_content_over_content() -> None:
+    result = ToolResult(display=Display(content="멘션용", slash_content="슬래시용\nid abc"))
+
+    assert render_result(result)["content"] == "슬래시용\nid abc"
+    assert result.display is not None and result.display.content == "멘션용"  # 원본은 그대로
+
+
 def test_render_result_without_display_is_never_empty() -> None:
     # 디스코드는 content도, embeds도, view도 없는 응답을 거부한다("This interaction failed").
     kwargs = render_result(ToolResult(data={"foo": "bar"}))

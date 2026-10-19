@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 _NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 _SHOW_TAG_RE = re.compile(r"\[\[show:([A-Za-z0-9_-]+)\]\]")
+# 유니가 답에 쓰면 이 요청의 omittable required 표시물(목록·표)을 붙이지 않는다.
+_NO_TABLE_TAG = "[[no_table]]"
 _IGNORED = {0.0, 1.0}
 # 소수점·쉼표 없는 작은 정수(순위 번호, "베스트 30"·"신곡 20" 같은 프레임 크기, 날짜, 곡 수)는 유니가
 # 계산해 만들어 낸 숫자가 아니라 말투·목록의 일부라 대조에서 뺀다(2026-10-19: 목록 번호와 프레임 크기가
@@ -72,7 +74,8 @@ def assemble_response(result: AgentTurnResult) -> AssembledResponse:
         )
 
     requested_ids = set(_SHOW_TAG_RE.findall(text))
-    clean_text = _SHOW_TAG_RE.sub("", text).strip()
+    omit_tables = _NO_TABLE_TAG in text
+    clean_text = _SHOW_TAG_RE.sub("", text).replace(_NO_TABLE_TAG, "").strip()
 
     # 숫자 위반이어도 그 턴에 모인 optional 표시물을 전부 보여주지 않는다 — 실기 2026-10-18:
     # 목표 하나만 수정했는데 이름→id 해석용으로 불렀을 뿐인 list_goals까지 통째로 새어 나왔다.
@@ -82,6 +85,7 @@ def assemble_response(result: AgentTurnResult) -> AssembledResponse:
     # required 표시물은 숫자 위반 여부와 무관하게 항상 붙는다(도구의 정상적인 주 출력이지,
     # 위반의 "증거"가 아니다) — 그래서 위반 게이트를 거치지 않고, 강제로 보여줄 것들보다
     # 먼저 온다.
-    displays = result.required_displays + optional
+    required = [d for d in result.required_displays if not (omit_tables and d.omittable)]
+    displays = required + optional
 
     return AssembledResponse(text=clean_text, displays=displays, numeric_violation=violation)

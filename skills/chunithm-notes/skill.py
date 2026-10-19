@@ -171,7 +171,7 @@ async def list_notes(ctx: ToolContext) -> ToolResult:
     lines = [_line(i) for i in items]
     return ToolResult(
         data={"notes": items},
-        display=Display(content="\n".join(lines) if lines else "메모가 없어."),
+        display=Display(content="\n".join(lines) if lines else "메모가 없어.", omittable=True),
         display_mode="required",
     )
 

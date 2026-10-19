@@ -93,7 +93,7 @@ listens: [chunithm.sync.completed]
 | 함수 | 하는 일 | 인자 | 슬래시 | display |
 | --- | --- | --- | --- | --- |
 | `profile` | 프로필 | `player: PlayerRef`(기본 나) | `/프로필` | optional |
-| `best` | 베스트 30, 신곡 20 | `player: PlayerRef`, `kind`(best/new/둘 다) | `/베스트` | required |
+| `best` | 베스트 30, 신곡 20 | `player: PlayerRef`, `kind`(best/new/둘 다) | `/베스트` | required(omittable) |
 | `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만) | `player: PlayerRef`, `count` | `/최근` | required |
 | `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | `/기록` | optional |
 | `analyze` | 상수대별 평균, 랭크 분포 | `player: PlayerRef`, 상수 범위(선택) | `/분석` | required |

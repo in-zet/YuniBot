@@ -1149,7 +1149,9 @@ async def test_list_goals_shows_rating_goal_achievement_ratio_and_remaining(
     assert goal["song_rating_sum_needed"] == "5.0000"
     content = result.display.content if result.display is not None else ""
     assert "달성률 50.00%" in content
-    assert created.data["goal_id"] in content  # I8: 슬래시 사용자가 id를 볼 수 있다
+    # I8: id는 슬래시 본문에만 있다(멘션 답에는 안 보인다).
+    assert created.data["goal_id"] not in content
+    assert result.display is not None and created.data["goal_id"] in (result.display.slash_content or "")
 
 
 async def test_progress_computes_ratio_for_fresh_rating_goal_without_progress_rows(
@@ -1208,12 +1210,14 @@ async def test_set_overpower_goal_rejects_target_not_above_current(skill: Module
 # ---------------------------------------------------------------- I8: id 보이기
 
 
-async def test_todo_list_shows_goal_id(skill: ModuleType, db: aiosqlite.Connection) -> None:
+async def test_todo_list_shows_goal_id_only_in_slash_content(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
     created = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     result = await skill.todo_list(ctx)
     assert result.data["todos"][0]["goal_id"] == created.data["goal_id"]
-    assert result.display is not None and created.data["goal_id"] in (result.display.content or "")
+    assert result.display is not None
+    assert created.data["goal_id"] not in (result.display.content or "")
+    assert created.data["goal_id"] in (result.display.slash_content or "")
 
 
 # ---------------------------------------------------------------- 사소한 항목
