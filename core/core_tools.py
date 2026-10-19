@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from core.decorators import tool
 from core.skill_loading import SkillLoadState
+from core.threads import ThreadEndRequest
 from core.tool_types import Display, ToolContext, ToolResult
 
 
@@ -53,3 +54,19 @@ async def list_capabilities(ctx: ToolContext, category: str | None = None) -> To
 
 
 CORE_TOOL_SPECS = [open_skill.__yuni_tool__, remember.__yuni_tool__, list_capabilities.__yuni_tool__]  # pyright: ignore[reportFunctionMemberAccess]
+
+
+@tool()
+async def end_conversation(ctx: ToolContext) -> ToolResult:
+    """지금의 대화 스레드를 끝낸다. 플레이어가 대화를 끝내려는 뜻을 분명히 밝혔을 때만 부른다(예: "이만할게",
+    "끝났어", "다음에 얘기하자"). 애매하면 부르지 말고 끝낼지 되묻는다. 먼저 짧게 마무리하는 말을 쓰고, 그 말을
+    보낸 뒤 대화가 닫힌다."""
+    request = ctx.services.get("_thread_end")
+    if not isinstance(request, ThreadEndRequest):
+        return ToolResult(error="끝낼 대화 스레드가 아니다")
+    request.requested = True
+    return ToolResult(data={"ending": True})
+
+
+# 대화 스레드 안에서만 모델에게 보이는 코어 도구.
+THREAD_TOOL_SPECS = [end_conversation.__yuni_tool__]  # pyright: ignore[reportFunctionMemberAccess]

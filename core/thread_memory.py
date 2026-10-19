@@ -29,6 +29,7 @@ async def queue_thread_memory(memory: _MemoryLike, transcript: ThreadTranscript,
     messages = [
         PendingMessage(id=m.message_id or f"{transcript.thread_id}:{index}", text=strip_mentions(m.content))
         for index, m in enumerate(transcript.messages)
+        if not m.is_yuni
     ]
     last_message_id = next((m.message_id for m in reversed(transcript.messages) if m.message_id), None)
     try:

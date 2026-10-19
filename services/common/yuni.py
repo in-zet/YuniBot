@@ -82,12 +82,18 @@ class YuniService:
         self._address = address
 
     async def line(
-        self, sections: list[Section], *, player_id: str | None = None, guild_id: str | None = None
+        self,
+        sections: list[Section],
+        *,
+        player_id: str | None = None,
+        guild_id: str | None = None,
+        fallback: str | None = None,
     ) -> str:
-        """`player_id`·`guild_id`는 사용량 기록에만 쓴다(월 비용 상한이 서버별이라서). 없으면 기록하지 않는다."""
+        """`player_id`·`guild_id`는 사용량 기록에만 쓴다(월 비용 상한이 서버별이라서). 없으면 기록하지 않는다.
+        `fallback`은 단계가 없는 한마디(질문 등)가 실패했을 때 쓸 고정 문구다. 기본은 "확인했어!"."""
         stages: list[Stage] = [s.stage for s in sections if s.stage is not None]
         highest = highest_stage(stages)
-        fixed = _STAGE_LINES[highest] if highest is not None else _DEFAULT_LINE
+        fixed = _STAGE_LINES[highest] if highest is not None else (fallback or _DEFAULT_LINE)
 
         has_content = highest is not None or any(s.data or s.hint for s in sections)
         if self._llm is None or self._model is None or not has_content:

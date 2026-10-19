@@ -22,9 +22,17 @@ class _FakeGateway:
         self.channel_messages: list[tuple[str, str]] = []
         self.dms: list[tuple[str, str, object]] = []
         self.reactions: list[tuple[str, str, str]] = []
+        self.channel_views: list[object | None] = []
+        self.fail_send = False
 
-    async def send_channel_message(self, channel_id: str, content: str) -> None:
+    async def send_channel_message(self, channel_id: str, content: str, *, view: object | None = None) -> None:
+        if self.fail_send:
+            raise RuntimeError("전송 실패")
         self.channel_messages.append((channel_id, content))
+        self.channel_views.append(view)
+
+    async def open_dm_channel(self, discord_id: str) -> str:
+        return f"dm-{discord_id}"
 
     async def send_dm(self, discord_id: str, content: str, *, view: object | None = None) -> None:
         self.dms.append((discord_id, content, view))
@@ -172,3 +180,92 @@ async def test_react_forwards_to_the_gateway(env) -> None:
     notify, gateway = env[0], env[-1]
     await notify.react("c1", "m1", "📝")
     assert gateway.reactions == [("c1", "m1", "📝")]
+
+
+async def _linked_player(players: PlayersService, discord_id: str = "111") -> str:
+    player = await players.create_player()
+    await players.link_account(player.id, discord_id)
+    return player.id
+
+
+async def test_open_dm_thread_sends_opening_with_button_and_records_it(env) -> None:
+    notify, players, _, gateway = env
+    player_id = await _linked_player(players)
+    closed: list[ThreadTranscript] = []
+
+    session = await notify.open_dm_thread(
+        skill_name="chunithm-session", player_id=player_id, opening="이번엔 어땠어?",
+        on_close=closed.append, guidance="후기 지침", now=datetime.now(UTC),
+    )
+
+    assert session is not None
+    assert session.channel_id == "dm-111"
+    assert session.guidance == "후기 지침"
+    assert gateway.channel_messages == [("dm-111", "이번엔 어땠어?")]
+    assert [(m.content, m.is_yuni) for m in session.transcript] == [("이번엔 어땠어?", True)]
+    assert notify.has_open_thread(player_id, "chunithm-session")
+
+
+async def test_open_dm_thread_uses_the_end_button_factory(env) -> None:
+    _, players, settings, gateway = env
+    threads = ThreadManager()
+    built: list[str] = []
+    notify = NotifyService(
+        gateway=gateway, players=players, settings=settings, threads=threads,
+        end_button=lambda session: built.append(session.thread_id) or "view",
+    )
+    player_id = await _linked_player(players)
+
+    session = await notify.open_dm_thread(
+        skill_name="s", player_id=player_id, opening="안녕", on_close=lambda _t: None, now=datetime.now(UTC)
+    )
+
+    assert session is not None
+    assert built == [session.thread_id]
+    assert gateway.channel_views == ["view"]
+
+
+async def test_open_dm_thread_returns_none_without_account_or_when_already_open(env) -> None:
+    notify, players, _, gateway = env
+    lonely = await players.create_player()
+    assert await notify.open_dm_thread(
+        skill_name="s", player_id=lonely.id, opening="안녕", on_close=lambda _t: None, now=datetime.now(UTC)
+    ) is None
+
+    player_id = await _linked_player(players)
+    first = await notify.open_dm_thread(
+        skill_name="s", player_id=player_id, opening="안녕", on_close=lambda _t: None, now=datetime.now(UTC)
+    )
+    second = await notify.open_dm_thread(
+        skill_name="s", player_id=player_id, opening="또 안녕", on_close=lambda _t: None, now=datetime.now(UTC)
+    )
+    assert first is not None and second is None
+    assert gateway.channel_messages == [("dm-111", "안녕")]
+
+
+async def test_open_dm_thread_discards_the_session_when_the_opening_cannot_be_sent(env) -> None:
+    notify, players, _, gateway = env
+    player_id = await _linked_player(players)
+    gateway.fail_send = True
+
+    with pytest.raises(RuntimeError):
+        await notify.open_dm_thread(
+            skill_name="s", player_id=player_id, opening="안녕", on_close=lambda _t: None, now=datetime.now(UTC)
+        )
+
+    assert not notify.has_open_thread(player_id, "s")
+
+
+async def test_close_thread_runs_the_close_callback(env) -> None:
+    notify, players, _, _ = env
+    player_id = await _linked_player(players)
+    closed: list[ThreadTranscript] = []
+    session = await notify.open_dm_thread(
+        skill_name="s", player_id=player_id, opening="안녕", on_close=closed.append, now=datetime.now(UTC)
+    )
+    assert session is not None
+
+    await notify.close_thread(session.thread_id, reason="explicit")
+
+    assert [t.closed_reason for t in closed] == ["explicit"]
+    assert not notify.has_open_thread(player_id, "s")

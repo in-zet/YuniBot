@@ -9,7 +9,7 @@ from typing import Any
 
 import aiosqlite
 
-from core.core_tools import CORE_TOOL_SPECS
+from core.core_tools import CORE_TOOL_SPECS, THREAD_TOOL_SPECS
 from core.decorators import ToolSpec
 from core.executor import ToolExecutor
 from core.llm import (
@@ -24,11 +24,12 @@ from core.prompt import PromptAssembler
 from core.registry import LoadedSkill
 from core.registry_snapshot import RegistrySnapshot
 from core.skill_loading import SkillLoadState
+from core.threads import ThreadEndRequest
 from core.tool_types import Display, ToolContext, ToolResult
 
 logger = logging.getLogger(__name__)
 
-_CORE_TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in CORE_TOOL_SPECS}
+_CORE_TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in [*CORE_TOOL_SPECS, *THREAD_TOOL_SPECS]}
 
 # 이번 턴에서 heavy 스킬(manifest.weight == "heavy")의 도구를 처음 부르기 직전에 한 번
 # 불린다 — core/mention.py가 이걸로 "확인하고 있다"를 시간 기다리지 않고 바로 보낸다.
@@ -140,11 +141,16 @@ class AgentLoop:
         prompt_context_snippets: list[str],
         on_retry: OnRetry | None = None,
         on_heavy_call: OnHeavyCall | None = None,
+        thread_end: ThreadEndRequest | None = None,
     ) -> AgentTurnResult:
+        """thread_end가 있으면 대화 스레드 안의 응답이다 — 모델에게 end_conversation 도구가 보이고, 부르면 thread_end가 켜진다."""
+        services: dict[str, object] = {**ctx.services, "_skill_load_state": skill_state}
+        if thread_end is not None:
+            services["_thread_end"] = thread_end
         inner_ctx = ToolContext(
             player_id=ctx.player_id,
             tags=ctx.tags,
-            services={**ctx.services, "_skill_load_state": skill_state},
+            services=services,
             guild_id=ctx.guild_id,
             event_bus=ctx.event_bus,
             player_data=ctx.player_data,
@@ -172,7 +178,9 @@ class AgentLoop:
                 skill_state=skill_state,
                 prompt_context_snippets=prompt_context_snippets,
             )
-            tools = self._prompt.build_tool_declarations(player_tags=player_tags, skill_state=skill_state)
+            tools = self._prompt.build_tool_declarations(
+                player_tags=player_tags, skill_state=skill_state, in_thread=thread_end is not None
+            )
 
             llm_started = time.monotonic()
             turn = await self._llm.generate(

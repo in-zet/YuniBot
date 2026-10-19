@@ -24,6 +24,9 @@ class ThreadMessage:
     at: datetime
     # 디스코드 메시지 id. 메모리 요약 대기 목록의 중복 제거와 📝 반응에 쓴다.
     message_id: str | None = None
+    # 유니가 한 말이면 True(player_id는 이 대화의 플레이어 id를 그대로 둔다). 전문 저장에는 들어가고
+    # 메모리 요약 대기 목록에는 들어가지 않는다.
+    is_yuni: bool = False
 
 
 @dataclass(slots=True, kw_only=True)
@@ -53,6 +56,19 @@ class ThreadSession:
     checked_at: datetime | None = None
     # 이 대화에서 펼쳐 둔 스킬(오래 안 쓴 순). 메시지마다 이어받는다.
     opened_skills: list[str] = field(default_factory=list)
+    # 이 대화 안에서만 프롬프트 맥락에 넣는 지침(연 스킬이 정한다. 예: 후기용 말투와 리포트 요약).
+    guidance: str = ""
+
+    def record_yuni(self, content: str, *, at: datetime) -> None:
+        """유니가 한 말을 전문에 남긴다. 무응답 시간은 플레이어의 마지막 말부터 재므로 last_activity는 건드리지 않는다."""
+        self.transcript.append(ThreadMessage(player_id=self.player_id, content=content, at=at, is_yuni=True))
+
+
+@dataclass(slots=True)
+class ThreadEndRequest:
+    """한 번의 응답 동안 모델이 대화를 끝내자고 했는지(core_tools의 end_conversation이 켠다)."""
+
+    requested: bool = False
 
 
 OnClosed = Callable[[ThreadTranscript], Awaitable[None]]
@@ -74,6 +90,7 @@ class ThreadManager:
         on_close: Callable[[ThreadTranscript], None | Awaitable[None]],
         idle_timeout: float = 300.0,
         close_timeout: float = 300.0,
+        guidance: str = "",
         now: datetime,
     ) -> ThreadSession:
         session = ThreadSession(
@@ -85,10 +102,22 @@ class ThreadManager:
             idle_timeout=idle_timeout,
             close_timeout=close_timeout,
             on_close=on_close,
+            guidance=guidance,
             last_activity=now,
         )
         self._sessions[session.thread_id] = session
         return session
+
+    def discard(self, thread_id: str) -> None:
+        """열다가 실패한 대화를 훅 없이 버린다(첫 메시지를 못 보냈을 때)."""
+        _ = self._sessions.pop(thread_id, None)
+
+    def open_for(self, player_id: str, skill_name: str) -> ThreadSession | None:
+        """이 플레이어가 이 스킬로 이미 열어 둔 대화(닫히지 않은 것)."""
+        for session in self._sessions.values():
+            if session.player_id == player_id and session.skill_name == skill_name and session.state != "closed":
+                return session
+        return None
 
     def session_for_channel(self, channel_id: str) -> ThreadSession | None:
         """이 채널에서 아직 닫히지 않은 대화를 찾는다."""

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
@@ -13,6 +15,7 @@ import aiosqlite
 import pytest
 
 from core.events import EventBus
+from core.threads import ThreadMessage, ThreadTranscript
 from core.tool_types import ToolContext
 from services.chunithm.records import PbRow, SyncLogSummary
 from services.common.arcades import Arcade, ArcadeVisit
@@ -20,7 +23,7 @@ from services.common.players import Player, PlayersService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CORE_PLAYERS_SQL = Path("migrations/core/001_players.sql").read_text()
-_SESSION_SQL = Path(__file__).parent.parent / "migrations" / "001_init.sql"
+_MIGRATIONS = sorted((Path(__file__).parent.parent / "migrations").glob("*.sql"))
 
 
 def _load_skill() -> ModuleType:
@@ -32,8 +35,10 @@ def _load_skill() -> ModuleType:
 
 
 @pytest.fixture
-def skill() -> ModuleType:
-    return _load_skill()
+def skill(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    module = _load_skill()
+    monkeypatch.setattr(module, "_ASK_DELAY_SECONDS", 0.0)
+    return module
 
 
 @pytest.fixture
@@ -41,7 +46,8 @@ async def db() -> AsyncGenerator[aiosqlite.Connection]:
     conn = await aiosqlite.connect(":memory:")
     conn.row_factory = aiosqlite.Row
     await conn.executescript(_CORE_PLAYERS_SQL)
-    await conn.executescript(_SESSION_SQL.read_text())
+    for migration in _MIGRATIONS:
+        await conn.executescript(migration.read_text())
     try:
         yield conn
     finally:
@@ -82,16 +88,59 @@ class _FakeArcades:
         )
 
 
+@dataclass(slots=True, kw_only=True)
+class _FakeSettings:
+    values: dict[str, Any] = field(default_factory=dict)
+
+    async def get_value(self, *, scope: str, scope_id: str, skill: str, name: str, default: Any) -> Any:
+        return self.values.get(name, default)
+
+
+@dataclass(slots=True, kw_only=True)
+class _FakeYuni:
+    asked: list[dict[str, Any]] = field(default_factory=list)
+
+    async def line(self, sections: list[Any], *, player_id: str | None = None, guild_id: str | None = None,
+                   fallback: str | None = None) -> str:
+        self.asked.append({"sections": sections, "fallback": fallback})
+        return "이번엔 어땠어?"
+
+
+@dataclass(slots=True, kw_only=True)
+class _FakeNotify:
+    opened: list[dict[str, Any]] = field(default_factory=list)
+    open_threads: set[tuple[str, str]] = field(default_factory=set)
+    can_open: bool = True
+    raise_on_open: bool = False
+
+    def has_open_thread(self, player_id: str, skill_name: str) -> bool:
+        return (player_id, skill_name) in self.open_threads
+
+    async def open_dm_thread(self, **kwargs: Any) -> object | None:
+        if self.raise_on_open:
+            raise RuntimeError("DM 차단")
+        if not self.can_open:
+            return None
+        self.opened.append(kwargs)
+        self.open_threads.add((kwargs["player_id"], kwargs["skill_name"]))
+        return object()
+
+
 def _ctx(
     *, player_id: str, db: aiosqlite.Connection,
     records: _FakeRecords | None = None, arcades: _FakeArcades | None = None,
-    players: PlayersService | None = None,
+    players: PlayersService | None = None, notify: _FakeNotify | None = None,
+    settings: _FakeSettings | None = None, yuni: _FakeYuni | None = None, bus: EventBus | None = None,
+    guild_id: str | None = None,
 ) -> ToolContext:
     services: dict[str, object] = {
         "records": records or _FakeRecords(), "arcades": arcades or _FakeArcades(),
-        "players": players or PlayersService(db),
+        "players": players or PlayersService(db), "notify": notify or _FakeNotify(),
+        "settings": settings or _FakeSettings(), "yuni": yuni or _FakeYuni(),
     }
-    return ToolContext(player_id=player_id, tags=frozenset(), services=services, db=db, event_bus=EventBus())
+    return ToolContext(
+        player_id=player_id, tags=frozenset(), services=services, db=db, event_bus=bus or EventBus(), guild_id=guild_id
+    )
 
 
 def _sync_report_section(
@@ -367,3 +416,322 @@ async def test_delete_session_does_not_touch_others(skill: ModuleType, db: aiosq
 
     row = await (await db.execute("SELECT * FROM session_reports WHERE session_id = ?", ("s2",))).fetchone()
     assert row is not None
+
+
+# ---------------------------------------------------------------- 후기
+
+
+class _RecordingBus(EventBus):
+    def __init__(self) -> None:
+        super().__init__()
+        self.emitted: list[tuple[str, Any]] = []
+
+    async def emit_notify(self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None) -> None:
+        self.emitted.append((event_name, payload))
+
+
+_T0 = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
+
+
+def _transcript(
+    *, player_id: str, lines: list[tuple[str, bool]], reason: str = "explicit"
+) -> ThreadTranscript:
+    """lines: (내용, 유니가 한 말인지)"""
+    return ThreadTranscript(
+        thread_id="t1", player_id=player_id, closed_reason=reason, skill_name="chunithm-session", channel_id="dm-1",  # pyright: ignore[reportArgumentType]
+        messages=[
+            ThreadMessage(player_id=player_id, content=text, at=_T0 + timedelta(seconds=i), is_yuni=is_yuni)
+            for i, (text, is_yuni) in enumerate(lines)
+        ],
+    )
+
+
+async def _reported(skill: ModuleType, db: aiosqlite.Connection, **ctx_kwargs: Any) -> tuple[ToolContext, _FakeNotify, str]:
+    players = PlayersService(db)
+    me = await players.create_player()
+    notify = ctx_kwargs.pop("notify", None) or _FakeNotify()
+    ctx = _ctx(db=db, player_id=me.id, players=players, notify=notify, **ctx_kwargs)
+    return ctx, notify, me.id
+
+
+async def test_report_with_new_plays_asks_for_a_review_in_dm(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    yuni = _FakeYuni()
+    ctx, notify, player_id = await _reported(skill, db, yuni=yuni)
+
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+
+    assert len(notify.opened) == 1
+    opened = notify.opened[0]
+    assert opened["skill_name"] == "chunithm-session"
+    assert opened["opening"] == "이번엔 어땠어?"
+    assert opened["idle_timeout"] == 300.0 and opened["close_timeout"] == 300.0
+    assert "세션 요약 2026-10-05" in opened["guidance"]
+    assert "end_conversation" in opened["guidance"]
+    assert yuni.asked[0]["fallback"] == "이번엔 어땠어?"
+    # 질문에 쓰는 힌트에는 숫자가 없어서 유니가 날짜를 읊다가 고정 문구로 되돌아가지 않는다.
+    assert not any(ch.isdigit() for ch in yuni.asked[0]["sections"][0].hint)
+
+
+async def test_report_without_new_plays_asks_nothing(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db)
+
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id, has_new_plays=False))
+
+    assert notify.opened == []
+
+
+async def test_review_question_respects_the_player_setting(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db, settings=_FakeSettings(values={"후기 물어보기": False}))
+
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+
+    assert notify.opened == []
+
+
+async def test_review_question_skipped_while_a_review_is_already_open(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    notify = _FakeNotify()
+    ctx, notify, player_id = await _reported(skill, db, notify=notify)
+    notify.open_threads.add((player_id, "chunithm-session"))
+
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+
+    assert notify.opened == []
+
+
+async def test_review_asks_only_about_the_latest_session(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db)
+    payload = _reported_payload(player_id=player_id, session_id="s1", play_date="2026-10-01")
+    payload["sessions"] = [
+        {"id": "s1", "play_date": "2026-10-01", "estimated": False},
+        {"id": "s2", "play_date": "2026-10-03", "estimated": False},
+    ]
+
+    await skill.on_sync_reported(ctx, payload)
+
+    assert len(notify.opened) == 1
+    assert "2026-10-03" in notify.opened[0]["guidance"]
+
+
+async def test_review_uses_the_guild_timeout_settings(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    settings = _FakeSettings(values={"후기 무응답 확인 시간": 2, "후기 종결 시간": 7})
+    ctx, notify, player_id = await _reported(skill, db, settings=settings, guild_id="g1")
+
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+
+    assert notify.opened[0]["idle_timeout"] == 120.0
+    assert notify.opened[0]["close_timeout"] == 420.0
+
+
+async def test_report_is_kept_even_when_the_dm_cannot_be_opened(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    for notify in (_FakeNotify(can_open=False), _FakeNotify(raise_on_open=True)):
+        ctx, _notify, player_id = await _reported(skill, db, notify=notify)
+        await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id, session_id=f"s-{player_id}"))
+        rows = await (await db.execute("SELECT COUNT(*) AS n FROM session_reports WHERE player_id = ?", (player_id,))).fetchone()
+        assert rows is not None and rows["n"] == 1
+
+
+async def _close(skill: ModuleType, notify: _FakeNotify, transcript: ThreadTranscript) -> None:
+    await notify.opened[-1]["on_close"](transcript)
+
+
+async def test_closing_saves_the_full_transcript_and_emits_closed(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    bus = _RecordingBus()
+    ctx, notify, player_id = await _reported(skill, db, bus=bus)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+
+    await _close(skill, notify, _transcript(
+        player_id=player_id, lines=[("이번엔 어땠어?", True), ("크로노 처음으로 SSS 떴어", False), ("우와 축하해!", True)]
+    ))
+
+    row = await (await db.execute("SELECT * FROM session_reviews")).fetchone()
+    assert row is not None
+    assert row["status"] == "완료" and row["is_public"] == 0 and row["player_id"] == player_id
+    saved = json.loads(row["messages"])
+    assert [(m["who"], m["text"]) for m in saved] == [
+        ("yuni", "이번엔 어땠어?"), ("player", "크로노 처음으로 SSS 떴어"), ("yuni", "우와 축하해!"),
+    ]
+    assert bus.emitted[-1][0] == "chunithm.session.closed"
+    payload = bus.emitted[-1][1]
+    assert payload["saved"] is True and payload["status"] == "완료" and payload["session_id"] == "s1"
+    assert "나: 크로노 처음으로 SSS 떴어" in payload["review"]
+
+
+async def test_closing_without_the_player_speaking_marks_it_skipped(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    bus = _RecordingBus()
+    ctx, notify, player_id = await _reported(skill, db, bus=bus)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+
+    await _close(skill, notify, _transcript(player_id=player_id, lines=[("이번엔 어땠어?", True)], reason="timeout"))
+
+    row = await (await db.execute("SELECT status FROM session_reviews")).fetchone()
+    assert row is not None and row["status"] == "넘김"
+    assert bus.emitted[-1][1]["saved"] is False
+
+
+async def test_shutdown_during_a_conversation_marks_it_aborted_and_it_is_asked_again(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx, notify, player_id = await _reported(skill, db)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+    await _close(skill, notify, _transcript(
+        player_id=player_id, lines=[("이번엔 어땠어?", True), ("음 그게", False)], reason="shutdown"
+    ))
+    row = await (await db.execute("SELECT status FROM session_reviews")).fetchone()
+    assert row is not None and row["status"] == "중단"
+
+    notify.open_threads.clear()
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+    assert len(notify.opened) == 2  # 중단된 후기는 다음 동기화에서 다시 묻는다
+
+
+async def test_finished_or_skipped_reviews_are_not_asked_again(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+    await _close(skill, notify, _transcript(player_id=player_id, lines=[("어땠어?", True)], reason="timeout"))
+    notify.open_threads.clear()
+
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+
+    assert len(notify.opened) == 1
+
+
+async def test_a_later_review_is_appended_after_the_earlier_one(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+    await _close(skill, notify, _transcript(player_id=player_id, lines=[("어땠어?", True), ("좋았어", False)]))
+    first = await (await db.execute("SELECT started_at FROM session_reviews")).fetchone()
+    assert first is not None
+    notify.open_threads.clear()
+
+    result = await skill.review_open(ctx)
+    assert result.error is None
+    await _close(skill, notify, _transcript(player_id=player_id, lines=[("더 있어?", True), ("하나 더", False)]))
+
+    row = await (await db.execute("SELECT * FROM session_reviews")).fetchone()
+    assert row is not None
+    assert [m["text"] for m in json.loads(row["messages"])] == ["어땠어?", "좋았어", "더 있어?", "하나 더"]
+    assert row["started_at"] == first["started_at"]
+
+
+async def test_skipping_a_later_review_keeps_the_earlier_one(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+    await _close(skill, notify, _transcript(player_id=player_id, lines=[("어땠어?", True), ("좋았어", False)]))
+    notify.open_threads.clear()
+    _ = await skill.review_open(ctx)
+
+    await _close(skill, notify, _transcript(player_id=player_id, lines=[("더 있어?", True)], reason="timeout"))
+
+    row = await (await db.execute("SELECT status, messages FROM session_reviews")).fetchone()
+    assert row is not None and row["status"] == "완료"
+    assert [m["text"] for m in json.loads(row["messages"])] == ["어땠어?", "좋았어"]
+
+
+async def test_a_failing_save_does_not_break_closing(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+    await db.execute("DROP TABLE session_reviews")
+
+    await _close(skill, notify, _transcript(player_id=player_id, lines=[("어땠어?", True), ("좋았어", False)]))
+
+
+# ---------------------------------------------------------------- review_open
+
+
+async def test_review_open_defaults_to_the_latest_session(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db, settings=_FakeSettings(values={"후기 물어보기": False}))
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id, session_id="s1", play_date="2026-10-01"))
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id, session_id="s2", play_date="2026-10-05"))
+
+    result = await skill.review_open(ctx)
+
+    assert result.error is None
+    assert result.data["play_date"] == "2026-10-05"
+    assert "2026-10-05" in notify.opened[0]["guidance"]
+
+
+async def test_review_open_by_date_works_even_when_asking_is_turned_off(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx, notify, player_id = await _reported(skill, db, settings=_FakeSettings(values={"후기 물어보기": False}))
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id, session_id="s1", play_date="2026-10-01"))
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id, session_id="s2", play_date="2026-10-05"))
+
+    result = await skill.review_open(ctx, date="2026-10-01")
+
+    assert result.error is None
+    assert "2026-10-01" in notify.opened[0]["guidance"]
+
+
+async def test_review_open_errors(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db, settings=_FakeSettings(values={"후기 물어보기": False}))
+    assert (await skill.review_open(ctx)).error == skill._NOT_SYNCED_ERROR
+
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id, session_id="s1", play_date="2026-10-01"))
+    missing = await skill.review_open(ctx, date="2026-10-09")
+    assert missing.error is not None and missing.data["nearby"] == {"before": "2026-10-01", "after": None}
+
+    _ = await skill.review_open(ctx)
+    assert (await skill.review_open(ctx)).error is not None  # 이미 열려 있다
+
+    notify.open_threads.clear()
+    notify.can_open = False
+    assert (await skill.review_open(ctx)).error is not None  # DM을 열 수 없다
+
+
+# ---------------------------------------------------------------- 후기 보기와 삭제
+
+
+async def _with_review(skill: ModuleType, db: aiosqlite.Connection) -> tuple[ToolContext, str]:
+    ctx, notify, player_id = await _reported(skill, db)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+    await _close(skill, notify, _transcript(
+        player_id=player_id, lines=[("어땠어?", True), ("크로노 SSS 떴어", False)]
+    ))
+    return ctx, player_id
+
+
+async def test_get_session_shows_the_review_to_its_owner_only(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, player_id = await _with_review(skill, db)
+    own = await skill.get_session(ctx)
+    assert own.data["review"]["status"] == "완료"
+    assert own.display is not None and own.display.content is not None
+    assert "나: 크로노 SSS 떴어" in own.display.content
+
+    players = PlayersService(db)
+    await players.set_visibility(player_id, "records_public", True)
+    viewer = await players.create_player()
+    owner = await players.get_player(player_id)
+    seen = await skill.get_session(_ctx(db=db, player_id=viewer.id, players=players), player=owner)
+    assert seen.error is None
+    assert "review" not in seen.data
+    assert seen.display is not None and seen.display.content is not None
+    assert "크로노 SSS 떴어" not in seen.display.content
+
+
+async def test_get_session_cuts_a_long_review(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, notify, player_id = await _reported(skill, db)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+    await _close(skill, notify, _transcript(player_id=player_id, lines=[("가" * 900, False)]))
+
+    result = await skill.get_session(ctx)
+
+    assert result.display is not None and result.display.content is not None
+    assert "가" * 900 not in result.display.content
+    assert len(result.data["review"]["text"]) > 900  # data에는 전문이 있다
+
+
+async def test_deleting_a_session_deletes_its_review(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx, _player_id = await _with_review(skill, db)
+
+    result = await skill.delete_session(ctx, date="2026-10-05")
+
+    assert result.error is None
+    row = await (await db.execute("SELECT COUNT(*) AS n FROM session_reviews")).fetchone()
+    assert row is not None and row["n"] == 0

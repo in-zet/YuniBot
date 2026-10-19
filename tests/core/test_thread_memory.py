@@ -55,3 +55,18 @@ async def test_queue_failure_does_not_raise() -> None:
     transcript = _transcript([ThreadMessage(player_id="p1", content="안녕", at=at)])
 
     await queue_thread_memory(_FakeMemory(fail=True), transcript, now=1.0)
+
+
+async def test_yuni_lines_are_not_queued_as_the_players_writing() -> None:
+    at = datetime(2026, 1, 1, tzinfo=UTC)
+    memory = _FakeMemory()
+    transcript = _transcript(
+        [
+            ThreadMessage(player_id="p1", content="어땠어?", at=at, is_yuni=True),
+            ThreadMessage(player_id="p1", content="좋았어", at=at, message_id="m1"),
+        ]
+    )
+
+    await queue_thread_memory(memory, transcript, now=1.0)
+
+    assert [m.text for m in memory.calls[0]["messages"]] == ["좋았어"]

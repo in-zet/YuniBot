@@ -72,3 +72,25 @@ async def test_remember_rejects_empty_input() -> None:
         assert (await remember(ctx, content="  ", nickname="@")).error is not None
     finally:
         await conn.close()
+
+
+async def test_end_conversation_marks_the_request_inside_a_thread() -> None:
+    from core.core_tools import THREAD_TOOL_SPECS, end_conversation
+    from core.threads import ThreadEndRequest
+
+    request = ThreadEndRequest()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={"_thread_end": request})
+
+    result = await end_conversation(ctx)
+
+    assert result.error is None
+    assert request.requested is True
+    assert {spec.name for spec in THREAD_TOOL_SPECS} == {"end_conversation"}
+
+
+async def test_end_conversation_refuses_outside_a_thread() -> None:
+    from core.core_tools import end_conversation
+
+    result = await end_conversation(ToolContext(player_id="p1", tags=frozenset()))
+
+    assert result.error is not None

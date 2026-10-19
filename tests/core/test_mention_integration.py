@@ -187,6 +187,7 @@ def _mention_entry(
     address: _FakeAddress | None = None,
     notify: Any | None = None,
     conversation_skills: Any | None = None,
+    threads: Any | None = None,
 ) -> tuple[MentionEntry, _FakeUsage]:
     registry = _registry(*extra_skill_dirs)
     bus = event_bus if event_bus is not None else EventBus()
@@ -210,7 +211,7 @@ def _mention_entry(
         settings=_FakeSettings(), usage=usage_obj, bot_discord_id="bot", agent_model=agent_model,
         memory=memory if memory is not None else _FakeMemory(), event_bus=bus,
         known_skill_names={s.manifest.name for s in registry.enabled_skills()}, skill_loading_mode="instructions",
-        address=address, conversation_skills=conversation_skills,
+        address=address, conversation_skills=conversation_skills, threads=threads,
     )
     return entry, usage_obj
 
@@ -938,3 +939,111 @@ async def test_message_without_mention_or_thread_is_ignored() -> None:
     await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=_NOW, send=_sender("b1", sent), typing=_NoopTyping())
 
     assert sent == []
+
+
+def _tool_names(entry: MentionEntry) -> list[set[str]]:
+    llm = cast("Any", entry._agent._llm)
+    return [{d.name for d in tools} for _m, _s, _c, tools in llm.calls]
+
+
+@pytest.mark.asyncio
+async def test_thread_guidance_goes_into_the_prompt_only_inside_the_thread() -> None:
+    plain = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")
+    entry, _usage = _mention_entry([plain])
+    thread = _thread_session()
+    thread.guidance = "[후기 대화] 한두 문장으로만 말한다"
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="좋았어", channel_id="c1")
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id=None, now=_NOW, send=_sender("b1", []), typing=_NoopTyping(),
+        thread=thread,
+    )
+    system_instruction = cast("Any", entry._agent._llm).calls[0][1]
+    assert "[후기 대화] 한두 문장으로만 말한다" in system_instruction
+
+    mention_entry, _usage = _mention_entry([plain])
+    mention = ChannelMessage(message_id="2", author_discord_id="p1", is_bot=False, content="안녕", mentions_bot=True)
+    await mention_entry.handle(
+        trigger=mention, history=[mention], guild_id=None, now=_NOW, send=_sender("b2", []), typing=_NoopTyping()
+    )
+    assert "[후기 대화]" not in cast("Any", mention_entry._agent._llm).calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_end_conversation_tool_is_offered_only_inside_a_thread() -> None:
+    plain = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")
+    in_thread, _usage = _mention_entry([plain])
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="안녕", channel_id="c1")
+    await in_thread.handle(
+        trigger=trigger, history=[trigger], guild_id=None, now=_NOW, send=_sender("b1", []), typing=_NoopTyping(),
+        thread=_thread_session(),
+    )
+    outside, _usage = _mention_entry([plain])
+    mention = ChannelMessage(message_id="2", author_discord_id="p1", is_bot=False, content="안녕", mentions_bot=True)
+    await outside.handle(
+        trigger=mention, history=[mention], guild_id=None, now=_NOW, send=_sender("b2", []), typing=_NoopTyping()
+    )
+
+    assert "end_conversation" in _tool_names(in_thread)[0]
+    assert "end_conversation" not in _tool_names(outside)[0]
+
+
+@pytest.mark.asyncio
+async def test_end_conversation_closes_the_thread_after_the_farewell_and_keeps_the_transcript() -> None:
+    from core.threads import ThreadManager, ThreadTranscript
+
+    closed: list[ThreadTranscript] = []
+    manager = ThreadManager()
+
+    class _Transport:
+        async def send_message(self, text: str) -> None:
+            pass
+
+    session = await manager.open(
+        skill_name="chunithm-border", player_id="p1", transport=_Transport(), channel_id="c1",
+        on_close=closed.append, now=_NOW,
+    )
+    end_call = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="end_conversation", args={})],
+    )
+    farewell = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="수고했어!")]), text="수고했어!")
+    entry, _usage = _mention_entry([end_call, farewell], threads=manager)
+    sent: list[str] = []
+
+    await manager.receive(session.thread_id, "p1", "이만 갈게", now=_NOW, message_id="m1")
+    trigger = ChannelMessage(message_id="m1", author_discord_id="p1", is_bot=False, content="이만 갈게", channel_id="c1")
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id=None, now=_NOW, send=_sender("b1", sent), typing=_NoopTyping(),
+        thread=session,
+    )
+
+    assert sent == ["수고했어!"]
+    assert len(closed) == 1
+    assert closed[0].closed_reason == "explicit"
+    assert [(m.content, m.is_yuni) for m in closed[0].messages] == [("이만 갈게", False), ("수고했어!", True)]
+
+
+@pytest.mark.asyncio
+async def test_thread_stays_open_when_the_model_does_not_end_it() -> None:
+    from core.threads import ThreadManager
+
+    manager = ThreadManager()
+
+    class _Transport:
+        async def send_message(self, text: str) -> None:
+            pass
+
+    session = await manager.open(
+        skill_name="chunithm-border", player_id="p1", transport=_Transport(), channel_id="c1",
+        on_close=lambda t: None, now=_NOW,
+    )
+    plain = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="그랬구나")]), text="그랬구나")
+    entry, _usage = _mention_entry([plain], threads=manager)
+    trigger = ChannelMessage(message_id="m1", author_discord_id="p1", is_bot=False, content="힘들었어", channel_id="c1")
+
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id=None, now=_NOW, send=_sender("b1", []), typing=_NoopTyping(),
+        thread=session,
+    )
+
+    assert manager.session_for_channel("c1") is session

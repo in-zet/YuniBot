@@ -294,3 +294,54 @@ async def test_close_all_closes_every_open_session_as_shutdown() -> None:
 
     assert [t.closed_reason for t in closed] == ["shutdown", "shutdown"]
     assert manager.session_for_channel("c1") is None
+
+
+async def test_open_for_finds_only_this_players_open_conversation_for_the_skill() -> None:
+    manager = ThreadManager()
+    session = await manager.open(
+        skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
+        on_close=lambda t: None, now=datetime.now(UTC),
+    )
+
+    assert manager.open_for("p1", "chunithm-session") is session
+    assert manager.open_for("p2", "chunithm-session") is None
+    assert manager.open_for("p1", "other-skill") is None
+
+    await manager.close(session.thread_id, reason="explicit")
+    assert manager.open_for("p1", "chunithm-session") is None
+
+
+async def test_discard_drops_the_session_without_running_hooks() -> None:
+    hook_calls: list[ThreadTranscript] = []
+
+    async def hook(transcript: ThreadTranscript) -> None:
+        hook_calls.append(transcript)
+
+    manager = ThreadManager(on_closed=hook)
+    session = await manager.open(
+        skill_name="s", player_id="p1", transport=_FakeTransport(), channel_id="c1",
+        on_close=lambda t: None, now=datetime.now(UTC),
+    )
+
+    manager.discard(session.thread_id)
+
+    assert manager.session_for_channel("c1") is None
+    assert hook_calls == []
+
+
+async def test_record_yuni_keeps_yuni_lines_in_the_transcript_without_touching_activity() -> None:
+    manager = ThreadManager()
+    start = datetime.now(UTC)
+    session = await manager.open(
+        skill_name="s", player_id="p1", transport=_FakeTransport(), channel_id="c1",
+        on_close=lambda t: None, guidance="지침", now=start,
+    )
+    session.record_yuni("어땠어?", at=start)
+    await manager.receive(session.thread_id, "p1", "좋았어", now=start + timedelta(seconds=30))
+    session.record_yuni("다행이다", at=start + timedelta(seconds=31))
+
+    assert session.guidance == "지침"
+    assert [(m.content, m.is_yuni) for m in session.transcript] == [
+        ("어땠어?", True), ("좋았어", False), ("다행이다", True),
+    ]
+    assert session.last_activity == start + timedelta(seconds=30)

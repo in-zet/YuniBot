@@ -23,7 +23,7 @@ from core.fallback_messages import (
 )
 from core.response_assembly import assemble_response
 from core.skill_loading import Mode, SkillLoadState
-from core.threads import ThreadSession
+from core.threads import ThreadEndRequest, ThreadManager, ThreadSession
 from core.tool_types import Display, ToolContext
 from services.common.memory import PendingMessage, strip_mentions
 from services.common.notify import NotifyService
@@ -148,6 +148,7 @@ class MentionEntry:
         skill_loading_mode: str,
         address: _AddressLike | None = None,
         conversation_skills: ConversationSkillStore | None = None,
+        threads: ThreadManager | None = None,
     ) -> None:
         self._agent = agent
         self._players = players
@@ -170,6 +171,7 @@ class MentionEntry:
         self._skill_loading_mode = skill_loading_mode
         self._address = address
         self._conversation_skills = conversation_skills
+        self._threads = threads
 
     async def _carried_skills(self, trigger: ChannelMessage, context: list[ChannelMessage]) -> list[str]:
         """답장 사슬에서 가장 가까운 유니 메시지가 남긴 '펼쳐 둔 스킬'을 찾는다. 답장이 아니면 새 대화다."""
@@ -254,6 +256,8 @@ class MentionEntry:
         prompt_context_snippets: list[str] = []
         if is_new_player:
             prompt_context_snippets.append("이 플레이어는 유니를 처음 멘션했다.")
+        if thread is not None and thread.guidance:
+            prompt_context_snippets.append(thread.guidance)
 
         # 요청한 본인의 호칭과 메모리만 프롬프트에 넣는다(00-core.md "주입 범위"). 호칭은 코드가 정한
         # 최종 이름이고, 모델은 "상"을 직접 붙이지 않는다.
@@ -287,6 +291,7 @@ class MentionEntry:
             sent_id = await send(text, displays)
             if thread is not None:
                 thread.opened_skills = skill_state.ordered_skills()
+                thread.record_yuni(text, at=now)
             elif sent_id is not None and self._conversation_skills is not None:
                 try:
                     await self._conversation_skills.save(
@@ -316,11 +321,13 @@ class MentionEntry:
             notice_sent = True
             await send(WORKING_MESSAGE, [])
 
+        thread_end = ThreadEndRequest() if thread is not None else None
         async with typing:
             try:
                 result = await self._agent.run(
                     ctx=ctx, skill_state=skill_state, user_text=user_text,
                     prompt_context_snippets=prompt_context_snippets, on_retry=on_retry, on_heavy_call=on_heavy_call,
+                    thread_end=thread_end,
                 )
             except Exception:  # LLM/네트워크 어떤 실패든 디스코드 핸들러를 죽이지 않고 고정 문구로 돌린다
                 logger.warning("플레이어 %s의 멘션 처리 실패, 고정 문구로 응답한다", player.id, exc_info=True)
@@ -357,6 +364,9 @@ class MentionEntry:
                 public_displays.append(display)
         text = assembled.text or LLM_FAILURE_MESSAGE
         await reply(f"{text}\n{PRIVATE_DM_FAILED_MESSAGE}" if dm_failed else text, public_displays)
+        # 모델이 끝내자고 한 대화는 마무리 말을 보낸 뒤 닫는다(닫힘 훅이 전문을 저장한다).
+        if thread is not None and thread_end is not None and thread_end.requested and self._threads is not None:
+            await self._threads.close(thread.thread_id, reason="explicit")
 
     async def _send_private(self, player_id: str, content: str) -> bool:
         try:

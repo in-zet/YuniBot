@@ -31,6 +31,7 @@ from core.tool_types import (
     SongQuery,
     ToolContext,
 )
+from services.common.notify import NotifyService
 from services.common.players import PlayersService
 from services.common.websearch import WebsearchService
 from tests.core.skill_factory import slash_tool, write_skill
@@ -785,5 +786,68 @@ async def test_yuni_bond_records_first_met_through_the_real_event_bus_and_adds_i
             ToolContext(player_id=player.id, tags=frozenset(), services={}, guild_id=None)
         )
         assert any("크로노 연습" in s for s in snippets)
+    finally:
+        await client.close()
+
+
+class _RecordingGateway:
+    """DM으로 나가는 글만 모으는 가짜 게이트웨이(디스코드 없이 후기 흐름을 끝까지 돌린다)."""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, object | None]] = []
+
+    async def send_channel_message(self, channel_id: str, content: str, *, view: object | None = None) -> None:
+        self.sent.append((channel_id, content, view))
+
+    async def open_dm_channel(self, discord_id: str) -> str:
+        return f"dm-{discord_id}"
+
+    async def send_dm(self, discord_id: str, content: str, *, view: object | None = None) -> None:
+        self.sent.append((f"dm-{discord_id}", content, view))
+
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_session_review_flow_runs_through_the_real_bus_notify_and_thread_manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, registry, executor = await build_client(_config(tmp_path, Path("skills")))
+    try:
+        skill = next(s for s in registry.enabled_skills() if s.manifest.name == "chunithm-session")
+        monkeypatch.setitem(skill.code.tools[0].fn.__globals__, "_ASK_DELAY_SECONDS", 0.0)
+        gateway = _RecordingGateway()
+        notify = cast("NotifyService", client._services["notify"])  # pyright: ignore[reportPrivateUsage]
+        notify._gateway = gateway  # pyright: ignore[reportPrivateUsage]
+        players = cast("PlayersService", client._services["players"])  # pyright: ignore[reportPrivateUsage]
+        player = await players.create_player()
+        await players.link_account(player.id, "111")
+        await executor.event_bus.emit_notify(
+            "chunithm.sync.reported",
+            {
+                "player_id": player.id, "has_new_plays": True, "rendered_text": "세션 요약",
+                "sections_data": [], "yuni_line": "", "sessions": [{"id": "s1", "play_date": "2026-10-05", "estimated": False}],
+            },
+            player_id=player.id, guild_id=None,
+        )
+        await executor.event_bus.drain()
+
+        assert [(c, v is not None) for c, _t, v in gateway.sent] == [("dm-111", True)]  # 첫 말에 끝내기 버튼이 붙는다
+        session = client._threads.session_for_channel("dm-111")  # pyright: ignore[reportPrivateUsage, reportOptionalMemberAccess]
+        assert session is not None and session.skill_name == "chunithm-session"
+        assert "세션 요약" in session.guidance
+
+        await client._threads.receive(session.thread_id, player.id, "좋았어", now=datetime.datetime.now(datetime.UTC))  # pyright: ignore[reportPrivateUsage, reportOptionalMemberAccess]
+        await client._threads.close(session.thread_id, reason="explicit")  # pyright: ignore[reportPrivateUsage, reportOptionalMemberAccess]
+        await executor.event_bus.drain()
+
+        cursor = await client.conn.execute("SELECT status FROM session_reviews WHERE session_id = 's1'")
+        row = await cursor.fetchone()
+        assert row is not None and row[0] == "완료"
+        # 후기 대화도 닫힐 때 평소처럼 메모리 요약 대기 목록에 들어간다(유니의 말은 빠진다).
+        cursor = await client.conn.execute("SELECT messages FROM player_memory_pending WHERE player_id = ?", (player.id,))
+        pending = await cursor.fetchone()
+        assert pending is not None and "좋았어" in pending[0] and "어땠어" not in pending[0]
     finally:
         await client.close()

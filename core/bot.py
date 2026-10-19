@@ -41,6 +41,7 @@ from core.search_gemini import GeminiSearchAdapter
 from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
 from core.thread_memory import queue_thread_memory
+from core.thread_view import ThreadEndView
 from core.threads import ThreadManager, ThreadSession, ThreadTranscript
 from core.tool_types import (
     ArcadeRef,
@@ -306,12 +307,24 @@ class _BotDiscordGateway:
     def __init__(self, get_client: Callable[[], discord.Client]) -> None:
         self._get_client = get_client
 
-    async def send_channel_message(self, channel_id: str, content: str) -> None:
-        channel = self._get_client().get_channel(int(channel_id))
+    async def send_channel_message(
+        self, channel_id: str, content: str, *, view: discord.ui.View | None = None
+    ) -> None:
+        client = self._get_client()
+        # 캐시에 없는 DM 채널(재시작 뒤 등)은 fetch로 찾는다.
+        channel = client.get_channel(int(channel_id)) or await client.fetch_channel(int(channel_id))
         # get_channel()의 반환형은 카테고리/포럼 채널도 포함한다 — 그런 채널에는 보낼 수
         # 없으므로(런타임에도 실패한다), Messageable로 좁혀진 것만 보낸다.
         if isinstance(channel, discord.abc.Messageable):
-            await channel.send(content)
+            if view is not None:
+                await channel.send(content, view=view)
+            else:
+                await channel.send(content)
+
+    async def open_dm_channel(self, discord_id: str) -> str:
+        user = await self._get_client().fetch_user(int(discord_id))
+        dm = await user.create_dm()
+        return str(dm.id)
 
     async def send_dm(self, discord_id: str, content: str, *, view: discord.ui.View | None = None) -> None:
         user = await self._get_client().fetch_user(int(discord_id))
@@ -561,6 +574,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         players=players,
         settings=settings_service,
         threads=thread_manager,
+        end_button=lambda session: ThreadEndView(threads=thread_manager, players=players, session=session),
     )
 
     services["http"] = http_service
@@ -652,7 +666,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         # 핸들러에 닿는다(M1) — executor도 이 event_bus 변수로 만들어졌으니 같은 객체다.
         event_bus=event_bus,
         known_skill_names=known_skill_names, skill_loading_mode=config.skill_loading_mode,
-        address=address_resolver, conversation_skills=conversation_skills,
+        address=address_resolver, conversation_skills=conversation_skills, threads=thread_manager,
     )
 
     async def _react_memory_saved(pending: PendingSummary) -> None:

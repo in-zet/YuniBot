@@ -54,11 +54,12 @@ class PromptAssembler:
         return "\n\n".join(sections)
 
     def build_tool_declarations(
-        self, *, player_tags: set[str], skill_state: SkillLoadState
+        self, *, player_tags: set[str], skill_state: SkillLoadState, in_thread: bool = False
     ) -> list[ToolDeclaration]:
-        from core.core_tools import CORE_TOOL_SPECS
+        from core.core_tools import CORE_TOOL_SPECS, THREAD_TOOL_SPECS
 
-        declarations = [build_tool_declaration(spec, skill_name=None) for spec in CORE_TOOL_SPECS]
+        core_specs = [*CORE_TOOL_SPECS, *THREAD_TOOL_SPECS] if in_thread else CORE_TOOL_SPECS
+        declarations = [build_tool_declaration(spec, skill_name=None) for spec in core_specs]
         for skill in self.visible_skill_cards(player_tags=player_tags):
             level = skill_state.level_for(skill.manifest.name)
             if level != "full" and level != "instructions":
