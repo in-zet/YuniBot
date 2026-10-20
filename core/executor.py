@@ -110,6 +110,10 @@ class ToolExecutor:
         return self._scheduler
 
     @property
+    def resolvers(self) -> ResolverRegistry:
+        return self._resolvers
+
+    @property
     def tables(self) -> TableStore | None:
         return self._tables
 

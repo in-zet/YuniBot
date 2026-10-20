@@ -165,7 +165,14 @@ class AgentLoop:
         thread_end: ThreadEndRequest | None = None,
     ) -> AgentTurnResult:
         """thread_end가 있으면 대화 스레드 안의 응답이다 — 모델에게 end_conversation 도구가 보이고, 부르면 thread_end가 켜진다."""
-        services: dict[str, object] = {**ctx.services, "_skill_load_state": skill_state}
+        result = AgentTurnResult()
+        # 코어 도구 전용 내부 키(manifest.services 선언 대상이 아니다): table_query/table_peek이 쓴다.
+        services: dict[str, object] = {
+            **ctx.services,
+            "_skill_load_state": skill_state,
+            "_turn_table_ids": result.turn_table_ids,
+            "_ref_resolvers": self._executor.resolvers,
+        }
         if thread_end is not None:
             services["_thread_end"] = thread_end
         inner_ctx = ToolContext(
@@ -186,7 +193,6 @@ class AgentLoop:
 
         prompt_context_snippets = [*prompt_context_snippets, *await self._skill_prompt_snippets(ctx)]
         contents: list[LlmContent] = [LlmContent(role="user", parts=[LlmPart(text=user_text)])]
-        result = AgentTurnResult()
         tool_calls_made = 0
         tool_call_log: list[str] = []
         tool_call_counts: dict[str, int] = {}

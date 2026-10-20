@@ -8,9 +8,9 @@ from core.tool_types import ToolContext
 from services.common.memory import MemoryService
 
 
-def test_core_tool_specs_contains_all_three() -> None:
+def test_core_tool_specs_contains_all_core_tools() -> None:
     names = {spec.name for spec in CORE_TOOL_SPECS}
-    assert names == {"open_skill", "remember", "list_capabilities"}
+    assert names == {"open_skill", "remember", "list_capabilities", "table_query", "table_peek"}
 
 
 def test_list_capabilities_importable_without_core_capabilities_module() -> None:
@@ -94,3 +94,123 @@ async def test_end_conversation_refuses_outside_a_thread() -> None:
     result = await end_conversation(ToolContext(player_id="p1", tags=frozenset()))
 
     assert result.error is not None
+
+
+# ---- table_query / table_peek ----
+
+from typing import Any
+
+from core.declarations import build_tool_declaration
+from core.executor import ToolExecutor
+from core.permissions import InMemoryTagProvider
+from core.resolvers import ResolutionError, ResolverRegistry
+from core.tables import RowRef, TableBuilder, TableStore, cell
+from core.tool_types import ScoreRef
+
+from core.core_tools import table_peek, table_query  # isort: skip
+
+
+class _ScoreResolver:
+    async def resolve(self, raw: str, ctx: ToolContext) -> int:
+        scores = {"SSS": 1_007_500, "SS": 1_000_000}
+        if raw in scores:
+            return scores[raw]
+        if raw.isdigit():
+            return int(raw)
+        raise ResolutionError(message="찾지 못함")
+
+
+def _env() -> tuple[ToolExecutor, ToolContext]:
+    store = TableStore()
+    builder = TableBuilder().column("song", "곡").column("score", "점수", "ScoreRef").column("rank", "랭크", "RankRef")
+    for key, (song, score) in enumerate([("A", 1_005_000), ("B", 1_009_000), ("C", None)], start=1):
+        builder.row(RowRef("k", str(key)), {"song": cell(song), "score": cell(score), "rank": cell(None)})
+    _ = store.put("p1", "c1", builder.build(), now=0)
+    resolvers = ResolverRegistry()
+    resolvers.register(ScoreRef, _ScoreResolver())
+    executor = ToolExecutor(
+        resolvers=resolvers, tag_provider=InMemoryTagProvider(), tag_definitions={}, tables=store
+    )
+    ctx = ToolContext(
+        player_id="p1", tags=frozenset(), channel_id="c1",
+        services={"_ref_resolvers": resolvers, "_turn_table_ids": []},
+    )
+    return executor, ctx
+
+
+def _tool(fn: Any) -> Any:
+    return fn.__yuni_tool__
+
+
+async def _query(spec: Any, args: dict[str, Any]) -> Any:
+    executor, ctx = _env()
+    outcome = await executor.invoke(_tool(spec), ctx, args)
+    assert outcome.result is not None
+    return outcome.result
+
+
+async def test_table_query_value_is_parsed_by_the_columns_value_type() -> None:
+    result = await _query(table_query, {"table": "t1", "where": [{"column": "점수", "op": "<", "value": "SSS"}]})
+
+    assert result.error is None and result.table is not None
+    assert [row.cell("song").raw for row in result.table.rows] == ["A", "C"]  # B(1,009,000)는 SSS 이상, C는 값 없음이라 통과
+    assert result.table.steps == ("점수<SSS",)
+
+
+async def test_table_query_unresolvable_value_and_unknown_column_are_errors() -> None:
+    bad_value = await _query(table_query, {"table": "t1", "where": [{"column": "점수", "op": "<", "value": "???"}]})
+    assert bad_value.error == "'점수' 칸 값 '???'을(를) 해석하지 못했다"
+    no_column = await _query(table_query, {"table": "t1", "where": [{"column": "없음", "op": "<", "value": "1"}]})
+    assert no_column.error == "그 표에 '없음' 칸이 없다"
+    unresolvable_type = await _query(table_query, {"table": "t1", "where": [{"column": "랭크", "op": "==", "value": "SS"}]})
+    assert unresolvable_type.error == "'랭크' 칸 값을 해석할 수 없다"
+
+
+async def test_table_query_number_value_must_be_numeric() -> None:
+    executor, ctx = _env()
+    builder = TableBuilder().column("n", "수", "number").row(RowRef("k", "1"), {"n": cell(5)})
+    assert executor.tables is not None
+    _ = executor.tables.put("p1", "c1", builder.build(), now=0)
+    outcome = await executor.invoke(
+        _tool(table_query), ctx, {"table": "t2", "where": [{"column": "수", "op": ">", "value": "abc"}]}
+    )
+    assert outcome.result is not None and outcome.result.error == "'수' 칸 값 'abc'은 숫자가 아니다"
+    ok = await executor.invoke(
+        _tool(table_query), ctx, {"table": "t2", "where": [{"column": "수", "op": ">", "value": "1,0"}]}
+    )
+    assert ok.result is not None and ok.result.error is None  # 쉼표는 천 단위 구분으로 본다(10보다 작지 않으면 통과)
+
+
+async def test_table_query_rows_refused_on_this_turns_table() -> None:
+    executor, ctx = _env()
+    ctx.services["_turn_table_ids"].append("t1")  # pyright: ignore[reportIndexIssue,reportAttributeAccessIssue]
+    outcome = await executor.invoke(_tool(table_query), ctx, {"table": "t1", "rows": [1]})
+    assert outcome.result is not None and outcome.result.error == "번호는 사람이 본 표에만 쓴다"
+    peek = await executor.invoke(_tool(table_peek), ctx, {"table": "t1", "rows": [1]})
+    assert peek.result is not None and peek.result.error == "번호는 사람이 본 표에만 쓴다"
+    plain = await executor.invoke(_tool(table_query), ctx, {"table": "t1"})
+    assert plain.result is not None and plain.result.error is None  # 번호 없이는 된다
+
+
+async def test_table_peek_returns_data_without_a_table() -> None:
+    result = await _query(table_peek, {"table": "t1", "rows": [2]})
+    assert result.table is None and result.display is None
+    assert result.data["rows"] == [{"number": 2, "values": {"곡": "B", "점수": 1_009_000, "랭크": None}}]
+
+
+def test_table_tools_declare_array_parameters_for_the_model() -> None:
+    declaration = build_tool_declaration(_tool(table_query), skill_name=None)
+    properties = declaration.parameters_json_schema["properties"]
+    assert properties["table"] == {"type": "string"}
+    assert properties["rows"] == {"type": "array", "items": {"type": "integer"}}
+    assert properties["exclude_rows"] == {"type": "array", "items": {"type": "integer"}}
+    assert properties["where"] == {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {"column": {"type": "string"}, "op": {"type": "string"}, "value": {"type": "string"}},
+            "required": ["column", "op", "value"],
+        },
+    }
+    assert properties["descending"] == {"type": "boolean"}
+    assert declaration.parameters_json_schema["required"] == ["table"]

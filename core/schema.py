@@ -6,7 +6,7 @@ import inspect
 import types
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Annotated, Any, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, get_args, get_origin, get_type_hints, is_typeddict
 
 from core.decorators import DRY_RUN_PARAM
 from core.tables import TableNeeds
@@ -52,6 +52,14 @@ def _unwrap_optional(py_type: Any) -> tuple[Any, bool]:
     return py_type, False
 
 
+def is_list_type(py_type: Any) -> bool:
+    """`list[기본 타입]` 또는 `list[TypedDict]`. 모델이 번호 목록이나 조건 목록을 넘기는 데 쓴다."""
+    if get_origin(py_type) is not list:
+        return False
+    (item,) = get_args(py_type) or (None,)
+    return item in _PRIMITIVES or is_typeddict(item)
+
+
 def _strip_annotated(py_type: Any) -> tuple[Any, list[Any]]:
     """Annotated[X, ...]에서 X와 메타데이터를 꺼낸다. Annotated가 아니면 그대로."""
     if get_origin(py_type) is Annotated:
@@ -82,11 +90,12 @@ def build_arg_schema(fn: Callable[..., Any]) -> ArgSchema:
         is_ref_type = py_type in STANDARD_REF_TYPES
         is_enum = isinstance(py_type, type) and issubclass(py_type, enum.Enum)
         is_primitive = py_type in _PRIMITIVES
+        is_list = is_list_type(py_type)
 
-        if not (is_ref_type or is_enum or is_primitive):
+        if not (is_ref_type or is_enum or is_primitive or is_list):
             raise SchemaBuildError(
                 f"'{fn.__name__}'의 인자 '{param_name}'({py_type})는 지원하지 않는 타입이다. "
-                "표준 인자 타입, Enum, str/int/float/bool만 쓸 수 있다"
+                "표준 인자 타입, Enum, str/int/float/bool, 그 목록(list[int] 등)과 TypedDict 목록만 쓸 수 있다"
             )
 
         has_default = param.default is not inspect.Parameter.empty

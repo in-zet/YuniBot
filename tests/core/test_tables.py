@@ -6,8 +6,10 @@ from typing import Any
 import pytest
 
 from core.tables import (
+    PEEK_MAX_ROWS,
     TABLE_TTL_SECONDS,
     Cell,
+    Condition,
     PartialRowHint,
     RowRef,
     TableArg,
@@ -18,8 +20,10 @@ from core.tables import (
     WorkTable,
     cell,
     parse_table_arg,
+    peek_rows,
     resolve_table_arg,
     row_at,
+    select_rows,
     summarize_table,
 )
 
@@ -475,3 +479,189 @@ def test_summarize_table_gives_the_model_only_what_it_may_see() -> None:
 def test_summarize_table_omits_empty_parts() -> None:
     table = dataclasses.replace(TableBuilder().column("a").row(RowRef("k", "1"), {"a": cell("x")}).build(), id="t1")
     assert summarize_table(table) == {"table": "t1", "rows": 1, "unit": "개", "columns": ["a"]}
+
+
+# ---- 거르기·정렬 엔진 (select_rows / peek_rows) ----
+
+
+def _score_table() -> WorkTable:
+    """상수 묶음 둘. 점수 없는 행 하나(5번)."""
+    builder = TableBuilder(subject="p1", unit="채보")
+    builder.column("song", "곡", bare=True).column("const", "상수", "number").column("score", "점수", "ScoreRef")
+    builder.column("lamp", "램프", "LampRef").column("id", "아이디", slash_only=True)
+    builder.group("15.5", {"평균": "x"})
+    rows = [
+        ("A", 15.5, 1_005_000, "FULL COMBO", "g1"),
+        ("B", 15.5, 990_000, None, "g2"),
+        ("C", 15.5, 1_008_000, "ALL JUSTICE", "g3"),
+    ]
+    for key, (song, const, score, lamp, gid) in enumerate(rows, start=1):
+        builder.row(
+            RowRef("chunithm.chart", str(key)),
+            {
+                "song": cell(song), "const": cell(const, f"{const}"), "score": cell(score, f"{score:,}"),
+                "lamp": cell(lamp), "id": cell(gid),
+            },
+        )
+    builder.group("15.0")
+    builder.row(RowRef("chunithm.chart", "4"), {"song": cell("D"), "const": cell(15.0, "15.0"), "score": cell(1_000_000, "1,000,000"), "lamp": cell("FULL COMBO"), "id": cell("g4")})
+    builder.row(RowRef("chunithm.chart", "5"), {"song": cell("E"), "const": cell(15.0, "15.0"), "score": cell(None, "점수 없음"), "lamp": cell(None), "id": cell("g5")})
+    return builder.summary({"합": "1"}).step("원본").build()
+
+
+def _songs(table: WorkTable) -> list[str]:
+    return [str(row.cell("song").raw) for row in table.rows]
+
+
+def _where(column: str, op: str, value: Any, text: str | None = None) -> Condition:
+    return Condition(column=column, op=op, value=value, text=str(value) if text is None else text)
+
+
+def test_where_compares_with_the_columns_value_and_missing_values_pass() -> None:
+    out = select_rows(_score_table(), where=[_where("점수", "<", 1_007_500, "SSS")])
+    assert _songs(out) == ["A", "B", "D", "E"]  # 점수 없는 E는 통과, C(1,008,000)는 탈락
+    assert out.steps == ("원본", "점수<SSS")
+    assert out.id == ""
+
+
+@pytest.mark.parametrize(
+    ("op", "value", "expected"),
+    [
+        ("==", 1_000_000, ["D", "E"]),
+        ("!=", 1_000_000, ["A", "B", "C", "E"]),
+        ("<=", 1_000_000, ["B", "D", "E"]),
+        (">", 1_000_000, ["A", "C", "E"]),
+        (">=", 1_005_000, ["A", "C", "E"]),
+    ],
+)
+def test_where_operators(op: str, value: int, expected: list[str]) -> None:
+    assert _songs(select_rows(_score_table(), where=[_where("점수", op, value)])) == expected
+
+
+def test_where_conditions_are_anded_and_contains_works_on_text() -> None:
+    table = _score_table()
+    out = select_rows(table, where=[_where("상수", ">=", 15.5), _where("점수", ">", 1_000_000)])
+    assert _songs(out) == ["A", "C"]
+    assert _songs(select_rows(table, where=[_where("곡", "contains", "a")])) == ["A"]  # 대소문자 무시
+    assert _songs(select_rows(table, where=[_where("램프", "==", "FULL COMBO")])) == ["A", "B", "D", "E"]
+
+
+def test_where_errors() -> None:
+    table = _score_table()
+    with pytest.raises(TableError, match="'없음' 칸이 없다"):
+        select_rows(table, where=[_where("없음", "==", 1)])
+    with pytest.raises(TableError, match="모르는 비교"):
+        select_rows(table, where=[_where("점수", "=~", 1)])
+    with pytest.raises(TableError, match="크기를 비교할 수 없다"):
+        select_rows(table, where=[_where("램프", ">", "FULL COMBO")])
+    with pytest.raises(TableError, match="비교할 수 없다"):
+        select_rows(table, where=[_where("점수", "<", "abc")])
+    with pytest.raises(TableError, match="비교할 수 없다"):
+        select_rows(table, where=[_where("점수", "contains", "1")])
+
+
+def test_numbers_rows_and_exclude_rows_run_before_where() -> None:
+    table = _score_table()
+    assert _songs(select_rows(table, rows=[1, 3, 5])) == ["A", "C", "E"]
+    assert _songs(select_rows(table, exclude_rows=[1])) == ["B", "C", "D", "E"]
+    out = select_rows(table, rows=[1, 2, 3], exclude_rows=[2], where=[_where("점수", ">", 1_000_000)])
+    assert _songs(out) == ["A", "C"]
+    assert out.steps == ("원본", "1·2·3번", "2번 뺌", "점수>1000000")
+    for bad in ([0], [6]):
+        with pytest.raises(TableError, match="그 표는 5행까지 있다"):
+            select_rows(table, rows=bad)
+        with pytest.raises(TableError, match="그 표는 5행까지 있다"):
+            select_rows(table, exclude_rows=bad)
+
+
+def test_sort_is_within_groups_stable_and_missing_values_go_last_both_ways() -> None:
+    table = _score_table()
+    asc = select_rows(table, sort="점수")
+    assert _songs(asc) == ["B", "A", "C", "D", "E"]  # 묶음 안에서만 정렬, E(값 없음)는 D 뒤
+    desc = select_rows(table, sort="점수", descending=True)
+    assert _songs(desc) == ["C", "A", "B", "D", "E"]
+    assert [g.title for g in desc.groups] == ["15.5", "15.0"]
+    assert desc.steps == ("원본", "점수 내림차순")
+    ties = select_rows(table, sort="상수")  # 같은 값이면 원래 순서
+    assert _songs(ties) == ["A", "B", "C", "D", "E"]
+
+
+def test_limit_applies_per_group() -> None:
+    out = select_rows(_score_table(), sort="점수", descending=True, limit=2)
+    assert _songs(out) == ["C", "A", "D", "E"]
+    assert out.steps[-1] == "묶음마다 앞 2개"
+    with pytest.raises(TableError, match="limit"):
+        select_rows(_score_table(), limit=0)
+
+
+def test_group_by_regroups_by_value_descending_with_shown_text_as_title() -> None:
+    out = select_rows(_score_table(), group_by="상수", sort="점수", descending=True)
+    assert [g.title for g in out.groups] == ["15.5", "15.0"]
+    assert [_songs(dataclasses.replace(out, groups=(g,))) for g in out.groups] == [["C", "A", "B"], ["D", "E"]]
+    assert all(not g.summary for g in out.groups)
+    assert out.summary == {}
+    by_lamp = select_rows(_score_table(), group_by="램프")
+    assert [g.title for g in by_lamp.groups] == ["FULL COMBO", "ALL JUSTICE", "(없음)"]  # 값 내림차순, 없는 값은 맨 뒤
+
+
+def test_group_by_empty_string_flattens_the_groups() -> None:
+    out = select_rows(_score_table(), group_by="")
+    assert len(out.groups) == 1 and out.groups[0].title is None
+    assert _songs(out) == ["A", "B", "C", "D", "E"]
+    assert out.steps[-1] == "묶음 풀기"
+
+
+def test_filtering_keeps_group_titles_but_drops_summaries_and_empty_groups() -> None:
+    table = _score_table()
+    out = select_rows(table, where=[_where("상수", "==", 15.5)])
+    assert [g.title for g in out.groups] == ["15.5"]
+    assert out.groups[0].summary == {}
+    assert out.summary == {}
+    assert table.groups[0].summary == {"평균": "x"}  # 원래 표는 그대로
+
+
+def test_select_rows_keeps_columns_formats_subject_and_unit() -> None:
+    table = dataclasses.replace(_score_table(), row_formats=("{곡}",))
+    out = select_rows(table, rows=[1])
+    assert out.columns == table.columns and out.row_formats == ("{곡}",)
+    assert out.subject == "p1" and out.unit == "채보"
+
+
+def test_peek_rows_returns_raw_values_with_original_numbers_and_hides_slash_only() -> None:
+    table = dataclasses.replace(_score_table(), id="t3")
+    data = peek_rows(table, rows=[3, 5])
+    assert data == {
+        "table": "t3",
+        "matched": 2,
+        "rows": [
+            {"number": 3, "values": {"곡": "C", "상수": 15.5, "점수": 1_008_000, "램프": "ALL JUSTICE"}},
+            {"number": 5, "values": {"곡": "E", "상수": 15.0, "점수": None, "램프": None}},
+        ],
+    }
+
+
+def test_peek_rows_where_sort_and_limit() -> None:
+    table = _score_table()
+    data = peek_rows(table, where=[_where("상수", "==", 15.5)], sort="점수", descending=True, limit=2)
+    assert [r["number"] for r in data["rows"]] == [3, 1]
+    assert data["matched"] == 3
+    # 정렬은 묶음과 무관하게 전체에서 한다
+    top = peek_rows(table, sort="점수", descending=True, limit=1)
+    assert top["rows"][0]["number"] == 3
+    assert len(peek_rows(table, limit=999)["rows"]) == 5  # 상한 20 안에서 전부
+    assert len(peek_rows(table, limit=0)["rows"]) == 1  # 최소 1
+
+
+def test_peek_rows_caps_at_twenty() -> None:
+    builder = TableBuilder().column("a")
+    for i in range(30):
+        builder.row(RowRef("k", str(i)), {"a": cell(i)})
+    data = peek_rows(builder.build(), limit=100)
+    assert len(data["rows"]) == PEEK_MAX_ROWS and data["matched"] == 30
+
+
+def test_peek_rows_rejects_group_by_and_exclude() -> None:
+    with pytest.raises(TableError):
+        peek_rows(_score_table(), group_by="상수")
+    with pytest.raises(TableError):
+        peek_rows(_score_table(), exclude_rows=[1])

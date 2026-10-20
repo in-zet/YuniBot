@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import enum
 import re
+from typing import get_args, get_type_hints, is_typeddict
 
 from core.decorators import ToolSpec
 from core.llm import ToolDeclaration
-from core.schema import ArgSpec, build_arg_schema
+from core.schema import ArgSpec, build_arg_schema, is_list_type
 from core.tool_types import STANDARD_REF_TYPES
 
 # ai.google.dev/api/generate-content의 FunctionDeclaration.name 설명 원문:
@@ -40,7 +41,21 @@ def _json_type(py_type: type) -> str:
     return "string"  # str, 표준 인자 타입(원문 그대로 받음), enum(이름을 문자열로 받음)
 
 
+def _item_schema(item: type) -> dict[str, object]:
+    if is_typeddict(item):
+        hints = get_type_hints(item)
+        return {
+            "type": "object",
+            "properties": {name: {"type": _json_type(py_type)} for name, py_type in hints.items()},
+            "required": list(hints),
+        }
+    return {"type": _json_type(item)}
+
+
 def _property_schema(arg: ArgSpec) -> dict[str, object]:
+    if is_list_type(arg.py_type):
+        (item,) = get_args(arg.py_type)
+        return {"type": "array", "items": _item_schema(item)}
     schema: dict[str, object] = {"type": _json_type(arg.py_type)}
     if isinstance(arg.py_type, type) and issubclass(arg.py_type, enum.Enum) and arg.py_type not in STANDARD_REF_TYPES:
         schema["enum"] = [member.value for member in arg.py_type]

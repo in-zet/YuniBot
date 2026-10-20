@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, TypedDict
 
 ValueType = Literal["text", "number", "ScoreRef", "RankRef", "LampRef", "DifficultyRef"]
 VALUE_TYPES: frozenset[str] = frozenset(
@@ -171,6 +171,203 @@ def pick_numbers(table: WorkTable, numbers: Iterable[int]) -> WorkTable:
 
 def _numbers_step(numbers: Collection[int]) -> str:
     return "·".join(str(n) for n in sorted(numbers)) + "번"
+
+
+COMPARE_OPS: frozenset[str] = frozenset({"==", "!=", "<", "<=", ">", ">=", "contains"})
+# 크기 비교(<, <=, >, >=)를 할 수 없는 칸 종류. 이름이 같은지만 본다.
+_UNORDERED_TYPES: frozenset[str] = frozenset({"LampRef", "DifficultyRef"})
+# 한 번에 돌려주는 행 수의 상한(`table_peek`).
+PEEK_MAX_ROWS = 20
+
+
+@dataclass(frozen=True, slots=True)
+class Condition:
+    """`where` 항목 하나. `value`는 칸의 값 종류로 이미 해석한 비교용 값이고, `text`는 모델이 넘긴 원문(steps용)이다."""
+
+    column: str
+    op: str
+    value: Any
+    text: str
+
+
+class WhereClause(TypedDict):
+    """모델이 넘기는 조건. `column`은 칸 보이는 이름, `value`는 칸 값 종류로 해석할 원문이다."""
+
+    column: str
+    op: str
+    value: str
+
+
+_NumberedGroup = tuple[str | None, list[tuple[int, Row]]]
+
+
+def _numbered_groups(table: WorkTable) -> list[_NumberedGroup]:
+    groups: list[_NumberedGroup] = []
+    number = 0
+    for group in table.groups:
+        rows: list[tuple[int, Row]] = []
+        for row in group.rows:
+            number += 1
+            rows.append((number, row))
+        groups.append((group.title, rows))
+    return groups
+
+
+def _column_by_label(table: WorkTable, label: str) -> Column:
+    column = table.column_by_label(label)
+    if column is None:
+        raise TableError(f"그 표에 '{label}' 칸이 없다")
+    return column
+
+
+def _check_numbers(table: WorkTable, numbers: Iterable[int]) -> set[int]:
+    wanted = set(numbers)
+    count = table.row_count
+    if any(n < 1 or n > count for n in wanted):
+        raise TableError(f"그 표는 {count}행까지 있다")
+    return wanted
+
+
+def _passes(raw: Any, op: str, value: Any, column: Column) -> bool:
+    if raw is None:
+        return True  # 값이 없는 행은 어떤 조건이든 통과한다(임시 결정)
+    try:
+        if op == "contains":
+            if not isinstance(raw, str):
+                raise TypeError
+            return str(value).casefold() in raw.casefold()
+        if op == "==":
+            return bool(raw == value)
+        if op == "!=":
+            return bool(raw != value)
+        if column.value_type in _UNORDERED_TYPES:
+            raise TableError(f"'{column.label}' 칸은 크기를 비교할 수 없다")
+        if op == "<":
+            return bool(raw < value)
+        if op == "<=":
+            return bool(raw <= value)
+        if op == ">":
+            return bool(raw > value)
+        return bool(raw >= value)
+    except TypeError:
+        raise TableError(f"'{column.label}' 칸은 '{value}'와 비교할 수 없다") from None
+
+
+def _condition_step(condition: Condition) -> str:
+    if condition.op == "contains":
+        return f"{condition.column}에 {condition.text} 포함"
+    return f"{condition.column}{condition.op}{condition.text}"
+
+
+def _sorted_rows(
+    rows: list[tuple[int, Row]], column: Column, *, descending: bool
+) -> list[tuple[int, Row]]:
+    present = [item for item in rows if item[1].cell(column.name).raw is not None]
+    absent = [item for item in rows if item[1].cell(column.name).raw is None]
+    def raw_of(item: tuple[int, Row]) -> Any:
+        return item[1].cell(column.name).raw
+
+    try:
+        present.sort(key=raw_of, reverse=descending)
+    except TypeError:
+        raise TableError(f"'{column.label}' 칸은 정렬할 수 없다") from None
+    return [*present, *absent]  # 같은 값이면 원래 순서를 지킨다(안정 정렬). 값이 없는 행은 방향과 무관하게 맨 뒤
+
+
+def _regroup(groups: list[_NumberedGroup], column: Column) -> list[_NumberedGroup]:
+    buckets: dict[Any, list[tuple[int, Row]]] = {}
+    titles: dict[Any, str] = {}
+    for _title, rows in groups:
+        for item in rows:
+            cell_ = item[1].cell(column.name)
+            buckets.setdefault(cell_.raw, []).append(item)
+            titles.setdefault(cell_.raw, cell_.text or "(없음)")
+    keys = [key for key in buckets if key is not None]
+    try:
+        keys.sort(reverse=True)
+    except TypeError:
+        raise TableError(f"'{column.label}' 칸은 묶을 수 없다") from None
+    if None in buckets:
+        keys.append(None)
+    return [(titles[key], buckets[key]) for key in keys]
+
+
+def _select_numbered(
+    table: WorkTable,
+    *,
+    rows: Sequence[int] | None = None,
+    exclude_rows: Sequence[int] | None = None,
+    where: Sequence[Condition] = (),
+    sort: str | None = None,
+    descending: bool = False,
+    limit: int | None = None,
+    group_by: str | None = None,
+) -> tuple[list[_NumberedGroup], list[str]]:
+    """거르기·정렬 엔진. 순서는 번호 고르기 → where → 다시 묶기 → 정렬 → 묶음마다 limit이다."""
+    steps: list[str] = []
+    groups = _numbered_groups(table)
+    if rows is not None:
+        wanted = _check_numbers(table, rows)
+        groups = [(t, [item for item in rs if item[0] in wanted]) for t, rs in groups]
+        steps.append(_numbers_step(wanted))
+    if exclude_rows is not None:
+        dropped = _check_numbers(table, exclude_rows)
+        groups = [(t, [item for item in rs if item[0] not in dropped]) for t, rs in groups]
+        steps.append(_numbers_step(dropped) + " 뺌")
+    for condition in where:
+        if condition.op not in COMPARE_OPS:
+            raise TableError(f"모르는 비교 '{condition.op}' (쓸 수 있는 것: {', '.join(sorted(COMPARE_OPS))})")
+        column = _column_by_label(table, condition.column)
+        groups = [
+            (t, [item for item in rs if _passes(item[1].cell(column.name).raw, condition.op, condition.value, column)])
+            for t, rs in groups
+        ]
+        steps.append(_condition_step(condition))
+    if group_by is not None:
+        if group_by == "":
+            groups = [(None, [item for _t, rs in groups for item in rs])]
+            steps.append("묶음 풀기")
+        else:
+            groups = _regroup(groups, _column_by_label(table, group_by))
+            steps.append(f"{group_by}별 묶음")
+    if sort is not None:
+        column = _column_by_label(table, sort)
+        groups = [(t, _sorted_rows(rs, column, descending=descending)) for t, rs in groups]
+        steps.append(f"{sort} {'내림' if descending else '오름'}차순")
+    if limit is not None:
+        if limit < 1:
+            raise TableError("limit은 1 이상이어야 한다")
+        groups = [(t, rs[:limit]) for t, rs in groups]
+        steps.append(f"앞 {limit}개" if len([1 for _t, rs in groups if rs]) <= 1 else f"묶음마다 앞 {limit}개")
+    return [(t, rs) for t, rs in groups if rs], steps
+
+
+def select_rows(table: WorkTable, **options: Any) -> WorkTable:
+    """`table_query`의 엔진. 조건에 맞는 행으로 새 표를 만든다(원래 표는 그대로). 표·묶음 요약은 버리고
+    `steps`에 조건을 덧붙인다. 옵션은 `_select_numbered`와 같다."""
+    groups, steps = _select_numbered(table, **options)
+    return derive_table(table, [Group(title, tuple(row for _n, row in rs)) for title, rs in groups], steps=steps)
+
+
+def peek_rows(table: WorkTable, *, limit: int = 10, **options: Any) -> dict[str, Any]:
+    """`table_peek`의 엔진. 고른 행의 원래 값을 돌려준다. 행마다 원래 표의 번호를 붙인다."""
+    if options.get("group_by") is not None or options.get("exclude_rows") is not None:
+        raise TableError("table_peek은 묶기·번호 빼기를 쓰지 않는다")
+    options = dict(options)
+    limit = max(1, min(limit, PEEK_MAX_ROWS))
+    if options.get("sort") is not None:
+        options["group_by"] = ""  # 훑어보기는 묶음과 무관하게 전체에서 정렬한다
+    groups, _steps = _select_numbered(table, **options)
+    flat = [item for _t, rs in groups for item in rs]
+    visible = [column for column in table.columns if not column.slash_only]
+    return {
+        "table": table.id,
+        "matched": len(flat),
+        "rows": [
+            {"number": number, "values": {column.label: row.cell(column.name).raw for column in visible}}
+            for number, row in flat[:limit]
+        ],
+    }
 
 
 @dataclass(frozen=True, slots=True, init=False)

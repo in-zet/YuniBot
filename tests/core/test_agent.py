@@ -702,7 +702,7 @@ async def _run_table_turns(
             name, args = queue.pop(0)
             return GenerationTurn(
                 content=LlmContent(role="model", parts=[]),
-                function_calls=[FunctionCallRequest(call_id=str(len(seen)), name=f"table-skill_{name}", args=args)],
+                function_calls=[FunctionCallRequest(call_id=str(len(seen)), name=name if name.startswith("table_") else f"table-skill_{name}", args=args)],
             )
         return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="끝")]), text="끝")
 
@@ -738,6 +738,51 @@ async def test_table_result_is_stored_and_the_model_gets_only_the_summary(tmp_pa
     assert result.collected_data == seen
     assert "1,007,500" not in str(result.collected_data) and "secret-key" not in str(result.collected_data)
     assert result.required_displays == []
+
+
+@pytest.mark.asyncio
+async def test_table_query_makes_a_new_table_from_an_earlier_turn_table(tmp_path: Path) -> None:
+    def seed(store: TableStore) -> None:
+        builder = TableBuilder(subject="p1").column("song", "곡").column("score", "점수", "number")
+        builder.row(RowRef("chunithm.chart", "1"), {"song": cell("A"), "score": cell(10)})
+        builder.row(RowRef("chunithm.chart", "2"), {"song": cell("B"), "score": cell(30)})
+        builder.row(RowRef("chunithm.chart", "3"), {"song": cell("C"), "score": cell(20)})
+        _ = store.put("p1", "c1", builder.build(), now=0)
+
+    args = {"table": "t1", "where": [{"column": "점수", "op": ">=", "value": "20"}], "sort": "점수", "descending": True}
+    result, seen, store = await _run_table_turns(tmp_path, [("table_query", args)], before=seed)
+
+    assert seen[0]["table"] == "t2" and seen[0]["rows"] == 2
+    assert seen[0]["steps"] == ["점수>=20", "점수 내림차순"]
+    assert result.last_table_id == "t2"
+    new = store.get("p1", "c1", "t2")
+    assert new is not None and [r.cell("song").raw for r in new.rows] == ["B", "C"]
+    original = store.get("p1", "c1", "t1")
+    assert original is not None and original.row_count == 3
+
+
+@pytest.mark.asyncio
+async def test_table_query_rows_on_a_table_made_this_turn_is_refused(tmp_path: Path) -> None:
+    result, seen, _store = await _run_table_turns(
+        tmp_path, [("make", {}), ("table_query", {"table": "t1", "rows": [1]})]
+    )
+
+    assert seen[1] == {"error": "번호는 사람이 본 표에만 쓴다"}
+    assert result.turn_table_ids == ["t1"]
+
+
+@pytest.mark.asyncio
+async def test_table_peek_gives_raw_values_to_the_model_and_the_number_check(tmp_path: Path) -> None:
+    def seed(store: TableStore) -> None:
+        builder = TableBuilder().column("song", "곡").column("score", "점수", "number")
+        builder.row(RowRef("chunithm.chart", "1"), {"song": cell("A"), "score": cell(1_005_000, "1,005,000")})
+        _ = store.put("p1", "c1", builder.build(), now=0)
+
+    result, seen, _store = await _run_table_turns(tmp_path, [("table_peek", {"table": "t1", "rows": [1]})], before=seed)
+
+    assert seen[0]["rows"] == [{"number": 1, "values": {"곡": "A", "점수": 1_005_000}}]
+    assert result.collected_data == seen
+    assert result.last_table_id is None and result.turn_table_ids == []
 
 
 @pytest.mark.asyncio

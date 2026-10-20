@@ -1,9 +1,28 @@
 from __future__ import annotations
 
+from typing import Any
+
 from core.decorators import tool
+from core.resolvers import ResolutionError, ResolverRegistry
 from core.skill_loading import SkillLoadState
+from core.tables import (
+    Condition,
+    TableError,
+    WhereClause,
+    WorkTable,
+    peek_rows,
+    select_rows,
+)
 from core.threads import ThreadEndRequest
-from core.tool_types import ToolContext, ToolResult
+from core.tool_types import (
+    DifficultyRef,
+    LampRef,
+    RankRef,
+    ScoreRef,
+    TableRef,
+    ToolContext,
+    ToolResult,
+)
 
 
 def _load_state(ctx: ToolContext) -> SkillLoadState | None:
@@ -51,7 +70,114 @@ async def list_capabilities(ctx: ToolContext, category: str | None = None) -> To
     return await build_capabilities_result(ctx, category=category)
 
 
-CORE_TOOL_SPECS = [open_skill.__yuni_tool__, remember.__yuni_tool__, list_capabilities.__yuni_tool__]  # pyright: ignore[reportFunctionMemberAccess]
+_VALUE_REF_TYPES: dict[str, type] = {
+    "ScoreRef": ScoreRef,
+    "RankRef": RankRef,
+    "LampRef": LampRef,
+    "DifficultyRef": DifficultyRef,
+}
+
+
+def _comparable(value_type: str, resolved: Any) -> Any:
+    """해석기가 돌려준 값을 표 칸의 원래 값과 비교할 수 있는 값으로 바꾼다.
+    점수는 정수, 랭크는 기준 점수(그 칸의 원래 값도 기준 점수로 둔다), 램프·난이도는 정식 이름이다."""
+    if value_type == "ScoreRef":
+        return int(resolved)
+    if value_type == "RankRef":
+        return resolved.min_score
+    return resolved.canonical
+
+
+async def _parse_where(ctx: ToolContext, table: WorkTable, where: list[WhereClause] | None) -> list[Condition]:
+    conditions: list[Condition] = []
+    resolvers = ctx.services.get("_ref_resolvers")
+    for clause in where or []:
+        column = table.column_by_label(clause["column"])
+        if column is None:
+            raise TableError(f"그 표에 '{clause['column']}' 칸이 없다")
+        text = clause["value"]
+        value: Any = text
+        if column.value_type == "number":
+            try:
+                value = float(text.replace(",", ""))
+            except ValueError:
+                raise TableError(f"'{column.label}' 칸 값 '{text}'은 숫자가 아니다") from None
+        elif column.value_type in _VALUE_REF_TYPES and clause["op"] != "contains":
+            if not isinstance(resolvers, ResolverRegistry) or not resolvers.is_registered(_VALUE_REF_TYPES[column.value_type]):
+                raise TableError(f"'{column.label}' 칸 값을 해석할 수 없다")
+            try:
+                resolved = await resolvers.get(_VALUE_REF_TYPES[column.value_type]).resolve(text, ctx)
+            except ResolutionError:
+                raise TableError(f"'{column.label}' 칸 값 '{text}'을(를) 해석하지 못했다") from None
+            value = _comparable(column.value_type, resolved)
+        conditions.append(Condition(column=clause["column"], op=clause["op"], value=value, text=text))
+    return conditions
+
+
+def _guard_numbers(ctx: ToolContext, table: WorkTable, *numbers: list[int] | None) -> None:
+    turn_ids = ctx.services.get("_turn_table_ids")
+    if any(n is not None for n in numbers) and isinstance(turn_ids, list) and table.id in turn_ids:
+        raise TableError("번호는 사람이 본 표에만 쓴다")
+
+
+@tool()
+async def table_query(
+    ctx: ToolContext,
+    table: TableRef,
+    rows: list[int] | None = None,
+    exclude_rows: list[int] | None = None,
+    where: list[WhereClause] | None = None,
+    sort: str | None = None,
+    descending: bool = False,
+    limit: int | None = None,
+    group_by: str | None = None,
+) -> ToolResult:
+    """작업 표를 거르거나 정렬하거나 다시 묶어 새 표를 만든다(원래 표는 그대로). 결과 표가 사용자에게 보인다.
+    rows/exclude_rows는 사람이 표에서 본 번호(1부터, 묶음을 넘어 이어짐)를 그대로 넣는다("3번부터 5번"이면 [3,4,5]).
+    where는 {column: 칸 이름, op: ==,!=,<,<=,>,>=,contains, value: 사용자가 말한 값 그대로}의 목록(AND)이다.
+    limit은 묶음마다 앞에서 N개다. group_by는 칸 이름이면 그 칸 값으로 다시 묶고, 빈 문자열이면 묶음을 푼다."""
+    assert isinstance(table, WorkTable)
+    try:
+        _guard_numbers(ctx, table, rows, exclude_rows)
+        conditions = await _parse_where(ctx, table, where)
+        result = select_rows(
+            table, rows=rows, exclude_rows=exclude_rows, where=conditions, sort=sort, descending=descending,
+            limit=limit, group_by=group_by,
+        )
+    except TableError as exc:
+        return ToolResult(error=str(exc))
+    return ToolResult(table=result)
+
+
+@tool()
+async def table_peek(
+    ctx: ToolContext,
+    table: TableRef,
+    rows: list[int] | None = None,
+    where: list[WhereClause] | None = None,
+    sort: str | None = None,
+    descending: bool = False,
+    limit: int = 10,
+) -> ToolResult:
+    """작업 표에서 고른 행의 원래 값을 읽는다(표를 만들거나 출력하지 않는다). 행 값을 말해야 할 때만 부른다.
+    rows는 사람이 표에서 본 번호("3번 점수 얼마야?"면 [3]). 한 번에 최대 20행이다."""
+    assert isinstance(table, WorkTable)
+    try:
+        _guard_numbers(ctx, table, rows)
+        conditions = await _parse_where(ctx, table, where)
+        data = peek_rows(table, rows=rows, where=conditions, sort=sort, descending=descending, limit=limit)
+    except TableError as exc:
+        return ToolResult(error=str(exc))
+    return ToolResult(data=data)
+
+
+CORE_TOOL_SPECS = [
+    open_skill.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+    remember.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+    list_capabilities.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+    table_query.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+    table_peek.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+]
 
 
 @tool()
