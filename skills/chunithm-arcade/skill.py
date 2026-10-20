@@ -11,47 +11,28 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 from core.decorators import on, tool
 from core.events import Section
 from core.tool_types import ArcadeRef, Display, ToolContext, ToolResult
-from services.chunithm.arcade_settings import ArcadeSettings
+from services.chunithm.arcade_settings import (
+    FIELD_LABELS,
+    ArcadeSettings,
+    named_from_settings,
+    settings_line,
+)
 from services.common.arcades import Arcade
 
 _GAME = "chunithm"
 _REPORT_ORDER = 50
 _NO_ARCADE_HINT = "오락실을 말 안 했네. 다음 동기화 때 같이 말하거나 /오락실 방문으로 알려주면 설정을 저장해 둘게."
 
-_FIELD_LABELS: dict[str, str] = {
-    "speed": "스피드",
-    "field_wall_position": "필드 월",
-    "play_timing_offset": "판정 타이밍 A",
-    "judge_timing_offset": "판정 타이밍 B",
-    "guide_sound": "가이드음",
-}
-
 
 # ---------------------------------------------------------------- 공통 도우미
 
 
-def _named_from_settings(settings: ArcadeSettings) -> dict[str, str]:
-    return {
-        "speed": settings.speed, "field_wall_position": settings.field_wall_position,
-        "play_timing_offset": settings.play_timing_offset, "judge_timing_offset": settings.judge_timing_offset,
-        "guide_sound": settings.guide_sound,
-    }
-
-
 def _named_from_row(row: aiosqlite.Row) -> dict[str, str]:
-    return {name: row[name] for name in _FIELD_LABELS}
+    return {name: row[name] for name in FIELD_LABELS}
 
 
 def _diff(target: dict[str, str], other: dict[str, str]) -> list[str]:
-    return [label for name, label in _FIELD_LABELS.items() if target.get(name) != other.get(name)]
-
-
-def _settings_line(named: dict[str, str]) -> str:
-    return (
-        f"스피드 {named['speed']} / 필드 월 {named['field_wall_position']} / "
-        f"판정A {named['play_timing_offset']} / 판정B {named['judge_timing_offset']} / "
-        f"가이드음 {named['guide_sound']}"
-    )
+    return [label for name, label in FIELD_LABELS.items() if target.get(name) != other.get(name)]
 
 
 async def _latest_settings(ctx: ToolContext, *, player_id: str, arcade_id: str | None) -> aiosqlite.Row | None:
@@ -73,7 +54,7 @@ async def _store_settings(
     ctx: ToolContext, *, visit_id: int, player_id: str, arcade_id: str, play_date: str, settings: ArcadeSettings
 ) -> None:
     assert ctx.db is not None
-    named = _named_from_settings(settings)
+    named = named_from_settings(settings)
     now = datetime.now(UTC).isoformat()
     await ctx.db.execute(
         "INSERT INTO arcade_settings (visit_id, player_id, arcade_id, play_date, speed, field_wall_position, "
@@ -112,7 +93,7 @@ async def _apply_visit(ctx: ToolContext, arcade: Arcade, *, play_date: str | Non
         return {"play_date": resolved_date, "settings_saved": False, "reason": "network_error", "changed": []}
 
     previous = await _latest_settings(ctx, player_id=ctx.player_id, arcade_id=arcade.id)
-    changed = _diff(_named_from_row(previous), _named_from_settings(settings)) if previous is not None else []
+    changed = _diff(_named_from_row(previous), named_from_settings(settings)) if previous is not None else []
     await _store_settings(
         ctx, visit_id=visit_id, player_id=ctx.player_id, arcade_id=arcade.id,
         play_date=resolved_date, settings=settings,
@@ -142,7 +123,7 @@ async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     current = await _latest_settings(ctx, player_id=ctx.player_id, arcade_id=None)
     changed = _diff(target, _named_from_row(current)) if current is not None else []
 
-    lines = [f"{arcade.name}  마지막 방문 {for_arcade['play_date']}", _settings_line(target)]
+    lines = [f"{arcade.name}  마지막 방문 {for_arcade['play_date']}", settings_line(target)]
     lines.append("지금 계정과 다른 항목: " + ", ".join(changed) if changed else "지금 계정 그대로 쓰면 돼.")
     return ToolResult(
         data={
@@ -150,27 +131,6 @@ async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
             "settings": target, "changed": changed,
         },
         display=Display(content="\n".join(lines)),
-        display_mode="optional",
-    )
-
-
-@tool(slash="현재설정", tags=["chunithm-linked"], cost="network")
-async def current_settings(ctx: ToolContext) -> ToolResult:
-    """지금 내 계정의 인게임 설정을 CHUNITHM-NET에서 바로 읽어 보여준다. 오락실을 말하지 않아도 된다.
-    아무것도 저장하지 않는다."""
-    try:
-        settings = await ctx.chunithm_net.get_arcade_settings(ctx.player_id, ctx=ctx)
-    except ConnectionError:
-        return ToolResult(error="로그인이 안 돼 있어서 설정을 못 읽었어.")
-    except MaintenanceError:
-        return ToolResult(error="CHUNITHM-NET이 점검 중이라 설정을 못 읽었어.")
-    except AuthenticationError:
-        return ToolResult(error="로그인이 만료돼서 설정을 못 읽었어. 다시 연결해 줘.")
-
-    named = _named_from_settings(settings)
-    return ToolResult(
-        data={"settings": named},
-        display=Display(content=_settings_line(named)),
         display_mode="optional",
     )
 
@@ -189,7 +149,7 @@ async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
         return ToolResult(error=f"{arcade.name}에 저장된 설정이 없어.")
 
     entries = [{"play_date": row["play_date"], **_named_from_row(row)} for row in rows]
-    lines = [f"{e['play_date']}  {_settings_line(e)}" for e in entries]
+    lines = [f"{e['play_date']}  {settings_line(e)}" for e in entries]
     return ToolResult(
         data={"arcade": arcade.name, "entries": entries},
         display=Display(content=f"{arcade.name}\n" + "\n".join(lines)),
@@ -294,6 +254,6 @@ async def on_session_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
 
     return Section(
         order=_REPORT_ORDER,
-        display=Display(content=f"설정  {_settings_line(_named_from_row(row))}"),
+        display=Display(content=f"설정  {settings_line(_named_from_row(row))}"),
         data={"kind": "arcade_settings", **_named_from_row(row)},
     )

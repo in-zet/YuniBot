@@ -2,6 +2,7 @@
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import aiosqlite
 import pytest
@@ -87,6 +88,8 @@ class _FakeAdapter:
         jar: str = "#LWP-Cookies-2.0\n",
         recent_scores: list[RecentScore] | None = None,
         personal_bests: dict[str, list[PersonalBest]] | None = None,
+        favorite_music: list[int] | None = None,
+        token: str | None = "tok123",
     ) -> None:
         self.fails = fails
         # fails=True의 기본 실패는 "쿠키 만료" — 실제 어댑터가 인증 실패에서 던지는 타입이다.
@@ -96,10 +99,27 @@ class _FakeAdapter:
         self._jar = jar
         self._recent_scores = recent_scores if recent_scores is not None else []
         self._personal_bests = personal_bests if personal_bests is not None else {}
+        self._favorite_music = favorite_music if favorite_music is not None else []
+        self._token_value = token
+        self.requests: list[tuple[str, str, dict[str, object]]] = []
 
     @property
     def lwp_cookie_jar(self) -> str:
         return self._jar
+
+    @property
+    def _token(self) -> str | None:
+        return self._token_value
+
+    async def get_favorite_music(self) -> list[int]:
+        if self.fails:
+            raise self.error
+        return list(self._favorite_music)
+
+    async def set_favorite_music(self, ids) -> None:
+        if self.fails:
+            raise self.error
+        self._favorite_music = list(ids)
 
     async def get_profile(self):
         if self.fails:
@@ -138,6 +158,7 @@ class _FakeAdapter:
         pass
 
     async def _request_as_soup(self, method: str, url: str, **kwargs: object) -> LexborHTMLParser:
+        self.requests.append((method, url, dict(kwargs)))
         if self.fails:
             raise self.error
         return LexborHTMLParser(_ARCADE_SETTINGS_HTML)
@@ -547,6 +568,92 @@ async def test_get_arcade_settings_without_login_raises_connection_error(conn, s
         await service.get_arcade_settings(player.id)
 
 
+async def test_update_arcade_settings_posts_full_payload_with_only_requested_changes(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    adapter = _FakeAdapter(token="tok-abc")
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    result = await service.update_arcade_settings(player.id, changes={"speed": "9.00"})
+
+    assert result == parse_arcade_settings(LexborHTMLParser(_ARCADE_SETTINGS_HTML))
+    methods = [r[0] for r in adapter.requests]
+    assert methods == ["GET", "POST", "GET"]
+    _, post_url, post_kwargs = adapter.requests[1]
+    assert post_url == "/mobile/home/userOption/updateUserOption/update/"
+    payload = cast("dict[str, str]", post_kwargs["data"])
+    assert payload["speed"] == "32"
+    assert payload["token"] == "tok-abc"
+    # 바꾸지 않은 항목은 지금 선택된 값 그대로 실려 간다.
+    assert payload["fieldWallPosition"] == "3"
+
+
+async def test_update_arcade_settings_without_login_raises_connection_error(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+
+    with pytest.raises(ConnectionError):
+        await service.update_arcade_settings(player.id, changes={"speed": "9.00"})
+
+
+async def test_update_arcade_settings_unknown_value_raises_without_posting(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    adapter = _FakeAdapter()
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    with pytest.raises(ValueError, match="가이드음"):
+        await service.update_arcade_settings(player.id, changes={"guide_sound": "존재하지않는값"})
+
+    assert [r[0] for r in adapter.requests] == ["GET"]
+
+
+async def test_get_favorite_music_returns_adapter_list(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(favorite_music=[3, 7]), players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    assert await service.get_favorite_music(player.id) == [3, 7]
+
+
+async def test_get_favorite_music_without_login_raises_connection_error(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+
+    with pytest.raises(ConnectionError):
+        await service.get_favorite_music(player.id)
+
+
+async def test_set_favorite_music_replaces_list(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    adapter = _FakeAdapter(favorite_music=[3])
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    await service.set_favorite_music(player.id, [3, 7])
+
+    assert await service.get_favorite_music(player.id) == [3, 7]
+
+
+async def test_set_favorite_music_without_login_raises_connection_error(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+
+    with pytest.raises(ConnectionError):
+        await service.set_favorite_music(player.id, [3])
+
+
 async def test_enrich_recent_with_detail_replaces_only_the_first_limit_items(conn, secrets) -> None:
     players = PlayersService(conn)
     player = await players.create_player()
@@ -608,6 +715,32 @@ async def test_get_arcade_settings_on_auth_failure_expires_login(conn, secrets) 
 
     with pytest.raises(AuthenticationError):
         await service.get_arcade_settings(player.id, ctx=ctx_with_bus)
+    await bus.drain()
+
+    assert received == [(player.id, {"player_id": player.id})]
+    assert await players.tags_for(player.id) == set()
+
+
+async def test_update_arcade_settings_on_auth_failure_expires_login(conn, secrets) -> None:
+    players, player, bus, received = await _linked_player_with_expiry_bus(conn, secrets)
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(fails=True), players=players)
+    ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+
+    with pytest.raises(AuthenticationError):
+        await service.update_arcade_settings(player.id, changes={"speed": "9.00"}, ctx=ctx_with_bus)
+    await bus.drain()
+
+    assert received == [(player.id, {"player_id": player.id})]
+    assert await players.tags_for(player.id) == set()
+
+
+async def test_get_favorite_music_on_auth_failure_expires_login(conn, secrets) -> None:
+    players, player, bus, received = await _linked_player_with_expiry_bus(conn, secrets)
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(fails=True), players=players)
+    ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+
+    with pytest.raises(AuthenticationError):
+        await service.get_favorite_music(player.id, ctx=ctx_with_bus)
     await bus.drain()
 
     assert received == [(player.id, {"player_id": player.id})]

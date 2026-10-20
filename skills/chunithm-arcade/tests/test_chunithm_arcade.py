@@ -10,7 +10,6 @@ from typing import Any
 
 import aiosqlite
 import pytest
-from chuni_penguin.adapters.errors import MaintenanceError
 
 from core.events import EventBus
 from core.tool_types import ToolContext
@@ -230,33 +229,6 @@ async def test_get_settings_shows_diff_against_most_recently_read_account_settin
 
 
 # ---------------------------------------------------------------- history
-
-
-async def test_current_settings_reads_live_without_storing(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    player_id = await _make_player(db)
-    chunithm_net = _FakeChunithmNet(settings=_settings(speed="1.50"))
-    ctx = _ctx(player_id=player_id, db=db, chunithm_net=chunithm_net)
-
-    result = await skill.current_settings(ctx)
-
-    assert result.error is None
-    assert result.data["settings"]["speed"] == "1.50"
-    assert result.display is not None and "1.50" in result.display.content
-    cursor = await db.execute("SELECT COUNT(*) FROM arcade_settings")
-    row = await cursor.fetchone()
-    assert row is not None and row[0] == 0
-
-
-@pytest.mark.parametrize("error", [ConnectionError("로그인되어 있지 않다"), MaintenanceError()])
-async def test_current_settings_reports_read_failures(
-    skill: ModuleType, db: aiosqlite.Connection, error: Exception
-) -> None:
-    player_id = await _make_player(db)
-    ctx = _ctx(player_id=player_id, db=db, chunithm_net=_FakeChunithmNet(error=error))
-
-    result = await skill.current_settings(ctx)
-
-    assert result.error is not None
 
 
 async def test_history_lists_entries_in_date_order(skill: ModuleType, db: aiosqlite.Connection) -> None:

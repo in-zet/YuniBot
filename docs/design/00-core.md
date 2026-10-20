@@ -497,7 +497,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 ## 스킬 문서 목록
 
-기본 스킬은 16개이고, 스킬마다 문서가 하나씩 있다. 각 문서에는 manifest, 동작 규칙, 도구, 이벤트, 데이터, 설정, `SKILL.md` 본문 초안, 테스트, 미확인 사항이 같은 순서로 들어 있다. 태그 열은 스킬을 쓰는 데 필요한 권한 태그다.
+기본 스킬은 17개이고, 스킬마다 문서가 하나씩 있다. 각 문서에는 manifest, 동작 규칙, 도구, 이벤트, 데이터, 설정, `SKILL.md` 본문 초안, 테스트, 미확인 사항이 같은 순서로 들어 있다. 태그 열은 스킬을 쓰는 데 필요한 권한 태그다.
 
 | 스킬 | 범위 | 하는 일 | 태그 |
 | --- | --- | --- | --- |
@@ -514,6 +514,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [chunithm-goals](skills/chunithm-goals.md) | 츄니즘 | 레이팅·오버파워·폴더·곡별(To-Do)·자유 목표, 기한 알림 | 없음. 기록 기반 도구만 `chunithm-synced` |
 | [chunithm-session](skills/chunithm-session.md) | 츄니즘 | 세션 보관·목록·불러오기, 세션 후기 대화 | `chunithm-synced` |
 | [chunithm-arcade](skills/chunithm-arcade.md) | 츄니즘 | 오락실별 게임 설정 저장·조회 | `chunithm-linked` |
+| [chunithm-settings](skills/chunithm-settings.md) | 츄니즘 | 지금 계정의 인게임 설정 조회·변경, 즐겨찾기 곡 조회·추가·삭제 | `chunithm-linked` |
 | [chunithm-notes](skills/chunithm-notes.md) | 츄니즘 | 곡별 메모 | 없음 |
 | [chunithm-updates](skills/chunithm-updates.md) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
 | [web-qa](skills/web-qa.md) | 츄니즘 | 용어 사전에 없는 일반 질문을 검색해 출처와 함께 답하기 | 없음 |

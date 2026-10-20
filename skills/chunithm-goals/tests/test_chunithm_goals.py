@@ -200,7 +200,7 @@ def _chart(title: str, difficulty: str = "MAS", *, note_count: int | None = None
     """ChartRef 해석 결과. 테스트는 해석기를 거치지 않고 해석된 값을 바로 넘긴다
     (chunithm-border/chunithm-song 테스트와 같은 방식)."""
     return ResolvedChart(
-        song=SongRecord(title=title, aliases=(), artist=""),
+        song=SongRecord(title=title, aliases=(), artist="", id=1),
         chart=ChartRecord(difficulty=difficulty, const=const, note_count=note_count),
     )
 

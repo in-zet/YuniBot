@@ -4,7 +4,7 @@ from __future__ import annotations
 import http.cookiejar
 import io
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
@@ -15,7 +15,11 @@ from chuni_penguin.adapters.errors import AuthenticationError
 from chuni_penguin.types import Difficulty
 
 from core.tool_types import ToolContext
-from services.chunithm.arcade_settings import ArcadeSettings, parse_arcade_settings
+from services.chunithm.arcade_settings import (
+    ArcadeSettings,
+    build_update_payload,
+    parse_arcade_settings,
+)
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
 
@@ -37,14 +41,20 @@ class ChunithmNetAdapterLike(Protocol):
     async def get_recent_scores(self) -> list[RecentScore]: ...
     async def get_personal_bests(self, *, difficulty: Difficulty) -> list[PersonalBest]: ...
     async def get_detailed_recent_score(self, score: RecentScore) -> RecentScore: ...
+    async def get_favorite_music(self) -> list[int]: ...
+    async def set_favorite_music(self, ids: Sequence[int]) -> None: ...
     async def logout(self) -> None: ...
     async def aclose(self) -> None: ...
 
-    # chunithm-arcade 전용: 설정 페이지(get_profile 등과 달리 chuni-penguin에 메서드가
-    # 없다)를 읽으려고 어댑터의 공용 요청 메서드를 그대로 쓴다. 이름이 private(밑줄)인
-    # 건 third_party 내부 구현이라서다 — 쿠키·인증·에러 훅까지 다시 구현하는 중복을
-    # 피하려고 이 Protocol에 얹었다(docs/design/skills/chunithm-arcade.md 구현 결정).
+    # chunithm-arcade·chunithm-settings 전용: 설정 페이지(get_profile 등과 달리
+    # chuni-penguin에 메서드가 없다)를 읽고 쓰려고 어댑터의 공용 요청 메서드와 CSRF
+    # 역할의 `_t` 쿠키를 그대로 쓴다. 이름이 private(밑줄)인 건 third_party 내부
+    # 구현이라서다 — 쿠키·인증·에러 훅까지 다시 구현하는 중복을 피하려고 이 Protocol에
+    # 얹었다(docs/design/skills/chunithm-arcade.md 구현 결정).
     async def _request_as_soup(self, method: str, url: str, **kwargs: object) -> LexborHTMLParser: ...
+
+    @property
+    def _token(self) -> str | None: ...
 
     @property
     def lwp_cookie_jar(self) -> str: ...
@@ -323,6 +333,66 @@ class ChunithmNetService:
         try:
             soup = await adapter._request_as_soup("GET", "/mobile/home/userOption/updateUserOption")
             return parse_arcade_settings(soup)
+        except AuthenticationError:
+            await self._expire_login(player_id, ctx)
+            raise
+        finally:
+            await adapter.aclose()
+
+    async def update_arcade_settings(
+        self, player_id: str, *, changes: dict[str, str], ctx: ToolContext | None = None
+    ) -> ArcadeSettings:
+        """게임 설정 중 `changes`에 담긴 항목만 바꾸고 나머지는 지금 값 그대로 다시
+        제출한다(`chunithm-settings` 전용). POST 응답을 믿지 않고 다시 읽어 실제로
+        반영된 값을 돌려준다. `changes`의 표시 텍스트가 선택지에 없으면
+        `build_update_payload`의 ValueError가 그대로 올라간다(모델에 보여줄 한글 메시지)."""
+        cookie = await self._decrypted_cookie(player_id)
+        if cookie is None:
+            raise ConnectionError("로그인되어 있지 않다")
+
+        adapter = self._adapter_factory(cookie)
+        try:
+            soup = await adapter._request_as_soup("GET", "/mobile/home/userOption/updateUserOption")
+            payload = build_update_payload(soup, changes)
+            payload["token"] = adapter._token or ""
+            await adapter._request_as_soup(
+                "POST", "/mobile/home/userOption/updateUserOption/update/", data=payload,
+            )
+            soup = await adapter._request_as_soup("GET", "/mobile/home/userOption/updateUserOption")
+            return parse_arcade_settings(soup)
+        except AuthenticationError:
+            await self._expire_login(player_id, ctx)
+            raise
+        finally:
+            await adapter.aclose()
+
+    async def get_favorite_music(self, player_id: str, *, ctx: ToolContext | None = None) -> list[int]:
+        """지금 즐겨찾기 곡 id 목록을 읽는다(`chunithm-settings` 전용)."""
+        cookie = await self._decrypted_cookie(player_id)
+        if cookie is None:
+            raise ConnectionError("로그인되어 있지 않다")
+
+        adapter = self._adapter_factory(cookie)
+        try:
+            return await adapter.get_favorite_music()
+        except AuthenticationError:
+            await self._expire_login(player_id, ctx)
+            raise
+        finally:
+            await adapter.aclose()
+
+    async def set_favorite_music(
+        self, player_id: str, ids: Sequence[int], *, ctx: ToolContext | None = None
+    ) -> None:
+        """즐겨찾기 곡 id 목록을 통째로 교체한다(`chunithm-settings` 전용) — 호출하는
+        쪽이 추가·삭제를 반영한 전체 목록을 만들어 넘긴다."""
+        cookie = await self._decrypted_cookie(player_id)
+        if cookie is None:
+            raise ConnectionError("로그인되어 있지 않다")
+
+        adapter = self._adapter_factory(cookie)
+        try:
+            await adapter.set_favorite_music(ids)
         except AuthenticationError:
             await self._expire_login(player_id, ctx)
             raise

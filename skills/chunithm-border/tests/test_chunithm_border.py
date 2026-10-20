@@ -23,7 +23,7 @@ def _load_skill() -> ModuleType:
 
 
 def _chart(note_count: int | None) -> ResolvedChart:
-    song = SongRecord(title="테스트곡", aliases=(), artist="테스터")
+    song = SongRecord(title="테스트곡", aliases=(), artist="테스터", id=1)
     return ResolvedChart(song=song, chart=ChartRecord(difficulty="MAS", const=13.0, note_count=note_count))
 
 

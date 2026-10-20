@@ -56,6 +56,10 @@ class SongRecord:
     title: str
     aliases: tuple[str, ...]
     artist: str
+    # CHUNITHM-NET의 실제 musicId(즐겨찾기 곡 추가/삭제에 쓴다). 같은 title이 여러 시드
+    # 엔트리로 merge될 때(WORLD'S END 분리 엔트리 등) title·artist·aliases와 같은 규칙으로
+    # 처음 본 엔트리의 id를 쓴다.
+    id: int
     charts: dict[str, ChartRecord] = field(default_factory=dict)
     is_new: bool = False
     bpm: float | None = None
@@ -114,6 +118,7 @@ def _load_seed(seed_path: Path) -> dict[str, SongRecord]:
                 title=title,
                 aliases=tuple(entry.get("aliases") or ()),
                 artist=entry.get("artist", ""),
+                id=entry["id"],
                 charts={},
                 bpm=entry.get("bpm"),
                 version=entry.get("version"),
@@ -150,9 +155,15 @@ class SongDbService:
         # 근사한다(완벽하지 않지만 기동 중 네트워크 장애에도 안 죽게 하는 하한선이다).
         raw = json.loads(seed_path.read_text(encoding="utf-8"))
         self._available_intl = {e["title"] for e in raw if e.get("available")}
+        self._by_id = {song.id: song for song in self._songs.values()}
         self._conn = conn
         if self._conn is not None:
             self._conn.row_factory = aiosqlite.Row
+
+    def by_id(self, song_id: int) -> SongRecord | None:
+        """즐겨찾기 곡 목록처럼 CHUNITHM-NET의 실제 musicId만 들고 있을 때 곡으로
+        되돌린다. 국제판 미수록 곡일 수도 있어 `resolve`와 달리 가용 여부를 거르지 않는다."""
+        return self._by_id.get(song_id)
 
     async def resolve(self, raw: str, ctx: ToolContext) -> SongRecord:
         text = raw.strip()
@@ -373,6 +384,7 @@ class SongDbService:
                     title=title,
                     aliases=(),
                     artist=entry.get("artist", ""),
+                    id=entry.get("idx", -1),
                     charts={
                         code: ChartRecord(
                             difficulty=code,
@@ -409,6 +421,7 @@ class SongDbService:
             if existing_song is not None:
                 existing_song.is_new = is_new
         self._songs.update(new_songs)
+        self._by_id.update({song.id: song for song in new_songs.values()})
         self._available_intl = new_available
 
     async def refresh_from_chunimaru(self, http: _HttpGetJson) -> None:

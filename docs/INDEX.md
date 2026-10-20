@@ -11,7 +11,7 @@
 | `docs/start.md` / `docs/end.md` | 세션 시작·종료 체크리스트(검증 명령은 `end.md` §1) | **관리대상** |
 | `docs/plan.md` | 범위 · 작업 단계 · 결정 기록 · 리스크 | **관리대상** |
 | `docs/conventions.md` · `docs/pitfalls.md` | 개발 규칙 · 겪은 함정 | **관리대상** |
-| `docs/design/` | 기준 설계서: `00-core.md`(코어) + `skills/<스킬>.md` 16개 | **관리대상** |
+| `docs/design/` | 기준 설계서: `00-core.md`(코어) + `skills/<스킬>.md` 17개 | **관리대상** |
 | `docs/reference/` | CHUNITHM-NET 페이지·Chunimaru 응답 저장본 — 파서 시험이 읽는다 | **읽기전용** |
 | `progress/` | 날짜별 작업 일지(`YYYY-MM-DD.md`) — 실제 작업의 유일한 확정 기록 | **관리대상** |
 | `core/` | 입구·에이전트·도구 실행기·레지스트리·이벤트·예약·LLM 어댑터 | **관리대상** |
