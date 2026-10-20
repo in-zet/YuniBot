@@ -15,6 +15,7 @@ import aiosqlite
 import pytest
 
 from core.events import EventBus, Section
+from core.tables import RowRef, render_text
 from core.tool_types import Display, ToolContext
 from services.chunithm.records import ChartUpdate, RatingDeltas, SessionInfo, SyncDiff
 from services.chunithm.songdb import SongDbService
@@ -178,6 +179,14 @@ async def test_goal_completed_keeps_the_registered_date(skill: ModuleType, db: a
 
     [event] = result.data["events"]
     assert (event["goal"], event["days_taken"], event["date_label"]) == ("크로노 MAS SSS", 10, "10월 11일")
+    table = result.table
+    assert table is not None and table.subject == "p1" and table.unit == "기록"
+    [row] = table.rows
+    assert row.ref.kind == "yuni-bond.event" and row.ref.key == '["goal_done", "2026-10-11", "", ""]'
+    assert (row.cell("날짜").raw, row.cell("날짜").text) == ("2026-10-11", "10월 11일")
+    assert (row.cell("종류").raw, row.cell("종류").text) == ("goal_done", "To-Do 달성")
+    assert not row.cell("곡").filled  # 곡과 무관한 기록은 곡 칸이 빈다
+    assert row.cell("내용").text == "크로노 MAS SSS · 10일 걸림"
 
 
 # ---------------------------------------------------------------- 동기화
@@ -324,6 +333,9 @@ async def test_a_chart_updated_many_times_shows_up_as_a_long_haul(skill: ModuleT
     [event] = result.data["events"]
     assert (event["updates"], event["first_score"], event["latest_score"]) == (5, 990_000, 998_000)
     assert event["since_label"] == "10월 1일"
+    [row] = result.table.rows
+    assert row.cell("곡").raw == "B.B.K.K.B.K.K." and row.cell("난이도").text == "MAS"
+    assert row.cell("내용").text == "5번 갱신, 990,000점 → 998,000점 · 10월 1일부터"
 
 
 async def test_four_updates_are_not_yet_a_long_haul(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -352,6 +364,7 @@ async def test_history_with_no_records_says_so(skill: ModuleType, db: aiosqlite.
 
     assert result.data == {"events": []}
     assert result.error is None
+    assert result.table is None and result.display is not None
 
 
 async def test_history_rejects_an_unknown_kind(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -380,6 +393,14 @@ async def test_promise_lifecycle(skill: ModuleType, db: aiosqlite.Connection) ->
 
     listed = await skill.promise_list(_ctx(db))
     assert [p["text"] for p in listed.data["promises"]] == ["다음엔 크로노 연습할게"]
+    table = listed.table
+    assert table is not None and table.subject == "p1" and table.unit == "약속"
+    [row] = table.rows
+    assert row.ref == RowRef("yuni-bond.promise", saved.data["id"])
+    assert not row.cell("곡").filled and row.cell("id").text == saved.data["id"]
+    assert render_text(table).content.splitlines()[-1].startswith("1. 다음엔 크로노 연습할게  (")
+    assert saved.data["id"] not in render_text(table).content  # id는 슬래시 출력에만
+    assert saved.data["id"] in render_text(table, slash=True).content
 
     closed = await skill.promise_close(_ctx(db), promise_id=saved.data["id"])
     assert closed.error is None
@@ -516,10 +537,36 @@ async def test_plan_collects_candidates_with_notes_and_chart_links(skill: Module
     first, second = result.data["candidates"]
     assert first["note"] == "후반 왼손 주의" and first["url"].startswith("http")
     assert second["lamp"] == "all_justice" and "note" not in second
-    content = result.display.content
-    assert "1. B.B.K.K.B.K.K. MAS  1,007,500점까지 1,200점" in content
-    assert "올 저스티스 목표" in content
-    assert result.display_mode == "required"
+    table = result.table
+    assert table is not None and table.subject == "p1" and table.unit == "채보"
+    assert [c.label for c in table.columns] == ["곡", "난이도", "목표", "남은 점수", "메모", "채보 링크"]
+    row, lamp_row = table.rows
+    assert row.ref.kind == "chunithm.chart" and row.cell("남은 점수").raw == 1_200
+    assert row.cell("메모").text == "후반 왼손 주의" and row.cell("채보 링크").text.startswith("http")
+    assert not lamp_row.cell("남은 점수").filled and not lamp_row.cell("메모").filled
+    lines = render_text(table).content.splitlines()
+    assert lines[-2].startswith("1. B.B.K.K.B.K.K. MAS  1,007,500점까지 1,200점  메모 후반 왼손 주의  채보 링크 http")
+    assert "남은 점수" not in lines[-2]  # 목표 칸의 글에 이미 있다
+    assert lines[-1] == "2. Other EXP  올 저스티스 목표"
+    assert "게임플라자" in table.steps[0]
+
+
+async def test_plan_puts_other_skills_sections_in_the_summary(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    extra = Section(order=30, display=Display(content="오늘은 비가 와"), data={"kind": "weather"})
+    result = await skill.plan(_ctx(db, bus=_GatherBus([*_plan_sections(), extra])), count=5)
+
+    assert result.table is not None
+    assert result.table.summary["덧붙임"] == "오늘은 비가 와"
+    assert "덧붙임 오늘은 비가 와" in render_text(result.table).content
+
+
+async def test_plan_with_only_other_sections_shows_them_without_a_table(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    extra = Section(order=30, display=Display(content="오늘은 비가 와"), data={"kind": "weather"})
+    result = await skill.plan(_ctx(db, bus=_GatherBus([extra])))
+
+    assert result.table is None and result.display is not None and result.display.content == "오늘은 비가 와"
 
 
 async def test_plan_trims_to_the_requested_count(skill: ModuleType, db: aiosqlite.Connection) -> None:

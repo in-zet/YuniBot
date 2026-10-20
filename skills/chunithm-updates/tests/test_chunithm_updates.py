@@ -15,6 +15,7 @@ import pytest
 
 from core.events import EventBus
 from core.scheduler import Scheduler
+from core.tables import RowRef, render_text
 from core.tool_types import ToolContext
 from services.common.players import PlayersService
 from services.common.settings import SettingsService
@@ -94,6 +95,10 @@ class _FakeHttp:
 class _FakeSongDb:
     refresh_calls: int = 0
     hits: list[Any] = field(default_factory=list)
+    known_titles: set[str] = field(default_factory=set)
+
+    def song_by_title(self, title: str) -> Any | None:
+        return object() if title in self.known_titles else None
 
     async def refresh_from_chunimaru(self, http: Any) -> None:
         self.refresh_calls += 1
@@ -375,6 +380,44 @@ async def test_new_songs_tool_reports_added_and_removed(skill: ModuleType, db: a
     result = await skill.new_songs(ctx, "jp")
     assert result.data["added"] == ["곡A"]
     assert result.data["removed"] == ["빠진곡"]
+    table = result.table
+    assert table is not None and table.unit == "곡"
+    assert [g.title for g in table.groups] == ["추가", "삭제"]
+    assert dict(table.summary) == {"지역": "일본판", "확인": "2026-10-10"}
+    added, removed = table.rows
+    assert added.ref == RowRef("chunithm-updates.listed_song", '["jp", "곡A"]')
+    assert not added.cell("곡").filled and added.cell("곡 이름(원문)").text == "곡A"  # 일본판은 곡 칸을 비운다
+    assert removed.cell("구분").text == "삭제"
+    text = render_text(table).content
+    assert "── 추가 · 1곡 ──" in text and "── 삭제 · 1곡 ──" in text and "곡 이름(원문) 곡A" in text
+
+
+async def test_new_songs_table_fills_song_cell_only_for_known_intl_additions(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    await skill.models.insert_song_snapshot(
+        db, region="intl", checked_at="2026-10-10T12:00:00",
+        song_ids={"1": "곡A", "2": "곡B"}, added=[("1", "곡A"), ("2", "곡B")], removed=[("9", "곡A")],
+    )
+    ctx = _ctx(db=db, songdb=_FakeSongDb(known_titles={"곡A"}))
+
+    result = await skill.new_songs(ctx, "intl")
+
+    assert result.table is not None
+    known, unknown, removed = result.table.rows
+    assert known.cell("곡").raw == "곡A" and not known.cell("곡 이름(원문)").filled  # 곡 단위 행
+    assert not unknown.cell("곡").filled and unknown.cell("곡 이름(원문)").text == "곡B"
+    assert not removed.cell("곡").filled  # 삭제된 곡은 곡 DB에 있어도 곡 칸을 비운다
+
+
+async def test_new_songs_without_changes_is_a_message(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    await skill.models.insert_song_snapshot(
+        db, region="intl", checked_at="2026-10-10T12:00:00", song_ids={}, added=[], removed=[],
+    )
+    result = await skill.new_songs(_ctx(db=db), "intl")
+
+    assert result.table is None and result.display is not None
+    assert "추가: 없음" in (result.display.content or "") and "삭제: 없음" in (result.display.content or "")
 
 
 async def test_new_songs_tool_rejects_unknown_region(skill: ModuleType, db: aiosqlite.Connection) -> None:

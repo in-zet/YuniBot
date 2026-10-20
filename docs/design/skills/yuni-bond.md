@@ -72,10 +72,10 @@ emits: [chunithm.plan.requested]
 
 | 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
 | --- | --- | --- | --- | --- | --- |
-| `history` | 함께한 기록 보기 | `song: SongQuery`(선택), 종류(선택) | `/기록들` | optional | never |
-| `plan` | 오늘 플레이할 곡 추리기 | `count`(기본 5), `arcade: ArcadeRef`(선택) | `/오늘계획` | required | never |
+| `history` | 함께한 기록 보기 (표 반환) | `song: SongQuery`(선택), 종류(선택) | `/기록들` | 표 | never |
+| `plan` | 오늘 플레이할 곡 추리기 (표 반환) | `count`(기본 5), `arcade: ArcadeRef`(선택) | `/오늘계획` | 표 | never |
 | `promise_set` | 약속 저장 | `text`, `song: SongQuery`(선택) | 없음 | optional | never |
-| `promise_list` | 열린 약속 보기 | 없음 | `/약속` | optional | never |
+| `promise_list` | 열린 약속 보기 (표 반환) | 없음 | `/약속` | 표 | never |
 | `promise_close` | 약속 닫기 | 약속 id | 없음 | optional | never |
 
 ## 이벤트
@@ -130,3 +130,10 @@ emits: [chunithm.plan.requested]
 - **오늘 계획**: `chunithm.plan.requested`로 모은 조각 중 목표 조각(`goal_plan`)의 To-Do를 후보로 삼아 `count`개로 자르고, 메모 조각(`plan_notes`)에서 같은 곡·난이도의 메모를, `songdb`에서 채보 링크를 붙인다. 두 조각이 아닌 다른 조각의 표시물은 뒤에 그대로 붙인다.
 - **설정 범위**: 오랜만의 동기화 기준은 설정에 "전역" 범위가 없어 서버 범위로 두었다(서버 밖 DM에서는 기본값 14일).
 - **서비스**: `yuni`는 쓰지 않아 뺐다. `settings`·`db`를 더했다.
+
+## 표로 바꾼 읽기 도구 (16단계 Part 4-4, 2026-10-20)
+
+표 모양·서식은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2를 따른다. 구현에서 정한 것:
+- `history`: 가리키는 것 `yuni-bond.event` = JSON(종류, 날짜, 곡, 난이도). 칸 날짜(보일 글자는 `date_label`)·종류(한글 이름)·곡·난이도·내용. 곡과 무관한 기록은 곡 칸이 빈다. 한 줄 서식이 없어 기본 출력이다(옛 한 줄 문장은 "내용" 칸으로 나눴다). 읽기 좋은 줄이 필요해지면 서식을 줄 수 있다.
+- `plan`: `chunithm.chart` 행. 칸 곡·난이도·목표·남은 점수(글자 출력에서 숨김 — 목표 글에 이미 있다)·메모·채보 링크. 서식은 `{곡} {난이도}  {목표}`이고 메모·채보 링크는 줄 끝에 붙는다. 다른 스킬이 낸 덧붙임 조각의 글은 표 요약의 "덧붙임"에 넣는다. 후보가 없으면 표 없이 덧붙임 글(없으면 지금 안내 문장)만 낸다.
+- `promise_list`: 가리키는 것 `yuni-bond.promise` = 약속 id. 칸 약속·곡(글자 출력에서 숨김)·날짜·id(`slash_only`). 서식 `{약속}  ({날짜})`. **`data`의 `promises`(id 포함)는 남겼다** — `promise_close`가 Part 6에서 표를 받게 될 때까지 모델이 약속을 닫는 데 쓴다. 그때 지운다.

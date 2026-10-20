@@ -85,7 +85,7 @@ services: [terms, players, notify, settings]
 | 함수 | 하는 일 | 인자 | 슬래시 | 태그 | display | confirm |
 | --- | --- | --- | --- | --- | --- | --- |
 | `explain` | 용어의 뜻, 별칭, 값, 출처 | `term` | `/용어 뜻` | 없음 | optional | never |
-| `list` | 분류별 용어 목록 | `category`(선택) | `/용어 목록` | 없음 | required | never |
+| `list` | 분류별 용어 목록 (표 반환) | `category`(선택) | `/용어 목록` | 없음 | 표 | never |
 | `suggest` | 서버 은어 등록(즉시 반영) | `term`, `meaning`, `aliases` | `/용어 제안` | 없음 | optional | never |
 | `review` | 등록 끄기·되돌리기 | 제안 id, 켤지 | `/용어 반영여부` | `admin` | optional | always |
 
@@ -124,3 +124,8 @@ services: [terms, players, notify, settings]
 ## 미확인 사항
 
 - 초기 용어 목록. 한국 커뮤니티 용어를 정리한 출처를 검색으로 찾지 못했다. 플레이어들이 실제로 쓰는 말을 먼저 모으고, 확인한 것만 넣는다.
+
+## 표로 바꾼 읽기 도구 (16단계 Part 4-4, 2026-10-20)
+
+표 모양·서식은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2를 따른다. 구현에서 정한 것:
+- `list`: 가리키는 것 `chunithm-terms.term` = 정식 용어. 칸 용어·분류. 한 줄 서식 없이 기본 출력("용어 X  분류 Y"). 용어가 없으면 표 없이 문장만 낸다.

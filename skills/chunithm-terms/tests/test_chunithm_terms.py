@@ -11,6 +11,7 @@ from typing import Any
 import aiosqlite
 import pytest
 
+from core.tables import RowRef, render_text
 from core.tool_types import ToolContext
 from services.chunithm.terms import TermsService
 
@@ -91,6 +92,15 @@ async def test_list_known_category(terms: TermsService) -> None:
 
     assert result.error is None
     assert result.data["count"] == 14
+    table = result.table
+    assert table is not None and table.unit == "용어" and table.row_count == 14
+    assert [c.label for c in table.columns] == ["용어", "분류"]
+    assert table.steps == ("용어 목록 (랭크)",)
+    first = table.rows[0]
+    assert first.ref == RowRef("chunithm-terms.term", first.cell("용어").raw)
+    assert first.cell("분류").text == "랭크"
+    rendered = render_text(table)  # 11행 이상이라 목록은 첨부 파일로 나간다
+    assert rendered.file is not None and rendered.file[1].decode().splitlines()[-1].startswith("14. 용어 ")
 
 
 async def test_list_unknown_category_is_an_error(terms: TermsService) -> None:

@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 from core.decorators import tool
+from core.tables import RowRef, TableBuilder, cell
 from core.tool_types import Display, ToolContext, ToolResult
+
+_TERM = "chunithm-terms.term"
+_T_NAME = "용어"
+_T_CATEGORY = "분류"
 
 
 @tool(slash="용어 뜻")
@@ -33,17 +38,22 @@ async def explain(ctx: ToolContext, term: str) -> ToolResult:
 
 @tool(slash="용어 목록")
 async def list(ctx: ToolContext, category: str | None = None) -> ToolResult:
-    """분류별 용어 목록을 보여준다. 분류를 안 주면 전부 보여준다."""
+    """분류별 용어 목록을 표로 보여준다. 분류를 안 주면 전부 보여준다."""
     try:
         items = await ctx.terms.list_terms(category, ctx)
     except ValueError as exc:
         return ToolResult(error=str(exc))
 
-    lines = [f"{item.canonical} ({item.category_label})" for item in items]
-    return ToolResult(
-        data={"count": len(items), "terms": [item.canonical for item in items]},
-        display=Display(content="\n".join(lines) if lines else "등록된 용어가 없다."),
-    )
+    data = {"count": len(items), "terms": [item.canonical for item in items]}
+    if not items:
+        return ToolResult(data=data, display=Display(content="등록된 용어가 없다."))
+    builder = TableBuilder(unit="용어")
+    builder.column(_T_NAME)
+    builder.column(_T_CATEGORY)
+    builder.step(f"용어 목록 ({category})" if category else "용어 목록")
+    for item in items:
+        builder.row(RowRef(_TERM, item.canonical), {_T_NAME: cell(item.canonical), _T_CATEGORY: cell(item.category_label)})
+    return ToolResult(data=data, table=builder.build())
 
 
 _REPORT_CHANNEL_SETTING_SKILL = "admin"

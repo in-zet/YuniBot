@@ -12,6 +12,7 @@ import aiosqlite
 import pytest
 
 from core.events import EventBus
+from core.tables import render_text
 from core.tool_types import ToolContext
 from services.chunithm.arcade_settings import ArcadeSettings
 from services.chunithm.records import SessionInfo
@@ -248,6 +249,17 @@ async def test_history_lists_entries_in_date_order(skill: ModuleType, db: aiosql
 
     assert result.error is None
     assert [e["play_date"] for e in result.data["entries"]] == ["2026-10-01", "2026-10-05"]
+    table = result.table
+    assert table is not None and table.subject == player_id and table.unit == "기록"
+    assert [c.label for c in table.columns] == [
+        "날짜", "스피드", "필드 월", "판정 타이밍 A", "판정 타이밍 B", "가이드음",
+    ]
+    first, second = table.rows
+    assert first.ref.kind == "chunithm-arcade.settings_entry"
+    assert first.ref.key == f'["{arcade.id}", "2026-10-01"]' and first.ref != second.ref
+    assert dict(table.summary) == {"오락실": arcade.name}
+    assert second.cell("스피드").text == "2.00"
+    assert render_text(table).content.splitlines()[-1].startswith("2. 날짜 2026-10-05  스피드 2.00")
 
 
 async def test_history_errors_when_nothing_stored(skill: ModuleType, db: aiosqlite.Connection) -> None:

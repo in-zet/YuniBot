@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import sys
 import uuid
@@ -15,7 +16,9 @@ import aiosqlite
 from core.decorators import on, prompt_context, tool
 from core.events import Section
 from core.resolvers import ResolutionError
+from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.tool_types import ArcadeRef, Display, SongQuery, ToolContext, ToolResult
+from services.chunithm import table_columns as tc
 from services.chunithm.songdb import SongRecord
 from services.common.arcades import Arcade
 
@@ -61,6 +64,25 @@ _PLAN_DEFAULT_COUNT = 5
 _PLAN_MAX_COUNT = 10
 _PROMPT_CONTEXT_CHARS = 300
 _LAMP_LABELS = {"full_combo": "풀 콤보", "all_justice": "올 저스티스"}
+
+_EVENT = "yuni-bond.event"
+_PROMISE = "yuni-bond.promise"
+_E_DATE = "날짜"
+_E_KIND = "종류"
+_E_DETAIL = "내용"
+_EVENT_KIND_LABELS = {
+    _FIRST_MET: "처음 만난 날", _RANK_FIRST: "랭크 첫 달성", _RATING: "레이팅 돌파", _GOAL_DONE: "To-Do 달성",
+    _LONG_HAUL: "오래 붙잡은 곡",
+}
+_P_GOAL = "목표"
+_P_REMAINING = "남은 점수"
+_P_NOTE = "메모"
+_P_LINK = "채보 링크"
+_PLAN_FORMAT = "{곡} {난이도}  {목표}"
+_PROMISE_TEXT = "약속"
+_PROMISE_DATE = "날짜"
+_PROMISE_ID = "id"
+_PROMISE_FORMAT = "{약속}  ({날짜})"
 
 
 def _today() -> date:
@@ -410,11 +432,47 @@ async def history(ctx: ToolContext, song: SongQuery | None = None, kind: str | N
             display_mode="optional",
         )
     items = [_event_item(e, today) for e in events]
-    return ToolResult(
-        data={"events": items},
-        display=Display(content="\n".join(_event_line(i) for i in items)),
-        display_mode="optional",
-    )
+    builder = TableBuilder(subject=ctx.player_id, unit="기록")
+    builder.column(_E_DATE)
+    builder.column(_E_KIND)
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.column(_E_DETAIL)
+    builder.step("유니와 함께한 기록 (날짜순)")
+    for item in items:
+        title = item.get("song_title", "")
+        difficulty = item.get("difficulty", "")
+        key = json.dumps([item["kind"], item["date"], title, difficulty], ensure_ascii=False)
+        builder.row(
+            RowRef(_EVENT, key),
+            {
+                _E_DATE: cell(item["date"], item["date_label"]),
+                _E_KIND: cell(item["kind"], _EVENT_KIND_LABELS[item["kind"]]),
+                tc.SONG: tc.song_cell(title),
+                tc.DIFFICULTY: tc.difficulty_cell(difficulty),
+                _E_DETAIL: _event_detail_cell(item),
+            },
+        )
+    return ToolResult(data={"events": items}, table=builder.build())
+
+
+def _event_detail_cell(item: dict[str, Any]) -> Any:
+    """기록 한 줄의 "내용"(종류 칸이 이미 말하는 것은 빼고 값과 걸린 기간만)."""
+    kind = item["kind"]
+    taken = f" · {item['days_taken']}일 걸림" if item.get("days_taken") else ""
+    if kind == _FIRST_MET:
+        text = f"{item['days_ago']}일 전"
+    elif kind == _RANK_FIRST:
+        text = f"{item['rank']}{taken}"
+    elif kind == _RATING:
+        text = f"{item['rating']}"
+    elif kind == _GOAL_DONE:
+        text = f"{item['goal']}{taken}"
+    else:
+        text = (
+            f"{item['updates']}번 갱신, {item['first_score']:,}점 → {item['latest_score']:,}점 · "
+            f"{item['since_label']}부터"
+        )
+    return cell(text) if text else EMPTY_CELL
 
 
 async def _first_met(ctx: ToolContext) -> dict[str, Any] | None:
@@ -483,31 +541,44 @@ async def plan(ctx: ToolContext, count: int = _PLAN_DEFAULT_COUNT, arcade: Arcad
             {**todo, "url": await _chart_url(ctx, title, difficulty), **({"note": note} if note else {})}
         )
 
-    lines: list[str] = []
-    for index, cand in enumerate(candidates, start=1):
-        lines.append(f"{index}. {cand['song_title']} {cand['difficulty']}  {_goal_text(cand)}")
-        if cand.get("note"):
-            lines.append(f"   메모: {cand['note']}")
-        if cand.get("url"):
-            lines.append(f"   {cand['url']}")
-    for section in others:
-        if isinstance(section.display, Display) and section.display.content:
-            lines.append(section.display.content)
+    extras = [
+        section.display.content
+        for section in others
+        if isinstance(section.display, Display) and section.display.content
+    ]
+    data = {
+        "candidates": candidates, "total_candidates": len(todos),
+        "arcade": arcade.name if arcade is not None else None,
+    }
+    if not candidates:
+        content = "\n".join(extras) or "오늘 계획에 쓸 후보가 아직 없어. To-Do를 등록하거나 메모를 남기면 거기서 골라 줄게."
+        return ToolResult(data=data, display=Display(content=content), display_mode="required")
 
-    if not lines:
-        return ToolResult(
-            data={"candidates": [], "total_candidates": len(todos)},
-            display=Display(content="오늘 계획에 쓸 후보가 아직 없어. To-Do를 등록하거나 메모를 남기면 거기서 골라 줄게."),
-            display_mode="required",
+    builder = TableBuilder(subject=ctx.player_id, unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.column(_P_GOAL)
+    builder.column(_P_REMAINING, value_type="number", hidden_in_text=True)  # 목표 칸의 글에 이미 들어 있다
+    builder.column(_P_NOTE)
+    builder.column(_P_LINK)
+    builder.row_formats([_PLAN_FORMAT])
+    builder.step(f"오늘 계획 후보 {len(candidates)}곡" + (f" ({arcade.name})" if arcade is not None else ""))
+    if extras:
+        # 다른 스킬이 낸 덧붙임 조각의 글은 그대로 머리말에 찍는다.
+        builder.summary({"덧붙임": "\n".join(extras)})
+    for cand in candidates:
+        remaining = cand.get("remaining_score")
+        builder.row(
+            tc.chart_ref(cand["song_title"], cand["difficulty"]),
+            {
+                tc.SONG: tc.song_cell(cand["song_title"]),
+                tc.DIFFICULTY: tc.difficulty_cell(cand["difficulty"]),
+                _P_GOAL: cell(_goal_text(cand)),
+                _P_REMAINING: cell(remaining, f"{remaining:,}") if remaining is not None else EMPTY_CELL,
+                _P_NOTE: cell(cand["note"]) if cand.get("note") else EMPTY_CELL,
+                _P_LINK: cell(cand["url"]) if cand.get("url") else EMPTY_CELL,
+            },
         )
-    return ToolResult(
-        data={
-            "candidates": candidates, "total_candidates": len(todos),
-            "arcade": arcade.name if arcade is not None else None,
-        },
-        display=Display(content="\n".join(lines)),
-        display_mode="required",
-    )
+    return ToolResult(data=data, table=builder.build())
 
 
 # ---------------------------------------------------------------- 약속
@@ -562,14 +633,32 @@ async def promise_list(ctx: ToolContext) -> ToolResult:
     today = _today()
     items = [
         {
-            "id": r["id"], "text": r["text"], "date_label": calc.date_label(r["created_on"], today=today),
+            "id": r["id"], "text": r["text"], "created_on": r["created_on"],
+            "date_label": calc.date_label(r["created_on"], today=today),
             "days_ago": calc.days_between(r["created_on"], today.isoformat()),
             **({"song_title": r["song_title"]} if r["song_title"] else {}),
         }
         for r in rows
     ]
-    lines = [f"[{i['id']}] {i['text']}  ({i['date_label']})" for i in items]
-    return ToolResult(data={"promises": items}, display=Display(content="\n".join(lines)), display_mode="optional")
+    builder = TableBuilder(subject=ctx.player_id, unit="약속")
+    builder.column(_PROMISE_TEXT)
+    tc.add_columns(builder, tc.SONG, hidden_in_text=(tc.SONG,))
+    builder.column(_PROMISE_DATE)
+    builder.column(_PROMISE_ID, slash_only=True)
+    builder.row_formats([_PROMISE_FORMAT])
+    builder.step("열린 약속 (최근순)")
+    for item in items:
+        builder.row(
+            RowRef(_PROMISE, item["id"]),
+            {
+                _PROMISE_TEXT: cell(item["text"]),
+                tc.SONG: tc.song_cell(item.get("song_title")),
+                _PROMISE_DATE: cell(item["created_on"], item["date_label"]),
+                _PROMISE_ID: cell(item["id"]),
+            },
+        )
+    # 약속 id(`promises`)는 Part 6에서 `promise_close`가 표를 받게 될 때까지 모델이 약속을 닫는 데 쓴다.
+    return ToolResult(data={"promises": items}, table=builder.build())
 
 
 @tool(mutates=True)

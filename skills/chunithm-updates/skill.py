@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import re
 import sys
@@ -12,7 +13,9 @@ from typing import Any
 
 from core.decorators import on, schedule, tool
 from core.events import Section
+from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.tool_types import Display, ToolContext, ToolResult
+from services.chunithm import table_columns as tc
 from services.chunithm.records_calc import candidate_upside
 from services.common.notify import parse_channel_ref
 
@@ -58,6 +61,10 @@ class Region(StrEnum):
 
 
 _REGION_LABELS: dict[Region, str] = {Region.INTL: "국제판", Region.JP: "일본판"}
+_LISTED_SONG = "chunithm-updates.listed_song"
+_U_KIND = "구분"
+_U_ADDED = "추가"
+_U_REMOVED = "삭제"
 _NOTICE_SOURCES: dict[Region, tuple[str, Any]] = {
     Region.INTL: ("https://info-chunithm.sega.com/", calc.parse_intl_news),
     Region.JP: ("https://info-chunithm.sega.jp/feed/", calc.parse_jp_rss),
@@ -349,15 +356,34 @@ async def new_songs(ctx: ToolContext, region: Region, date: str | None = None) -
         )
     added = [title for _, title in snapshot.added]
     removed = [title for _, title in snapshot.removed]
-    lines = [
-        f"[{_REGION_LABELS[region]}] {snapshot.checked_at[:10]} 확인",
-        "추가: " + (", ".join(added) if added else "없음"),
-        "삭제: " + (", ".join(removed) if removed else "없음"),
-    ]
-    return ToolResult(
-        data={"region": region.value, "checked_at": snapshot.checked_at, "added": added, "removed": removed},
-        display=Display(content="\n".join(lines)),
-    )
+    data = {"region": region.value, "checked_at": snapshot.checked_at, "added": added, "removed": removed}
+    checked = snapshot.checked_at[:10]
+    if not added and not removed:
+        lines = [f"[{_REGION_LABELS[region]}] {checked} 확인", "추가: 없음", "삭제: 없음"]
+        return ToolResult(data=data, display=Display(content="\n".join(lines)))
+
+    builder = TableBuilder(unit="곡")
+    builder.column(_U_KIND, hidden_in_text=True)  # 묶음 표지(추가/삭제)가 이미 보여 준다
+    tc.add_columns(builder, tc.SONG, tc.SONG_RAW_NAME)
+    builder.step("업데이트 곡 변동")
+    builder.summary({"지역": _REGION_LABELS[region], "확인": checked})
+    for kind, titles in ((_U_ADDED, added), (_U_REMOVED, removed)):
+        if not titles:
+            continue
+        builder.group(kind)
+        for title in titles:
+            # 국제판 추가곡이 곡 DB에 있으면 곡 칸을 채워 곡 단위 행으로 쓸 수 있게 한다. 그 밖에는 곡 칸을 비우고
+            # 원문만 적는다(곡 DB에 없거나 이미 빠진 곡, 일본판 곡).
+            known = region is Region.INTL and kind == _U_ADDED and ctx.songdb.song_by_title(title) is not None
+            builder.row(
+                RowRef(_LISTED_SONG, json.dumps([region.value, title], ensure_ascii=False)),
+                {
+                    _U_KIND: cell(kind),
+                    tc.SONG: tc.song_cell(title) if known else EMPTY_CELL,
+                    tc.SONG_RAW_NAME: EMPTY_CELL if known else cell(title),
+                },
+            )
+    return ToolResult(data=data, table=builder.build())
 
 
 @tool(slash="업데이트 설정", tags=["admin"], mutates=True, confirm="always")

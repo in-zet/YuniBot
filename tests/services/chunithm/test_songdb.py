@@ -557,3 +557,10 @@ async def test_chunimaru_overlay_keeps_seed_jacket(songdb: SongDbService) -> Non
     songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
 
     assert (await songdb.resolve("B.B.K.K.B.K.K.", _CTX)).jacket == before
+
+
+def test_song_by_title_finds_by_exact_title_only(songdb: SongDbService) -> None:
+    song = songdb.song_by_title("B.B.K.K.B.K.K.")
+    assert song is not None and song.title == "B.B.K.K.B.K.K."
+    assert songdb.song_by_title("b.b.k.k.b.k.k.") is None  # 별칭·대소문자 풀이는 resolve의 일
+    assert songdb.song_by_title("없는 곡") is None

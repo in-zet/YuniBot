@@ -10,6 +10,7 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.decorators import on, tool
 from core.events import Section
+from core.tables import RowRef, TableBuilder, cell
 from core.tool_types import ArcadeRef, Display, ToolContext, ToolResult
 from services.chunithm.arcade_settings import (
     FIELD_LABELS,
@@ -20,6 +21,8 @@ from services.chunithm.arcade_settings import (
 from services.common.arcades import Arcade
 
 _GAME = "chunithm"
+_SETTINGS_ENTRY = "chunithm-arcade.settings_entry"
+_H_DATE = "날짜"
 _REPORT_ORDER = 50
 _NO_ARCADE_HINT = "오락실을 말 안 했네. 다음 동기화 때 같이 말하거나 /오락실 방문으로 알려주면 설정을 저장해 둘게."
 
@@ -137,7 +140,7 @@ async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
 
 @tool(slash="오락실 기록")
 async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
-    """그 오락실에서 저장된 설정 변화를 날짜순으로 보여준다."""
+    """그 오락실에서 저장된 설정 변화를 날짜순 표로 보여준다."""
     assert isinstance(arcade, Arcade)
     assert ctx.db is not None
     cursor = await ctx.db.execute(
@@ -149,11 +152,21 @@ async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
         return ToolResult(error=f"{arcade.name}에 저장된 설정이 없어.")
 
     entries = [{"play_date": row["play_date"], **_named_from_row(row)} for row in rows]
-    lines = [f"{e['play_date']}  {settings_line(e)}" for e in entries]
-    return ToolResult(
-        data={"arcade": arcade.name, "entries": entries},
-        display=Display(content=f"{arcade.name}\n" + "\n".join(lines)),
-    )
+    builder = TableBuilder(subject=ctx.player_id, unit="기록")
+    builder.column(_H_DATE)
+    for label in FIELD_LABELS.values():
+        builder.column(label)
+    builder.step("오락실 설정 기록 (날짜순)")
+    builder.summary({"오락실": arcade.name})
+    for entry in entries:
+        builder.row(
+            RowRef(_SETTINGS_ENTRY, json.dumps([arcade.id, entry["play_date"]], ensure_ascii=False)),
+            {
+                _H_DATE: cell(entry["play_date"]),
+                **{label: cell(entry[name]) for name, label in FIELD_LABELS.items()},
+            },
+        )
+    return ToolResult(data={"arcade": arcade.name, "entries": entries}, table=builder.build())
 
 
 @tool(slash="오락실 방문", tags=["chunithm-linked"], cost="network", mutates=True)

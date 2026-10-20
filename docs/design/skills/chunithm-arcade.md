@@ -76,7 +76,7 @@ listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.view
 | 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
 | --- | --- | --- | --- | --- | --- |
 | `get_settings` | 그 오락실의 마지막 설정과 지금 계정 설정의 차이 | `arcade: ArcadeRef` | `/오락실 설정` | optional | never |
-| `history` | 그 오락실의 설정 변화 | `arcade: ArcadeRef` | `/오락실 기록` | required | never |
+| `history` | 그 오락실의 설정 변화 (표 반환) | `arcade: ArcadeRef` | `/오락실 기록` | 표 | never |
 | `record_visit` | 세션에 오락실 방문을 남기고 지금 설정을 저장. 도구 태그 chunithm-linked, cost network | `arcade: ArcadeRef`, 날짜(기본 최근 세션) | `/오락실 방문` | optional | never |
 | `set_privacy` | 방문 기록과 설정 공개 여부 | `public: bool` | 없음 | optional | never |
 
@@ -125,3 +125,8 @@ listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.view
 
 - 오락실에 묶이지 않은 "지금 계정 설정을 바로 읽기"(`current_settings`)는 `chunithm-settings` 스킬로 옮겼다. 설정을 실제로 바꾸는 기능(즐겨찾기 곡, 게임 설정 변경)이 생기면서 "CHUNITHM-NET 지금 계정 설정"을 다루는 스킬을 하나로 모으는 게 맞다고 봤다 — 이 스킬은 오락실 방문 이력에 묶인 조회·저장만 남는다. `get_arcade_settings`(서비스 메서드)는 두 스킬이 그대로 같이 쓴다.
 - 표시 포맷 도우미(`FIELD_LABELS`, `named_from_settings`, `settings_line`)는 두 스킬이 똑같이 쓰므로 `services/chunithm/arcade_settings.py`로 옮겼다(스킬마다 복사하지 않는다).
+
+## 표로 바꾼 읽기 도구 (16단계 Part 4-4, 2026-10-20)
+
+표 모양·서식은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2를 따른다. 구현에서 정한 것:
+- `history`: 가리키는 것 `chunithm-arcade.settings_entry` = JSON(오락실 id, 날짜). 칸 날짜·스피드·필드 월·판정 타이밍 A·판정 타이밍 B·가이드음(칸 이름은 `FIELD_LABELS`). 표 요약에 오락실 이름. 서식 없이 기본 출력. 저장된 설정이 없으면 지금처럼 오류다.

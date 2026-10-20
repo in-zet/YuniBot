@@ -257,6 +257,10 @@ class SongDbService:
         await self._conn.execute("DELETE FROM songdb_aliases WHERE guild_id = ? AND alias = ?", (guild_id, alias))
         await self._conn.commit()
 
+    def song_by_title(self, title: str) -> SongRecord | None:
+        """정식 제목으로 곡을 찾는다. 국제판 수록 여부는 가리지 않는다."""
+        return self._songs.get(title)
+
     def const_for(self, title: str, difficulty: str) -> float | None:
         song = self._songs.get(title)
         if song is None:
