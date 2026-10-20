@@ -18,6 +18,15 @@ from services.chunithm.terms import ResolvedDifficulty
 _DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 
 
+def _difficulty_code(difficulty: DifficultyRef | None) -> str | None:
+    """난이도 인자를 songdb 조회용 짧은 코드로 바꾼다. 비어 있으면 난이도를 가리지 않는다는
+    뜻으로 None을 그대로 돌려준다(find_by_version의 "비우면 버전 전체" 규칙과 같다)."""
+    if difficulty is None:
+        return None
+    assert isinstance(difficulty, ResolvedDifficulty)
+    return LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
+
+
 def _with_sections(head: str, sections: list[Section]) -> str:
     """곡 조회 조각(chunithm.song.viewed 모으기 결과, order순)을 본문 뒤에 빈 줄로 나눠 붙인다.
     chunithm-sync가 동기화 리포트 조각을 붙이는 것과 같은 방식이다."""
@@ -79,8 +88,7 @@ async def find_by_const(
     ctx: ToolContext, min_const: float, max_const: float, difficulty: DifficultyRef
 ) -> ToolResult:
     """상수 범위와 난이도로 채보 목록을 상수순으로 보여준다."""
-    assert isinstance(difficulty, ResolvedDifficulty)
-    short_code = LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
+    short_code = _difficulty_code(difficulty)
     hits = ctx.songdb.find_by_const(min_const=min_const, max_const=max_const, difficulty=short_code)
 
     lines = [f"{hit.song.title} — 상수 {hit.chart.const}" for hit in hits]
@@ -88,6 +96,36 @@ async def find_by_const(
     return ToolResult(
         data={"count": len(hits), "titles": [hit.song.title for hit in hits]},
         display=Display(content="\n".join(lines) if lines else "해당 범위의 채보가 없다.", omittable=True),
+    )
+
+
+@tool(slash="버전")
+async def find_by_version(
+    ctx: ToolContext, version: str, difficulty: DifficultyRef | None = None
+) -> ToolResult:
+    """수록 버전으로 채보 목록을 상수순으로 보여준다. 난이도를 안 주면 그 버전의 모든 채보를
+    난이도 가리지 않고 보여준다."""
+    short_code = _difficulty_code(difficulty)
+    hits = ctx.songdb.find_by_version(version=version, difficulty=short_code)
+
+    lines = [f"{hit.song.title} {hit.chart.difficulty} — 상수 {hit.chart.const}" for hit in hits]
+
+    return ToolResult(
+        data={"count": len(hits), "titles": [hit.song.title for hit in hits]},
+        display=Display(content="\n".join(lines) if lines else "해당 버전의 채보가 없다.", omittable=True),
+    )
+
+
+@tool(slash="작곡가")
+async def find_by_artist(ctx: ToolContext, artist: str) -> ToolResult:
+    """작곡가(아티스트) 이름으로 국제판 수록곡을 찾는다."""
+    songs = ctx.songdb.find_by_artist(name=artist)
+
+    lines = [f"{song.title} — {song.artist}" for song in songs]
+
+    return ToolResult(
+        data={"count": len(songs), "titles": [song.title for song in songs]},
+        display=Display(content="\n".join(lines) if lines else "해당 작곡가의 곡이 없다.", omittable=True),
     )
 
 

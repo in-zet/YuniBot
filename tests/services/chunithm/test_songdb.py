@@ -269,6 +269,36 @@ async def test_find_by_version_returns_empty_when_nothing_matches(songdb: SongDb
     assert hits == []
 
 
+async def test_find_by_artist_returns_sorted_songs(songdb: SongDbService) -> None:
+    songs = songdb.find_by_artist(name="nora2r")
+    assert songs
+    titles = [song.title for song in songs]
+    assert titles == sorted(titles)
+    assert "B.B.K.K.B.K.K." in titles
+
+
+async def test_find_by_artist_is_case_insensitive(songdb: SongDbService) -> None:
+    songs = songdb.find_by_artist(name="NORA2R")
+    assert any(song.title == "B.B.K.K.B.K.K." for song in songs)
+
+
+async def test_find_by_artist_matches_collab_credit_substring(songdb: SongDbService) -> None:
+    # "MEGATON BLAST"의 크레딧은 "BlackY vs. Yooh" — 콜라보 한쪽 이름만으로도 찾아야 한다.
+    songs = songdb.find_by_artist(name="Yooh")
+    assert any(song.title == "MEGATON BLAST" for song in songs)
+
+
+async def test_find_by_artist_excludes_unavailable_song(songdb: SongDbService) -> None:
+    # "天体観測"(BUMP OF CHICKEN [cover])은 국제판 미수록이다.
+    songs = songdb.find_by_artist(name="BUMP OF CHICKEN")
+    assert all(song.title != "天体観測" for song in songs)
+
+
+async def test_find_by_artist_returns_empty_when_nothing_matches(songdb: SongDbService) -> None:
+    songs = songdb.find_by_artist(name="그런작곡가없음")
+    assert songs == []
+
+
 async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService) -> None:
     song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
     link = songdb.chart_link(song, song.charts["MAS"])

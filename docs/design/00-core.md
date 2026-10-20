@@ -564,6 +564,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - **아키텍처**: CPU가 라이젠 5이므로 x86-64다.
 - **자동 시작**: 재시작 정책 `unless-stopped`와 부팅 시 Docker 시작. 기기가 켜지면 봇도 올라온다.
 - **보존할 것**: DB가 든 `data` 폴더, 설정 파일, 토큰과 암호화 키가 든 `.env`. 셋 다 컨테이너 밖 볼륨에 둔다. `data/http_cache.sqlite`는 캐시라 지워도 되고 백업하지 않는다.
+- **로그**: `core/log_setup.py`가 표준 출력(`docker logs`)과 `data/logs/yuni.log`(5MB씩 최대 6개 돌려 씀)에 같이 남긴다. `docker compose up --build` 등으로 컨테이너가 재생성되면 `docker logs`는 그 컨테이너와 함께 사라지지만, 로그 파일은 볼륨(`data/`) 안이라 남는다(2026-10-19 실기: 컨테이너 재생성 직후 원인 분석이 막혀 결정).
 - **네트워크**: 디스코드와 외부 API로 나가는 연결만 쓴다. 포트 개방과 고정 IP가 필요 없다. 웹 로그인 서버는 두지 않는다.
 - **디스코드 설정**: 멘션과 답장을 읽기 위해 메시지 내용 인텐트를 켠다.
 

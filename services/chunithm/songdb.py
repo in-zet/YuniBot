@@ -331,6 +331,19 @@ class SongDbService:
         hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
         return hits
 
+    def find_by_artist(self, *, name: str) -> list[SongRecord]:
+        """작곡가(아티스트 크레딧) 이름으로, 지금 국제판에서 고를 수 있는 곡을 제목순으로
+        찾는다. 대소문자 구분 없는 부분 일치다 — "A vs. B" 같은 콜라보 크레딧에도 걸리게
+        한다. 상수·레벨·버전과 달리 아티스트는 채보가 아니라 곡 단위 값이라 ConstRangeHit이
+        아니라 SongRecord를 그대로 돌려준다."""
+        lowered = name.lower()
+        songs = [
+            song for title, song in self._songs.items()
+            if title in self._available_intl and lowered in song.artist.lower()
+        ]
+        songs.sort(key=lambda song: song.title)
+        return songs
+
     def chart_link(self, song: SongRecord, chart: ChartRecord) -> ChartLinkInfo:
         """채보 뷰어 링크. sdvx.in 매핑이 있으면 그 링크, 없으면 유튜브 검색 링크."""
         if chart.sdvxin is not None:
