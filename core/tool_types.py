@@ -11,7 +11,7 @@ from core.events import EventBus, Section
 from core.player_data import PlayerDataScanner
 from core.registry_snapshot import RegistrySnapshot
 from core.scheduler import Scheduler
-from core.tables import TableStore
+from core.tables import TableStore, WorkTable
 from core.usage import UsageService
 
 
@@ -85,6 +85,8 @@ class Display:
 class ToolResult:
     data: dict[str, Any] = field(default_factory=dict)
     display: Display | None = None
+    # 여러 항목을 돌려주는 도구의 결과. 표를 돌려주는 도구는 display를 비운다(코어가 표를 그려 붙인다).
+    table: WorkTable | None = None
     display_mode: Literal["required", "optional"] = "required"
     error: str | None = None
 
@@ -121,6 +123,11 @@ class ScoreRef:
     """점수 표현(숫자/랭크/램프 이름)을 0~1,010,000 점수로 바꾸는 자리."""
 
 
+class TableRef:
+    """모델이 넘긴 작업 표 id(`"t3"` 또는 번호를 붙인 `"t3:2,3"`)를 도구가 받을 `WorkTable`로 바꾸는 자리.
+    해석은 서비스가 아니라 실행기가 보관소에서 한다. 필요한 것은 `Annotated[TableRef, TableNeeds(...)]`로 선언한다."""
+
+
 STANDARD_REF_TYPES: frozenset[type] = frozenset(
-    {PlayerRef, SongQuery, ChartRef, ArcadeRef, RankRef, DifficultyRef, LampRef, ScoreRef}
+    {PlayerRef, SongQuery, ChartRef, ArcadeRef, RankRef, DifficultyRef, LampRef, ScoreRef, TableRef}
 )

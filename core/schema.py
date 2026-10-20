@@ -6,10 +6,11 @@ import inspect
 import types
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, get_type_hints
+from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
 from core.decorators import DRY_RUN_PARAM
-from core.tool_types import STANDARD_REF_TYPES
+from core.tables import TableNeeds
+from core.tool_types import STANDARD_REF_TYPES, TableRef
 
 _PRIMITIVES: frozenset[type] = frozenset({str, int, float, bool})
 
@@ -30,6 +31,8 @@ class ArgSpec:
     required: bool
     default: Any = None
     is_ref_type: bool = False
+    # TableRef 인자가 Annotated로 선언한 필요한 것. 선언이 없으면 None.
+    table_needs: TableNeeds | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -49,9 +52,17 @@ def _unwrap_optional(py_type: Any) -> tuple[Any, bool]:
     return py_type, False
 
 
+def _strip_annotated(py_type: Any) -> tuple[Any, list[Any]]:
+    """Annotated[X, ...]에서 X와 메타데이터를 꺼낸다. Annotated가 아니면 그대로."""
+    if get_origin(py_type) is Annotated:
+        base, *extras = get_args(py_type)
+        return base, list(extras)
+    return py_type, []
+
+
 def build_arg_schema(fn: Callable[..., Any]) -> ArgSchema:
     """ctx(와 실행기가 넣는 dry_run)를 제외한 함수 인자에서 JSON Schema에 준하는 ArgSchema를 만든다."""
-    hints = get_type_hints(fn)
+    hints = get_type_hints(fn, include_extras=True)
     signature = inspect.signature(fn)
     args: list[ArgSpec] = []
 
@@ -60,7 +71,13 @@ def build_arg_schema(fn: Callable[..., Any]) -> ArgSchema:
             continue
 
         py_type = hints.get(param_name, Any)
+        py_type, extras = _strip_annotated(py_type)
         py_type, is_optional = _unwrap_optional(py_type)
+        py_type, more = _strip_annotated(py_type)
+        extras += more
+        table_needs = next((e for e in extras if isinstance(e, TableNeeds)), None)
+        if table_needs is not None and py_type is not TableRef:
+            raise SchemaBuildError(f"'{fn.__name__}'의 인자 '{param_name}'는 TableRef가 아닌데 TableNeeds를 선언했다")
 
         is_ref_type = py_type in STANDARD_REF_TYPES
         is_enum = isinstance(py_type, type) and issubclass(py_type, enum.Enum)
@@ -80,6 +97,7 @@ def build_arg_schema(fn: Callable[..., Any]) -> ArgSchema:
                 required=not (has_default or is_optional),
                 default=None if param.default is inspect.Parameter.empty else param.default,
                 is_ref_type=is_ref_type,
+                table_needs=table_needs,
             )
         )
 

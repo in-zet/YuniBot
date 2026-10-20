@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 
 from core.registry import LoadedSkill, SkillRegistry
+from core.schema import build_arg_schema
+from core.tool_types import TableRef
 
 # "CREATE TABLE" / "CREATE TABLE IF NOT EXISTS" 뒤에 오는 테이블 이름을 찾는다.
 # 테이블 이름은 맨 단어(bare word)이거나 "...", `...`, [...] 로 감싼 식별자일 수 있다.
@@ -68,6 +70,17 @@ def check_docstrings(skill: LoadedSkill) -> list[str]:
     return violations
 
 
+def check_table_args_have_no_slash(skill: LoadedSkill) -> list[str]:
+    """표(TableRef)를 받는 도구는 슬래시를 가질 수 없다 — 슬래시는 표를 보관하지 않아 표 id를 줄 수 없다."""
+    violations: list[str] = []
+    for spec in [*skill.code.tools, *skill.code.slash_only_tools]:
+        if spec.slash is None:
+            continue
+        if any(arg.py_type is TableRef for arg in build_arg_schema(spec.fn).args):
+            violations.append(f"'{spec.name}'은 TableRef 인자를 받는데 슬래시가 있다")
+    return violations
+
+
 def run_all_contract_checks(registry: SkillRegistry) -> dict[str, list[str]]:
     results: dict[str, list[str]] = {}
     for skill in registry.enabled_skills():
@@ -75,5 +88,6 @@ def run_all_contract_checks(registry: SkillRegistry) -> dict[str, list[str]]:
         violations += check_table_prefix(skill)
         violations += check_migration_filenames(skill)
         violations += check_docstrings(skill)
+        violations += check_table_args_have_no_slash(skill)
         results[skill.manifest.name] = violations
     return results

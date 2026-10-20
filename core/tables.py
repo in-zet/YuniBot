@@ -1,8 +1,9 @@
 # core/tables.py
 from __future__ import annotations
 
+import re
 import time
-from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Literal, Self
@@ -134,6 +135,179 @@ def row_at(table: WorkTable, number: int) -> Row:
         if n == number:
             return row
     raise TableError(f"그 표는 {count}행까지 있다")  # pragma: no cover
+
+
+def derive_table(table: WorkTable, groups: Iterable[Group], *, steps: Iterable[str] = ()) -> WorkTable:
+    """같은 칸 정의로 행만 바꾼 새 표. id는 비우고, 원래 행 전체에서만 맞는 표·묶음 요약은 버린다.
+    비어 버린 묶음은 뺀다. 표지 이름은 남는다."""
+    kept = tuple(
+        Group(group.title, group.rows) for group in groups if group.rows
+    )
+    return replace(table, id="", groups=kept, summary=MappingProxyType({}), steps=(*table.steps, *steps))
+
+
+def keep_rows(table: WorkTable, keep: Callable[[int, Row], bool], *, steps: Iterable[str] = ()) -> WorkTable:
+    """`keep(번호, 행)`이 참인 행만 남긴 새 표. 번호는 원래 표의 번호다."""
+    number = 0
+    groups: list[Group] = []
+    for group in table.groups:
+        rows: list[Row] = []
+        for row in group.rows:
+            number += 1
+            if keep(number, row):
+                rows.append(row)
+        groups.append(Group(group.title, tuple(rows)))
+    return derive_table(table, groups, steps=steps)
+
+
+def pick_numbers(table: WorkTable, numbers: Iterable[int]) -> WorkTable:
+    """표에 찍힌 번호의 행만 남긴 새 표. 없는 번호가 하나라도 있으면 에러. 행 순서는 원래 표를 따른다."""
+    wanted = set(numbers)
+    count = table.row_count
+    if any(n < 1 or n > count for n in wanted):
+        raise TableError(f"그 표는 {count}행까지 있다")
+    return keep_rows(table, lambda n, _row: n in wanted, steps=[_numbers_step(wanted)])
+
+
+def _numbers_step(numbers: Collection[int]) -> str:
+    return "·".join(str(n) for n in sorted(numbers)) + "번"
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class TableNeeds:
+    """표를 받는 도구가 선언하는 필요한 것. 쓰는 것만 준다.
+
+    `ref_kind`: 행이 가리키는 것의 종류. `columns`: 표에 있어야 하는 칸 이름. `nonempty`: 행에서 차 있어야 하는
+    칸 이름. `single`: 남은 행이 정확히 하나여야 한다(항목 하나만 다루는 도구)."""
+
+    ref_kind: str | None
+    columns: tuple[str, ...]
+    nonempty: tuple[str, ...]
+    single: bool
+
+    def __init__(
+        self,
+        *,
+        ref_kind: str | None = None,
+        columns: Sequence[str] = (),
+        nonempty: Sequence[str] = (),
+        single: bool = False,
+    ) -> None:
+        object.__setattr__(self, "ref_kind", ref_kind)
+        object.__setattr__(self, "columns", tuple(columns))
+        object.__setattr__(self, "nonempty", tuple(nonempty))
+        object.__setattr__(self, "single", single)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PartialRowHint:
+    """`column`이 비었지만 `given`은 차 있는 행("곡 단위 행")을 뺄 때 붙이는 따로 센 문구.
+    코어는 칸의 뜻을 모르므로 칸 이름과 문구를 공통 칸 모듈이 정해서 넘겨 준다."""
+
+    column: str
+    given: str
+    label: str
+    advice: str
+
+
+_TABLE_ARG_RE = re.compile(r"t(\d+)(?::(\d+(?:,\d+)*))?")
+
+
+def parse_table_arg(raw: str) -> tuple[str, list[int] | None]:
+    """`"t3"` 또는 `"t3:2,3"`을 (표 id, 번호 목록 또는 None)으로 나눈다."""
+    compact = "".join(raw.split())
+    match = _TABLE_ARG_RE.fullmatch(compact)
+    if match is None:
+        raise TableError("표 id 모양이 틀렸다")
+    numbers = None if match.group(2) is None else [int(n) for n in match.group(2).split(",")]
+    return f"t{int(match.group(1))}", numbers
+
+
+@dataclass(frozen=True, slots=True)
+class TableArg:
+    table: WorkTable
+    # 입력 표가 옛 값이다(결과 표도 옛 값이 된다).
+    stale: bool
+
+
+def resolve_table_arg(
+    raw: object,
+    *,
+    store: TableStore | None,
+    player_id: str,
+    channel_id: str | None,
+    needs: TableNeeds | None,
+    mutates: bool,
+    turn_table_ids: Collection[str] = (),
+    partial_row_hints: Sequence[PartialRowHint] = (),
+) -> TableArg:
+    """`TableRef` 인자를 도구에 넘길 표로 바꾼다. 실패하면 `TableError`(메시지는 그대로 보여도 된다)."""
+    if not isinstance(raw, str):
+        raise TableError("표 id 모양이 틀렸다")
+    table_id, numbers = parse_table_arg(raw)
+    table = None if store is None or channel_id is None else store.get(player_id, channel_id, table_id)
+    if table is None or store is None or channel_id is None:
+        raise TableError("그 표 없음(지난 표이거나 다른 채널의 표)")
+    stale = store.is_stale(player_id, channel_id, table_id)
+    if mutates and stale:
+        raise TableError("표가 동기화 전 값이라 다시 만들어야 한다")
+    if numbers is not None:
+        if table_id in turn_table_ids:
+            raise TableError("번호는 사람이 본 표에만 쓴다")
+        table = pick_numbers(table, numbers)
+    if needs is not None:
+        table = _apply_needs(table, needs, partial_row_hints)
+    return TableArg(table, stale)
+
+
+def _apply_needs(table: WorkTable, needs: TableNeeds, hints: Sequence[PartialRowHint]) -> WorkTable:
+    for name in needs.columns:
+        if table.column_by_name(name) is None:
+            raise TableError(f"그 표에는 '{name}' 칸이 없다")
+
+    def label(name: str) -> str:
+        column = table.column_by_name(name)
+        return name if column is None else column.label
+
+    hint_by_column = {hint.column: hint for hint in hints}
+    dropped_kind = 0
+    dropped_by_column: dict[str, int] = {}
+    dropped_partial: dict[str, int] = {}
+
+    def keep(_number: int, row: Row) -> bool:
+        nonlocal dropped_kind
+        if needs.ref_kind is not None and row.ref.kind != needs.ref_kind:
+            dropped_kind += 1
+            return False
+        for name in needs.nonempty:
+            if row.cell(name).filled:
+                continue
+            hint = hint_by_column.get(name)
+            if hint is not None and row.cell(hint.given).filled:
+                dropped_partial[name] = dropped_partial.get(name, 0) + 1
+            else:
+                dropped_by_column[name] = dropped_by_column.get(name, 0) + 1
+            return False
+        return True
+
+    reduced = keep_rows(table, keep)
+    reasons: list[str] = []
+    if dropped_kind:
+        reasons.append(f"대상 종류가 아닌 행 {dropped_kind}개 뺌")
+    for name in needs.nonempty:
+        if name in dropped_by_column:
+            reasons.append(f"{label(name)} 없는 행 {dropped_by_column[name]}개 뺌")
+        if name in dropped_partial:
+            hint = hint_by_column[name]
+            reasons.append(f"{hint.label} {dropped_partial[name]}개 뺌 — {hint.advice}")
+    removed = table.row_count - reduced.row_count
+    if reduced.row_count == 0:
+        raise TableError(f"대상 행이 없다(전부 {removed}개 뺌: {'; '.join(reasons)})" if removed else "대상 행이 없다")
+    if needs.single and reduced.row_count != 1:
+        raise TableError(f"한 행만 골라야 한다(지금 {reduced.row_count}개)")
+    if not removed:
+        return table
+    return replace(reduced, steps=(*table.steps, *reasons))
 
 
 class TableBuilder:

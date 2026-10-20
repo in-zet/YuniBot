@@ -88,7 +88,7 @@
   - [ ] Part 1: 코어(표 구조·보관소·`TableRef`·`table_query`/`table_peek`·글자 출력·`Display.files`). 세부 파트 하나가 작업 단위이고, 끝날 때마다 사용자 지시를 기다린다(2026-10-20 사용자 결정). 시험은 세부 파트마다 그 파트 몫을 함께 쓴다(수정 문서 1-10을 나눠 담는다)
     - [X] 1-1 표 구조(`core/tables.py`: `WorkTable`·`Column`·`Cell`·`Row`·`Group`·`TableBuilder`·`row_at`) — 구현 완료(2026-10-20)
     - [X] 1-2 보관소(`TableStore`·`ToolContext.tables`·`channel_id`·만료·옛 값 표시) — 구현 완료(2026-10-20)
-    - [ ] 1-3 도구 결과와 인자(`ToolResult.table`·`TableRef`·`TableNeeds`·실행기의 표 해석)
+    - [X] 1-3 도구 결과와 인자(`ToolResult.table`·`TableRef`·`TableNeeds`·실행기의 표 해석) — 구현 완료(2026-10-20)
     - [ ] 1-4 에이전트 처리(표 요약·`last_table_id` 등)
     - [ ] 1-5 코어 내장 도구(`select_rows`·`table_query`·`table_peek`)
     - [ ] 1-6 글자 출력(`render_text`·`row_text`·응답 조립)

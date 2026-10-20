@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
 import pytest
 
 from core.tables import (
     TABLE_TTL_SECONDS,
     Cell,
+    PartialRowHint,
     RowRef,
+    TableArg,
     TableBuilder,
     TableError,
+    TableNeeds,
     TableStore,
     WorkTable,
     cell,
+    parse_table_arg,
+    resolve_table_arg,
     row_at,
 )
 
@@ -250,3 +256,196 @@ def test_put_with_stale_flag_marks_new_table() -> None:
     store.put("p1", "c1", _subject_table(), now=0)
     assert store.is_stale("p1", "c1", "t1")
     assert not store.is_stale("p1", "c1", "t2")
+
+
+# ---- 표 인자 해석 (TableRef) ----
+
+
+def _chart_table(subject: str | None = "p1") -> WorkTable:
+    """채보 3행 + 곡 단위 행 2개(난이도 없음) + 곡 없는 행 1개."""
+    builder = TableBuilder(subject=subject, unit="행").column("song", "곡", bare=True).column("diff", "난이도")
+    builder.group("A")
+    builder.row(RowRef("chunithm.chart", "1"), {"song": cell("S1"), "diff": cell("MAS")})
+    builder.row(RowRef("chunithm.chart", "2"), {"song": cell("S2"), "diff": cell("EXP")})
+    builder.row(RowRef("chunithm.song", "3"), {"song": cell("S3"), "diff": cell(None)})
+    builder.group("B", {"평균": "1"})
+    builder.row(RowRef("chunithm.song", "4"), {"song": cell("S4"), "diff": cell(None)})
+    builder.row(RowRef("goal", "5"), {"song": cell(None), "diff": cell(None)})
+    builder.row(RowRef("chunithm.chart", "6"), {"song": cell("S6"), "diff": cell("MAS")})
+    return builder.summary({"합": "6"}).step("원본").build()
+
+
+_HINT = PartialRowHint(
+    column="diff", given="song", label="곡 단위 행(난이도 없음)", advice="`charts_of`로 난이도를 정할 수 있다"
+)
+
+
+def _store_with(table: WorkTable, *, stale: bool = False) -> TableStore:
+    store = TableStore()
+    store.put("p1", "c1", table, now=0, stale=stale)
+    return store
+
+
+def _resolve(raw: object, store: TableStore | None, **kwargs: Any) -> TableArg:
+    options: dict[str, Any] = {
+        "store": store, "player_id": "p1", "channel_id": "c1", "needs": None, "mutates": False,
+    }
+    options.update(kwargs)
+    return resolve_table_arg(raw, **options)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("t3", ("t3", None)), (" t3 ", ("t3", None)), ("t3:2,3", ("t3", [2, 3])), ("t3 : 2 , 3", ("t3", [2, 3])), ("t03:07", ("t3", [7]))],
+)
+def test_parse_table_arg(raw: str, expected: tuple[str, list[int] | None]) -> None:
+    assert parse_table_arg(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["", "3", "T3", "t", "t3:", "t3:2,", "t3:2-4", "t3:a", "t3,4", "t3:2:3", "표3"])
+def test_parse_table_arg_rejects_bad_shape(raw: str) -> None:
+    with pytest.raises(TableError, match="표 id 모양이 틀렸다"):
+        parse_table_arg(raw)
+
+
+def test_resolve_returns_the_stored_table() -> None:
+    store = _store_with(_chart_table())
+    arg = _resolve("t1", store)
+    assert arg.table.id == "t1"
+    assert arg.table.row_count == 6
+    assert not arg.stale
+
+
+def test_resolve_rejects_non_string() -> None:
+    with pytest.raises(TableError, match="모양"):
+        _resolve(3, _store_with(_chart_table()))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"player_id": "p2"}, {"channel_id": "c2"}, {"channel_id": None}, {"store": None}],
+)
+def test_resolve_misses_other_player_or_channel(kwargs: dict[str, Any]) -> None:
+    store = _store_with(_chart_table())
+    with pytest.raises(TableError, match="그 표 없음"):
+        _resolve("t1", kwargs.pop("store", store), **kwargs)
+    with pytest.raises(TableError, match="그 표 없음"):
+        _resolve("t7", _store_with(_chart_table()))
+
+
+def test_resolve_rejects_stale_table_for_mutating_tool_only() -> None:
+    store = _store_with(_chart_table(), stale=True)
+    with pytest.raises(TableError, match="동기화 전 값이라 다시 만들어야 한다"):
+        _resolve("t1", store, mutates=True)
+    arg = _resolve("t1", store, mutates=False)
+    assert arg.stale
+
+
+def test_resolve_numbers_pick_the_same_rows_as_the_printed_numbers() -> None:
+    store = _store_with(_chart_table())
+    arg = _resolve("t1:2,6", store)
+    assert [row.ref.key for row in arg.table.rows] == ["2", "6"]
+    assert arg.table.id == ""
+    assert arg.table.steps == ("원본", "2·6번")
+    assert [g.title for g in arg.table.groups] == ["A", "B"]
+    assert arg.table.summary == {}
+    assert arg.table.groups[1].summary == {}
+
+
+def test_resolve_numbers_drop_emptied_groups() -> None:
+    arg = _resolve("t1:4", _store_with(_chart_table()))
+    assert [g.title for g in arg.table.groups] == ["B"]
+
+
+@pytest.mark.parametrize("raw", ["t1:7", "t1:0", "t1:1,9"])
+def test_resolve_numbers_out_of_range(raw: str) -> None:
+    with pytest.raises(TableError, match="그 표는 6행까지 있다"):
+        _resolve(raw, _store_with(_chart_table()))
+
+
+def test_resolve_numbers_rejected_on_table_made_this_turn() -> None:
+    store = _store_with(_chart_table())
+    with pytest.raises(TableError, match="번호는 사람이 본 표에만 쓴다"):
+        _resolve("t1:2", store, turn_table_ids={"t1"})
+    assert _resolve("t1", store, turn_table_ids={"t1"}).table.row_count == 6  # 번호 없이는 된다
+    assert _resolve("t1:2", store, turn_table_ids={"t2"}).table.row_count == 1
+
+
+def test_needs_ref_kind_drops_other_rows() -> None:
+    arg = _resolve("t1", _store_with(_chart_table()), needs=TableNeeds(ref_kind="chunithm.chart"))
+    assert [row.ref.key for row in arg.table.rows] == ["1", "2", "6"]
+    assert arg.table.steps == ("원본", "대상 종류가 아닌 행 3개 뺌")
+    assert arg.table.summary == {}
+
+
+def test_needs_nonempty_drops_rows_and_names_the_reason() -> None:
+    arg = _resolve("t1", _store_with(_chart_table()), needs=TableNeeds(nonempty=["song"]))
+    assert [row.ref.key for row in arg.table.rows] == ["1", "2", "3", "4", "6"]
+    assert arg.table.steps == ("원본", "곡 없는 행 1개 뺌")
+
+
+def test_partial_rows_are_counted_apart_with_advice() -> None:
+    needs = TableNeeds(nonempty=["song", "diff"])
+    arg = _resolve("t1", _store_with(_chart_table()), needs=needs, partial_row_hints=[_HINT])
+    assert [row.ref.key for row in arg.table.rows] == ["1", "2", "6"]
+    assert arg.table.steps == (
+        "원본",
+        "곡 없는 행 1개 뺌",
+        "곡 단위 행(난이도 없음) 2개 뺌 — `charts_of`로 난이도를 정할 수 있다",
+    )
+
+
+def test_partial_rows_without_registered_hint_use_general_wording() -> None:
+    needs = TableNeeds(nonempty=["song", "diff"])
+    arg = _resolve("t1", _store_with(_chart_table()), needs=needs)
+    assert arg.table.steps == ("원본", "곡 없는 행 1개 뺌", "난이도 없는 행 2개 뺌")
+
+
+def test_nothing_dropped_keeps_the_stored_table_as_is() -> None:
+    store = _store_with(_chart_table())
+    arg = _resolve("t1", store, needs=TableNeeds(columns=["song"]))
+    assert arg.table.id == "t1"
+    assert arg.table.summary == {"합": "6"}
+
+
+def test_all_rows_dropped_is_an_error_naming_the_reasons() -> None:
+    table = TableBuilder().column("song", "곡").column("diff", "난이도")
+    table.row(RowRef("chunithm.song", "1"), {"song": cell("S"), "diff": cell(None)})
+    table.row(RowRef("goal", "2"), {"song": cell(None), "diff": cell(None)})
+    store = _store_with(table.build())
+    with pytest.raises(TableError) as info:
+        _resolve("t1", store, needs=TableNeeds(nonempty=["song", "diff"]), partial_row_hints=[_HINT])
+    assert str(info.value) == (
+        "대상 행이 없다(전부 2개 뺌: 곡 없는 행 1개 뺌; 곡 단위 행(난이도 없음) 1개 뺌 — `charts_of`로 난이도를 정할 수 있다)"
+    )
+
+
+def test_needs_columns_must_exist_in_table() -> None:
+    with pytest.raises(TableError, match="'rank' 칸이 없다"):
+        _resolve("t1", _store_with(_chart_table()), needs=TableNeeds(columns=["rank"]))
+
+
+def test_single_needs_exactly_one_row() -> None:
+    store = _store_with(_chart_table())
+    needs = TableNeeds(single=True)
+    with pytest.raises(TableError, match=r"한 행만 골라야 한다\(지금 6개\)"):
+        _resolve("t1", store, needs=needs)
+    assert _resolve("t1:3", store, needs=needs).table.row_count == 1
+    # 필요한 것으로 빼고 난 뒤의 행 수로 센다
+    with pytest.raises(TableError, match=r"지금 3개"):
+        _resolve("t1", store, needs=TableNeeds(single=True, ref_kind="chunithm.chart"))
+    assert _resolve("t1:1,3", store, needs=TableNeeds(single=True, ref_kind="chunithm.chart")).table.row_count == 1
+
+
+def test_numbers_come_before_needs() -> None:
+    # 3번은 곡 단위 행이라 필요한 것(난이도)에서 빠지고, 남는 것은 1번 하나다
+    arg = _resolve("t1:1,3", _store_with(_chart_table()), needs=TableNeeds(nonempty=["diff"]))
+    assert [row.ref.key for row in arg.table.rows] == ["1"]
+    assert arg.table.steps[:2] == ("원본", "1·3번")
+
+
+def test_table_needs_normalizes_sequences_to_tuples() -> None:
+    needs = TableNeeds(columns=["a"], nonempty=["b", "c"])
+    assert needs.columns == ("a",)
+    assert needs.nonempty == ("b", "c")
+    assert needs.ref_kind is None and needs.single is False

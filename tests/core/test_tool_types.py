@@ -6,6 +6,7 @@ from core.tool_types import (
     STANDARD_REF_TYPES,
     ChartRef,
     Display,
+    TableRef,
     ToolContext,
     ToolResult,
     UndeclaredServiceError,
@@ -33,6 +34,7 @@ def test_tool_result_defaults() -> None:
     assert result.display is None
     assert result.display_mode == "required"
     assert result.error is None
+    assert result.table is None
 
 
 def test_display_mode_optional() -> None:
@@ -42,7 +44,8 @@ def test_display_mode_optional() -> None:
 
 def test_standard_ref_types_registered() -> None:
     assert ChartRef in STANDARD_REF_TYPES
-    assert len(STANDARD_REF_TYPES) == 8
+    assert TableRef in STANDARD_REF_TYPES
+    assert len(STANDARD_REF_TYPES) == 9
 
 
 async def test_tool_context_emit_uses_event_bus() -> None:

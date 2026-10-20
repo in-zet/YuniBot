@@ -1,5 +1,6 @@
 # tests/core/test_executor.py
 import logging
+from typing import Annotated
 
 import pytest
 
@@ -8,7 +9,8 @@ from core.executor import ToolExecutor
 from core.manifest import DefinedTag
 from core.permissions import InMemoryTagProvider
 from core.resolvers import ResolutionError, ResolverRegistry
-from core.tool_types import ArcadeRef, ChartRef, ToolContext, ToolResult
+from core.tables import RowRef, TableBuilder, TableNeeds, TableStore, WorkTable, cell
+from core.tool_types import ArcadeRef, ChartRef, TableRef, ToolContext, ToolResult
 
 
 @tool(slash="보더")
@@ -533,3 +535,133 @@ async def test_always_tool_still_pauses_regardless_of_count() -> None:
     outcome = await executor.invoke(dangerous.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
     assert outcome.needs_confirm is True
     assert outcome.preview is None
+
+
+# ---- 표 인자 ----
+
+
+@tool()
+async def count_charts(
+    ctx: ToolContext, table: Annotated[TableRef, TableNeeds(ref_kind="chunithm.chart", nonempty=["song"])]
+) -> ToolResult:
+    """채보 행 수를 센다."""
+    assert isinstance(table, WorkTable)
+    return ToolResult(data={"rows": table.row_count, "steps": list(table.steps)})
+
+
+@tool(mutates=True)
+async def change_charts(ctx: ToolContext, table: TableRef) -> ToolResult:
+    """표의 행을 바꾸는 도구."""
+    return ToolResult(data={"changed": True})
+
+
+def _table_with_rows() -> WorkTable:
+    builder = TableBuilder(subject="p1").column("song", "곡")
+    builder.row(RowRef("chunithm.chart", "1"), {"song": cell("A")})
+    builder.row(RowRef("chunithm.chart", "2"), {"song": cell("B")})
+    builder.row(RowRef("goal", "3"), {"song": cell(None)})
+    return builder.build()
+
+
+def _table_executor() -> tuple[ToolExecutor, TableStore, ToolContext]:
+    store = TableStore()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={}, tables=store
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, channel_id="c1")
+    return executor, store, ctx
+
+
+@pytest.mark.asyncio
+async def test_table_arg_is_resolved_and_filtered_by_declared_needs() -> None:
+    executor, store, ctx = _table_executor()
+    _ = store.put("p1", "c1", _table_with_rows(), now=0)
+
+    outcome = await executor.invoke(count_charts.__yuni_tool__, ctx, {"table": "t1"})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.error is None
+    assert outcome.result.data == {"rows": 2, "steps": ["대상 종류가 아닌 행 1개 뺌"]}
+    assert outcome.stale_input is False
+
+
+@pytest.mark.asyncio
+async def test_table_arg_with_numbers_hands_over_only_those_rows() -> None:
+    executor, store, ctx = _table_executor()
+    _ = store.put("p1", "c1", _table_with_rows(), now=0)
+
+    outcome = await executor.invoke(count_charts.__yuni_tool__, ctx, {"table": "t1:2,3"})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None
+    assert outcome.result.data["rows"] == 1
+    assert outcome.result.data["steps"] == ["2·3번", "대상 종류가 아닌 행 1개 뺌"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        ("t9", "그 표 없음"),
+        ("표", "표 id 모양이 틀렸다"),
+        ("t1:9", "그 표는 3행까지 있다"),
+        ("t1:3", "대상 행이 없다(전부 1개 뺌"),
+    ],
+)
+async def test_table_arg_errors_come_back_as_tool_errors_without_calling(raw: str, message: str) -> None:
+    executor, store, ctx = _table_executor()
+    _ = store.put("p1", "c1", _table_with_rows(), now=0)
+
+    outcome = await executor.invoke(count_charts.__yuni_tool__, ctx, {"table": raw})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.error is not None
+    assert message in outcome.result.error
+
+
+@pytest.mark.asyncio
+async def test_table_arg_cannot_see_other_players_or_channels_tables() -> None:
+    executor, store, ctx = _table_executor()
+    _ = store.put("p2", "c1", _table_with_rows(), now=0)
+    _ = store.put("p1", "c2", _table_with_rows(), now=0)
+
+    outcome = await executor.invoke(count_charts.__yuni_tool__, ctx, {"table": "t1"})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.error is not None
+    assert "그 표 없음" in outcome.result.error
+
+
+@pytest.mark.asyncio
+async def test_number_on_a_table_made_this_turn_is_refused() -> None:
+    executor, store, ctx = _table_executor()
+    _ = store.put("p1", "c1", _table_with_rows(), now=0)
+
+    outcome = await executor.invoke(
+        count_charts.__yuni_tool__, ctx, {"table": "t1:1"}, turn_table_ids={"t1"}  # pyright: ignore[reportFunctionMemberAccess]
+    )
+
+    assert outcome.result is not None
+    assert outcome.result.error == "번호는 사람이 본 표에만 쓴다"
+
+
+@pytest.mark.asyncio
+async def test_mutating_tool_refuses_stale_table_but_read_only_tool_takes_it() -> None:
+    executor, store, ctx = _table_executor()
+    _ = store.put("p1", "c1", _table_with_rows(), now=0)
+    store.mark_stale("p1")
+
+    refused = await executor.invoke(change_charts.__yuni_tool__, ctx, {"table": "t1"})  # pyright: ignore[reportFunctionMemberAccess]
+    assert refused.result is not None
+    assert refused.result.error == "표가 동기화 전 값이라 다시 만들어야 한다"
+
+    accepted = await executor.invoke(count_charts.__yuni_tool__, ctx, {"table": "t1"})  # pyright: ignore[reportFunctionMemberAccess]
+    assert accepted.result is not None and accepted.result.error is None
+    assert accepted.stale_input is True
+
+
+@pytest.mark.asyncio
+async def test_table_arg_without_store_is_a_plain_error() -> None:
+    executor = ToolExecutor(resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={})
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(count_charts.__yuni_tool__, ctx, {"table": "t1"})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.error is not None
+    assert "그 표 없음" in outcome.result.error

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,8 +21,8 @@ from core.player_data import PlayerDataScanner
 from core.resolvers import ResolutionError, ResolverRegistry
 from core.scheduler import Scheduler
 from core.schema import build_arg_schema
-from core.tables import TableStore
-from core.tool_types import ToolContext, ToolResult
+from core.tables import PartialRowHint, TableError, TableStore, resolve_table_arg
+from core.tool_types import TableRef, ToolContext, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ class ExecutionOutcome:
     # confirm="bulk" 도구가 dry_run으로 돌려준 미리보기(바뀔 건수와 안내문). 확인 버튼과
     # 함께 보여준다. confirm="always"면 None이다.
     preview: ToolResult | None = None
+    # 입력 표 중 하나라도 옛 값(동기화 전)이었다 — 결과 표도 옛 값으로 보관해야 한다.
+    stale_input: bool = False
 
 
 def _bulk_count(preview: ToolResult) -> int:
@@ -71,6 +73,7 @@ class ToolExecutor:
         settings: SkillToggleProvider | None = None,
         scheduler: Scheduler | None = None,
         tables: TableStore | None = None,
+        partial_row_hints: Sequence[PartialRowHint] = (),
     ) -> None:
         self._resolvers = resolvers
         self._tag_provider = tag_provider
@@ -81,6 +84,7 @@ class ToolExecutor:
         self._settings = settings
         self._scheduler = scheduler
         self._tables = tables
+        self._partial_row_hints = tuple(partial_row_hints)
         self._pending: dict[str, _PendingConfirm] = {}
 
     @property
@@ -123,6 +127,7 @@ class ToolExecutor:
         skill_tags: list[str] | None = None,
         skill_tags_any: list[str] | None = None,
         skill_name: str | None = None,
+        turn_table_ids: Collection[str] = (),
     ) -> ExecutionOutcome:
         """skill_tags/skill_tags_any는 이 도구가 속한 스킬 manifest의 조건이다.
 
@@ -145,6 +150,7 @@ class ToolExecutor:
         schema = build_arg_schema(spec.fn)
 
         resolved: dict[str, Any] = {}
+        stale_input = False
         for arg in schema.args:
             if arg.name not in raw_args:
                 if arg.required:
@@ -153,7 +159,23 @@ class ToolExecutor:
                 continue
 
             raw_value = raw_args[arg.name]
-            if arg.is_ref_type:
+            if arg.py_type is TableRef:
+                try:
+                    table_arg = resolve_table_arg(
+                        raw_value,
+                        store=self._tables,
+                        player_id=ctx.player_id,
+                        channel_id=ctx.channel_id,
+                        needs=arg.table_needs,
+                        mutates=spec.mutates,
+                        turn_table_ids=turn_table_ids,
+                        partial_row_hints=self._partial_row_hints,
+                    )
+                except TableError as exc:
+                    return ExecutionOutcome(result=ToolResult(error=str(exc)))
+                resolved[arg.name] = table_arg.table
+                stale_input = stale_input or table_arg.stale
+            elif arg.is_ref_type:
                 # 세 경우를 구분한다. 어느 쪽이든 날것 예외를 호출자(슬래시/LLM 루프)에 흘려보내지 않는다.
                 # 1) 해석기 미등록: get()/resolve()를 부르기 전에 확인해 바로 에러 결과로.
                 # 2) ResolutionError: 해석기의 문서화된 실패(찾지 못함/후보 여럿) — 그대로 안내.
@@ -211,7 +233,7 @@ class ToolExecutor:
             if _bulk_count(preview) > 1:
                 return self._hold(spec, ctx, resolved, preview=preview)
 
-        return ExecutionOutcome(result=await self._call(spec, ctx, resolved))
+        return ExecutionOutcome(result=await self._call(spec, ctx, resolved), stale_input=stale_input)
 
     def _hold(
         self,

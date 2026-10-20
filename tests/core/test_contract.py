@@ -1,9 +1,14 @@
 from pathlib import Path
 
-from core.contract_checks import check_table_prefix, run_all_contract_checks
-from core.decorators import SkillCode
+from core.contract_checks import (
+    check_table_args_have_no_slash,
+    check_table_prefix,
+    run_all_contract_checks,
+)
+from core.decorators import SkillCode, ToolSpec, tool
 from core.manifest import SkillManifest
 from core.registry import LoadedSkill, SkillRegistry
+from core.tool_types import TableRef, ToolContext, ToolResult
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
@@ -101,3 +106,30 @@ def test_check_table_prefix_still_flags_mismatched_quoted_table_name(tmp_path: P
 
     assert any("totally_unrelated" in v and "접두사" in v for v in violations)
     assert not any("'IF'" in v for v in violations)
+
+
+@tool(slash="표슬래시")
+async def _slash_with_table(ctx: ToolContext, table: TableRef) -> ToolResult:
+    """슬래시가 있는데 표를 받는 도구."""
+    return ToolResult()
+
+
+@tool()
+async def _model_only_with_table(ctx: ToolContext, table: TableRef) -> ToolResult:
+    """슬래시 없이 표를 받는 도구."""
+    return ToolResult()
+
+
+def _spec(fn: object) -> ToolSpec:
+    return fn.__yuni_tool__  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_tool_with_table_arg_must_not_have_slash(tmp_path: Path) -> None:
+    manifest = SkillManifest(
+        name="table-skill", description="테스트용", examples=["예시"], category="메모", game="common", version=1
+    )
+    skill = LoadedSkill(
+        manifest=manifest, path=tmp_path,
+        code=SkillCode(tools=[_spec(_slash_with_table), _spec(_model_only_with_table)]),
+    )
+    assert check_table_args_have_no_slash(skill) == ["'_slash_with_table'은 TableRef 인자를 받는데 슬래시가 있다"]
