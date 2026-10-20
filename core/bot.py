@@ -235,7 +235,7 @@ class YuniClient(discord.Client):
             )
 
         history_messages = [
-            msg async for msg in message.channel.history(limit=20, before=message)
+            msg async for msg in message.channel.history(limit=50, before=message)
         ]
         history = [
             ChannelMessage(
