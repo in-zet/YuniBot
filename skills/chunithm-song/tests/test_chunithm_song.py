@@ -121,6 +121,51 @@ async def test_find_by_const_returns_sorted_results() -> None:
     assert result.data["count"] >= 1
 
 
+async def test_find_by_version_without_difficulty_returns_all_available_charts() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    result = await skill.find_by_version(_ctx_with_songdb(songdb), version="LUMINOUS")
+
+    assert result.error is None
+    assert result.data["count"] > 0
+    assert "可愛くてごめん" in result.data["titles"]
+
+
+async def test_find_by_version_with_difficulty_filters_to_one_chart() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    result = await skill.find_by_version(
+        _ctx_with_songdb(songdb), version="LUMINOUS", difficulty=_resolved_difficulty("MASTER"),
+    )
+
+    assert result.error is None
+    assert result.data["count"] > 0
+
+
+async def test_find_by_artist_returns_matching_songs() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    result = await skill.find_by_artist(_ctx_with_songdb(songdb), artist="nora2r")
+
+    assert result.error is None
+    assert result.data["count"] > 0
+    assert "B.B.K.K.B.K.K." in result.data["titles"]
+
+
+async def test_find_by_artist_no_match_shows_empty_message() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    result = await skill.find_by_artist(_ctx_with_songdb(songdb), artist="그런작곡가없음")
+
+    assert result.error is None
+    assert result.data["count"] == 0
+    assert result.display is not None and "없다" in (result.display.content or "")
+
+
 async def test_chart_link_prefers_sdvxin_mapping() -> None:
     skill = _load_skill()
     songdb = SongDbService()

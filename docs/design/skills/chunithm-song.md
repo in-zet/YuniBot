@@ -13,6 +13,8 @@ examples:
   - 크로노 마스 상수 얼마야?
   - 15.2에서 15.4 사이 마스 곡 보여 줘
   - 라미아 채보 링크 줘
+  - Zekk 작곡곡 뭐 있어?
+  - LUMINOUS PLUS 버전 곡 다 보여 줘
 category: 곡 정보
 game: chunithm
 version: 1
@@ -33,6 +35,15 @@ emits: [chunithm.song.viewed]
 
 **상수 범위 검색**: 상수 범위와 난이도로 채보 목록을 낸다. 가나다순이 아니라 상수순이다.
 
+**수록 버전 검색**: 버전 이름(문자열 그대로 비교, `SongRecord.version`과 같은 값)과 선택적 난이도로
+채보 목록을 낸다. 난이도를 안 주면 그 버전의 모든 채보를 난이도 가리지 않고 낸다 — `chunithm-folders`·
+`chunithm-goals`의 "버전 폴더"가 이미 이 규칙으로 `songdb.find_by_version`을 쓰고 있어 같은 의미를
+그대로 노출한다(2026-10-20 결정).
+
+**작곡가 검색**: 아티스트 크레딧(`SongRecord.artist`)으로 수록곡을 찾는다. 대소문자 구분 없는 부분
+일치라 "A vs. B" 같은 콜라보 크레딧도 걸린다. 아티스트는 채보가 아니라 곡 단위 값이라 난이도 인자가
+없다(2026-10-20 결정 — 상수·레벨·버전과 달리 난이도로 좁힐 대상 자체가 없다).
+
 **채보 뷰어 링크**
 
 - `songdb`의 sdvx.in(CHUNITHM譜面保管所) 매핑으로 링크 버튼을 단다. 매핑은 chuni-penguin 시드에서 가져온다.
@@ -52,6 +63,8 @@ emits: [chunithm.song.viewed]
 | `info` | 곡 정보와 난이도별 채보 | `song: SongQuery` | `/곡` | 없음 | required | never |
 | `chart` | 채보 하나의 상수, 노트 수 | `chart: ChartRef` | 없음 | 없음 | optional | never |
 | `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `max`, `difficulty`: DifficultyRef | `/상수` | 없음 | required | never |
+| `find_by_version` | 수록 버전(+선택적 난이도)으로 채보 목록 | `version`, `difficulty: DifficultyRef \| None` | `/버전` | 없음 | required | never |
+| `find_by_artist` | 작곡가로 수록곡 목록 | `artist` | `/작곡가` | 없음 | required | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | 없음 | optional | never |
 | `alias_add` | 별칭 추가 | `song: SongQuery`, `alias` | `/별칭 추가` | 없음 | optional | never |
 | `alias_remove` | 별칭 삭제 | `alias` | `/별칭 삭제` | 없음(함수 안에서 추가한 사람 또는 `admin` 확인) | optional | never |
@@ -75,6 +88,10 @@ emits: [chunithm.song.viewed]
 - 추정 상수면 추정이라고 함께 말한다.
 - 후보가 여러 개면 두세 개를 보여 주고 고르게 한다.
 - 별칭 추가 요청이 모호하면 어느 곡인지 확인한 뒤 추가한다.
+- 작곡가 이름은 기억이나 추측으로 보태지 않는다. `find_by_artist`가 찾은 결과만 말하고,
+  없으면 없다고 한다(철자가 다를 수 있다고 알려 줘도 된다).
+- 수록 버전으로 찾을 때 난이도를 안 말했으면 `find_by_version`의 난이도를 비워 그 버전
+  전체를 보여준다. 난이도를 말했으면 그 난이도만 좁힌다.
 
 ## 테스트
 
@@ -82,6 +99,8 @@ emits: [chunithm.song.viewed]
 - 노트 수가 비어 있는 채보의 표시.
 - 다른 곡에 쓰인 별칭을 거절하는지.
 - 매핑이 없는 채보에 유튜브 링크만 나오는지.
+- `find_by_version`이 난이도 없이 그 버전 전체를, 난이도를 주면 그 난이도만 내는지.
+- `find_by_artist`가 대소문자를 가리지 않고 부분 일치로 찾는지, 콜라보 크레딧에도 걸리는지.
 
 ## 미확인 사항
 
@@ -95,3 +114,16 @@ emits: [chunithm.song.viewed]
 - `chunithm.song.viewed`는 지금 내기만 하고 돌아온 조각은 버린다. 조각을 곡 정보 아래에 붙이는 코드는 실제로 받는 스킬(notes/goals)이 생길 때 넣는다.
 - 상수 범위 검색은 결과를 전부 돌려주되, 표시는 상위 25개까지만 하고 나머지는 "...외 N개"로 줄인다.
 - sdvx.in 링크는 vendored `sdvxin_link`를 그대로 쓰고, 매핑이 없을 때의 유튜브 검색 링크("곡명 譜面確認")는 `songdb.py`의 전용 함수가 만든다.
+
+## 구현 결정 (2026-10-20, 작곡가·버전 검색 추가)
+
+- 계기: 실기 로그에서 "Zekk 작곡곡 뭐 있어?"에 이 스킬에 맞는 도구가 없어 `web-qa`(웹 검색)로
+  답했다(`data/logs/yuni.log` 2026-10-20 10:40). `songdb`에 `artist` 필드가 이미 있는데도 조회
+  도구가 없던 공백이었다.
+- `find_by_artist`는 `ConstRangeHit`이 아니라 `SongRecord` 목록을 그대로 돌려준다 — 아티스트는
+  상수·레벨·버전과 달리 채보가 아니라 곡 단위 값이라 난이도별로 나눌 이유가 없다.
+- `find_by_version`은 서비스가 이미 지원하던 "난이도 생략 = 버전 전체"(`chunithm-folders`·
+  `chunithm-goals`가 쓰던 규칙)를 그대로 노출했다. `find_by_const`는 반대로 난이도가 필수인
+  기존 결정을 유지했다(상수 범위는 난이도 없이 물으면 결과가 너무 넓어질 수 있어서다).
+- **기각**: 작곡가 검색에 정확 일치만 허용하는 안 — 콜라보 크레딧("A vs. B")이 정확한 아티스트
+  이름과 다르게 표기돼 못 찾는 경우가 생긴다.
