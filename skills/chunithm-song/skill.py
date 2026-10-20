@@ -1,14 +1,20 @@
 # skills/chunithm-song/skill.py
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import replace
+from types import MappingProxyType
+from typing import Annotated
+
 from core.decorators import tool
 from core.events import Section
-from core.tables import TableBuilder, WorkTable
+from core.tables import Row, TableBuilder, TableNeeds, WorkTable, expand_rows
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
     Display,
     SongQuery,
+    TableRef,
     ToolContext,
     ToolResult,
 )
@@ -231,6 +237,47 @@ async def find_by_artist(
     for song, chart_record in charts:
         builder.row(tc.chart_ref(song.title, short_code), tc.chart_cells(song, chart_record, columns))
     return ToolResult(data={"count": len(charts)}, table=builder.build())
+
+
+_EXPAND_COLUMNS = (tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT)
+_DEFAULT_EXPAND = "MAS"
+
+
+@tool()
+async def charts_of(
+    ctx: ToolContext,
+    table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG])],
+    difficulty: DifficultyRef | None = None,
+) -> ToolResult:
+    """곡 표의 곡 단위 행(난이도 없음)을 그 곡의 채보 행으로 바꾼 새 표를 돌려준다. 난이도를 안 주면 MAS다
+    (모든 난이도로 펼치지 않는다). 그 난이도가 없는 곡은 빠진다. 이미 채보인 행은 그대로 둔다.
+    점수·보더·채보 링크처럼 난이도가 필요한 도구에 곡 표를 넘기기 전에 쓴다."""
+    assert isinstance(table, WorkTable)
+    code = _difficulty_code(difficulty) or _DEFAULT_EXPAND
+    missing = 0
+    expanded = 0
+
+    def expand(row: Row) -> Sequence[Row] | None:
+        nonlocal missing, expanded
+        if row.cell(tc.DIFFICULTY).filled:
+            return None
+        song = ctx.songdb.song_by_title(str(row.cell(tc.SONG).raw))
+        chart_record = None if song is None else song.charts.get(code)
+        if song is None or chart_record is None or not chart_record.is_available:
+            missing += 1
+            return []
+        expanded += 1
+        cells = {**row.cells, **tc.chart_cells(song, chart_record, _EXPAND_COLUMNS)}
+        return [Row(tc.chart_ref(song.title, code), MappingProxyType(cells))]
+
+    result = expand_rows(table, expand, tc.common_columns(*_EXPAND_COLUMNS))
+    steps = [f"{code}로 펼침"] if expanded else ["펼칠 곡 단위 행 없음"]
+    if missing:
+        steps.append(f"{code} 없는 곡 {missing}개 뺌")
+    result = replace(result, steps=(*result.steps, *steps), unit="채보" if expanded else result.unit)
+    if result.row_count == 0:
+        return ToolResult(error=f"{code} 채보가 있는 곡이 없다(곡 {missing}개 뺌)")
+    return ToolResult(data={"count": result.row_count, "difficulty": code, "expanded": expanded}, table=result)
 
 
 @tool()

@@ -146,6 +146,41 @@ def derive_table(table: WorkTable, groups: Iterable[Group], *, steps: Iterable[s
     return replace(table, id="", groups=kept, summary=MappingProxyType({}), steps=(*table.steps, *steps))
 
 
+def _new_columns(table: WorkTable, columns: Sequence[Column]) -> list[Column]:
+    """`columns` 중 표에 아직 없는 칸. 이름이 같으면 이미 있는 것으로 보고, 보이는 이름만 겹치면 에러."""
+    known = {column.name for column in table.columns}
+    labels = {column.label for column in table.columns}
+    added: list[Column] = []
+    for column in columns:
+        if column.name in known:
+            continue
+        if column.label in labels:
+            raise TableError(f"칸 보이는 이름이 겹친다: {column.label}")
+        added.append(column)
+    return added
+
+
+def expand_rows(
+    table: WorkTable,
+    expand: Callable[[Row], Sequence[Row] | None],
+    columns: Sequence[Column] = (),
+    *,
+    steps: Iterable[str] = (),
+) -> WorkTable:
+    """행을 바꾼 새 표(곡 행을 채보 행으로 펼치는 도구의 바탕). `expand(행)`이 None이면 그 행은 그대로,
+    빈 목록이면 뺀다. 아니면 돌려준 행들이 그 자리에 들어간다. 칸을 더하는 규칙은 `extend_table`과 같다."""
+    added = _new_columns(table, columns)
+    groups: list[Group] = []
+    for group in table.groups:
+        rows: list[Row] = []
+        for row in group.rows:
+            replaced = expand(row)
+            rows.extend([row] if replaced is None else replaced)
+        groups.append(Group(group.title, tuple(rows)))
+    derived = derive_table(table, groups, steps=steps)
+    return replace(derived, columns=(*table.columns, *added))
+
+
 def extend_table(
     table: WorkTable,
     columns: Sequence[Column],
@@ -156,15 +191,7 @@ def extend_table(
     """칸을 더한 새 표(칸 더하기 도구의 바탕). 행은 그대로이고 `cells_for(행)`이 돌려준 셀이 그 행에 더해진다.
     이미 있는 칸(이름이 같음)이면 정의는 그대로 두고 셀만 덮어쓴다. 보이는 이름만 겹치면 에러.
     `derive_table`처럼 id와 요약은 비우고 표지 이름은 남긴다."""
-    known = {column.name for column in table.columns}
-    labels = {column.label for column in table.columns}
-    added: list[Column] = []
-    for column in columns:
-        if column.name in known:
-            continue
-        if column.label in labels:
-            raise TableError(f"칸 보이는 이름이 겹친다: {column.label}")
-        added.append(column)
+    added = _new_columns(table, columns)
     groups = [
         Group(
             group.title,

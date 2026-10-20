@@ -370,3 +370,110 @@ def _resolved_difficulty(canonical: str):
     from services.chunithm.terms import ResolvedDifficulty
 
     return ResolvedDifficulty(canonical=canonical)
+
+
+# ---------------------------------------------------------------- charts_of
+
+
+def _song_table(titles: list[str], *, extra_memo: dict[str, str] | None = None) -> WorkTable:
+    from core.tables import TableBuilder, cell
+
+    builder = TableBuilder(unit="곡")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.column("메모", "메모")
+    builder.step("테스트 곡 표")
+    for title in titles:
+        memo = (extra_memo or {}).get(title)
+        builder.row(tc.song_ref(title), {
+            tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell(None),
+            "메모": cell(memo) if memo else cell(None, "-"),
+        })
+    return builder.build()
+
+
+def _titles_with(songdb: SongDbService, code: str, *, want: bool, count: int) -> list[str]:
+    titles: list[str] = []
+    for hit in songdb.find_songs(difficulty="MAS"):
+        has = code in hit.song.charts and hit.song.charts[code].is_available
+        if has == want and hit.song.title not in titles:
+            titles.append(hit.song.title)
+        if len(titles) == count:
+            break
+    return titles
+
+
+async def test_charts_of_expands_song_rows_to_mas_by_default() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    titles = _titles_with(songdb, "MAS", want=True, count=2)
+
+    result = await skill.charts_of(
+        _ctx_with_songdb(songdb), table=_song_table(titles, extra_memo={titles[0]: "메모 있음"})
+    )
+
+    assert result.error is None
+    table = result.table
+    assert table is not None
+    assert table.unit == "채보"
+    assert table.steps == ("테스트 곡 표", "MAS로 펼침")
+    assert [c.name for c in table.columns] == [tc.SONG, tc.DIFFICULTY, "메모", tc.LEVEL, tc.CONST, tc.NOTE_COUNT]
+    first = table.rows[0]
+    assert first.ref == tc.chart_ref(titles[0], "MAS")
+    assert first.cell(tc.DIFFICULTY).raw == "MASTER" and first.cell(tc.DIFFICULTY).text == "MAS"
+    song = songdb.song_by_title(titles[0])
+    assert song is not None
+    chart = song.charts["MAS"]
+    assert first.cell(tc.CONST).raw == chart.const
+    assert first.cell(tc.NOTE_COUNT).raw == chart.note_count
+    assert first.cell("메모").raw == "메모 있음"  # 원래 행의 다른 칸은 그대로 옮긴다
+    assert result.data == {"count": 2, "difficulty": "MAS", "expanded": 2}
+
+
+async def test_charts_of_drops_songs_without_that_difficulty() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    has = _titles_with(songdb, "ULT", want=True, count=1)
+    lacks = _titles_with(songdb, "ULT", want=False, count=2)
+    difficulty = await _resolve_difficulty("ULT")
+
+    result = await skill.charts_of(_ctx_with_songdb(songdb), table=_song_table([*has, *lacks]), difficulty=difficulty)
+
+    assert result.error is None and result.table is not None
+    assert _titles(result.table) == has
+    assert result.table.steps[-2:] == ("ULT로 펼침", "ULT 없는 곡 2개 뺌")
+
+
+async def test_charts_of_errors_when_no_song_has_the_difficulty() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    lacks = _titles_with(songdb, "ULT", want=False, count=2)
+    difficulty = await _resolve_difficulty("ULT")
+
+    result = await skill.charts_of(_ctx_with_songdb(songdb), table=_song_table(lacks), difficulty=difficulty)
+
+    assert result.table is None
+    assert result.error is not None and "ULT" in result.error
+
+
+async def test_charts_of_leaves_chart_rows_alone() -> None:
+    from core.tables import TableBuilder
+
+    skill = _load_skill()
+    songdb = SongDbService()
+    title = _titles_with(songdb, "MAS", want=True, count=1)[0]
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.row(tc.chart_ref(title, "EXP"), {tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell("EXP")})
+    source = builder.build()
+
+    result = await skill.charts_of(_ctx_with_songdb(songdb), table=source)
+
+    assert result.table is not None
+    assert result.table.rows[0].ref == tc.chart_ref(title, "EXP")
+    assert result.table.steps == ("펼칠 곡 단위 행 없음",)
+
+
+async def _resolve_difficulty(name: str) -> object:
+    from services.chunithm.terms import TermsService
+
+    return await TermsService().resolve_difficulty(name, _CTX_NO_GUILD)

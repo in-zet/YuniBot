@@ -13,6 +13,7 @@ from core.tables import (
     Column,
     Condition,
     PartialRowHint,
+    Row,
     RowRef,
     TableArg,
     TableBuilder,
@@ -22,6 +23,7 @@ from core.tables import (
     WorkTable,
     cell,
     describe_table,
+    expand_rows,
     extend_table,
     parse_table_arg,
     peek_rows,
@@ -860,6 +862,26 @@ def test_extend_table_adds_columns_cells_and_keeps_rows_groups_and_format() -> N
     assert extended.row_formats == source.row_formats and extended.subject == "p1"
     assert extended.id == "" and not extended.summary and not extended.groups[0].summary
     assert source.column_by_name("score") is None
+
+
+def test_expand_rows_replaces_keeps_and_drops_rows_and_adds_columns() -> None:
+    source = _table()
+    first, second = source.rows[0], source.rows[1]
+
+    def expand(row: Row) -> list[Row] | None:
+        if row is first:
+            return [Row(RowRef("k", "a1"), {"song": cell("A1")}), Row(RowRef("k", "a2"), {"song": cell("A2")})]
+        if row is second:
+            return []
+        return None
+
+    result = expand_rows(source, expand, [Column(name="level", label="레벨")], steps=["펼침"])
+
+    assert [row.ref.key for row in result.rows[:3]] == ["a1", "a2", source.rows[2].ref.key]
+    assert result.row_count == source.row_count + 1 - 1
+    assert [c.name for c in result.columns] == ["song", "const", "level"]
+    assert result.steps == ("15 이상", "펼침") and result.id == "" and result.subject == "p1"
+    assert source.row_count == len(source.rows) and source.column_by_name("level") is None
 
 
 def test_extend_table_overwrites_existing_column_cells_and_rejects_label_clash() -> None:
