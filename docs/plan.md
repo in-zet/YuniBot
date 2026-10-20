@@ -84,7 +84,7 @@
 - [X] 14. `chunithm-folders`(채보 폴더) — `2026-10-20_수정.md` §14
 - [X] 15. `yuni-lore`(설정집 읽기) — `2026-10-20_수정.md` §15
 - [ ] 16. 작업 표(설계 `00-core.md` "작업 표" 초안, 결정 대기 모두 정리·구현 전) — `2026-10-20_수정.md` §16
-  - [ ] Part 0: 동기화 때 플레이어 레벨·캐릭터 그림 주소 저장
+  - [X] Part 0: 동기화 때 플레이어 레벨·캐릭터 그림 주소 저장 — 구현 완료(2026-10-20, `records_profile`·`RecordsService.player_profile`). 실기 미확인: 실제 동기화 뒤 `records_profile`에 레벨·그림 주소가 들어가는지
   - [ ] Part 1: 코어(표 구조·보관소·`TableRef`·`table_query`/`table_peek`·글자 출력·`Display.files`)
   - [ ] Part 2: 첫 범위 스킬(곡 검색 4개·`best`·`add_scores`·폴더 보기/저장)
   - [ ] Part 3: 그림 표 `chunithm-image`

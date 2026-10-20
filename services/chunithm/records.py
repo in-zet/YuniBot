@@ -149,6 +149,17 @@ class PbRow:
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
+class PlayerProfile:
+    """동기화 때 저장한 프로필 값. 값이 없으면 None. 그림은 주소만 저장한다(받아 캐시하는 쪽은 그릴 때)."""
+
+    level: int | None
+    reincarnation_stars: int | None
+    character_image_url: str | None
+    character_frame_url: str | None
+    updated_at: str
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
 class SyncLogSummary:
     nickname: str | None
     computed_rating: Decimal | None
@@ -320,6 +331,20 @@ class RecordsService:
                     overpower_value, overpower_percentage,
                     # 첫 동기화도 남긴다 — 다음 동기화가 비교할 기준점이다.
                     _rating_str(best30_average), _rating_str(new20_average),
+                ),
+            )
+            # 플레이어당 최신 한 줄만 둔다(이력 없음).
+            await self._conn.execute(
+                "INSERT INTO records_profile (player_id, game, level, reincarnation_stars, "
+                "character_image_url, character_frame_url, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(player_id, game) DO UPDATE SET level = excluded.level, "
+                "reincarnation_stars = excluded.reincarnation_stars, "
+                "character_image_url = excluded.character_image_url, "
+                "character_frame_url = excluded.character_frame_url, updated_at = excluded.updated_at",
+                (
+                    player_id, _GAME, fetch.profile.level, fetch.profile.reincarnation_stars,
+                    fetch.profile.profile_picture, fetch.profile.profile_picture_frame,
+                    synced_at.isoformat(),
                 ),
             )
             await self._conn.commit()
@@ -643,6 +668,24 @@ class RecordsService:
         계산이라 숫자가 어긋나지 않는다)."""
         _, new = self._frames(await self.all_pb_rows(player_id))
         return _frame_floor(new, _NEW_FRAME_SIZE)
+
+    async def player_profile(self, player_id: str) -> PlayerProfile | None:
+        """마지막 동기화 때 저장한 레벨·환생 별·캐릭터 그림 주소. 동기화한 적 없으면 None."""
+        cursor = await self._conn.execute(
+            "SELECT level, reincarnation_stars, character_image_url, character_frame_url, updated_at "
+            "FROM records_profile WHERE player_id = ? AND game = ?",
+            (player_id, _GAME),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return PlayerProfile(
+            level=row["level"],
+            reincarnation_stars=row["reincarnation_stars"],
+            character_image_url=row["character_image_url"],
+            character_frame_url=row["character_frame_url"],
+            updated_at=row["updated_at"],
+        )
 
     async def last_sync_at(self, player_id: str) -> str | None:
         cursor = await self._conn.execute(

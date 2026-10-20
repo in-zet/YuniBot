@@ -104,3 +104,4 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 - 프레임 진입·이탈은 동기화 적용 전 `records_pb`로 다시 계산한 상위 30/20과 이번 베스트30/신곡20을 비교한다.
 - 동기화 비교 데이터(diff)는 DB에 두지 않고 `RecordsService`의 메모리 캐시(최대 200개)에만 둔다. 같은 요청 안에서 쓰고 버린다.
 - 리포트의 레이팅·베스트30평균·신곡20평균 현재값과 직전값은 `/프로필`·`/베스트`와 같은 출처(`RecordsService.rating_deltas`, 동기화 때 저장한 CHUNITHM-NET 스냅샷)에서 가져온다.
+- 동기화 때 프로필 페이지의 플레이어 레벨·환생 별·캐릭터 그림 주소·프레임 주소를 `records_profile`(플레이어당 최신 한 줄, 이력 없음)에 덮어쓴다(2026-10-20, 16단계 Part 0). 추가 접속은 없다. 그림 파일은 받지 않고 주소만 저장한다 — 그릴 때 받아 캐시한다. 읽기는 `RecordsService.player_profile`. 계정 연결 때 버릴 데이터는 `player_id` 열로 자동 발견된다.

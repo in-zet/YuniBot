@@ -47,6 +47,7 @@ _RECORDS_MIGRATION = (
     Path("migrations/core/008_records.sql").read_text()
     + Path("migrations/core/013_records_overpower.sql").read_text()
     + Path("migrations/core/014_records_sync_log_snapshot_averages.sql").read_text()
+    + Path("migrations/core/018_records_profile.sql").read_text()
 )
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -300,6 +301,64 @@ async def test_best_score_returns_none_when_never_played(conn) -> None:
     score = await service.best_score(player.id, song_title="존재하지않는곡", difficulty="MAS")
 
     assert score is None
+
+
+async def test_player_profile_saved_by_sync_and_overwritten_by_next(conn) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
+    service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
+
+    assert await service.player_profile(player.id) is None
+
+    first = _fixture_fetch()
+    first.profile.level = 42
+    first.profile.reincarnation_stars = 3
+    first.profile.profile_picture = "https://example.invalid/chara1.png"
+    first.profile.profile_picture_frame = "https://example.invalid/frame1.png"
+    await service.save_sync(player.id, first, ctx)
+
+    saved = await service.player_profile(player.id)
+    assert saved is not None
+    assert saved.level == 42
+    assert saved.reincarnation_stars == 3
+    assert saved.character_image_url == "https://example.invalid/chara1.png"
+    assert saved.character_frame_url == "https://example.invalid/frame1.png"
+
+    second = _fixture_fetch()
+    second.profile.level = 43
+    second.profile.reincarnation_stars = 3
+    second.profile.profile_picture = "https://example.invalid/chara2.png"
+    second.profile.profile_picture_frame = None
+    await service.save_sync(player.id, second, ctx)
+
+    updated = await service.player_profile(player.id)
+    assert updated is not None
+    assert updated.level == 43
+    assert updated.character_image_url == "https://example.invalid/chara2.png"
+    assert updated.character_frame_url is None
+    cursor = await conn.execute("SELECT COUNT(*) FROM records_profile WHERE player_id = ?", (player.id,))
+    row = await cursor.fetchone()
+    assert row[0] == 1
+
+
+async def test_player_profile_values_are_none_when_profile_lacks_them(conn) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=EventBus())
+    service = RecordsService(conn=conn, songdb=SongDbService(), players=players)
+
+    fetch = _fixture_fetch()
+    fetch.profile.level = None
+    fetch.profile.reincarnation_stars = None
+    fetch.profile.profile_picture = None
+    fetch.profile.profile_picture_frame = None
+    await service.save_sync(player.id, fetch, ctx)
+
+    saved = await service.player_profile(player.id)
+    assert saved is not None
+    assert (saved.level, saved.reincarnation_stars) == (None, None)
+    assert (saved.character_image_url, saved.character_frame_url) == (None, None)
 
 
 async def test_last_sync_at_returns_most_recent(conn, monkeypatch) -> None:
