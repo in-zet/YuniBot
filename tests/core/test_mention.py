@@ -72,12 +72,56 @@ def test_build_conversation_context_falls_back_to_recent_channel_history() -> No
     assert [m.message_id for m in context] == ["1", "2", "4"]  # 다른 사람(other) 메시지는 빠진다
 
 
-def test_build_conversation_context_caps_at_max_messages() -> None:
+def test_build_conversation_context_caps_at_max_player_messages() -> None:
     history = [_msg(str(i), author="p1", content=f"{i}") for i in range(1, 10)]
     trigger = _msg("10", author="p1", content="마지막", mentions_bot=True)
-    context = build_conversation_context(history + [trigger], trigger=trigger, player_discord_ids={"p1"}, max_messages=3)
+    context = build_conversation_context(
+        history + [trigger], trigger=trigger, player_discord_ids={"p1"}, max_player_messages=3
+    )
     assert len(context) == 3
     assert context[-1].message_id == "10"
+
+
+def test_build_conversation_context_does_not_count_yuni_messages() -> None:
+    # 유니가 한 질문에 세 메시지(나눠 보낸 긴 표 등)로 답해도 플레이어 한 턴으로 친다.
+    messages = [
+        _msg("1", author="p1", content="질문"),
+        _msg("2", author="bot", is_bot=True, content="답 1"),
+        _msg("3", author="bot", is_bot=True, content="답 2"),
+        _msg("4", author="bot", is_bot=True, content="답 3"),
+        _msg("5", author="p1", content="다음 질문", mentions_bot=True),
+    ]
+    context = build_conversation_context(
+        messages, trigger=messages[-1], player_discord_ids={"p1"}, max_player_messages=2
+    )
+    assert [m.message_id for m in context] == ["1", "2", "3", "4", "5"]
+
+
+def test_build_conversation_context_drops_yuni_answers_of_cut_question() -> None:
+    messages = [
+        _msg("1", author="p1", content="오래된 질문"),
+        _msg("2", author="bot", is_bot=True, content="오래된 답"),
+        _msg("3", author="p1", content="질문"),
+        _msg("4", author="bot", is_bot=True, content="답"),
+        _msg("5", author="p1", content="새 멘션", mentions_bot=True),
+    ]
+    context = build_conversation_context(
+        messages, trigger=messages[-1], player_discord_ids={"p1"}, max_player_messages=2
+    )
+    assert [m.message_id for m in context] == ["3", "4", "5"]
+
+
+def test_build_conversation_context_reply_chain_counts_only_player_messages() -> None:
+    m1 = _msg("1", author="p1", content="오래된 질문", mentions_bot=True)
+    m2 = _msg("2", author="bot", is_bot=True, content="오래된 답", ref="1")
+    m3 = _msg("3", author="p1", content="질문", ref="2")
+    m4 = _msg("4", author="bot", is_bot=True, content="답 1", ref="3")
+    m5 = _msg("5", author="bot", is_bot=True, content="답 2", ref="4")
+    m6 = _msg("6", author="p1", content="그럼 이건?", ref="5")
+    context = build_conversation_context(
+        [m1, m2, m3, m4, m5, m6], trigger=m6, player_discord_ids={"p1"}, max_player_messages=2
+    )
+    assert [m.message_id for m in context] == ["3", "4", "5", "6"]
 
 
 class _FakePlayers:

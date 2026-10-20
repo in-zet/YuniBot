@@ -13,6 +13,7 @@ from discord import app_commands
 
 from core.decorators import SlashOnlySpec, ToolSpec
 from core.executor import ToolExecutor
+from core.message_split import split_message
 from core.permissions import TagRequirement, check_tags
 from core.registry_snapshot import RegistrySnapshot
 from core.schema import ArgSpec, build_arg_schema
@@ -26,8 +27,6 @@ if TYPE_CHECKING:
 __all__ = ["callback_arg_name_problems", "slash_path_problems"]  # 테스트/호출자 편의를 위한 재노출
 
 logger = logging.getLogger(__name__)
-
-_DISCORD_CONTENT_LIMIT = 2000
 
 
 class SlashPlanError(ValueError):
@@ -241,7 +240,7 @@ def render_result(result: ToolResult) -> dict[str, Any]:
     슬래시 직접 실행과 확인/취소 버튼이 모두 이 함수 하나를 쓴다. 돌려주는 인자는 언제나
     비어 있지 않은 content, embeds, view 중 하나 이상을 담는다."""
     if result.error:
-        return {"content": result.error[:_DISCORD_CONTENT_LIMIT], "ephemeral": True}
+        return {"content": result.error, "ephemeral": True}
 
     display = result.display
     if display is not None and display.slash_content is not None:
@@ -254,7 +253,7 @@ def render_result(result: ToolResult) -> dict[str, Any]:
             kwargs["ephemeral"] = True
         return kwargs
 
-    kwargs = {"content": _fallback_content(result.data)[:_DISCORD_CONTENT_LIMIT]}
+    kwargs = {"content": _fallback_content(result.data)}
     if display is not None and display.ephemeral:
         kwargs["ephemeral"] = True
     return kwargs
@@ -269,16 +268,23 @@ async def respond(interaction: discord.Interaction, **kwargs: Any) -> None:
     interaction"(10062)으로 조용히 실패한다(실제로 재현됐다). defer가 이미 끝났으면 그 뒤로는
     `edit_original_response`/`followup`만 쓸 수 있는데, ephemeral 여부는 defer 시점에 고정돼
     나중에 못 바꾸므로, ephemeral 결과는 그 자리(공개로 떠 있는 "생각 중...")를 지우고 새
-    비공개 팔로업으로 보낸다."""
+    비공개 팔로업으로 보낸다. 본문이 2000자를 넘으면 디스코드가 통째로 거절하므로 줄 경계에서 나눠
+    첫 조각만 이 경로로 보내고(embeds·view도 여기 붙는다) 나머지는 팔로업으로 이어 보낸다."""
     ephemeral = kwargs.pop("ephemeral", False)
+    rest: list[str] = []
+    content = kwargs.get("content")
+    if content:
+        first, *rest = split_message(content)
+        kwargs["content"] = first
     if not interaction.response.is_done():
         await interaction.response.send_message(**kwargs, ephemeral=ephemeral)
-        return
-    if ephemeral:
+    elif ephemeral:
         await interaction.delete_original_response()
         await interaction.followup.send(**kwargs, ephemeral=True)
     else:
         await interaction.edit_original_response(**kwargs)
+    for chunk in rest:
+        await interaction.followup.send(chunk, ephemeral=ephemeral)
 
 
 async def _send_result(interaction: discord.Interaction, result: ToolResult) -> None:

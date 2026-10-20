@@ -35,7 +35,7 @@ from services.common.players import DiscordAccount, Player
 # guild/DM을 가리지 않고 걸어야 하므로 이 문자열로 "서버가 아닌 대화"를 표시한다.
 _DM_SCOPE = "dm"
 
-MAX_CONTEXT_MESSAGES = 10
+MAX_CONTEXT_PLAYER_MESSAGES = 10
 
 logger = logging.getLogger(__name__)
 
@@ -100,35 +100,53 @@ def build_conversation_context(
     *,
     trigger: ChannelMessage,
     player_discord_ids: set[str],
-    max_messages: int = MAX_CONTEXT_MESSAGES,
+    max_player_messages: int = MAX_CONTEXT_PLAYER_MESSAGES,
 ) -> list[ChannelMessage]:
     """같은 채널의 최근 메시지 중 '유니와 이 플레이어가 주고받은' 것만 추린다.
 
     trigger가 답장이면(reference_id가 있으면) 그 사슬을 거슬러 올라가며, 사슬이 끊기면(참조한
     메시지가 없거나 봇/이 플레이어가 아닌 다른 사람의 메시지면) 거기서 멈춘다. 답장이 아니면
-    최근 채널 기록에서 '봇이 보냈거나 이 플레이어가 보낸' 메시지만 최근 순으로 최대
-    max_messages개 모은다(다른 사람의 대화는 맥락에 안 섞인다 — 00-core.md "대화 맥락":
-    "멘션이 없는 메시지는 맥락으로도 모으지 않는다"와 같은 원칙을 제3자 메시지에도 적용한다).
+    최근 채널 기록에서 '봇이 보냈거나 이 플레이어가 보낸' 메시지만 모은다(다른 사람의 대화는 맥락에
+    안 섞인다 — 00-core.md "대화 맥락": "멘션이 없는 메시지는 맥락으로도 모으지 않는다"와 같은
+    원칙을 제3자 메시지에도 적용한다). 어느 쪽이든 길이는 플레이어 메시지 수(trigger 포함)로만
+    센다 — 유니가 한 번에 여러 메시지로 답해도 한 턴이다(2026-10-20 결정).
     """
     by_id = {m.message_id: m for m in messages}
 
     if trigger.reference_id is not None:
         chain: list[ChannelMessage] = [trigger]
+        seen = {trigger.message_id}
         current = by_id.get(trigger.reference_id)
-        while current is not None and len(chain) < max_messages:
+        while current is not None and current.message_id not in seen:
             is_relevant = current.is_bot or current.author_discord_id in player_discord_ids
             if not is_relevant:
                 break
             chain.append(current)
+            seen.add(current.message_id)
             current = by_id.get(current.reference_id) if current.reference_id else None
-        return list(reversed(chain))
+        relevant = list(reversed(chain))
+    else:
+        relevant = [
+            m for m in messages
+            if m.message_id != trigger.message_id and (m.is_bot or m.author_discord_id in player_discord_ids)
+        ]
+        relevant.append(trigger)
+    return _last_player_turns(relevant, trigger=trigger, max_player_messages=max_player_messages)
 
-    relevant = [
-        m for m in messages
-        if m.message_id != trigger.message_id and (m.is_bot or m.author_discord_id in player_discord_ids)
-    ]
-    relevant.append(trigger)
-    return relevant[-max_messages:]
+
+def _last_player_turns(
+    messages: list[ChannelMessage], *, trigger: ChannelMessage, max_player_messages: int
+) -> list[ChannelMessage]:
+    """뒤에서부터 플레이어 메시지를 max_player_messages개까지 세고, 그 가장 오래된 것부터 끝까지 자른다.
+    그보다 앞선 유니 메시지는 잘린 질문에 대한 답이라 같이 뺀다."""
+    count = 0
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message is trigger or not message.is_bot:
+            count += 1
+            if count == max_player_messages:
+                return messages[index:]
+    return messages
 
 
 class MentionEntry:

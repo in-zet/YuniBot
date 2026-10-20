@@ -20,6 +20,7 @@ from core.slash import (
     attach_to_tree,
     build_slash_plan,
     render_result,
+    respond,
     slash_path_problems,
 )
 from core.tool_types import Display, ToolContext, ToolResult
@@ -366,6 +367,33 @@ def test_render_result_passes_display_ephemeral_through() -> None:
     kwargs = render_result(ToolResult(data={}, display=display))
 
     assert kwargs["ephemeral"] is True
+
+
+def _long_text() -> str:
+    return "\n".join(f"{i}번째 줄 " + "가" * 50 for i in range(100))
+
+
+async def test_respond_splits_content_over_discord_limit() -> None:
+    interaction = _fake(1)
+    long_text = _long_text()
+
+    await respond(interaction, content=long_text, embeds=[])
+
+    calls = interaction.calls
+    assert len(calls) > 1
+    assert all(len(call["content"]) <= 2000 for call in calls)
+    assert "\n".join(call["content"] for call in calls) == long_text
+    assert "embeds" in calls[0] and "embeds" not in calls[1]
+
+
+async def test_respond_after_defer_splits_and_keeps_ephemeral() -> None:
+    interaction = _fake(1)
+    await interaction.response.defer(ephemeral=True)
+
+    await respond(interaction, content=_long_text(), ephemeral=True)
+
+    assert len(interaction.calls) > 1
+    assert all(call.get("ephemeral") is True for call in interaction.calls)
 
 
 async def test_data_only_tool_reply_has_content(
