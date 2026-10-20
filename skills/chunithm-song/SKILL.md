@@ -7,6 +7,7 @@ examples:
   - 라미아 채보 링크 줘
   - Zekk 작곡곡 뭐 있어?
   - LUMINOUS PLUS 버전 곡 다 보여 줘
+  - 15.0에서 15.2 상수 중에 노트 수 1000개 넘는 곡 뭐 있어?
 category: 곡 정보
 game: chunithm
 version: 1
@@ -23,3 +24,6 @@ emits: [chunithm.song.viewed]
   없으면 없다고 한다(철자가 다를 수 있다고 알려 줘도 된다).
 - 수록 버전으로 찾을 때 난이도를 안 말했으면 `find_by_version`의 난이도를 비워 그 버전
   전체를 보여준다. 난이도를 말했으면 그 난이도만 좁힌다.
+- 상수·레벨·버전·난이도·노트 수 중 두 개 이상을 동시에 걸면 `find_songs`를 쓴다(상수 범위 하나만,
+  또는 버전 하나만이면 `find_by_const`/`find_by_version`이 먼저다 — 레벨만으로 찾는 건
+  `find_songs`뿐이다). 말하지 않은 조건은 비워 둔다 — 지어내지 않는다.

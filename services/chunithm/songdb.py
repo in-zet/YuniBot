@@ -331,6 +331,47 @@ class SongDbService:
         hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
         return hits
 
+    def find_songs(
+        self, *,
+        min_const: float | None = None,
+        max_const: float | None = None,
+        level: str | None = None,
+        version: str | None = None,
+        difficulty: str | None = None,
+        min_note_count: int | None = None,
+        max_note_count: int | None = None,
+    ) -> list[ConstRangeHit]:
+        """상수 범위·레벨·수록 버전·난이도·노트 수 범위를 한 번에 AND로 겹쳐 찾는다.
+        find_by_const/find_by_level/find_by_version은 각각 조건 하나(+난이도)만 받아서
+        "15.0~15.2 상수 중 노트 수 1000개 이상"처럼 조건을 두 개 이상 동시에 거는 질문을
+        못 받는다 — 그걸 위한 것이다. 준 조건만 보고 안 준 건 거르지 않는다. 조건을 하나도
+        안 주면(전부 None) 국제판 전체를 돌려준다 — "조건이 있어야 한다"는 판단은 이
+        메서드가 아니라 호출부(스킬)가 한다."""
+        hits: list[ConstRangeHit] = []
+        for title, song in self._songs.items():
+            if title not in self._available_intl:
+                continue
+            if version is not None and song.version != version:
+                continue
+            codes = [difficulty] if difficulty is not None else list(song.charts)
+            for code in codes:
+                chart = song.charts.get(code)
+                if chart is None or not chart.is_available:
+                    continue
+                if min_const is not None and (chart.const is None or chart.const < min_const):
+                    continue
+                if max_const is not None and (chart.const is None or chart.const > max_const):
+                    continue
+                if level is not None and chart.level != level:
+                    continue
+                if min_note_count is not None and (chart.note_count is None or chart.note_count < min_note_count):
+                    continue
+                if max_note_count is not None and (chart.note_count is None or chart.note_count > max_note_count):
+                    continue
+                hits.append(ConstRangeHit(song=song, chart=chart))
+        hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
+        return hits
+
     def find_by_artist(self, *, name: str) -> list[SongRecord]:
         """작곡가(아티스트 크레딧) 이름으로, 지금 국제판에서 고를 수 있는 곡을 제목순으로
         찾는다. 대소문자 구분 없는 부분 일치다 — "A vs. B" 같은 콜라보 크레딧에도 걸리게

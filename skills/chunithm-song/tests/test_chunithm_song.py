@@ -166,6 +166,40 @@ async def test_find_by_artist_no_match_shows_empty_message() -> None:
     assert result.display is not None and "없다" in (result.display.content or "")
 
 
+async def test_find_songs_combines_const_and_note_count() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    notes = songdb.note_count_for("B.B.K.K.B.K.K.", "MAS")
+    assert notes is not None
+
+    result = await skill.find_songs(
+        _ctx_with_songdb(songdb), min_const=12.5, max_const=12.5, min_note_count=notes,
+    )
+
+    assert result.error is None
+    assert "B.B.K.K.B.K.K." in result.data["titles"]
+
+
+async def test_find_songs_without_any_filter_is_rejected() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    result = await skill.find_songs(_ctx_with_songdb(songdb))
+
+    assert result.error is not None
+
+
+async def test_find_songs_no_match_shows_empty_message() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    result = await skill.find_songs(_ctx_with_songdb(songdb), min_const=99.0, max_const=99.0)
+
+    assert result.error is None
+    assert result.data["count"] == 0
+    assert result.display is not None and "없다" in (result.display.content or "")
+
+
 async def test_chart_link_prefers_sdvxin_mapping() -> None:
     skill = _load_skill()
     songdb = SongDbService()

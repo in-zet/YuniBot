@@ -299,6 +299,48 @@ async def test_find_by_artist_returns_empty_when_nothing_matches(songdb: SongDbS
     assert songs == []
 
 
+async def test_find_songs_combines_const_range_and_note_count_as_and(songdb: SongDbService) -> None:
+    # "B.B.K.K.B.K.K." MAS는 상수 12.5·노트 960개다. 같은 상수 범위에서 노트 수 하한을
+    # 그 값보다 올리면 조건 하나만으로는 안 빠지던 채보가 AND 조합에서는 빠져야 한다.
+    const = songdb.const_for("B.B.K.K.B.K.K.", "MAS")
+    notes = songdb.note_count_for("B.B.K.K.B.K.K.", "MAS")
+    assert const is not None and notes is not None
+
+    hits = songdb.find_songs(min_const=const, max_const=const, min_note_count=notes)
+    assert any(hit.song.title == "B.B.K.K.B.K.K." and hit.chart.difficulty == "MAS" for hit in hits)
+
+    hits_excluded = songdb.find_songs(min_const=const, max_const=const, min_note_count=notes + 1)
+    assert not any(hit.song.title == "B.B.K.K.B.K.K." for hit in hits_excluded)
+
+
+async def test_find_songs_level_only_matches_that_level(songdb: SongDbService) -> None:
+    # "B.B.K.K.B.K.K." MAS는 표기 레벨 "12+"다(상수 12.5).
+    hits = songdb.find_songs(level="12+")
+    assert hits
+    assert all(hit.chart.level == "12+" for hit in hits)
+    assert any(hit.song.title == "B.B.K.K.B.K.K." for hit in hits)
+
+
+async def test_find_songs_version_and_const_combo(songdb: SongDbService) -> None:
+    hits = songdb.find_songs(version="CHUNITHM", min_const=12.0, max_const=13.0)
+    assert any(hit.song.title == "B.B.K.K.B.K.K." for hit in hits)
+    assert all(hit.song.version == "CHUNITHM" for hit in hits)
+
+
+async def test_find_songs_returns_empty_when_nothing_matches(songdb: SongDbService) -> None:
+    assert songdb.find_songs(min_const=99.0, max_const=99.0) == []
+
+
+async def test_find_songs_without_any_filter_returns_more_than_a_narrowed_query(
+    songdb: SongDbService,
+) -> None:
+    # 서비스 메서드 자체는 조건이 하나도 없어도 거절하지 않는다(그 판단은 스킬 도구가 한다) —
+    # 조건을 준 조합보다 결과가 더 많아야 한다.
+    narrowed = songdb.find_songs(min_const=12.0, max_const=13.0)
+    everything = songdb.find_songs()
+    assert len(everything) > len(narrowed)
+
+
 async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService) -> None:
     song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
     link = songdb.chart_link(song, song.charts["MAS"])

@@ -116,6 +116,40 @@ async def find_by_version(
     )
 
 
+@tool(slash="검색")
+async def find_songs(
+    ctx: ToolContext,
+    min_const: float | None = None,
+    max_const: float | None = None,
+    level: str | None = None,
+    version: str | None = None,
+    difficulty: DifficultyRef | None = None,
+    min_note_count: int | None = None,
+    max_note_count: int | None = None,
+) -> ToolResult:
+    """상수 범위·레벨·수록 버전·난이도·노트 수 범위를 한 번에 조합해 채보를 찾는다.
+    `/상수`·`/버전`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
+    조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다."""
+    if all(
+        v is None
+        for v in (min_const, max_const, level, version, difficulty, min_note_count, max_note_count)
+    ):
+        return ToolResult(error="조건을 하나는 줘야 한다(상수 범위, 레벨, 버전, 난이도, 노트 수 중)")
+
+    short_code = _difficulty_code(difficulty)
+    hits = ctx.songdb.find_songs(
+        min_const=min_const, max_const=max_const, level=level, version=version,
+        difficulty=short_code, min_note_count=min_note_count, max_note_count=max_note_count,
+    )
+
+    lines = [f"{hit.song.title} {hit.chart.difficulty} — 상수 {hit.chart.const}" for hit in hits]
+
+    return ToolResult(
+        data={"count": len(hits), "titles": [hit.song.title for hit in hits]},
+        display=Display(content="\n".join(lines) if lines else "조건에 맞는 채보가 없다.", omittable=True),
+    )
+
+
 @tool(slash="작곡가")
 async def find_by_artist(ctx: ToolContext, artist: str) -> ToolResult:
     """작곡가(아티스트) 이름으로 국제판 수록곡을 찾는다."""

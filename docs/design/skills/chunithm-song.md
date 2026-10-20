@@ -15,6 +15,7 @@ examples:
   - 라미아 채보 링크 줘
   - Zekk 작곡곡 뭐 있어?
   - LUMINOUS PLUS 버전 곡 다 보여 줘
+  - 15.0에서 15.2 상수 중에 노트 수 1000개 넘는 곡 뭐 있어?
 category: 곡 정보
 game: chunithm
 version: 1
@@ -44,6 +45,10 @@ emits: [chunithm.song.viewed]
 일치라 "A vs. B" 같은 콜라보 크레딧도 걸린다. 아티스트는 채보가 아니라 곡 단위 값이라 난이도 인자가
 없다(2026-10-20 결정 — 상수·레벨·버전과 달리 난이도로 좁힐 대상 자체가 없다).
 
+**조합 검색**: 상수 범위·레벨·수록 버전·난이도·노트 수 범위 중 둘 이상을 AND로 동시에 거는 질문을
+위한 것이다(`find_by_const`/`find_by_version`은 조건 하나+난이도만 받는다). 조건을 하나도 안 주면
+범위가 너무 넓어 바로 에러를 돌려준다. 준 조건만 보고 안 준 건 거르지 않는다(2026-10-20 결정).
+
 **채보 뷰어 링크**
 
 - `songdb`의 sdvx.in(CHUNITHM譜面保管所) 매핑으로 링크 버튼을 단다. 매핑은 chuni-penguin 시드에서 가져온다.
@@ -65,6 +70,7 @@ emits: [chunithm.song.viewed]
 | `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `max`, `difficulty`: DifficultyRef | `/상수` | 없음 | required | never |
 | `find_by_version` | 수록 버전(+선택적 난이도)으로 채보 목록 | `version`, `difficulty: DifficultyRef \| None` | `/버전` | 없음 | required | never |
 | `find_by_artist` | 작곡가로 수록곡 목록 | `artist` | `/작곡가` | 없음 | required | never |
+| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count` | `/검색` | 없음 | required | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | 없음 | optional | never |
 | `alias_add` | 별칭 추가 | `song: SongQuery`, `alias` | `/별칭 추가` | 없음 | optional | never |
 | `alias_remove` | 별칭 삭제 | `alias` | `/별칭 삭제` | 없음(함수 안에서 추가한 사람 또는 `admin` 확인) | optional | never |
@@ -92,6 +98,9 @@ emits: [chunithm.song.viewed]
   없으면 없다고 한다(철자가 다를 수 있다고 알려 줘도 된다).
 - 수록 버전으로 찾을 때 난이도를 안 말했으면 `find_by_version`의 난이도를 비워 그 버전
   전체를 보여준다. 난이도를 말했으면 그 난이도만 좁힌다.
+- 상수·레벨·버전·난이도·노트 수 중 두 개 이상을 동시에 걸면 `find_songs`를 쓴다(상수 범위 하나만,
+  또는 버전 하나만이면 `find_by_const`/`find_by_version`이 먼저다 — 레벨만으로 찾는 건
+  `find_songs`뿐이다). 말하지 않은 조건은 비워 둔다 — 지어내지 않는다.
 
 ## 테스트
 
@@ -101,6 +110,8 @@ emits: [chunithm.song.viewed]
 - 매핑이 없는 채보에 유튜브 링크만 나오는지.
 - `find_by_version`이 난이도 없이 그 버전 전체를, 난이도를 주면 그 난이도만 내는지.
 - `find_by_artist`가 대소문자를 가리지 않고 부분 일치로 찾는지, 콜라보 크레딧에도 걸리는지.
+- `find_songs`가 준 조건만 AND로 겹치는지(상수 범위+노트 수 조합 등), 조건이 하나도 없으면
+  에러를 돌리는지.
 
 ## 미확인 사항
 
@@ -127,3 +138,19 @@ emits: [chunithm.song.viewed]
   기존 결정을 유지했다(상수 범위는 난이도 없이 물으면 결과가 너무 넓어질 수 있어서다).
 - **기각**: 작곡가 검색에 정확 일치만 허용하는 안 — 콜라보 크레딧("A vs. B")이 정확한 아티스트
   이름과 다르게 표기돼 못 찾는 경우가 생긴다.
+
+## 구현 결정 (2026-10-20, 조합 검색 `find_songs` 추가)
+
+- 계기: "15.0~15.2 상수 중 노트 수 1000개 넘는 곡" 같은, 조건 두 개 이상을 동시에 거는 질문은
+  `find_by_const`/`find_by_level`/`find_by_version` 중 어느 것도 못 받는다(각각 조건 하나+난이도만
+  받는다). 모델이 DB를 SQL로 직접 조회하게 하는 안도 검토했지만, 곡 데이터가 실제로는 SQL 테이블이
+  아니라 시드를 메모리로 읽은 Python 객체라 전용 테이블을 새로 만들어야 하고, 그러면 임의 SQL 실행
+  표면(다른 테이블 노출 위험, 검증 비용)이 새로 생긴다 — 기존 `find_by_*` 패턴을 확장한 조합 필터
+  쪽이 안전하고 구조도 덜 바뀌어 이쪽을 택했다(사용자 결정).
+- `find_songs`는 모든 조건이 선택적이고 준 것만 AND로 겹친다. 정렬은 `find_by_level`/
+  `find_by_version`과 같은 "상수 오름차순(모르면 뒤), 같으면 제목순"을 쓴다 — 조건 조합에 따라
+  상수가 전혀 안 걸린 질문(레벨만 등)도 있을 수 있어 레벨 전용 정렬은 따로 안 만들었다.
+  `find_by_const`처럼 레벨/버전/난이도 전부 비우고 노트 수 범위만 주는 질문도 그대로 받는다.
+- 조건을 하나도 안 주면 서비스 메서드 자체는 국제판 전체를 돌려주지만(단순함 유지), 스킬 도구
+  단에서 먼저 막는다 — 전체 목록을 돌려주는 건 이 도구의 쓸모가 아니고, 결과가 너무 커진다.
+- **기각**: 모델이 직접 쓰는 SQL 조회 도구 — 위 "계기" 참고.
