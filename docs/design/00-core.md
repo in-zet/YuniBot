@@ -688,7 +688,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [chunithm-settings](skills/chunithm-settings.md) | 츄니즘 | 지금 계정의 인게임 설정 조회·변경, 즐겨찾기 곡 조회·추가·삭제 | `chunithm-linked` |
 | [chunithm-notes](skills/chunithm-notes.md) | 츄니즘 | 곡별 메모 | 없음 |
 | [chunithm-updates](skills/chunithm-updates.md) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
-| [chunithm-folders](skills/chunithm-folders.md) | 츄니즘 | 채보를 모은 이름 붙인 폴더 생성·조회, 조건 일괄 추가/삭제, 메모 | 없음 |
+| [chunithm-folders](skills/chunithm-folders.md) | 츄니즘 | 채보를 모은 이름 붙인 폴더 생성·조회, 표로 일괄 추가/삭제, 메모 | 없음 |
 | [yuni-lore](skills/yuni-lore.md) | 공통 | 유니·나비·Linked VERSE 설정집을 구간별로 읽어 답하기(결말은 스포일러 확인 후) | 없음 |
 | [web-qa](skills/web-qa.md) | 츄니즘 | 용어 사전에 없는 일반 질문을 검색해 출처와 함께 답하기 | 없음 |
 

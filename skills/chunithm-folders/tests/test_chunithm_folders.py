@@ -247,65 +247,6 @@ async def test_remove_chart_present_removes_it(skill: ModuleType, db: aiosqlite.
     assert shown.table is None and shown.data["count"] == 0
 
 
-# ---------------------------------------------------------------- 조건 일괄
-
-
-async def test_add_by_condition_requires_exactly_one_filter(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    ctx = _ctx(db=db)
-    await skill.create_folder(ctx, "F1")
-
-    none_given = await skill.add_by_condition(ctx, "F1")
-    assert none_given.error is not None
-
-    both_given = await skill.add_by_condition(ctx, "F1", min_const=15.0, max_const=15.0, level="14+")
-    assert both_given.error is not None
-
-
-async def test_add_by_condition_const_range_requires_both_bounds(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    ctx = _ctx(db=db)
-    await skill.create_folder(ctx, "F1")
-    result = await skill.add_by_condition(ctx, "F1", min_const=15.0)
-    assert result.error is not None
-
-
-async def test_add_by_condition_dry_run_does_not_change_folder(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    songdb = _FakeSongDb(const_range_hits=[("곡A", "MAS", 15.0), ("곡B", "ULT", 15.0)])
-    ctx = _ctx(db=db, songdb=songdb)
-    await skill.create_folder(ctx, "F1")
-
-    result = await skill.add_by_condition(ctx, "F1", min_const=15.0, max_const=15.0, dry_run=True)
-    assert result.data["count"] == 2
-    shown = await skill.show_folder(ctx, "F1")
-    assert shown.table is None and shown.data["count"] == 0
-
-
-async def test_add_by_condition_excludes_existing_and_is_idempotent(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    songdb = _FakeSongDb(const_range_hits=[("곡A", "MAS", 15.0), ("곡B", "ULT", 15.0)])
-    ctx = _ctx(db=db, songdb=songdb)
-    await skill.create_folder(ctx, "F1")
-    await skill.add_chart(ctx, "F1", _chart("곡A", "MAS"))
-
-    result = await skill.add_by_condition(ctx, "F1", min_const=15.0, max_const=15.0)
-    assert result.data["count"] == 1
-    assert result.data["charts"] == ["곡B ULT"]
-
-    again = await skill.add_by_condition(ctx, "F1", min_const=15.0, max_const=15.0)
-    assert again.data["count"] == 0
-
-
-async def test_remove_by_condition_only_removes_present_ones(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    songdb = _FakeSongDb(level_hits=[("곡A", "MAS"), ("곡B", "ULT")])
-    ctx = _ctx(db=db, songdb=songdb)
-    await skill.create_folder(ctx, "F1")
-    await skill.add_chart(ctx, "F1", _chart("곡A", "MAS"))
-
-    result = await skill.remove_by_condition(ctx, "F1", level="14+")
-    assert result.data["count"] == 1
-    assert result.data["charts"] == ["곡A MAS"]
-    shown = await skill.show_folder(ctx, "F1")
-    assert shown.table is None and shown.data["count"] == 0
-
-
 # ---------------------------------------------------------------- 메모
 
 
@@ -424,3 +365,61 @@ async def test_save_table_is_refused_for_a_stale_table(skill: ModuleType, db: ai
 
     assert outcome.result is not None and outcome.result.error is not None
     assert "동기화 전 값" in outcome.result.error
+
+
+# ---------------------------------------------------------------- 표로 일괄 추가·삭제
+
+
+async def test_add_to_folder_excludes_existing_and_is_idempotent(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db)
+    await skill.create_folder(ctx, "F1")
+    await skill.add_chart(ctx, "F1", _chart("곡A", "MAS"))
+    table = _chart_table(("곡A", "MAS"), ("곡B", "ULT"), ("곡B", "ULT"))
+
+    result = await skill.add_to_folder(ctx, "F1", table)
+    assert result.data["count"] == 1 and result.data["charts"] == ["곡B ULT"]
+    assert result.data["already"] == 1
+    assert "1개는 이미 폴더에 있음" in result.display.content
+
+    again = await skill.add_to_folder(ctx, "F1", table)
+    assert again.data["count"] == 0
+    assert (await skill.show_folder(ctx, "F1")).data["count"] == 2
+
+
+async def test_add_to_folder_dry_run_counts_what_would_change_without_writing(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = _ctx(db=db)
+    await skill.create_folder(ctx, "F1")
+    await skill.add_chart(ctx, "F1", _chart("곡A", "MAS"))
+
+    preview = await skill.add_to_folder(ctx, "F1", _chart_table(("곡A", "MAS"), ("곡B", "MAS"), ("곡C", "MAS")), dry_run=True)
+
+    assert preview.data["count"] == 2 and preview.data["already"] == 1
+    assert (await skill.show_folder(ctx, "F1")).data["count"] == 1
+
+
+async def test_add_to_folder_unknown_folder_errors(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    result = await skill.add_to_folder(_ctx(db=db), "없는 폴더", _chart_table(("A", "MAS")))
+    assert result.error is not None and "폴더를 찾지 못했어" in result.error
+
+
+async def test_remove_from_folder_only_removes_present_ones(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db)
+    await skill.create_folder(ctx, "F1")
+    await skill.add_chart(ctx, "F1", _chart("곡A", "MAS"))
+    await skill.add_chart(ctx, "F1", _chart("곡C", "MAS"))
+
+    result = await skill.remove_from_folder(ctx, "F1", _chart_table(("곡A", "MAS"), ("곡B", "ULT")))
+
+    assert result.data["count"] == 1 and result.data["charts"] == ["곡A MAS"]
+    assert result.data["missing"] == 1
+    shown = await skill.show_folder(ctx, "F1")
+    assert [tc.chart_key(r.ref) for r in shown.table.rows] == [("곡C", "MAS")]
+
+
+async def test_remove_from_folder_nothing_present_changes_nothing(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db)
+    await skill.create_folder(ctx, "F1")
+    result = await skill.remove_from_folder(ctx, "F1", _chart_table(("곡B", "ULT")), dry_run=True)
+    assert result.data["count"] == 0

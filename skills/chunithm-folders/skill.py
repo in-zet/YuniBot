@@ -10,7 +10,6 @@ from core.decorators import tool
 from core.tables import RowRef, TableBuilder, TableNeeds, WorkTable, cell
 from core.tool_types import (
     ChartRef,
-    DifficultyRef,
     Display,
     TableRef,
     ToolContext,
@@ -18,8 +17,7 @@ from core.tool_types import (
 )
 from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
-from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, ConstRangeHit
-from services.chunithm.terms import ResolvedDifficulty
+from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
 
 _GAME = "chunithm"
 _FOLDER = "chunithm-folders.folder"
@@ -29,13 +27,6 @@ _F_NOTE = "메모 유무"
 # 일괄 추가/삭제 결과를 말로 늘어놓을 때 자르는 개수. 조건에 따라 대상이 백 개 가까이
 # 나올 수 있어(예: 특정 레벨 전체), 전부 쓰면 디스코드 메시지가 과하게 길어진다.
 _DISPLAY_LIMIT = 15
-
-
-def _difficulty_code(difficulty: DifficultyRef | None) -> str | None:
-    if difficulty is None:
-        return None
-    assert isinstance(difficulty, ResolvedDifficulty)
-    return LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
 
 
 async def _fetch_folder(ctx: ToolContext, name: str) -> aiosqlite.Row | None:
@@ -86,29 +77,13 @@ async def _folder_chart_keys(ctx: ToolContext, folder_id: int) -> set[tuple[str,
     return {(r["song_title"], r["difficulty"]) for r in rows}
 
 
-def _hits_for_condition(
-    ctx: ToolContext,
-    *,
-    difficulty_code: str | None,
-    min_const: float | None,
-    max_const: float | None,
-    level: str | None,
-    version: str | None,
-) -> list[ConstRangeHit] | str:
-    """상수 범위·레벨·수록 버전 중 정확히 하나로 채보를 찾는다. 조건이 0개거나 2개 이상이면
-    에러 문구를 돌려준다(목표 스킬의 "폴더 정의"와 같은 제약 — songdb에 장르가 없어
-    장르 조합은 지원하지 않는다)."""
-    given = [min_const is not None or max_const is not None, level is not None, version is not None]
-    if sum(given) != 1:
-        return "상수 범위(min_const·max_const)·레벨(level)·수록 버전(version) 중 하나만 줘."
-    if given[0]:
-        if min_const is None or max_const is None:
-            return "상수 범위는 min_const·max_const를 같이 줘야 해."
-        return ctx.songdb.find_by_const(min_const=min_const, max_const=max_const, difficulty=difficulty_code)
-    if level is not None:
-        return ctx.songdb.find_by_level(level=level, difficulty=difficulty_code)
-    assert version is not None
-    return ctx.songdb.find_by_version(version=version, difficulty=difficulty_code)
+def _table_chart_keys(table: WorkTable) -> list[tuple[str, str]]:
+    """표의 채보 행(곡·난이도 칸이 찬 행)의 (곡, 난이도 코드). 같은 채보는 한 번만."""
+    keys: list[tuple[str, str]] = []
+    for row in table.rows:
+        difficulty = str(row.cell(tc.DIFFICULTY).raw)
+        keys.append((str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)))
+    return list(dict.fromkeys(keys))
 
 
 def _display_names(names: list[str]) -> str:
@@ -278,11 +253,7 @@ async def save_table(
     if await _fetch_folder(ctx, name) is not None:
         return ToolResult(error=f"'{name}' 폴더가 이미 있어.")
 
-    keys: list[tuple[str, str]] = []
-    for row in table.rows:
-        difficulty = str(row.cell(tc.DIFFICULTY).raw)
-        keys.append((str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)))
-    keys = list(dict.fromkeys(keys))
+    keys = _table_chart_keys(table)
     labels = [f"{title} {difficulty}" for title, difficulty in keys]
     notes = [step for step in table.steps if "뺌" in step]
 
@@ -375,122 +346,122 @@ async def remove_chart(ctx: ToolContext, name: str, chart: ChartRef) -> ToolResu
     )
 
 
-# ---------------------------------------------------------------- 조건 일괄
+# ---------------------------------------------------------------- 표로 일괄
 
 
-@tool(slash="폴더 조건추가", mutates=True, confirm="bulk")
-async def add_by_condition(
-    ctx: ToolContext,
-    name: str,
-    difficulty: DifficultyRef | None = None,
-    min_const: float | None = None,
-    max_const: float | None = None,
-    level: str | None = None,
-    version: str | None = None,
-    *,
-    dry_run: bool = False,
+_NEEDS_CHARTS = TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])
+
+
+@tool(mutates=True, confirm="bulk")
+async def add_to_folder(
+    ctx: ToolContext, name: str, table: Annotated[TableRef, _NEEDS_CHARTS], *, dry_run: bool = False
 ) -> ToolResult:
-    """상수 범위·레벨·수록 버전 중 하나(+ 선택적 난이도)에 맞는 채보를 찾아 폴더에 일괄
-    추가한다. 이미 폴더에 있는 채보는 뺀다. 대상이 2개 이상이면 실행기가 먼저 개수를
-    보여주고 확인을 받는다."""
+    """이미 있는 폴더에 작업 표의 채보 행(곡·난이도가 있는 행)을 일괄 추가한다. 이미 폴더에 있는 채보는 뺀다.
+    새 폴더를 만들 때는 save_table을 쓴다. 대상이 2개 이상이면 실행기가 먼저 개수를 보여주고 확인을 받는다."""
+    assert isinstance(table, WorkTable)
     assert ctx.db is not None
     folder = await _require_folder(ctx, name)
     if isinstance(folder, ToolResult):
         return folder
-    hits = _hits_for_condition(
-        ctx, difficulty_code=_difficulty_code(difficulty),
-        min_const=min_const, max_const=max_const, level=level, version=version,
-    )
-    if isinstance(hits, str):
-        return ToolResult(error=hits)
-
+    keys = _table_chart_keys(table)
     existing = await _folder_chart_keys(ctx, folder["id"])
-    targets = [hit for hit in hits if (hit.song.title, hit.chart.difficulty) not in existing]
-    names = [f"{t.song.title} {t.chart.difficulty}" for t in targets]
+    targets = [key for key in keys if key not in existing]
+    already = len(keys) - len(targets)
+    names = [f"{title} {difficulty}" for title, difficulty in targets]
+    notes = _skip_notes(table, already, "이미 폴더에 있음")
 
     if not targets:
         return ToolResult(
-            data={"count": 0, "charts": []},
-            display=Display(content="그 조건에 맞는데 아직 없는 채보가 없어."),
+            data={"count": 0, "charts": [], "already": already, "notes": notes},
+            display=Display(content="표의 채보가 전부 이미 폴더에 있어."),
             display_mode="required",
         )
     if dry_run:
         return ToolResult(
-            data={"count": len(targets), "charts": names},
-            display=Display(content=f"'{folder['name']}'에 {len(targets)}개를 추가할게: {_display_names(names)}"),
+            data={"count": len(targets), "charts": names, "already": already, "notes": notes},
+            display=Display(
+                content=f"'{folder['name']}'에 {len(targets)}개를 추가할게: {_display_names(names)}{_notes_text(notes)}"
+            ),
             display_mode="required",
         )
 
     now = datetime.now(UTC).isoformat()
-    for t in targets:
+    for title, difficulty in targets:
         await ctx.db.execute(
             "INSERT INTO folders_charts (folder_id, song_title, difficulty, added_at) VALUES (?, ?, ?, ?)",
-            (folder["id"], t.song.title, t.chart.difficulty, now),
+            (folder["id"], title, difficulty, now),
         )
     await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
     await ctx.db.commit()
     return ToolResult(
-        data={"count": len(targets), "charts": names},
-        display=Display(content=f"'{folder['name']}'에 {len(targets)}개를 추가했어: {_display_names(names)}"),
+        data={"count": len(targets), "charts": names, "already": already, "notes": notes},
+        display=Display(
+            content=f"'{folder['name']}'에 {len(targets)}개를 추가했어: {_display_names(names)}{_notes_text(notes)}"
+        ),
         display_mode="required",
     )
 
 
-@tool(slash="폴더 조건삭제", mutates=True, confirm="bulk")
-async def remove_by_condition(
-    ctx: ToolContext,
-    name: str,
-    difficulty: DifficultyRef | None = None,
-    min_const: float | None = None,
-    max_const: float | None = None,
-    level: str | None = None,
-    version: str | None = None,
-    *,
-    dry_run: bool = False,
+@tool(mutates=True, confirm="bulk")
+async def remove_from_folder(
+    ctx: ToolContext, name: str, table: Annotated[TableRef, _NEEDS_CHARTS], *, dry_run: bool = False
 ) -> ToolResult:
-    """상수 범위·레벨·수록 버전 중 하나(+ 선택적 난이도)에 맞는 채보 중 폴더에 지금 들어있는
-    것만 일괄로 뺀다. 대상이 2개 이상이면 실행기가 먼저 개수를 보여주고 확인을 받는다."""
+    """폴더에서 작업 표의 채보 행(곡·난이도가 있는 행) 중 지금 폴더에 들어 있는 것만 일괄로 뺀다. 폴더 자체를
+    지우는 도구가 아니다. 대상이 2개 이상이면 실행기가 먼저 개수를 보여주고 확인을 받는다."""
+    assert isinstance(table, WorkTable)
     assert ctx.db is not None
     folder = await _require_folder(ctx, name)
     if isinstance(folder, ToolResult):
         return folder
-    hits = _hits_for_condition(
-        ctx, difficulty_code=_difficulty_code(difficulty),
-        min_const=min_const, max_const=max_const, level=level, version=version,
-    )
-    if isinstance(hits, str):
-        return ToolResult(error=hits)
-
+    keys = _table_chart_keys(table)
     existing = await _folder_chart_keys(ctx, folder["id"])
-    targets = [hit for hit in hits if (hit.song.title, hit.chart.difficulty) in existing]
-    names = [f"{t.song.title} {t.chart.difficulty}" for t in targets]
+    targets = [key for key in keys if key in existing]
+    missing = len(keys) - len(targets)
+    names = [f"{title} {difficulty}" for title, difficulty in targets]
+    notes = _skip_notes(table, missing, "폴더에 없음")
 
     if not targets:
         return ToolResult(
-            data={"count": 0, "charts": []},
-            display=Display(content="그 조건에 맞으면서 폴더에 있는 채보가 없어."),
+            data={"count": 0, "charts": [], "missing": missing, "notes": notes},
+            display=Display(content="표의 채보가 폴더에 하나도 없어."),
             display_mode="required",
         )
     if dry_run:
         return ToolResult(
-            data={"count": len(targets), "charts": names},
-            display=Display(content=f"'{folder['name']}'에서 {len(targets)}개를 뺄게: {_display_names(names)}"),
+            data={"count": len(targets), "charts": names, "missing": missing, "notes": notes},
+            display=Display(
+                content=f"'{folder['name']}'에서 {len(targets)}개를 뺄게: {_display_names(names)}{_notes_text(notes)}"
+            ),
             display_mode="required",
         )
 
     now = datetime.now(UTC).isoformat()
-    for t in targets:
+    for title, difficulty in targets:
         await ctx.db.execute(
             "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND difficulty = ?",
-            (folder["id"], t.song.title, t.chart.difficulty),
+            (folder["id"], title, difficulty),
         )
     await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
     await ctx.db.commit()
     return ToolResult(
-        data={"count": len(targets), "charts": names},
-        display=Display(content=f"'{folder['name']}'에서 {len(targets)}개를 뺐어: {_display_names(names)}"),
+        data={"count": len(targets), "charts": names, "missing": missing, "notes": notes},
+        display=Display(
+            content=f"'{folder['name']}'에서 {len(targets)}개를 뺐어: {_display_names(names)}{_notes_text(notes)}"
+        ),
         display_mode="required",
     )
+
+
+def _skip_notes(table: WorkTable, skipped: int, reason: str) -> list[str]:
+    """표 과정의 "뺌" 안내와 이 도구가 지금 DB를 보고 뺀 개수 안내."""
+    notes = [step for step in table.steps if "뺌" in step]
+    if skipped:
+        notes.append(f"{skipped}개는 {reason}")
+    return notes
+
+
+def _notes_text(notes: list[str]) -> str:
+    return f" ({'; '.join(notes)})" if notes else ""
 
 
 # ---------------------------------------------------------------- 메모
