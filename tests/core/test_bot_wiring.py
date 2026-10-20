@@ -33,6 +33,7 @@ from core.tool_types import (
     SongQuery,
     ToolContext,
 )
+from services.chunithm.table_columns import PARTIAL_ROW_HINTS
 from services.common.notify import NotifyService
 from services.common.players import PlayersService
 from services.common.websearch import WebsearchService
@@ -98,6 +99,14 @@ async def test_build_client_registers_chunithm_services_and_resolvers(tmp_path: 
         assert "chunithm_net" in executor.services  # cookie 키가 있으므로 등록돼야 한다
         for ref_type in (SongQuery, ChartRef, RankRef, DifficultyRef, LampRef, ScoreRef):
             assert executor._resolvers.is_registered(ref_type)
+    finally:
+        await client.close()
+
+
+async def test_build_client_passes_partial_row_hints_to_the_executor(tmp_path: Path) -> None:
+    client, _registry, executor = await build_client(_config(tmp_path))
+    try:
+        assert executor._partial_row_hints == PARTIAL_ROW_HINTS  # pyright: ignore[reportPrivateUsage]
     finally:
         await client.close()
 

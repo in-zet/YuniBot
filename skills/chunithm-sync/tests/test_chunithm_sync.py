@@ -1,6 +1,7 @@
 # skills/chunithm-sync/tests/test_chunithm_sync.py
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -13,6 +14,7 @@ import pytest
 from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.events import EventBus, Section
+from core.tables import RowRef, TableBuilder, TableStore, WorkTable, cell
 from core.tool_types import Display, ToolContext
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import SessionInfo, SyncDiff, SyncResult
@@ -473,3 +475,58 @@ async def test_run_cooldown_without_guild_uses_default(skill: ModuleType) -> Non
     assert result.error is not None
     assert "90초" in result.error
     assert f.settings.calls == []
+
+
+# ---------------------------------------------------------------- 작업 표 옛 값 표시
+
+
+def _stale_setup(**kwargs: Any) -> tuple[_Fakes, TableStore, ToolContext, str, str, str]:
+    f = ctx_with_fake_services(**kwargs)
+    store = TableStore()
+    ctx = dataclasses.replace(f.ctx, tables=store, channel_id="c1")
+
+    def _table(subject: str | None) -> WorkTable:
+        builder = TableBuilder(subject=subject, unit="채보")
+        builder.column("곡", bare=True).row(RowRef("chunithm.chart", "a"), {"곡": cell("A")})
+        return builder.build()
+
+    mine = store.put("p1", "c1", _table("p1"))
+    others = store.put("p1", "c1", _table("p2"))
+    plain = store.put("p1", "c1", _table(None))
+    return f, store, ctx, mine, others, plain
+
+
+async def test_sync_marks_only_this_players_tables_stale(skill: ModuleType) -> None:
+    _, store, ctx, mine, others, plain = _stale_setup()
+
+    result = await skill.run(ctx)
+
+    assert result.error is None
+    assert store.is_stale("p1", "c1", mine)
+    assert not store.is_stale("p1", "c1", others)
+    assert not store.is_stale("p1", "c1", plain)
+
+
+async def test_first_sync_also_marks_tables_stale(skill: ModuleType) -> None:
+    _, store, ctx, mine, _, _ = _stale_setup(first_sync=True)
+
+    await skill.run(ctx)
+
+    assert store.is_stale("p1", "c1", mine)
+
+
+async def test_failed_fetch_does_not_mark_tables_stale(skill: ModuleType) -> None:
+    _, store, ctx, mine, _, _ = _stale_setup(fetch_error=MaintenanceError())
+
+    result = await skill.run(ctx)
+
+    assert result.error is not None
+    assert not store.is_stale("p1", "c1", mine)
+
+
+async def test_sync_without_table_store_still_works(skill: ModuleType) -> None:
+    f = ctx_with_fake_services()
+
+    result = await skill.run(f.ctx)
+
+    assert result.error is None

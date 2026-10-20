@@ -65,6 +65,7 @@ from services.chunithm.chart_ref import ChartRefResolver
 from services.chunithm.chunithm_net import ChunithmNetService
 from services.chunithm.records import RecordsService
 from services.chunithm.songdb import SongDbService
+from services.chunithm.table_columns import PARTIAL_ROW_HINTS
 from services.chunithm.terms import TermsService
 from services.common.arcades import ArcadesService
 from services.common.http import HttpService, build_http_service
@@ -559,6 +560,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         settings=settings_service,
         scheduler=scheduler,
         tables=table_store,
+        partial_row_hints=PARTIAL_ROW_HINTS,
     )
     # services는 이 시점에 아직 notify/yuni/usage/http가 없지만, 같은 dict 객체를 그대로
     # 들고 있는다 — build_client()가 뒤에서 그 dict를 더 채우면(아래) EventBus도 같은

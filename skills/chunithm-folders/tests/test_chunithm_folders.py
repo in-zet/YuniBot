@@ -12,7 +12,9 @@ import aiosqlite
 import pytest
 
 from core.events import EventBus
+from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import ToolContext
+from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.songdb import ChartRecord, SongRecord
 from services.chunithm.terms import ResolvedDifficulty
@@ -60,6 +62,11 @@ class _FakeSongDb:
 
     def const_for(self, title: str, difficulty: str) -> float | None:
         return self.consts.get((title, difficulty))
+
+    def chart_for(self, title: str, difficulty: str) -> ChartRecord | None:
+        if (title, difficulty) not in self.consts:
+            return None
+        return ChartRecord(difficulty=difficulty, const=self.consts[(title, difficulty)], note_count=None)
 
     def find_by_const(self, *, min_const: float, max_const: float, difficulty: str | None = None) -> list[Any]:
         return [_Hit(title, dif, const) for title, dif, const in self.const_range_hits]
@@ -173,7 +180,27 @@ async def test_show_folder_includes_note_and_charts_with_const(skill: ModuleType
 
     result = await skill.show_folder(ctx, "F1")
     assert result.data["note"] == "메모"
-    assert result.data["charts"] == [{"song_title": "크로노 마기아", "difficulty": "MAS", "const": 15.0}]
+    table = result.table
+    assert table is not None and result.display is None
+    assert table.subject == "p1" and table.unit == "채보"
+    assert table.summary == {"폴더": "F1", "메모": "메모"}
+    assert [c.name for c in table.columns] == [tc.SONG, tc.DIFFICULTY, tc.CONST]
+    (row,) = table.rows
+    assert tc.chart_key(row.ref) == ("크로노 마기아", "MAS")
+    assert row.cell(tc.CONST).raw == 15.0 and row.cell(tc.CONST).text == "15.0"
+    assert render_text(table).content.endswith("1. 크로노 마기아  MAS  상수 15.0")
+
+
+async def test_show_folder_empty_folder_says_so_without_table(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db)
+    await skill.create_folder(ctx, "F1")
+    await skill.set_note(ctx, "F1", "비었음")
+
+    result = await skill.show_folder(ctx, "F1")
+
+    assert result.table is None
+    assert result.display is not None and "채보가 없어" in (result.display.content or "")
+    assert result.data["count"] == 0
 
 
 async def test_show_folder_missing_folder_error(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -193,7 +220,7 @@ async def test_add_chart_duplicate_is_noop(skill: ModuleType, db: aiosqlite.Conn
     assert first.data["added"] is True
     assert second.data["added"] is False
     shown = await skill.show_folder(ctx, "F1")
-    assert len(shown.data["charts"]) == 1
+    assert shown.table is not None and shown.table.row_count == 1
 
 
 async def test_remove_chart_missing_is_noop(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -210,7 +237,7 @@ async def test_remove_chart_present_removes_it(skill: ModuleType, db: aiosqlite.
     result = await skill.remove_chart(ctx, "F1", _chart("곡"))
     assert result.data["removed"] is True
     shown = await skill.show_folder(ctx, "F1")
-    assert shown.data["charts"] == []
+    assert shown.table is None and shown.data["count"] == 0
 
 
 # ---------------------------------------------------------------- 조건 일괄
@@ -242,7 +269,7 @@ async def test_add_by_condition_dry_run_does_not_change_folder(skill: ModuleType
     result = await skill.add_by_condition(ctx, "F1", min_const=15.0, max_const=15.0, dry_run=True)
     assert result.data["count"] == 2
     shown = await skill.show_folder(ctx, "F1")
-    assert shown.data["charts"] == []
+    assert shown.table is None and shown.data["count"] == 0
 
 
 async def test_add_by_condition_excludes_existing_and_is_idempotent(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -269,7 +296,7 @@ async def test_remove_by_condition_only_removes_present_ones(skill: ModuleType, 
     assert result.data["count"] == 1
     assert result.data["charts"] == ["곡A MAS"]
     shown = await skill.show_folder(ctx, "F1")
-    assert shown.data["charts"] == []
+    assert shown.table is None and shown.data["count"] == 0
 
 
 # ---------------------------------------------------------------- 메모
@@ -288,3 +315,103 @@ async def test_set_note_overwrite_append_and_clear(skill: ModuleType, db: aiosql
 
     cleared = await skill.set_note(ctx, "F1", "")
     assert cleared.data["note"] is None
+
+
+# ---------------------------------------------------------------- save_table
+
+
+def _chart_table(*charts: tuple[str | None, str | None]) -> WorkTable:
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.step("검색 결과")
+    for title, difficulty in charts:
+        ref = tc.song_ref(title) if difficulty is None and title else tc.chart_ref(title or "", difficulty or "")
+        builder.row(ref, {tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell(difficulty)})
+    return builder.build()
+
+
+async def test_save_table_creates_new_folder_with_the_chart_rows(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db)
+
+    result = await skill.save_table(ctx, _chart_table(("A", "MAS"), ("B", "EXP"), ("A", "MAS")), "새 폴더")
+
+    assert result.error is None
+    assert result.data["count"] == 2  # 같은 채보가 두 번 있어도 한 번만 담는다
+    shown = await skill.show_folder(ctx, "새 폴더")
+    assert shown.table is not None
+    assert [tc.chart_key(r.ref) for r in shown.table.rows] == [("A", "MAS"), ("B", "EXP")]
+
+
+async def test_save_table_rejects_existing_folder_name_case_insensitively(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = _ctx(db=db)
+    await skill.create_folder(ctx, "F1")
+
+    result = await skill.save_table(ctx, _chart_table(("A", "MAS")), "f1")
+    dry = await skill.save_table(ctx, _chart_table(("A", "MAS")), "f1", dry_run=True)
+
+    assert result.error is not None and "이미 있어" in result.error
+    assert dry.error is not None
+    assert (await skill.show_folder(ctx, "F1")).data["count"] == 0
+
+
+async def test_save_table_dry_run_writes_nothing_and_reports_count(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db)
+
+    preview = await skill.save_table(ctx, _chart_table(("A", "MAS"), ("B", "MAS")), "새", dry_run=True)
+
+    assert preview.data["count"] == 2
+    assert (await skill.list_folders(ctx)).data["folders"] == []
+
+
+async def test_save_table_through_executor_drops_rows_without_chart_and_asks_confirm(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    from core.executor import ToolExecutor
+    from core.permissions import InMemoryTagProvider
+    from core.resolvers import ResolverRegistry
+    from core.tables import TableStore
+
+    store = TableStore()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={}, tables=store,
+        partial_row_hints=tc.PARTIAL_ROW_HINTS,
+    )
+    ctx = ToolContext(
+        player_id="p1", tags=frozenset(), services={"songdb": _FakeSongDb()}, db=db,
+        event_bus=EventBus(), channel_id="c1",
+    )
+    table_id = store.put("p1", "c1", _chart_table(("A", "MAS"), ("B", "EXP"), ("S", None), (None, None)))
+
+    outcome = await executor.invoke(skill.save_table.__yuni_tool__, ctx, {"table": table_id, "name": "폴더"})
+
+    assert outcome.needs_confirm and outcome.preview is not None
+    assert outcome.preview.data["count"] == 2
+    assert any("곡 단위 행(난이도 없음) 1개 뺌" in note for note in outcome.preview.data["notes"])
+    assert outcome.confirm_token is not None
+    done = await executor.confirm(outcome.confirm_token, confirmed=True, player_id="p1")
+    assert done.error is None and done.data["count"] == 2
+    assert (await skill.show_folder(ctx, "폴더")).data["count"] == 2
+
+
+async def test_save_table_is_refused_for_a_stale_table(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    from core.executor import ToolExecutor
+    from core.permissions import InMemoryTagProvider
+    from core.resolvers import ResolverRegistry
+    from core.tables import TableStore
+
+    store = TableStore()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={}, tables=store,
+    )
+    ctx = ToolContext(
+        player_id="p1", tags=frozenset(), services={"songdb": _FakeSongDb()}, db=db,
+        event_bus=EventBus(), channel_id="c1",
+    )
+    table_id = store.put("p1", "c1", _chart_table(("A", "MAS")), stale=True)
+
+    outcome = await executor.invoke(skill.save_table.__yuni_tool__, ctx, {"table": table_id, "name": "폴더"})
+
+    assert outcome.result is not None and outcome.result.error is not None
+    assert "동기화 전 값" in outcome.result.error

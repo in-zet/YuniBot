@@ -95,13 +95,13 @@
     - [X] 1-7 첨부 파일과 그림 표 표시(`Display.files`·`drew_table`·슬래시 경로) — 구현 완료(2026-10-20). 실기 미확인: 11행 이상 표가 .txt 첨부로 나가는지(멘션·슬래시)
     - [X] 1-8 수명 연결(`core/mention.py`: 묶기·`retain_only`·프롬프트 조각·번호 기준 줄) — 구현 완료(2026-10-20)
     - [X] 1-9 프롬프트(`prompts/rules.md`) — 구현 완료(2026-10-20)
-  - [ ] Part 2: 첫 범위 스킬(곡 검색 4개·`best`·`add_scores`·폴더 보기/저장) — 세부 파트
+  - [X] Part 2: 첫 범위 스킬(곡 검색 4개·`best`·`add_scores`·폴더 보기/저장) — 구현 완료(2026-10-20). 실기 미확인: 멘션에서 표가 실제로 붙고 11행 이상이 .txt로 나가는지, "그중에…"·"2번" 후속 요청, 곡 검색 표에 `add_scores`·`save_table`을 이어 쓰는 흐름, 동기화 뒤 옛 값 표가 거절되는지, `/상수`·`/베스트` 슬래시 출력 모양. 세부
     - [X] 2-1 공통 칸 `services/chunithm/table_columns.py` — 구현 완료(2026-10-20)
     - [X] 2-2 `chunithm-song` 곡 검색 4개 표로(`find_songs`의 `sort_by`·`descending` 제거, `find_by_artist`에 `difficulty`) — 구현 완료(2026-10-20)
     - [X] 2-3 `chunithm-report` `best` 표 + `add_scores` — 구현 완료(2026-10-20)
-    - [ ] 2-4 `chunithm-folders` `show_folder` 표 + `save_table`
-    - [ ] 2-5 `chunithm-sync` `mark_stale` + `core/bot.py` `partial_row_hints` 연결
-    - [ ] 2-6 `rules.md` 정리·문서
+    - [X] 2-4 `chunithm-folders` `show_folder` 표 + `save_table` — 구현 완료(2026-10-20)
+    - [X] 2-5 `chunithm-sync` `mark_stale` + `core/bot.py` `partial_row_hints` 연결 — 구현 완료(2026-10-20)
+    - [X] 2-6 `rules.md` 정리·문서 — 구현 완료(2026-10-20)
   - [ ] Part 3: 그림 표 `chunithm-image`
   - [ ] Part 4: 나머지 목록 도구를 표로(15개)
   - [ ] Part 5: 표를 받아 칸을 더하거나 곡 행을 채보로 펼치는 도구(6개)

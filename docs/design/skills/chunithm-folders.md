@@ -72,12 +72,15 @@ goals와 이 스킬이 그대로 공유한다(새로 안 만든다).
 | `delete_folder` | 폴더+메모+채보 통째로 삭제 | `name: str` | `/폴더 삭제` | optional | always |
 | `rename_folder` | 폴더 이름 변경 | `name, new_name: str` | `/폴더 이름변경` | optional | never |
 | `list_folders` | 내 폴더 목록(이름·채보 수·메모 유무) | 없음 | `/폴더 목록` | required | never |
-| `show_folder` | 폴더 메모 + 안의 채보 전체 | `name: str` | `/폴더 보기` | required | never |
+| `show_folder` | 폴더 안의 채보 전체 (표 반환) | `name: str` | `/폴더 보기` | 표 | never |
 | `add_chart` | 채보 한 개 추가 | `name: str, chart: ChartRef` | `/폴더 채보추가` | optional | never |
 | `remove_chart` | 채보 한 개 삭제 | `name: str, chart: ChartRef` | `/폴더 채보삭제` | optional | never |
 | `add_by_condition` | 조건에 맞는 채보 일괄 추가 | `name, difficulty?, min_const?, max_const?, level?, version?` | `/폴더 조건추가` | required | bulk |
 | `remove_by_condition` | 조건에 맞는 채보 일괄 삭제 | 위와 같음 | `/폴더 조건삭제` | required | bulk |
+| `save_table` | 작업 표의 채보 행(곡·난이도가 찬 행)으로 **새 폴더** 만들기. 같은 이름이 있으면 에러, 칸은 저장하지 않음 | `table: TableRef`, `name: str` | 없음 | required | bulk |
 | `set_note` | 폴더 메모 설정/덧붙이기/지우기(빈 문자열) | `name: str, text: str, append=False` | `/폴더 메모` | optional | never |
+
+`show_folder`의 표: 가리키는 것 `chunithm.chart`, 칸 곡·난이도·상수, 표 요약 `폴더`·`메모`(있을 때), `subject`는 본인. 채보가 없는 폴더는 표 없이 안내 문구만 낸다. `save_table`은 `mutates=True`라 "동기화 전 값" 표를 받지 않고(실행기가 막는다), `TableRef`를 받으니 슬래시가 없다. 이미 있는 폴더에 표를 더하는 도구는 Part 6(데이터 바꾸기)에서 한다.
 
 모든 도구가 `cost="light"`(네트워크 호출 없음), `mutates=True`는 생성·삭제·이름변경·채보
 추가/삭제·조건 일괄·메모(조회 넷을 뺀 전부)에 — 전부 `ctx.player_id` 본인 폴더만 건드린다
@@ -104,6 +107,7 @@ goals와 이 스킬이 그대로 공유한다(새로 안 만든다).
 - 생성 + 조건 일괄 추가가 한 번에 왔으면 두 도구를 이어서 부른다.
 - 조건은 상수 범위·레벨·수록 버전 중 하나만 받는다. 둘 이상 섞으면 못 한다고 말한다.
 - 목록/보기는 표가 자동으로 붙으니 다시 나열하지 않는다.
+- 방금 찾은 곡 표나 베스트 표를 "폴더로 저장해 줘"라고 하면 `save_table`에 그 표 id와 폴더 이름을 준다(곡·난이도 없는 행은 알아서 빠지고, 빠진 수는 확인 때 보인다). 이름을 안 말했으면 표의 조건으로 뜻이 통하는 이름을 짓는다. 이미 있는 폴더에 더하는 건 아직 못 한다.
 
 ## 테스트
 
@@ -114,6 +118,7 @@ goals와 이 스킬이 그대로 공유한다(새로 안 만든다).
 - `add_chart`/`remove_chart`의 중복 추가·없는 채보 삭제가 조용히 끝나는지.
 - `set_note`의 덮어쓰기·append·빈 문자열로 지우기.
 - `rename_folder`가 다른 폴더 이름과 겹치면 거절하는지(자기 자신으로의 "변경"은 허용).
+- `show_folder`가 표(칸·가리키는 것·요약)를 내는지, `save_table`이 표의 채보 행으로 새 폴더를 만드는지(중복 채보 한 번만), 같은 이름이면 거절하는지, 곡 없는 행·곡 단위 행을 실행기가 빼고 확인 때 보여 주는지, 옛 값 표를 거절하는지.
 
 ## 미확인 사항
 

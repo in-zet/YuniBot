@@ -87,6 +87,9 @@ async def run(
         return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
 
     result = await ctx.records.save_sync(ctx.player_id, fetch, ctx)
+    # 저장이 일어났으니(기준점만 만든 첫 동기화도) 이 플레이어의 점수가 담긴 작업 표는 옛 값이다.
+    if ctx.tables is not None:
+        ctx.tables.mark_stale(ctx.player_id)
     rating_data: dict[str, Any] = {
         "computed_rating": _rating_text(result.computed_rating),
         "displayed_rating": None if result.displayed_rating is None else str(result.displayed_rating),

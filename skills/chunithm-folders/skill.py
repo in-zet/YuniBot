@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 import aiosqlite
 
 from core.decorators import tool
-from core.tool_types import ChartRef, DifficultyRef, Display, ToolContext, ToolResult
+from core.tables import TableBuilder, TableNeeds, WorkTable
+from core.tool_types import (
+    ChartRef,
+    DifficultyRef,
+    Display,
+    TableRef,
+    ToolContext,
+    ToolResult,
+)
+from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, ConstRangeHit
 from services.chunithm.terms import ResolvedDifficulty
@@ -200,7 +209,7 @@ async def list_folders(ctx: ToolContext) -> ToolResult:
 
 @tool(slash="폴더 보기")
 async def show_folder(ctx: ToolContext, name: str) -> ToolResult:
-    """폴더의 메모와 안에 든 채보 전체(곡, 난이도, 상수)를 보여준다."""
+    """폴더의 메모와 안에 든 채보 전체(곡, 난이도, 상수)를 표로 돌려준다."""
     assert ctx.db is not None
     folder = await _require_folder(ctx, name)
     if isinstance(folder, ToolResult):
@@ -211,27 +220,88 @@ async def show_folder(ctx: ToolContext, name: str) -> ToolResult:
         (folder["id"],),
     )
     rows: list[aiosqlite.Row] = list(await cursor.fetchall())
-    charts: list[dict[str, Any]] = [
-        {
-            "song_title": r["song_title"], "difficulty": r["difficulty"],
-            "const": ctx.songdb.const_for(r["song_title"], r["difficulty"]),
-        }
-        for r in rows
-    ]
+    if not rows:
+        lines = [folder["name"]]
+        if folder["note"]:
+            lines.append(f"메모: {folder['note']}")
+        lines.append("채보가 없어.")
+        return ToolResult(
+            data={"name": folder["name"], "note": folder["note"], "count": 0},
+            display=Display(content="\n".join(lines), omittable=True),
+        )
 
-    def _chart_line(c: dict[str, Any]) -> str:
-        const_text = f" ({c['const']})" if c["const"] is not None else ""
-        return f"{c['song_title']} {c['difficulty']}{const_text}"
-
-    lines: list[str] = []
+    columns = (tc.SONG, tc.DIFFICULTY, tc.CONST)
+    builder = TableBuilder(subject=ctx.player_id, unit="채보")
+    tc.add_columns(builder, *columns).step(f"{folder['name']} 폴더")
+    summary = {"폴더": folder["name"]}
     if folder["note"]:
-        lines.append(f"메모: {folder['note']}")
-    lines += [_chart_line(c) for c in charts] if charts else ["채보가 없어."]
-
+        summary["메모"] = folder["note"]
+    builder.summary(summary)
+    for r in rows:
+        title, difficulty = r["song_title"], r["difficulty"]
+        chart = ctx.songdb.chart_for(title, difficulty)
+        builder.row(
+            tc.chart_ref(title, difficulty),
+            {
+                tc.SONG: tc.song_cell(title),
+                tc.DIFFICULTY: tc.difficulty_cell(difficulty),
+                tc.CONST: tc.const_cell(
+                    chart.const if chart is not None else None,
+                    estimated=chart is not None and chart.is_const_unknown,
+                ),
+            },
+        )
     return ToolResult(
-        data={"name": folder["name"], "note": folder["note"], "charts": charts},
-        display=Display(content="\n".join([folder["name"], *lines]), omittable=True),
-        display_mode="required",
+        data={"name": folder["name"], "note": folder["note"], "count": len(rows)}, table=builder.build()
+    )
+
+
+@tool(mutates=True, confirm="bulk")
+async def save_table(
+    ctx: ToolContext,
+    table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])],
+    name: str,
+    *,
+    dry_run: bool = False,
+) -> ToolResult:
+    """작업 표의 채보 행(곡·난이도가 있는 행)으로 새 폴더를 만든다. 같은 이름의 폴더가 이미 있으면 에러다.
+    표의 칸은 저장하지 않고 채보 목록만 담는다. 이미 있는 폴더에 더하는 도구가 아니다.
+    채보가 2개 이상이면 실행기가 개수를 보여주고 확인을 받는다."""
+    assert isinstance(table, WorkTable)
+    assert ctx.db is not None
+    if await _fetch_folder(ctx, name) is not None:
+        return ToolResult(error=f"'{name}' 폴더가 이미 있어.")
+
+    keys: list[tuple[str, str]] = []
+    for row in table.rows:
+        difficulty = str(row.cell(tc.DIFFICULTY).raw)
+        keys.append((str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)))
+    keys = list(dict.fromkeys(keys))
+    labels = [f"{title} {difficulty}" for title, difficulty in keys]
+    notes = [step for step in table.steps if "뺌" in step]
+
+    if dry_run:
+        return ToolResult(
+            data={"count": len(keys), "charts": labels, "notes": notes},
+            display=Display(content=f"'{name}' 폴더를 만들고 {len(keys)}개를 담을게: {_display_names(labels)}"),
+        )
+
+    now = datetime.now(UTC).isoformat()
+    cursor = await ctx.db.execute(
+        "INSERT INTO folders_folders (player_id, game, name, note, created_at, updated_at) "
+        "VALUES (?, ?, ?, NULL, ?, ?)",
+        (ctx.player_id, _GAME, name, now, now),
+    )
+    folder_id = cursor.lastrowid
+    for title, difficulty in keys:
+        await ctx.db.execute(
+            "INSERT INTO folders_charts (folder_id, song_title, difficulty, added_at) VALUES (?, ?, ?, ?)",
+            (folder_id, title, difficulty, now),
+        )
+    await ctx.db.commit()
+    return ToolResult(
+        data={"name": name, "count": len(keys), "notes": notes},
+        display=Display(content=f"'{name}' 폴더를 만들고 {len(keys)}개를 담았어: {_display_names(labels)}"),
     )
 
 

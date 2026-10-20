@@ -260,6 +260,11 @@ class SongDbService:
         chart = song.charts.get(difficulty)
         return chart.const if chart else None
 
+    def chart_for(self, title: str, difficulty: str) -> ChartRecord | None:
+        """곡 제목과 난이도 코드로 채보 하나를 찾는다(고를 수 있는지는 가리지 않는다)."""
+        song = self._songs.get(title)
+        return song.charts.get(difficulty) if song is not None else None
+
     def note_count_for(self, title: str, difficulty: str) -> int | None:
         song = self._songs.get(title)
         if song is None:
