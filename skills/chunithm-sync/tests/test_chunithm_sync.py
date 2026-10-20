@@ -229,7 +229,7 @@ def ctx_with_fake_services(
 
 
 def _chart() -> ResolvedChart:
-    song = SongRecord(title="Chronomia", aliases=(), artist="테스터")
+    song = SongRecord(title="Chronomia", aliases=(), artist="테스터", id=1)
     return ResolvedChart(song=song, chart=ChartRecord(difficulty="MAS", const=14.8, note_count=2000))
 
 

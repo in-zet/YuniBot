@@ -73,6 +73,24 @@ async def test_duplicate_same_difficulty_prefers_available_entry(songdb: SongDbS
     assert note_count == 1051
 
 
+async def test_by_id_finds_song_by_sega_music_id(songdb: SongDbService) -> None:
+    song = songdb.by_id(3)
+    assert song is not None
+    assert song.title == "B.B.K.K.B.K.K."
+
+
+async def test_by_id_unknown_returns_none(songdb: SongDbService) -> None:
+    assert songdb.by_id(999_999) is None
+
+
+async def test_by_id_finds_song_added_only_by_chunimaru_overlay(songdb: SongDbService) -> None:
+    songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
+
+    song = songdb.by_id(2897)
+    assert song is not None
+    assert song.title == "Ave Mujica"
+
+
 async def test_before_chunimaru_overlay_removed_song_is_unavailable(songdb: SongDbService) -> None:
     # "天体観測"은 로컬 시드의 available=false, removed=true라 덧씌우기 전에도 안 잡혀야 한다.
     with pytest.raises(ResolutionError, match="찾지 못함"):
@@ -261,7 +279,7 @@ async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService
 async def test_chart_link_falls_back_to_youtube_without_mapping(songdb: SongDbService) -> None:
     from services.chunithm.songdb import ChartRecord, SongRecord
 
-    fake_song = SongRecord(title="테스트곡", aliases=(), artist="", charts={})
+    fake_song = SongRecord(title="테스트곡", aliases=(), artist="", id=1, charts={})
     fake_chart = ChartRecord(difficulty="MAS", const=10.0, note_count=1000, sdvxin=None)
 
     link = songdb.chart_link(fake_song, fake_chart)

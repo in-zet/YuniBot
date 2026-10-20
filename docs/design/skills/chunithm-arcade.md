@@ -76,7 +76,6 @@ listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.view
 | 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
 | --- | --- | --- | --- | --- | --- |
 | `get_settings` | 그 오락실의 마지막 설정과 지금 계정 설정의 차이 | `arcade: ArcadeRef` | `/오락실 설정` | optional | never |
-| `current_settings` | 지금 계정의 인게임 설정을 CHUNITHM-NET에서 바로 읽어 보여줌(저장 안 함). 도구 태그 chunithm-linked, cost network | 없음 | `/현재설정` | optional | never |
 | `history` | 그 오락실의 설정 변화 | `arcade: ArcadeRef` | `/오락실 기록` | required | never |
 | `record_visit` | 세션에 오락실 방문을 남기고 지금 설정을 저장. 도구 태그 chunithm-linked, cost network | `arcade: ArcadeRef`, 날짜(기본 최근 세션) | `/오락실 방문` | optional | never |
 | `set_privacy` | 방문 기록과 설정 공개 여부 | `public: bool` | 없음 | optional | never |
@@ -121,3 +120,8 @@ listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.view
 - `chunithm-session`(7단계 Part 3)의 `on_sync_reported`가 임시로 하던 `arcades.record_visit()` 호출을 이 스킬로 옮겼다 — 두 스킬이 같은 `arcade_id`를 보고 각자 기록하면 방문이 중복된다. 설정 읽기(네트워크 호출)도 방문 기록과 같은 순간에 해야 하므로 한 곳(이 스킬의 `on_sync_reported`)에 묶었다.
 - `arcade_settings`에 `play_date` 열을 둬서 `chunithm.session.viewed`가 날짜로 바로 찾을 수 있게 했다 — `chunithm-session`이 쓰는 `visited_at[:10]` 근사치보다 정확하다(동기화 payload의 `sessions[].play_date`를 그대로 쓴다).
 - 판정 폭 세부 조정(`judgeCritical`/`judgeJustice`/`judgeAttack`) 등 이름 안 붙은 항목은 `raw_json`에만 들어가고 표/도구 결과에는 안 나온다(저장만 해 둔다).
+
+## 구현 결정 (2026-10-20)
+
+- 오락실에 묶이지 않은 "지금 계정 설정을 바로 읽기"(`current_settings`)는 `chunithm-settings` 스킬로 옮겼다. 설정을 실제로 바꾸는 기능(즐겨찾기 곡, 게임 설정 변경)이 생기면서 "CHUNITHM-NET 지금 계정 설정"을 다루는 스킬을 하나로 모으는 게 맞다고 봤다 — 이 스킬은 오락실 방문 이력에 묶인 조회·저장만 남는다. `get_arcade_settings`(서비스 메서드)는 두 스킬이 그대로 같이 쓴다.
+- 표시 포맷 도우미(`FIELD_LABELS`, `named_from_settings`, `settings_line`)는 두 스킬이 똑같이 쓰므로 `services/chunithm/arcade_settings.py`로 옮겼다(스킬마다 복사하지 않는다).

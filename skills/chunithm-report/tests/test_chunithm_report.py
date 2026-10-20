@@ -214,7 +214,7 @@ def _content(result: ToolResult) -> str:
 
 
 def _chart(title: str = "Chronomia", difficulty: str = "MAS") -> ResolvedChart:
-    song = SongRecord(title=title, aliases=(), artist="테스터")
+    song = SongRecord(title=title, aliases=(), artist="테스터", id=1)
     return ResolvedChart(song=song, chart=ChartRecord(difficulty=difficulty, const=14.8, note_count=2000))
 
 
