@@ -22,6 +22,8 @@ _MAX_RETRIES = 3
 # 504(DEADLINE_EXCEEDED)는 요청 타임아웃에 걸렸다는 뜻이다. 모델이 응답 없이 멈춘 것이라(2026-10-19
 # gemini-3.8-flash가 25초 넘게 무응답) 다시 불러도 같은 시간을 또 기다릴 가능성이 커서 한 번만 재시도한다.
 _MAX_RETRIES_BY_CODE = {504: 1}
+# 보조 모델이 있으면 504는 같은 모델로 재시도하지 않고 바로 보조 모델로 넘긴다(2026-10-20).
+DEADLINE_EXCEEDED_CODES = frozenset({504})
 _RETRY_BASE_DELAY_SECONDS = 2.0  # 시도마다 2배로 늘린다(2초, 4초, 8초).
 
 # 요청 타임아웃. 없으면 모델이 응답 없이 멈출 때 멘션 처리가 끝없이 기다린다. 서버가 10초 미만
@@ -35,14 +37,30 @@ def http_options(timeout_seconds: int) -> types.HttpOptions:
     return types.HttpOptions(timeout=timeout_seconds * 1000)
 
 
-async def call_with_retry[T](call: Callable[[], Awaitable[T]], *, on_retry: OnRetry | None = None) -> T:
+def is_retryable(exc: genai_errors.APIError) -> bool:
+    """일시 오류(과부하·속도 제한·타임아웃)인지. 보조 모델로 넘길지 판단할 때도 같은 기준을 쓴다."""
+    return exc.code in _RETRYABLE_CODES
+
+
+async def call_with_retry[T](
+    call: Callable[[], Awaitable[T]],
+    *,
+    on_retry: OnRetry | None = None,
+    skip_retry_codes: frozenset[int] = frozenset(),
+) -> T:
+    """`skip_retry_codes`에 든 오류 코드는 재시도 없이 바로 올린다 — 보조 모델이 있을 때 504를 같은
+    모델로 또 기다리지 않고 바로 넘기려고 쓴다."""
     attempt = 0
     while True:
         try:
             return await call()
         except genai_errors.APIError as exc:
             attempt += 1
-            if exc.code not in _RETRYABLE_CODES or attempt > _MAX_RETRIES_BY_CODE.get(exc.code, _MAX_RETRIES):
+            if (
+                exc.code not in _RETRYABLE_CODES
+                or exc.code in skip_retry_codes
+                or attempt > _MAX_RETRIES_BY_CODE.get(exc.code, _MAX_RETRIES)
+            ):
                 raise
             delay = _RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
             logger.warning(

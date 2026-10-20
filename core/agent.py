@@ -47,6 +47,8 @@ class AgentTurnResult:
     hit_token_cap: bool = False
     # admin 태그가 필요한 도구를 부른 턴 — 관리 대화는 플레이어 메모리에 남기지 않는다.
     used_admin_tool: bool = False
+    # 마지막 LLM 왕복에서 실제로 답한 모델. 보조 모델로 넘어간 턴이면 그 이름이고, 아니면 None.
+    served_model: str | None = None
 
 
 class AgentLoop:
@@ -209,6 +211,7 @@ class AgentLoop:
                 ctx.player_id, llm_turns, time.monotonic() - llm_started, len(turn.function_calls),
                 turn.usage.input_tokens, turn.usage.output_tokens,
             )
+            result.served_model = turn.model
             result.usage = UsageInfo(
                 input_tokens=result.usage.input_tokens + turn.usage.input_tokens,
                 output_tokens=result.usage.output_tokens + turn.usage.output_tokens,

@@ -70,6 +70,26 @@ async def test_agent_loop_returns_text_when_model_answers_directly() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_reports_served_model_only_when_fallback_answered() -> None:
+    registry = _registry()
+
+    async def _run(turn_model: str | None) -> str | None:
+        script = [GenerationTurn(
+            content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답", model=turn_model,
+        )]
+        loop = AgentLoop(
+            llm=FakeLlmAdapter(script), executor=_executor(registry),
+            prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+            model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+        )
+        result = await loop.run(ctx=_ctx(), skill_state=_state(registry), user_text="안녕", prompt_context_snippets=[])
+        return result.served_model
+
+    assert await _run(None) is None
+    assert await _run("gemini-3.5-flash-lite") == "gemini-3.5-flash-lite"
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_calls_core_tool_then_answers() -> None:
     registry = _registry()
     call_turn = GenerationTurn(

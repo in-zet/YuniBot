@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import logging
+
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
-from core.gemini_retry import LLM_REQUEST_TIMEOUT_SECONDS, call_with_retry, http_options
+from core.gemini_retry import (
+    DEADLINE_EXCEEDED_CODES,
+    LLM_REQUEST_TIMEOUT_SECONDS,
+    call_with_retry,
+    http_options,
+    is_retryable,
+)
 from core.llm import (
     FunctionCallRequest,
     GenerationTurn,
@@ -13,6 +22,8 @@ from core.llm import (
     ToolDeclaration,
     UsageInfo,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def to_provider_content(content: LlmContent) -> types.Content:
@@ -84,8 +95,10 @@ def _to_provider_tool(tools: list[ToolDeclaration]) -> list[types.Tool]:
 class GeminiLlmAdapter:
     """LlmAdapter 프로토콜의 유일한 실제 구현. google.genai.types를 아는 유일한 모듈이다."""
 
-    def __init__(self, *, api_key: str) -> None:
+    def __init__(self, *, api_key: str, fallback_model: str | None = None) -> None:
         self._client = genai.Client(api_key=api_key, http_options=http_options(LLM_REQUEST_TIMEOUT_SECONDS))
+        # 메인 모델이 일시 오류로 끝내 실패하면 같은 요청을 이 모델로 한 번 더 보낸다(2026-10-20).
+        self._fallback_model = fallback_model or None
 
     async def generate(
         self,
@@ -105,13 +118,29 @@ class GeminiLlmAdapter:
             thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel(thinking_level)),
         )
 
-        async def _call() -> types.GenerateContentResponse:
+        async def _call_model(name: str) -> types.GenerateContentResponse:
             return await self._client.aio.models.generate_content(
-                model=model, contents=provider_contents, config=config
+                model=name, contents=provider_contents, config=config
             )
 
-        response = await call_with_retry(_call, on_retry=on_retry)
-        return _from_provider_response(response)
+        fallback = self._fallback_model
+        if fallback is None or fallback == model:
+            response = await call_with_retry(lambda: _call_model(model), on_retry=on_retry)
+            return _from_provider_response(response)
+
+        try:
+            response = await call_with_retry(
+                lambda: _call_model(model), on_retry=on_retry, skip_retry_codes=DEADLINE_EXCEEDED_CODES
+            )
+            return _from_provider_response(response)
+        except genai_errors.APIError as exc:
+            if not is_retryable(exc):
+                raise
+            logger.warning("%s 호출이 %s로 실패해 보조 모델 %s로 넘긴다: %s", model, exc.code, fallback, exc.message)
+        response = await call_with_retry(lambda: _call_model(fallback), on_retry=on_retry)
+        turn = _from_provider_response(response)
+        turn.model = fallback
+        return turn
 
     async def aclose(self) -> None:
         await self._client.aio.aclose()

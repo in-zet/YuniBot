@@ -53,6 +53,9 @@ class GenerationTurn:
     function_calls: list[FunctionCallRequest] = field(default_factory=list)
     text: str | None = None
     usage: UsageInfo = field(default_factory=lambda: UsageInfo(input_tokens=0, output_tokens=0))
+    # 실제로 답한 모델. 보조 모델로 넘어갔을 때만 채운다(비어 있으면 요청한 모델 그대로).
+    # core/mention.py가 비용 기록에 쓴다.
+    model: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)

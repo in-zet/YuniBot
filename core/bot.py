@@ -604,7 +604,9 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
             logger.warning(
                 "GEMINI_API_KEY가 비어 있다 - 설정 전까지 모든 멘션이 실패한다"
             )
-        llm_adapter = GeminiLlmAdapter(api_key=config.gemini_api_key or "unset")
+        llm_adapter = GeminiLlmAdapter(
+            api_key=config.gemini_api_key or "unset", fallback_model=config.fallback_model or None
+        )
 
     # 호칭: 메모리의 호칭 칸 → CHUNITHM-NET 닉네임 → (멘션이면) 디스코드 서버 닉네임. 게임 쪽 닉네임은 소스로 받는다.
     address_sources: list[NicknameSource] = []

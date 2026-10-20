@@ -427,6 +427,22 @@ async def test_mention_entry_records_usage_with_configured_agent_model_not_hardc
 
 
 @pytest.mark.asyncio
+async def test_mention_entry_records_usage_with_fallback_model_when_it_answered() -> None:
+    # 보조 모델이 답한 턴은 그 모델 요금으로 기록해야 한다(월 상한 계산이 실제와 맞도록).
+    script = [
+        GenerationTurn(
+            content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답",
+            usage=UsageInfo(input_tokens=5, output_tokens=2), model="gemini-3.5-flash-lite",
+        )
+    ]
+    entry, usage = _mention_entry(script, agent_model="gemini-3.8-flash")
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_ignore, typing=_NoopTyping())
+
+    assert usage.recorded[0]["model"] == "gemini-3.5-flash-lite"
+
+
+@pytest.mark.asyncio
 async def test_dm_mention_gets_cooldown_and_usage_but_skips_monthly_cap() -> None:
     # 회귀: DM(guild_id=None)도 쿨다운/사용량 기록은 받아야 하고, 월상한 검사만 건너뛴다.
     # _CapExceededUsage는 month_total_usd를 항상 터무니없이 큰 값으로 돌려준다 — guild

@@ -30,6 +30,9 @@ class CoreConfig:
     anthropic_api_key: str = ""
     agent_model: str = "gemini-3.8-flash"
     summary_model: str = "gemini-3.5-flash-lite"
+    # 메인 모델이 일시 오류(504 등)로 끝내 실패하면 같은 요청을 이 모델로 한 번 더 보낸다. 비우면 끈다.
+    # Gemini 제공자(LLM_PROVIDER=gemini)일 때만 쓴다.
+    fallback_model: str = ""
     # websearch는 LLM_PROVIDER와 독립이다 — 메인 에이전트와 검색이 다른 제공자를 쓸 수
     # 있다(00-core.md "websearch" 서비스).
     websearch_provider: Literal["gemini", "claude"] = "gemini"
@@ -79,6 +82,7 @@ def load_config() -> CoreConfig:
     anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     agent_model = os.environ.get("AGENT_MODEL", "gemini-3.8-flash")
     summary_model = os.environ.get("SUMMARY_MODEL", "gemini-3.5-flash-lite")
+    fallback_model = os.environ.get("FALLBACK_MODEL", "").strip()
     websearch_provider_raw = os.environ.get("WEBSEARCH_PROVIDER", "gemini")
     search_model = os.environ.get("SEARCH_MODEL", "gemini-3.8-flash")
     websearch_cooldown_seconds = int(os.environ.get("WEBSEARCH_COOLDOWN_SECONDS", "15"))
@@ -101,6 +105,7 @@ def load_config() -> CoreConfig:
         anthropic_api_key=anthropic_api_key,
         agent_model=agent_model,
         summary_model=summary_model,
+        fallback_model=fallback_model,
         websearch_provider=cast("Literal['gemini', 'claude']", websearch_provider_raw),
         search_model=search_model,
         websearch_cooldown_seconds=websearch_cooldown_seconds,

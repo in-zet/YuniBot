@@ -194,6 +194,93 @@ async def test_generate_retries_deadline_exceeded_only_once(monkeypatch: pytest.
     assert fake_models.call_count == 2  # 첫 시도 + 재시도 1번
 
 
+@dataclass
+class _ModelAwareApi:
+    """모델 이름별로 정해 둔 결과(예외 또는 응답)를 돌려주고, 불린 모델 이름을 순서대로 적는다."""
+
+    outcomes: dict[str, Any]
+    called_models: list[str] = field(default_factory=list)
+
+    async def generate_content(self, **kwargs: Any) -> Any:
+        model = kwargs["model"]
+        self.called_models.append(model)
+        outcome = self.outcomes[model]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+async def _generate_with_fallback(api: _ModelAwareApi, *, fallback_model: str | None) -> Any:
+    adapter = GeminiLlmAdapter(api_key="fake", fallback_model=fallback_model)
+    adapter._client.aio._models = api  # pyright: ignore[reportAttributeAccessIssue]
+    return await adapter.generate(
+        model="main", system_instruction="규칙",
+        contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="low",
+    )
+
+
+@pytest.mark.asyncio
+async def test_deadline_exceeded_goes_straight_to_fallback_model() -> None:
+    """2026-10-20: 보조 모델이 있으면 504를 같은 모델로 다시 기다리지 않고(재시도 0) 바로 넘긴다."""
+    api = _ModelAwareApi({"main": _server_error(504), "backup": _fake_response(text="보조 답", function_call=None)})
+
+    turn = await _generate_with_fallback(api, fallback_model="backup")
+
+    assert api.called_models == ["main", "backup"]
+    assert turn.text == "보조 답"
+    assert turn.model == "backup"
+
+
+@pytest.mark.asyncio
+async def test_exhausted_503_retries_then_fallback_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("core.gemini_retry.asyncio.sleep", lambda _delay: _NoopAwaitable())
+    api = _ModelAwareApi({"main": _server_error(503), "backup": _fake_response(text="보조 답", function_call=None)})
+
+    turn = await _generate_with_fallback(api, fallback_model="backup")
+
+    assert api.called_models == ["main"] * 4 + ["backup"]  # 첫 시도 + 재시도 3번, 그다음 보조
+    assert turn.model == "backup"
+
+
+@pytest.mark.asyncio
+async def test_main_model_success_does_not_touch_fallback() -> None:
+    api = _ModelAwareApi({"main": _fake_response(text="메인 답", function_call=None)})
+
+    turn = await _generate_with_fallback(api, fallback_model="backup")
+
+    assert api.called_models == ["main"]
+    assert turn.model is None  # 요청한 모델이 그대로 답했다
+
+
+@pytest.mark.asyncio
+async def test_client_error_does_not_use_fallback_model() -> None:
+    """잘못된 요청(400)은 모델을 바꿔도 똑같이 실패한다 — 보조 모델로 넘기지 않는다."""
+    bad_request = genai_errors.ClientError(400, {"message": "bad", "status": "INVALID_ARGUMENT"})
+    api = _ModelAwareApi({"main": bad_request, "backup": _fake_response(text="x", function_call=None)})
+
+    with pytest.raises(genai_errors.ClientError):
+        await _generate_with_fallback(api, fallback_model="backup")
+    assert api.called_models == ["main"]
+
+
+@pytest.mark.asyncio
+async def test_fallback_failure_raises_the_fallback_error() -> None:
+    api = _ModelAwareApi({"main": _server_error(504), "backup": _server_error(504)})
+
+    with pytest.raises(genai_errors.ServerError):
+        await _generate_with_fallback(api, fallback_model="backup")
+    assert api.called_models == ["main", "backup", "backup"]  # 보조 모델의 504는 기존 규칙대로 한 번 재시도
+
+
+@pytest.mark.asyncio
+async def test_without_fallback_model_keeps_deadline_retry_once() -> None:
+    api = _ModelAwareApi({"main": _server_error(504)})
+
+    with pytest.raises(genai_errors.ServerError):
+        await _generate_with_fallback(api, fallback_model=None)
+    assert api.called_models == ["main", "main"]
+
+
 def test_adapters_set_request_timeout() -> None:
     """타임아웃이 없으면 모델이 멈출 때 멘션 처리가 끝없이 기다린다."""
     from core.search_gemini import GeminiSearchAdapter

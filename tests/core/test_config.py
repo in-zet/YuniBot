@@ -80,6 +80,7 @@ def test_load_config_llm_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("AGENT_MODEL", raising=False)
     monkeypatch.delenv("SUMMARY_MODEL", raising=False)
+    monkeypatch.delenv("FALLBACK_MODEL", raising=False)
     monkeypatch.delenv("THINKING_LEVEL", raising=False)
     monkeypatch.delenv("SKILL_LOADING_MODE", raising=False)
     monkeypatch.delenv("MAX_TOOL_CALLS_PER_TURN", raising=False)
@@ -87,6 +88,7 @@ def test_load_config_llm_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     config = load_config()
 
+    assert config.fallback_model == ""  # 비우면 보조 모델 없음
     assert config.gemini_api_key == ""
     assert config.agent_model == "gemini-3.8-flash"
     assert config.summary_model == "gemini-3.5-flash-lite"
@@ -101,6 +103,7 @@ def test_load_config_llm_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
     monkeypatch.setenv("AGENT_MODEL", "gemini-3.5-flash-lite")
     monkeypatch.setenv("SUMMARY_MODEL", "gemini-3.1-flash-lite")
+    monkeypatch.setenv("FALLBACK_MODEL", " gemini-3.5-flash-lite ")
     monkeypatch.setenv("THINKING_LEVEL", "high")
     monkeypatch.setenv("SKILL_LOADING_MODE", "full")
     monkeypatch.setenv("MAX_TOOL_CALLS_PER_TURN", "3")
@@ -111,6 +114,7 @@ def test_load_config_llm_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.gemini_api_key == "fake-key"
     assert config.agent_model == "gemini-3.5-flash-lite"
     assert config.summary_model == "gemini-3.1-flash-lite"
+    assert config.fallback_model == "gemini-3.5-flash-lite"
     assert config.thinking_level == "high"
     assert config.skill_loading_mode == "full"
     assert config.max_tool_calls_per_turn == 3

@@ -338,7 +338,7 @@ class MentionEntry:
         # 사용량 기록도 guild/DM을 가리지 않는다 — DM 멘션은 guild_id가 없어 쿨다운
         # 스코프와 같은 고정값을 쓴다.
         await self._usage.record(
-            guild_id=cooldown_scope, player_id=player.id, model=self._agent_model, kind="agent",
+            guild_id=cooldown_scope, player_id=player.id, model=result.served_model or self._agent_model, kind="agent",
             input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
         )
 
