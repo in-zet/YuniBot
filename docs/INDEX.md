@@ -13,7 +13,8 @@
 | `docs/conventions.md` · `docs/pitfalls.md` | 개발 규칙 · 겪은 함정 | **관리대상** |
 | `docs/design/` | 기준 설계서: `00-core.md`(코어) + `skills/<스킬>.md` 18개 | **관리대상** |
 | `docs/reference/` | CHUNITHM-NET 페이지·Chunimaru 응답 저장본 — 파서 시험이 읽는다 | **읽기전용** |
-| `docs/persona/yuni-lines/` | 유니 일본어 대사 원문(말투 튜닝 자료, 봇은 읽지 않는다) | **관리대상** |
+| `docs/persona/yuni-lines/` | 유니 일본어 대사 원문: `uni/`(유니)·`navi/`(나비)·`setting/`(설정 안내문). 말투 튜닝 자료, 봇은 읽지 않는다 | **관리대상** |
+| `docs/persona/yuni-lore.md` | 유니 설정집(우리말, 3단계 스포일러 구분). 설정을 묻는 말에 답할 때의 바탕 — 읽는 도구는 아직 없다 | **관리대상** |
 | `progress/` | 날짜별 작업 일지(`YYYY-MM-DD.md`) — 실제 작업의 유일한 확정 기록 | **관리대상** |
 | `core/` | 입구·에이전트·도구 실행기·레지스트리·이벤트·예약·LLM 어댑터 | **관리대상** |
 | `services/common/` · `services/chunithm/` | 공통 서비스 · 츄니즘 서비스(`data/terms.yaml` 포함) | **관리대상** |
