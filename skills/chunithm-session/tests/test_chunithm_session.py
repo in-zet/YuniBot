@@ -15,6 +15,7 @@ import aiosqlite
 import pytest
 
 from core.events import EventBus
+from core.tables import render_text
 from core.threads import ThreadMessage, ThreadTranscript
 from core.tool_types import ToolContext
 from services.chunithm.records import PbRow, SyncLogSummary
@@ -342,6 +343,8 @@ async def test_list_sessions_filters_by_period(skill: ModuleType, db: aiosqlite.
 
     result = await skill.list_sessions(ctx, start="2026-10-01", end="2026-10-31")
     assert [s["play_date"] for s in result.data["sessions"]] == ["2026-10-05"]
+    assert result.table is not None and result.table.row_count == 1
+    assert result.table.steps == ("세션 목록 (날짜순) 2026-10-01~2026-10-31",)
 
 
 async def test_list_sessions_empty_when_no_match(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -349,6 +352,27 @@ async def test_list_sessions_empty_when_no_match(skill: ModuleType, db: aiosqlit
     ctx = _ctx(db=db, player_id=me.id, players=players)
     result = await skill.list_sessions(ctx, start="2026-01-01", end="2026-01-31")
     assert result.data["sessions"] == []
+    assert result.table is None and result.display is not None and "없" in (result.display.content or "")
+
+
+async def test_list_sessions_table_lines_with_and_without_arcade(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    me, players = await _me(db)
+    arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", guild_id="g1", name="겜플", created_by=me.id, created_at="x")})
+    ctx = _ctx(db=db, player_id=me.id, players=players, arcades=arcades)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id, session_id="s1", play_date="2026-09-20", estimated=True))
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id, session_id="s2", play_date="2026-10-05"))
+    await arcades.record_visit("ar1", player_id=me.id, game="chunithm")
+
+    result = await skill.list_sessions(ctx)
+
+    table = result.table
+    assert table is not None and table.subject == me.id and table.unit == "세션"
+    assert [r.ref.key for r in table.rows] == ["s1", "s2"] and table.rows[0].ref.kind == "chunithm-session.session"
+    assert table.rows[0].cell("날짜").raw == "2026-09-20" and table.rows[0].cell("추정").raw == "추정"
+    lines = render_text(table).content.splitlines()
+    assert lines[-2].startswith("1. 2026-09-20 (추정)") and "겜플" not in lines[-2]
+    assert lines[-2].endswith("  갱신 1채보")
+    assert lines[-1].startswith("2. 2026-10-05  겜플  갱신 1채보")
 
 
 # ---------------------------------------------------------------- 공개 설정

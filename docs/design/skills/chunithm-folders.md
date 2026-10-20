@@ -71,7 +71,7 @@ goals와 이 스킬이 그대로 공유한다(새로 안 만든다).
 | `create_folder` | 빈 폴더 생성 | `name: str` | `/폴더 생성` | optional | never |
 | `delete_folder` | 폴더+메모+채보 통째로 삭제 | `name: str` | `/폴더 삭제` | optional | always |
 | `rename_folder` | 폴더 이름 변경 | `name, new_name: str` | `/폴더 이름변경` | optional | never |
-| `list_folders` | 내 폴더 목록(이름·채보 수·메모 유무) | 없음 | `/폴더 목록` | required | never |
+| `list_folders` | 내 폴더 목록(이름·채보 수·메모 유무) (표 반환) | 없음 | `/폴더 목록` | 표 | never |
 | `show_folder` | 폴더 안의 채보 전체 (표 반환) | `name: str` | `/폴더 보기` | 표 | never |
 | `add_chart` | 채보 한 개 추가 | `name: str, chart: ChartRef` | `/폴더 채보추가` | optional | never |
 | `remove_chart` | 채보 한 개 삭제 | `name: str, chart: ChartRef` | `/폴더 채보삭제` | optional | never |
@@ -125,3 +125,7 @@ goals와 이 스킬이 그대로 공유한다(새로 안 만든다).
 - 실기 미확인: "15.0 상수 곡 모아서 폴더 만들어줘"에 유니가 이름을 스스로 지어 생성 후
   일괄 추가까지 이어서 하는지, 대상이 많을 때 확인 버튼이 뜨는지, `/폴더` 슬래시 그룹의
   하위 명령이 디스코드에 정상 등록되는지.
+
+## 표로 바꾼 읽기 도구 (16단계 Part 4-3, 2026-10-20)
+
+`list_folders`는 표를 돌려준다(표 모양은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1). 가리키는 것 `chunithm-folders.folder` = 폴더 id. 칸 이름·채보 수·메모 유무("있음"/"없음"). 한 줄 서식은 없고 기본 출력("이름 F1  채보 수 1  메모 유무 있음")이다. 폴더가 없으면 표 없이 "폴더가 없어."만 낸다.

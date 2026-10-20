@@ -1,6 +1,7 @@
 # skills/chunithm-notes/skill.py
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -8,7 +9,9 @@ import aiosqlite
 
 from core.decorators import on, tool
 from core.events import Section
+from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.tool_types import DifficultyRef, Display, SongQuery, ToolContext, ToolResult
+from services.chunithm import table_columns as tc
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, SongRecord
 from services.chunithm.terms import ResolvedDifficulty
 
@@ -21,6 +24,12 @@ _OTHERS_LIMIT = 3
 _PLAN_LIMIT = 5
 _SONG_VIEW_ORDER = 20
 _PLAN_ORDER = 20
+
+_NOTE = "chunithm-notes.note"
+_N_BODY = "메모"
+_N_PUBLIC = "공개"
+_N_UPDATED = "수정 시각"
+_NOTE_FORMATS = ("{곡} {난이도}  ({공개})  {메모}", "{곡}  ({공개})  {메모}")
 
 
 def _difficulty_code(difficulty: DifficultyRef | None) -> str:
@@ -148,7 +157,7 @@ async def get_note(ctx: ToolContext, song: SongQuery, difficulty: DifficultyRef 
 
 @tool(slash="메모 목록")
 async def list_notes(ctx: ToolContext) -> ToolResult:
-    """내 메모 전체 목록을 보여준다."""
+    """내 메모 전체 목록을 표로 보여준다. 난이도가 빈 행은 곡 전체 메모다."""
     assert ctx.db is not None
     cursor = await ctx.db.execute(
         "SELECT song_title, difficulty, body, public, updated_at FROM notes_notes "
@@ -163,17 +172,29 @@ async def list_notes(ctx: ToolContext) -> ToolResult:
         }
         for r in rows
     ]
+    if not items:
+        return ToolResult(data={"notes": []}, display=Display(content="메모가 없어."))
 
-    def _line(i: dict[str, Any]) -> str:
-        vis = "공개" if i["public"] else "비공개"
-        return f"{_head(i['song_title'], i['difficulty'] or '')}  ({vis})  {i['body']}"
-
-    lines = [_line(i) for i in items]
-    return ToolResult(
-        data={"notes": items},
-        display=Display(content="\n".join(lines) if lines else "메모가 없어.", omittable=True),
-        display_mode="required",
-    )
+    builder = TableBuilder(subject=ctx.player_id, unit="메모")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.column(_N_BODY)
+    builder.column(_N_PUBLIC)
+    builder.column(_N_UPDATED, hidden_in_text=True)
+    builder.row_formats(_NOTE_FORMATS)
+    builder.step("내 메모 (최근 수정순)")
+    for i in items:
+        # 곡 전체 메모는 난이도가 비어 곡 단위 행이 된다.
+        builder.row(
+            RowRef(_NOTE, json.dumps([i["song_title"], i["difficulty"] or ""], ensure_ascii=False)),
+            {
+                tc.SONG: tc.song_cell(i["song_title"]),
+                tc.DIFFICULTY: tc.difficulty_cell(i["difficulty"]) if i["difficulty"] else EMPTY_CELL,
+                _N_BODY: cell(i["body"]),
+                _N_PUBLIC: cell("공개" if i["public"] else "비공개"),
+                _N_UPDATED: cell(i["updated_at"]),
+            },
+        )
+    return ToolResult(data={"notes": items}, table=builder.build())
 
 
 @tool(slash="메모 삭제", mutates=True, confirm="always")

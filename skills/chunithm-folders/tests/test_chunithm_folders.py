@@ -169,6 +169,13 @@ async def test_list_folders_shows_count_and_note_flag(skill: ModuleType, db: aio
     assert by_name["F1"]["has_note"] is True
     assert by_name["F2"]["chart_count"] == 0
     assert by_name["F2"]["has_note"] is False
+    table = result.table
+    assert table is not None and table.subject == "p1" and table.unit == "폴더"
+    assert [r.cell("이름").raw for r in table.rows] == ["F1", "F2"]  # 이름순
+    assert [r.cell("채보 수").raw for r in table.rows] == [1, 0]
+    assert [r.cell("메모 유무").text for r in table.rows] == ["있음", "없음"]
+    assert all(r.ref.kind == "chunithm-folders.folder" for r in table.rows)
+    assert render_text(table).content.splitlines()[-2] == "1. 이름 F1  채보 수 1  메모 유무 있음"
 
 
 async def test_show_folder_includes_note_and_charts_with_const(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -363,6 +370,8 @@ async def test_save_table_dry_run_writes_nothing_and_reports_count(skill: Module
 
     assert preview.data["count"] == 2
     assert (await skill.list_folders(ctx)).data["folders"] == []
+    empty = await skill.list_folders(ctx)
+    assert empty.table is None and empty.display is not None and empty.display.content == "폴더가 없어."
 
 
 async def test_save_table_through_executor_drops_rows_without_chart_and_asks_confirm(

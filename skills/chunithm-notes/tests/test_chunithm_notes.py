@@ -11,6 +11,7 @@ import aiosqlite
 import pytest
 
 from core.events import EventBus
+from core.tables import render_text
 from core.tool_types import ToolContext
 from services.chunithm.songdb import SongDbService
 from services.chunithm.terms import ResolvedDifficulty
@@ -218,6 +219,14 @@ async def test_list_notes_returns_only_own_notes(skill: ModuleType, db: aiosqlit
     assert result.error is None
     assert len(result.data["notes"]) == 1
     assert result.data["notes"][0]["body"] == "메모1"
+    assert result.table is not None and result.table.subject == "p1" and result.table.row_count == 1
+
+
+async def test_list_notes_empty_is_a_message(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    result = await skill.list_notes(_ctx(db=db, player_id="p1"))
+
+    assert result.table is None and result.display is not None and result.display.content == "메모가 없어."
+    assert result.data["notes"] == []
 
 
 async def test_whole_song_note_and_per_difficulty_note_coexist(
@@ -241,6 +250,15 @@ async def test_whole_song_note_and_per_difficulty_note_coexist(
     assert listed.error is None
     by_difficulty = {n["difficulty"]: n["body"] for n in listed.data["notes"]}
     assert by_difficulty == {None: "곡 전체 메모", "MAS": "마스 전용 메모"}
+    # 표: 곡 전체 메모는 난이도가 빈 곡 단위 행이고, 두 행의 가리키는 것이 서로 다르다.
+    assert listed.table is not None
+    whole_row, mas_row = sorted(listed.table.rows, key=lambda r: r.cell("난이도").filled)
+    assert not whole_row.cell("난이도").filled and mas_row.cell("난이도").text == "MAS"
+    assert whole_row.ref != mas_row.ref and whole_row.ref.kind == "chunithm-notes.note"
+    lines = render_text(listed.table).content.splitlines()
+    assert "B.B.K.K.B.K.K. MAS  (비공개)  마스 전용 메모" in "\n".join(lines)
+    assert "B.B.K.K.B.K.K.  (비공개)  곡 전체 메모" in "\n".join(lines)
+    assert "수정 시각" not in "\n".join(lines)
 
     # get_note: 난이도를 비우고 물으면 곡 전체 메모만, MAS로 물으면 MAS 메모만 나온다
     # (서로 섞이거나 한쪽이 안 보이면 안 된다).

@@ -12,12 +12,22 @@ import aiosqlite
 
 from core.decorators import on, tool
 from core.events import Section
+from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.threads import ThreadTranscript
 from core.tool_types import ArcadeRef, Display, PlayerRef, ToolContext, ToolResult
 from services.common.arcades import Arcade
 from services.common.players import Player
 
 _GAME = "chunithm"
+_SESSION = "chunithm-session.session"
+_S_DATE = "날짜"
+_S_ESTIMATED = "추정"
+_S_ARCADE = "오락실"
+_S_UPDATED = "갱신 채보 수"
+_SESSION_FORMATS = (
+    "{날짜}  {오락실}  갱신 {갱신 채보 수}채보",
+    "{날짜}  갱신 {갱신 채보 수}채보",
+)
 _SYNC_REPORT_KIND = "sync_report"
 _UNKNOWN = "계산 불가"
 _PRIVATE_ERROR = "그 사람은 기록을 비공개로 해 놨어."
@@ -188,7 +198,18 @@ async def list_sessions(
 
     arcade_cache: dict[str, str | None] = {}
     items: list[dict[str, Any]] = []
-    lines: list[str] = []
+    builder = TableBuilder(subject=target.id, unit="세션")
+    builder.column(_S_DATE)
+    builder.column(_S_ESTIMATED, hidden_in_text=True)
+    builder.column(_S_ARCADE)
+    builder.column(_S_UPDATED, value_type="number")
+    builder.row_formats(_SESSION_FORMATS)
+    conditions_text = [
+        "세션 목록 (날짜순)",
+        *([f"{start or ''}~{end or ''}"] if start is not None or end is not None else []),
+        *([arcade.name] if arcade is not None else []),
+    ]
+    builder.step(" ".join(conditions_text))
     for r in rows:
         play_date = r["play_date"]
         updated_count = _updated_count_for(json.loads(r["sections_data"]), r["session_id"])
@@ -199,19 +220,24 @@ async def list_sessions(
                 found = await ctx.arcades.get(arcade_id)
                 arcade_cache[arcade_id] = found.name if found is not None else None
             arcade_name = arcade_cache[arcade_id]
+        estimated = bool(r["estimated"])
         items.append(
             {
-                "session_id": r["session_id"], "play_date": play_date, "estimated": bool(r["estimated"]),
+                "session_id": r["session_id"], "play_date": play_date, "estimated": estimated,
                 "arcade": arcade_name, "updated_count": updated_count,
             }
         )
-        suffix = " (추정)" if r["estimated"] else ""
-        arcade_part = f"  {arcade_name}" if arcade_name else ""
-        lines.append(f"{play_date}{suffix}{arcade_part}  갱신 {updated_count}채보")
+        builder.row(
+            RowRef(_SESSION, r["session_id"]),
+            {
+                _S_DATE: cell(play_date, f"{play_date} (추정)" if estimated else play_date),
+                _S_ESTIMATED: cell("추정" if estimated else "아님"),
+                _S_ARCADE: cell(arcade_name) if arcade_name else EMPTY_CELL,
+                _S_UPDATED: cell(updated_count),
+            },
+        )
 
-    return ToolResult(
-        data={"player_id": target.id, "sessions": items}, display=Display(content="\n".join(lines), omittable=True)
-    )
+    return ToolResult(data={"player_id": target.id, "sessions": items}, table=builder.build())
 
 
 @tool(slash="세션 보기")

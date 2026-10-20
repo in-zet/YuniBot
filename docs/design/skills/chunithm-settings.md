@@ -48,7 +48,7 @@ tags: [chunithm-linked]
 | --- | --- | --- | --- | --- | --- |
 | `current_settings` | 지금 계정의 인게임 설정을 바로 읽어 보여줌(저장 안 함) | 없음 | `/현재설정` | required | never |
 | `change_settings` | 말한 항목만 바꾸고 전체 반영 결과를 보여줌 | 다섯 항목 전부 `str \| None = None` | `/게임설정 변경` | required | never |
-| `list_favorites` | 즐겨찾기 곡 목록(제목) | 없음 | `/즐겨찾기 목록` | required | never |
+| `list_favorites` | 즐겨찾기 곡 목록(제목) (표 반환) | 없음 | `/즐겨찾기 목록` | 표 | never |
 | `add_favorite` | 즐겨찾기에 곡 추가 | `song: SongQuery` | `/즐겨찾기 추가` | optional | never |
 | `remove_favorite` | 즐겨찾기에서 곡 삭제 | `song: SongQuery` | `/즐겨찾기 삭제` | optional | never |
 
@@ -80,3 +80,7 @@ tags: [chunithm-linked]
 - `chunithm-arcade`의 `current_settings`(오락실에 안 묶인, 지금 계정을 바로 읽기만 하던 도구)를 이 스킬로 옮겼다. 표시 포맷 도우미(`FIELD_LABELS`, `named_from_settings`, `settings_line`)도 두 스킬이 같이 쓰도록 `services/chunithm/arcade_settings.py`로 옮겼다 — 스킬마다 복사하지 않는다(`docs/conventions.md` "공통 로직" 원칙).
 - 설정 변경 POST(`/mobile/home/userOption/updateUserOption/update/`)는 CSRF 토큰이 아니라 `_t` 쿠키값(`adapter._token`, 기존에 다른 third_party 쓰기 메서드들도 쓰는 값)을 폼 필드 `token`으로 실어 보낸다. `ChunithmNetAdapterLike` Protocol에 `_token` 프로퍼티와 `get_favorite_music`/`set_favorite_music`을 추가해 서비스가 이 값에 접근한다.
 - `SongRecord`에 `id: int`(SEGA 내부 musicId)를 새로 더했다 — 기존에 이 필드가 없는 테스트 픽스처(`chunithm-border`·`chunithm-sync`·`chunithm-goals`·`chunithm-report`·`songdb` 자체 테스트)는 자리표시용 id를 넣어 맞췄다. Chunimaru 전용(로컬 시드에 없는) 신곡은 그 응답의 `idx` 필드를 id로 쓴다.
+
+## 표로 바꾼 읽기 도구 (16단계 Part 4-3, 2026-10-20)
+
+`list_favorites`는 표를 돌려준다(표 모양은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1). 곡 단위 행(`chunithm.song`, 키 = 정식 제목), 칸 곡·곡 이름(원문)·작곡가·버전. 곡 DB에 없는 id는 곡 칸을 비우고 곡 이름(원문)에 "(모르는 곡 id N)"을 적으며, 가리키는 것은 `chunithm-settings.unknown_song`(키 = id)이다. `data`의 `titles`는 그대로 둔다.

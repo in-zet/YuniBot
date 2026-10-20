@@ -10,6 +10,7 @@ import pytest
 from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.events import EventBus
+from core.tables import render_text
 from core.tool_types import ToolContext
 from services.chunithm.arcade_settings import ArcadeSettings
 from services.chunithm.songdb import SongRecord
@@ -190,6 +191,13 @@ async def test_list_favorites_resolves_titles_by_id(skill: ModuleType) -> None:
 
     assert result.error is None
     assert result.data["titles"] == ["B.B.K.K.B.K.K.", "(모르는 곡 id 999)"]
+    table = result.table
+    assert table is not None and table.unit == "곡"
+    known, unknown = table.rows
+    assert known.ref.kind == "chunithm.song" and known.cell("곡").raw == "B.B.K.K.B.K.K."
+    assert not unknown.cell("곡").filled  # 곡 칸이 필요한 도구에서는 빠진다
+    assert unknown.cell("곡 이름(원문)").text == "(모르는 곡 id 999)"
+    assert render_text(table).content.splitlines()[-1] == "2. 곡 이름(원문) (모르는 곡 id 999)"
 
 
 async def test_list_favorites_empty(skill: ModuleType) -> None:
@@ -199,6 +207,7 @@ async def test_list_favorites_empty(skill: ModuleType) -> None:
 
     assert result.error is None
     assert result.data["titles"] == []
+    assert result.table is None and result.display is not None
 
 
 # ---------------------------------------------------------------- add_favorite / remove_favorite

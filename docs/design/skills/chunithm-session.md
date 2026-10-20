@@ -103,7 +103,7 @@ emits: [chunithm.session.closed, chunithm.session.viewed]
 
 | 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
 | --- | --- | --- | --- | --- | --- |
-| `list` | 세션 목록 | 날짜 또는 기간, `arcade: ArcadeRef`(선택), `player: PlayerRef` | `/세션 목록` | required | never |
+| `list` | 세션 목록 (표 반환) | 날짜 또는 기간, `arcade: ArcadeRef`(선택), `player: PlayerRef` | `/세션 목록` | 표 | never |
 | `get` | 세션 하나 불러오기(후기 포함) | 날짜, `arcade: ArcadeRef`(선택), `latest: bool`, `player: PlayerRef` | `/세션 보기` | required | never |
 | `review_open` | 후기 스레드 열기 | 날짜(기본 최근) | `/후기` | optional | never |
 | `delete` | 내 세션 지우기 | 날짜 또는 기간 | `/세션 삭제` | optional | always |
@@ -171,3 +171,7 @@ emits: [chunithm.session.closed, chunithm.session.viewed]
 - **저장.** `session_reviews`(`migrations/002_reviews.sql`)에 전문(유니와 플레이어의 말, 시각)을 JSON으로 그대로 저장한다. 상태는 플레이어가 한마디라도 했으면 완료(봇이 꺼져 닫혔으면 중단), 아니면 넘김. 같은 세션에 다시 남기면 메시지를 뒤에 잇고(넘김은 기존 후기를 건드리지 않는다), 세션을 지우면 후기도 지운다(외래키가 꺼져 있어 코드가 지운다). 저장 뒤 `chunithm.session.closed`(플레이어, 세션 id, 저장 여부, 상태, 닫힌 이유, 전문 글)를 낸다.
 - **보기.** `get_session`이 본인에게만 후기를 붙인다(길면 앞 600자). 공개로 바꾸는 버튼과 "전체 보기" 버튼은 아직 없다(후기는 항상 비공개).
 - 전문의 유니 발언은 코어 `ThreadMessage.is_yuni`로 구분하며, 메모리 요약 대기 목록에는 플레이어 글만 들어간다.
+
+## 표로 바꾼 읽기 도구 (16단계 Part 4-3, 2026-10-20)
+
+`list`(코드 이름 `list_sessions`)는 표를 돌려준다(표 모양·서식은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2). 가리키는 것 `chunithm-session.session` = 세션 id. 칸 날짜·추정(글자 출력에서 숨김)·오락실·갱신 채보 수. 추정 세션은 날짜 칸의 보일 글자에 " (추정)"이 붙는다. 오락실을 모르는 세션은 두 번째 서식으로 오락실 없이 그려진다. 과정(steps)에 기간·오락실 조건이 붙는다. 세션이 없으면 표 없이 문장만 낸다. `data`의 `sessions`는 그대로 둔다.

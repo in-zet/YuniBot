@@ -4,7 +4,9 @@ from __future__ import annotations
 from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.decorators import tool
+from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.tool_types import Display, SongQuery, ToolContext, ToolResult
+from services.chunithm import table_columns as tc
 from services.chunithm.arcade_settings import (
     FIELD_LABELS,
     named_from_settings,
@@ -12,6 +14,7 @@ from services.chunithm.arcade_settings import (
 )
 from services.chunithm.songdb import SongRecord
 
+_UNKNOWN_SONG = "chunithm-settings.unknown_song"
 _CHANGEABLE_FIELDS = ("speed", "field_wall_position", "play_timing_offset", "judge_timing_offset", "guide_sound")
 
 
@@ -82,7 +85,7 @@ async def change_settings(
 
 @tool(slash="즐겨찾기 목록", cost="network")
 async def list_favorites(ctx: ToolContext) -> ToolResult:
-    """지금 즐겨찾기로 등록된 곡 목록을 보여준다."""
+    """지금 즐겨찾기로 등록된 곡 목록을 표로 보여준다."""
     try:
         ids = await ctx.chunithm_net.get_favorite_music(ctx.player_id, ctx=ctx)
     except ConnectionError:
@@ -95,11 +98,24 @@ async def list_favorites(ctx: ToolContext) -> ToolResult:
     if not ids:
         return ToolResult(data={"titles": []}, display=Display(content="즐겨찾기에 등록된 곡이 없어."))
 
-    titles = [song.title if (song := ctx.songdb.by_id(i)) is not None else f"(모르는 곡 id {i})" for i in ids]
-    return ToolResult(
-        data={"titles": titles},
-        display=Display(content="즐겨찾기 곡:\n" + "\n".join(titles)),
-    )
+    titles: list[str] = []
+    builder = TableBuilder(unit="곡")
+    tc.add_columns(builder, tc.SONG, tc.SONG_RAW_NAME, tc.ARTIST, tc.VERSION)
+    builder.step("즐겨찾기")
+    for music_id in ids:
+        song = ctx.songdb.by_id(music_id)
+        if song is None:
+            # 곡 DB에 없는 곡은 곡 칸을 비우고 원문 칸에 id를 적는다(곡 칸이 필요한 도구에서는 빠진다).
+            unknown = f"(모르는 곡 id {music_id})"
+            titles.append(unknown)
+            builder.row(
+                RowRef(_UNKNOWN_SONG, str(music_id)),
+                {tc.SONG: EMPTY_CELL, tc.SONG_RAW_NAME: cell(unknown)},
+            )
+            continue
+        titles.append(song.title)
+        builder.row(tc.song_ref(song.title), tc.song_cells(song, (tc.SONG, tc.ARTIST, tc.VERSION)))
+    return ToolResult(data={"titles": titles}, table=builder.build())
 
 
 @tool(slash="즐겨찾기 추가", cost="network", mutates=True)

@@ -7,7 +7,7 @@ from typing import Annotated, Any
 import aiosqlite
 
 from core.decorators import tool
-from core.tables import TableBuilder, TableNeeds, WorkTable
+from core.tables import RowRef, TableBuilder, TableNeeds, WorkTable, cell
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -22,6 +22,10 @@ from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, ConstRangeHit
 from services.chunithm.terms import ResolvedDifficulty
 
 _GAME = "chunithm"
+_FOLDER = "chunithm-folders.folder"
+_F_NAME = "이름"
+_F_COUNT = "채보 수"
+_F_NOTE = "메모 유무"
 # 일괄 추가/삭제 결과를 말로 늘어놓을 때 자르는 개수. 조건에 따라 대상이 백 개 가까이
 # 나올 수 있어(예: 특정 레벨 전체), 전부 쓰면 디스코드 메시지가 과하게 길어진다.
 _DISPLAY_LIMIT = 15
@@ -183,28 +187,30 @@ async def rename_folder(ctx: ToolContext, name: str, new_name: str) -> ToolResul
 
 @tool(slash="폴더 목록")
 async def list_folders(ctx: ToolContext) -> ToolResult:
-    """내 폴더 목록(이름, 채보 수, 메모 유무)을 보여준다."""
+    """내 폴더 목록(이름, 채보 수, 메모 유무)을 표로 보여준다."""
     assert ctx.db is not None
     cursor = await ctx.db.execute(
         "SELECT id, name, note FROM folders_folders WHERE player_id = ? AND game = ? ORDER BY name",
         (ctx.player_id, _GAME),
     )
     rows: list[aiosqlite.Row] = list(await cursor.fetchall())
+    if not rows:
+        return ToolResult(data={"folders": []}, display=Display(content="폴더가 없어."))
     items: list[dict[str, Any]] = []
+    builder = TableBuilder(subject=ctx.player_id, unit="폴더")
+    builder.column(_F_NAME)
+    builder.column(_F_COUNT, value_type="number")
+    builder.column(_F_NOTE)
+    builder.step("내 폴더 (이름순)")
     for row in rows:
         count = await _chart_count(ctx, row["id"])
-        items.append({"name": row["name"], "chart_count": count, "has_note": row["note"] is not None})
-
-    def _line(i: dict[str, Any]) -> str:
-        suffix = " (메모 있음)" if i["has_note"] else ""
-        return f"{i['name']}  채보 {i['chart_count']}개{suffix}"
-
-    lines = [_line(i) for i in items]
-    return ToolResult(
-        data={"folders": items},
-        display=Display(content="\n".join(lines) if lines else "폴더가 없어.", omittable=True),
-        display_mode="required",
-    )
+        has_note = row["note"] is not None
+        items.append({"name": row["name"], "chart_count": count, "has_note": has_note})
+        builder.row(
+            RowRef(_FOLDER, row["id"]),
+            {_F_NAME: cell(row["name"]), _F_COUNT: cell(count), _F_NOTE: cell("있음" if has_note else "없음")},
+        )
+    return ToolResult(data={"folders": items}, table=builder.build())
 
 
 @tool(slash="폴더 보기")
