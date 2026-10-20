@@ -628,7 +628,7 @@ async def promise_list(ctx: ToolContext) -> ToolResult:
     rows = await _open_promises(_db(ctx), ctx.player_id, limit=_OPEN_PROMISE_CAP)
     if not rows:
         return ToolResult(
-            data={"promises": []}, display=Display(content="열린 약속이 없어."), display_mode="optional"
+            data={"count": 0}, display=Display(content="열린 약속이 없어."), display_mode="optional"
         )
     today = _today()
     items = [
@@ -657,8 +657,7 @@ async def promise_list(ctx: ToolContext) -> ToolResult:
                 _PROMISE_ID: cell(item["id"]),
             },
         )
-    # 약속 id(`promises`)는 Part 6에서 `promise_close`가 표를 받게 될 때까지 모델이 약속을 닫는 데 쓴다.
-    return ToolResult(data={"promises": items}, table=builder.build())
+    return ToolResult(data={"count": len(items)}, table=builder.build())
 
 
 @tool(mutates=True)

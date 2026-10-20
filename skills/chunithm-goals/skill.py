@@ -876,8 +876,7 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
     # 목표의 public은 목표 정의만 공개한다. 진행값은 그 사람의 records_public을 따른다.
     show_progress = await _progress_visible(ctx, target.id)
     if not rows:
-        return ToolResult(data={"player_id": target.id, "goals": []}, display=Display(content="목표가 없어."))
-    items: list[dict[str, Any]] = []
+        return ToolResult(data={"player_id": target.id, "count": 0}, display=Display(content="목표가 없어."))
     builder = TableBuilder(subject=target.id, unit="목표")
     # 줄에는 목표·상태·진행·기한만 보인다(나머지는 거르기·정렬용).
     builder.column(_G_KIND, hidden_in_text=True)
@@ -894,19 +893,9 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
     builder.step(f"목표 목록{'' if kind is None else f' ({_KIND_LABELS[kind.value]})'}")
     for r in rows:
         summary = await _goal_summary(ctx, r) if show_progress else _hidden_summary()
-        items.append(
-            {
-                "goal_id": r.id, "kind": r.kind, "target_ref": r.target_ref, "target_value": r.target_value,
-                "baseline_value": r.baseline_value if show_progress else None, "status": r.status, "due_at": r.due_at,
-                "duration_tag": r.duration_tag, "public": r.public, **summary,
-            }
-        )
         builder.row(RowRef(_GOAL, r.id), _goal_cells(r, summary))
-    return ToolResult(
-        # 목표 id(`goals`)는 Part 6에서 id를 받는 도구가 표를 받게 될 때까지 모델이 수정·진행·삭제에 쓴다.
-        data={"player_id": target.id, "goals": items},
-        table=builder.build(),
-    )
+    # 목표 id와 값은 표에만 있다(모델은 표 요약과 `table_peek`으로 본다).
+    return ToolResult(data={"player_id": target.id, "count": len(rows)}, table=builder.build())
 
 
 @tool(slash="목표 수정", mutates=True)
@@ -1220,7 +1209,7 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
         items.sort(key=lambda i: (i["const"] is None, -(i["const"] or 0.0)))
 
     if not items:
-        return ToolResult(data={"todos": []}, display=Display(content="투두가 없어."))
+        return ToolResult(data={"count": 0}, display=Display(content="투두가 없어."))
     builder = TableBuilder(subject=ctx.player_id, unit="투두")
     tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE)
     builder.column(_T_TARGET_SCORE, value_type="ScoreRef")
@@ -1250,11 +1239,7 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
                 _G_ID: cell(i["goal_id"]),
             },
         )
-    return ToolResult(
-        # 투두 id(`todos`)는 Part 6에서 id를 받는 도구가 표를 받게 될 때까지 모델이 완료·삭제에 쓴다.
-        data={"todos": items},
-        table=builder.build(),
-    )
+    return ToolResult(data={"count": len(items)}, table=builder.build())
 
 
 @tool(slash="투두 완료", mutates=True)

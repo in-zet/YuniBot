@@ -392,7 +392,7 @@ async def test_promise_lifecycle(skill: ModuleType, db: aiosqlite.Connection) ->
     assert saved.data["text"] == "다음엔 크로노 연습할게"
 
     listed = await skill.promise_list(_ctx(db))
-    assert [p["text"] for p in listed.data["promises"]] == ["다음엔 크로노 연습할게"]
+    assert listed.data == {"count": 1}  # 약속 id는 표에만 있다
     table = listed.table
     assert table is not None and table.subject == "p1" and table.unit == "약속"
     [row] = table.rows
@@ -404,7 +404,7 @@ async def test_promise_lifecycle(skill: ModuleType, db: aiosqlite.Connection) ->
 
     closed = await skill.promise_close(_ctx(db), promise_id=saved.data["id"])
     assert closed.error is None
-    assert (await skill.promise_list(_ctx(db))).data["promises"] == []
+    assert (await skill.promise_list(_ctx(db))).data == {"count": 0}
 
 
 async def test_the_same_open_promise_is_not_saved_twice(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -426,7 +426,7 @@ async def test_promise_tools_only_touch_the_players_own_promises(skill: ModuleTy
     saved = await skill.promise_set(_ctx(db, player_id="p1"), text="내 약속")
 
     assert (await skill.promise_close(_ctx(db, player_id="p2"), promise_id=saved.data["id"])).error is not None
-    assert (await skill.promise_list(_ctx(db, player_id="p2"))).data["promises"] == []
+    assert (await skill.promise_list(_ctx(db, player_id="p2"))).data == {"count": 0}
 
 
 async def test_dropping_a_promise_is_not_the_same_as_keeping_it(skill: ModuleType, db: aiosqlite.Connection) -> None:
