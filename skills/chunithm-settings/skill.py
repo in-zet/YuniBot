@@ -5,7 +5,11 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.decorators import tool
 from core.tool_types import Display, SongQuery, ToolContext, ToolResult
-from services.chunithm.arcade_settings import FIELD_LABELS, named_from_settings, settings_line
+from services.chunithm.arcade_settings import (
+    FIELD_LABELS,
+    named_from_settings,
+    settings_line,
+)
 from services.chunithm.songdb import SongRecord
 
 _CHANGEABLE_FIELDS = ("speed", "field_wall_position", "play_timing_offset", "judge_timing_offset", "guide_sound")
