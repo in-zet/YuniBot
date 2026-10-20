@@ -21,6 +21,7 @@ from core.player_data import PlayerDataScanner
 from core.resolvers import ResolutionError, ResolverRegistry
 from core.scheduler import Scheduler
 from core.schema import build_arg_schema
+from core.tables import TableStore
 from core.tool_types import ToolContext, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ class ToolExecutor:
         player_data: PlayerDataScanner | None = None,
         settings: SkillToggleProvider | None = None,
         scheduler: Scheduler | None = None,
+        tables: TableStore | None = None,
     ) -> None:
         self._resolvers = resolvers
         self._tag_provider = tag_provider
@@ -78,6 +80,7 @@ class ToolExecutor:
         self._player_data = player_data
         self._settings = settings
         self._scheduler = scheduler
+        self._tables = tables
         self._pending: dict[str, _PendingConfirm] = {}
 
     @property
@@ -101,6 +104,10 @@ class ToolExecutor:
     @property
     def scheduler(self) -> Scheduler | None:
         return self._scheduler
+
+    @property
+    def tables(self) -> TableStore | None:
+        return self._tables
 
     @property
     def settings(self) -> SkillToggleProvider | None:

@@ -291,7 +291,7 @@ class MentionEntry:
         tags = await self._players.tags_for(player.id)
         ctx = ToolContext(
             player_id=player.id, tags=frozenset(tags), services={}, guild_id=guild_id, usage=self._usage,
-            event_bus=self._event_bus,
+            event_bus=self._event_bus, channel_id=trigger.channel_id,
         )
         # self._skill_loading_mode는 생성자에서 str로 받는다(core/config.py의 CoreConfig는
         # Literal["instructions", "full"]이지만, MentionEntry의 공개 인터페이스를 core/skill_loading에

@@ -76,6 +76,7 @@ class EventBus:
         self._settings: SkillToggleProvider | None = None
         self._db: Any = None
         self._scheduler: Any = None
+        self._tables: Any = None
 
     def bind_dispatch(
         self,
@@ -85,6 +86,7 @@ class EventBus:
         settings: SkillToggleProvider | None,
         db: Any = None,
         scheduler: Any = None,
+        tables: Any = None,
     ) -> None:
         """build_client()가 services/players/settings_service를 다 만든 뒤 한 번 부른다.
 
@@ -104,6 +106,7 @@ class EventBus:
         self._settings = settings
         self._db = db
         self._scheduler = scheduler
+        self._tables = tables
 
     def register_notify(
         self,
@@ -180,6 +183,7 @@ class EventBus:
             event_bus=self,
             db=self._db if "db" in handler.skill_services else None,
             scheduler=self._scheduler if "scheduler" in handler.skill_services else None,
+            tables=self._tables if "tables" in handler.skill_services else None,
         )
 
     async def emit_notify(

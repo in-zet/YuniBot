@@ -122,7 +122,7 @@ skills/chunithm-border/
 | `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 함께한 기록, 관리, 폴더, 유니 설정 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
 | `game` | 예 | `chunithm` 또는 `common`. 다른 게임을 붙일 때 묶는 단위다. |
 | `version` | 예 | 스킬 버전. 바꾼 것을 추적한다. |
-| `services` | 예 | 쓰는 서비스 목록. 예: `songdb`, `chunithm_net`, `players`. 선언하지 않은 서비스는 못 쓴다. 코어 전용 맥락(`db` 원시 DB 연결, `player_data` 스킬 테이블 전체의 플레이어 데이터 집계·삭제, `registry_snapshot` 스킬 등록 현황, `usage` LLM 사용량)도 같은 방식으로 여기 적어야 받는다(account-link, admin처럼 꼭 필요한 공통 스킬만). |
+| `services` | 예 | 쓰는 서비스 목록. 예: `songdb`, `chunithm_net`, `players`. 선언하지 않은 서비스는 못 쓴다. 코어 전용 맥락(`db` 원시 DB 연결, `player_data` 스킬 테이블 전체의 플레이어 데이터 집계·삭제, `registry_snapshot` 스킬 등록 현황, `usage` LLM 사용량, `tables` 작업 표 보관소 — 동기화 저장 뒤 `mark_stale`을 부르는 스킬만)도 같은 방식으로 여기 적어야 받는다(account-link, admin처럼 꼭 필요한 공통 스킬만). |
 | `tags` | 아니오 | 이 스킬을 쓰는 데 필요한 권한 태그. 없으면 누구나 쓴다. 예: `[chunithm-linked]`, `[admin]`. |
 | `defines_tags` | 아니오 | 이 스킬이 새로 정의하는 태그(이름, 설명, 얻는 방법, 없을 때 숨길지). |
 | `emits` / `listens` | 아니오 | 내는 이벤트와 받는 이벤트 이름. |

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,7 @@ from core.search_claude import ClaudeSearchAdapter
 from core.search_gemini import GeminiSearchAdapter
 from core.settings_slash import build_settings_group
 from core.slash import attach_to_tree, build_slash_plan
+from core.tables import TableStore
 from core.thread_memory import queue_thread_memory
 from core.thread_view import ThreadEndView
 from core.threads import ThreadManager, ThreadSession, ThreadTranscript
@@ -141,6 +143,7 @@ class YuniClient(discord.Client):
         memory_flush: Callable[[float], Awaitable[None]] | None = None,
         threads: ThreadManager | None = None,
         housekeeping: Callable[[float], Awaitable[None]] | None = None,
+        tables: TableStore | None = None,
     ) -> None:
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
@@ -161,6 +164,8 @@ class YuniClient(discord.Client):
         self._threads = threads
         # 오래된 대화 상태 정리처럼 폴링 때마다 돌리는 잡일(epoch 초를 받는다).
         self._housekeeping = housekeeping
+        # 24시간 지난 작업 표를 폴링 때마다 지운다.
+        self._tables = tables
 
     async def setup_hook(self) -> None:
         assert self.user is not None  # setup_hook은 로그인 뒤에만 불린다(discord.py의 보장)
@@ -197,6 +202,8 @@ class YuniClient(discord.Client):
                 await self._housekeeping(datetime.datetime.now().timestamp())  # noqa: DTZ005 - 멘션 경로의 now.timestamp()와 같은 서버 로컬 시간 기준
             except Exception:
                 logger.warning("대화 상태 정리 실패, 다음 틱에 다시 시도한다", exc_info=True)
+        if self._tables is not None:
+            self._tables.expire(time.time())
         if self._memory_flush is not None:
             try:
                 await self._memory_flush(datetime.datetime.now().timestamp())  # noqa: DTZ005 - 멘션 경로의 now.timestamp()와 같은 서버 로컬 시간 기준
@@ -487,6 +494,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     # executor/event_bus보다 먼저 만든다 — 둘 다 생성 시점에 scheduler를 받아야 스킬이
     # ctx.scheduler로 예약을 걸거나 취소할 수 있다(아래).
     scheduler = Scheduler(conn, quiet_start=config.quiet_hours_start, quiet_end=config.quiet_hours_end)
+    table_store = TableStore()
 
     players = PlayersService(conn)
     await _sync_admin_bootstrap(players, config.admin_discord_ids)
@@ -542,12 +550,14 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         player_data=player_data,
         settings=settings_service,
         scheduler=scheduler,
+        tables=table_store,
     )
     # services는 이 시점에 아직 notify/yuni/usage/http가 없지만, 같은 dict 객체를 그대로
     # 들고 있는다 — build_client()가 뒤에서 그 dict를 더 채우면(아래) EventBus도 같은
     # 참조를 보므로 최신 상태를 보게 된다(services 프로퍼티의 주석과 같은 이유).
     event_bus.bind_dispatch(
         services=services, tag_provider=players, settings=settings_service, db=conn, scheduler=scheduler,
+        tables=table_store,
     )
 
     # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야
@@ -697,6 +707,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         skill_loading_mode=config.skill_loading_mode,
         scheduler=scheduler, schedule_fns=schedule_fns, services=services, event_bus=event_bus,
         player_data=player_data, memory_flush=flush_memory, threads=thread_manager, housekeeping=housekeeping,
+        tables=table_store,
     )
     client_holder.append(client)
 

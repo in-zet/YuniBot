@@ -331,6 +331,7 @@ async def _player_context(
         usage=executor.services.get("usage") if "usage" in declared else None,  # pyright: ignore[reportArgumentType]
         discord_id=discord_id,
         scheduler=executor.scheduler if "scheduler" in declared else None,
+        tables=executor.tables if "tables" in declared else None,
     )
     return ctx, is_new_player
 

@@ -11,6 +11,7 @@ from core.events import EventBus, Section
 from core.player_data import PlayerDataScanner
 from core.registry_snapshot import RegistrySnapshot
 from core.scheduler import Scheduler
+from core.tables import TableStore
 from core.usage import UsageService
 
 
@@ -37,6 +38,10 @@ class ToolContext:
     usage: UsageService | None = None
     discord_id: str | None = None
     scheduler: Scheduler | None = None
+    # 작업 표 보관소. 스킬은 동기화 저장 뒤 mark_stale을 부르는 데만 쓴다.
+    tables: TableStore | None = None
+    # 요청이 온 채널(대화 스레드면 스레드) id. 슬래시는 표를 보관하지 않으므로 None이다.
+    channel_id: str | None = None
 
     def __getattr__(self, name: str) -> Any:
         # dataclass가 정의한 필드(player_id, tags, services)는 정상 __getattribute__로 먼저 해석되므로

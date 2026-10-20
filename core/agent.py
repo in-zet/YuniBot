@@ -173,6 +173,8 @@ class AgentLoop:
             usage=ctx.usage,
             discord_id=ctx.discord_id,
             scheduler=ctx.scheduler,
+            tables=ctx.tables,
+            channel_id=ctx.channel_id,
         )
 
         prompt_context_snippets = [*prompt_context_snippets, *await self._skill_prompt_snippets(ctx)]
@@ -383,6 +385,8 @@ class AgentLoop:
                 usage=ctx.usage,
                 discord_id=ctx.discord_id,
                 scheduler=ctx.scheduler,
+                tables=self._executor.tables,
+                channel_id=ctx.channel_id,
             )
 
         declared = set(declared_services)
@@ -401,4 +405,6 @@ class AgentLoop:
             usage=self._executor.services.get("usage") if "usage" in declared else None,  # pyright: ignore[reportArgumentType]
             discord_id=ctx.discord_id,
             scheduler=self._executor.scheduler if "scheduler" in declared else None,
+            tables=self._executor.tables if "tables" in declared else None,
+            channel_id=ctx.channel_id,
         )

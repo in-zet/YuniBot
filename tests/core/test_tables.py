@@ -5,10 +5,12 @@ import dataclasses
 import pytest
 
 from core.tables import (
+    TABLE_TTL_SECONDS,
     Cell,
     RowRef,
     TableBuilder,
     TableError,
+    TableStore,
     WorkTable,
     cell,
     row_at,
@@ -134,3 +136,117 @@ def test_column_lookup() -> None:
     assert column is not None and column.name == "const"
     assert table.column_by_name("song") is not None
     assert table.column_by_label("없음") is None
+
+
+# ---- TableStore ----
+
+
+def _subject_table(subject: str | None = "p1") -> WorkTable:
+    builder = (
+        TableBuilder(subject=subject)
+        .column("a")
+        .row(RowRef("k", "1"), {"a": cell("x")})
+    )
+    return builder.build()
+
+
+def test_store_put_numbers_per_player_and_channel() -> None:
+    store = TableStore()
+    assert store.put("p1", "c1", _subject_table(), now=0) == "t1"
+    assert store.put("p1", "c1", _subject_table(), now=0) == "t2"
+    assert store.put("p1", "c2", _subject_table(), now=0) == "t1"
+    assert store.put("p2", "c1", _subject_table(), now=0) == "t1"
+    stored = store.get("p1", "c1", "t2")
+    assert stored is not None and stored.id == "t2"
+    assert store.ids("p1", "c1") == ["t1", "t2"]
+
+
+def test_store_does_not_leak_across_players_or_channels() -> None:
+    store = TableStore()
+    store.put("p1", "c1", _subject_table(), now=0)
+    assert store.get("p2", "c1", "t1") is None
+    assert store.get("p1", "c2", "t1") is None
+    assert store.get("p1", "c1", "t9") is None
+
+
+def test_store_does_not_reuse_numbers_after_delete() -> None:
+    store = TableStore()
+    store.put("p1", "c1", _subject_table(), now=0)
+    store.retain_only("p1", "c1", [])
+    assert store.get("p1", "c1", "t1") is None
+    assert store.put("p1", "c1", _subject_table(), now=0) == "t2"
+
+
+def test_store_does_not_change_the_table_given() -> None:
+    store = TableStore()
+    original = _subject_table()
+    store.put("p1", "c1", original, now=0)
+    assert original.id == ""
+
+
+def test_retain_only_keeps_tables_bound_to_alive_messages() -> None:
+    store = TableStore()
+    for _ in range(4):
+        store.put("p1", "c1", _subject_table(), now=0)
+    store.put("p2", "c1", _subject_table(), now=0)
+    store.bind("p1", "c1", "t1", "m1")
+    store.bind("p1", "c1", "t2", "m2")
+    store.bind("p1", "c1", "t3", "m3")  # t4는 묶이지 않았다
+    store.retain_only("p1", "c1", {"m2", "m3", "m9"})
+    assert store.ids("p1", "c1") == ["t2", "t3"]
+    assert store.ids("p2", "c1") == ["t1"]
+
+
+def test_table_for_message_and_last_bound() -> None:
+    store = TableStore()
+    for _ in range(3):
+        store.put("p1", "c1", _subject_table(), now=0)
+    assert store.last_bound("p1", "c1") is None
+    store.bind("p1", "c1", "t2", "m2")
+    store.bind("p1", "c1", "t1", "m1")
+    assert store.table_for_message("p1", "c1", "m2") == "t2"
+    assert store.table_for_message("p1", "c1", "m9") is None
+    assert store.table_for_message("p1", "c2", "m2") is None
+    assert (
+        store.last_bound("p1", "c1") == "t1"
+    )  # 가장 나중에 묶은 것 (id 순서가 아니다)
+    store.bind("p1", "c1", "t9", "mx")  # 없는 표에 묶기는 무시한다
+    assert store.last_bound("p1", "c1") == "t1"
+
+
+def test_expire_removes_tables_older_than_24_hours() -> None:
+    store = TableStore()
+    store.put("p1", "c1", _subject_table(), now=0)
+    store.put("p1", "c1", _subject_table(), now=1000)
+    assert store.expire(TABLE_TTL_SECONDS - 1) == 0
+    assert store.expire(TABLE_TTL_SECONDS) == 1
+    assert store.ids("p1", "c1") == ["t2"]
+    assert store.expire(1000 + TABLE_TTL_SECONDS) == 1
+    assert store.ids("p1", "c1") == []
+
+
+def test_mark_stale_only_marks_tables_of_that_subject_in_every_channel() -> None:
+    store = TableStore()
+    store.put("p1", "c1", _subject_table("p1"), now=0)
+    store.put("p1", "c2", _subject_table("p1"), now=0)
+    store.put("p1", "c1", _subject_table("p2"), now=0)  # 남의 데이터로 만든 표
+    store.put(
+        "p1", "c1", _subject_table(None), now=0
+    )  # 곡 검색처럼 플레이어와 무관한 표
+    store.mark_stale("p1")
+    assert store.is_stale("p1", "c1", "t1")
+    assert store.is_stale("p1", "c2", "t1")
+    assert not store.is_stale("p1", "c1", "t2")
+    assert not store.is_stale("p1", "c1", "t3")
+    assert not store.is_stale("p1", "c1", "t9")
+    assert store.get("p1", "c1", "t1") == dataclasses.replace(
+        _subject_table("p1"), id="t1"
+    )
+
+
+def test_put_with_stale_flag_marks_new_table() -> None:
+    store = TableStore()
+    store.put("p1", "c1", _subject_table(), now=0, stale=True)
+    store.put("p1", "c1", _subject_table(), now=0)
+    assert store.is_stale("p1", "c1", "t1")
+    assert not store.is_stale("p1", "c1", "t2")

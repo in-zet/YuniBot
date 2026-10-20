@@ -1,8 +1,9 @@
 # core/tables.py
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+import time
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Literal, Self
 
@@ -237,3 +238,108 @@ class TableBuilder:
             unit=self._unit,
             row_formats=tuple(self._row_formats),
         )
+
+
+# 만든 지 이만큼 지난 표는 맥락과 무관하게 지운다(그 채널에서 다시 멘션하지 않으면 지울 계기가 없다).
+TABLE_TTL_SECONDS = 24 * 60 * 60
+
+
+@dataclass(slots=True)
+class _StoredTable:
+    table: WorkTable
+    created_at: float
+    stale: bool = False
+    message_id: str | None = None
+    bound_seq: int = 0
+
+
+class TableStore:
+    """작업 표 보관소. 메모리에만 두고, 키는 (플레이어 id, 채널 id)다. 재시작하면 사라진다.
+
+    표는 바꾸지 않는다. "옛 값" 표시도 표 객체가 아니라 이 보관소가 따로 기억한다."""
+
+    def __init__(self) -> None:
+        self._tables: dict[tuple[str, str], dict[str, _StoredTable]] = {}
+        # 번호는 지운 뒤에도 되살리지 않는다 — 사라진 표의 id가 다른 표를 가리키는 일이 없게 한다.
+        self._next_number: dict[tuple[str, str], int] = {}
+        self._bind_seq = 0
+
+    def put(
+        self, player_id: str, channel_id: str, table: WorkTable, *, now: float | None = None, stale: bool = False
+    ) -> str:
+        """표를 보관하고 id(`t1`부터 그 플레이어+채널에서 늘어난다)를 붙여 돌려준다."""
+        key = (player_id, channel_id)
+        number = self._next_number.get(key, 0) + 1
+        self._next_number[key] = number
+        table_id = f"t{number}"
+        created_at = time.time() if now is None else now
+        self._tables.setdefault(key, {})[table_id] = _StoredTable(
+            replace(table, id=table_id), created_at, stale=stale
+        )
+        return table_id
+
+    def get(self, player_id: str, channel_id: str, table_id: str) -> WorkTable | None:
+        stored = self._tables.get((player_id, channel_id), {}).get(table_id)
+        return None if stored is None else stored.table
+
+    def ids(self, player_id: str, channel_id: str) -> list[str]:
+        """그 플레이어+채널의 살아 있는 표 id를 만든 순서대로."""
+        return list(self._tables.get((player_id, channel_id), {}))
+
+    def is_stale(self, player_id: str, channel_id: str, table_id: str) -> bool:
+        stored = self._tables.get((player_id, channel_id), {}).get(table_id)
+        return stored is not None and stored.stale
+
+    def mark_stale(self, subject_player_id: str) -> None:
+        """모든 채널에서 `subject`가 그 플레이어인 표에 "옛 값" 표시를 단다."""
+        for tables in self._tables.values():
+            for stored in tables.values():
+                if stored.table.subject == subject_player_id:
+                    stored.stale = True
+
+    def bind(self, player_id: str, channel_id: str, table_id: str, message_id: str) -> None:
+        """출력한 표를 유니 답장 메시지에 묶는다."""
+        stored = self._tables.get((player_id, channel_id), {}).get(table_id)
+        if stored is None:
+            return
+        self._bind_seq += 1
+        stored.message_id = message_id
+        stored.bound_seq = self._bind_seq
+
+    def table_for_message(self, player_id: str, channel_id: str, message_id: str) -> str | None:
+        for table_id, stored in self._tables.get((player_id, channel_id), {}).items():
+            if stored.message_id == message_id:
+                return table_id
+        return None
+
+    def last_bound(self, player_id: str, channel_id: str) -> str | None:
+        """가장 최근에 메시지에 묶인 표."""
+        best: tuple[int, str] | None = None
+        for table_id, stored in self._tables.get((player_id, channel_id), {}).items():
+            if stored.message_id is not None and (best is None or stored.bound_seq > best[0]):
+                best = (stored.bound_seq, table_id)
+        return None if best is None else best[1]
+
+    def retain_only(self, player_id: str, channel_id: str, alive_message_ids: Collection[str]) -> None:
+        """맥락 안 메시지에 묶인 표만 남기고 지운다. 묶이지 않은 표도 지운다."""
+        tables = self._tables.get((player_id, channel_id))
+        if not tables:
+            return
+        for table_id in [
+            table_id
+            for table_id, stored in tables.items()
+            if stored.message_id is None or stored.message_id not in alive_message_ids
+        ]:
+            del tables[table_id]
+
+    def expire(self, now: float) -> int:
+        """만든 지 24시간이 지난 표를 지우고 지운 개수를 돌려준다."""
+        removed = 0
+        for key in list(self._tables):
+            tables = self._tables[key]
+            for table_id in [t for t, stored in tables.items() if now - stored.created_at >= TABLE_TTL_SECONDS]:
+                del tables[table_id]
+                removed += 1
+            if not tables:
+                del self._tables[key]
+        return removed

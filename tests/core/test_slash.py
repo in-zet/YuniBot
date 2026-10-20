@@ -23,6 +23,7 @@ from core.slash import (
     respond,
     slash_path_problems,
 )
+from core.tables import TableStore
 from core.tool_types import Display, ToolContext, ToolResult
 from services.common.players import PlayersService
 
@@ -587,17 +588,19 @@ async def test_dispatch_gives_db_player_data_snapshot_only_to_skills_that_declar
     player_data = PlayerDataScanner(conn=conn, table_names=())
     snapshot = RegistrySnapshot(skills=(), failures={"x": "y"})
     fake_scheduler = object()
+    fake_tables = TableStore()
     executor = ToolExecutor(
         resolvers=ResolverRegistry(), tag_provider=players, tag_definitions={},
         services={"players": players}, player_data=player_data,
         scheduler=fake_scheduler,  # pyright: ignore[reportArgumentType]
+        tables=fake_tables,
     )
     plan = build_slash_plan(
         [  # pyright: ignore[reportArgumentType]
             (_FakeSkillWithServices("plain", ["players"]), undeclared_tool.__yuni_tool__),  # pyright: ignore[reportFunctionMemberAccess]
             (
                 _FakeSkillWithServices(
-                    "core-ish", ["players", "db", "player_data", "registry_snapshot", "scheduler"]
+                    "core-ish", ["players", "db", "player_data", "registry_snapshot", "scheduler", "tables"]
                 ),
                 declared_tool.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
             ),
@@ -619,12 +622,15 @@ async def test_dispatch_gives_db_player_data_snapshot_only_to_skills_that_declar
         assert plain.player_data is None
         assert plain.registry_snapshot is None
         assert plain.scheduler is None
+        assert plain.tables is None
+        assert plain.channel_id is None
 
         declared = seen["declared"]
         assert declared.db is conn
         assert declared.player_data is player_data
         assert declared.registry_snapshot is snapshot
         assert declared.scheduler is fake_scheduler
+        assert declared.tables is fake_tables
     finally:
         await conn.close()
 

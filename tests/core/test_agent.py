@@ -21,6 +21,7 @@ from core.registry import SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
 from core.skill_loading import Mode, SkillLoadState
+from core.tables import TableStore
 from core.tool_types import Display, ToolContext, ToolResult
 from services.common.memory import RememberResult
 from tests.core.skill_factory import write_skill
@@ -553,6 +554,96 @@ async def test_agent_loop_does_not_leak_undeclared_services_into_skill_tool_ctx(
     response = seen_function_responses[0]
     assert "error" not in response
     assert response["services"] == ["terms"]  # "players"/"settings"는 선언 안 했으니 안 보여야 한다
+
+
+def _write_tables_probe_skill(root: Path, name: str, *, services: list[str]) -> Path:
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True)
+    services_yaml = "[" + ", ".join(services) + "]"
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: 테스트용 표 보관소 확인 스킬\nexamples:\n  - 예시\n"
+        f"category: 메모\ngame: common\nversion: 1\nservices: {services_yaml}\n---\n\n테스트용.\n"
+    )
+    (skill_dir / "skill.py").write_text(
+        "from core.decorators import tool\n"
+        "from core.tool_types import ToolContext, ToolResult\n\n\n"
+        "@tool()\n"
+        "async def probe(ctx: ToolContext) -> ToolResult:\n"
+        '    """테스트용: 표 보관소와 채널 id를 그대로 보여준다."""\n'
+        "    return ToolResult(data={'channel': ctx.channel_id})\n"
+    )
+    return skill_dir
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_passes_channel_id_to_skill_tools_and_gates_tables(tmp_path: Path) -> None:
+    skills_root = tmp_path / "skills"
+    _ = _write_tables_probe_skill(skills_root, "tables-probe", services=["tables"])
+    registry = SkillRegistry([Path("skills"), skills_root])
+    registry.load()
+    assert "tables-probe" in {s.manifest.name for s in registry.enabled_skills()}, registry.failures()
+
+    store = TableStore()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(), tables=store,
+    )
+    seen: list[ToolContext] = []
+    original = executor.invoke
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs["ctx"] if "ctx" in kwargs else args[1])
+        return await original(*args, **kwargs)
+
+    executor.invoke = spy  # type: ignore[method-assign]  # pyright: ignore[reportAttributeAccessIssue]
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="tables-probe_probe", args={})],
+        usage=UsageInfo(input_tokens=10, output_tokens=1),
+    )
+
+    def script(
+        model: str, system: str, contents: list[LlmContent], tools: list[ToolDeclaration]
+    ) -> GenerationTurn:
+        if len(contents) == 1:
+            return call_turn
+        return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="봤다")]), text="봤다")
+
+    loop = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=executor,
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, channel_id="c9")
+    _ = await loop.run(ctx=ctx, skill_state=_state(registry, mode="full"), user_text="테스트", prompt_context_snippets=[])
+
+    assert len(seen) == 1
+    assert seen[0].channel_id == "c9"
+    assert seen[0].tables is store
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_hides_tables_from_skill_that_did_not_declare_them(tmp_path: Path) -> None:
+    skills_root = tmp_path / "skills"
+    _ = _write_tables_probe_skill(skills_root, "tables-probe", services=[])
+    registry = SkillRegistry([Path("skills"), skills_root])
+    registry.load()
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(), tables=TableStore(),
+    )
+    agent = AgentLoop(
+        llm=FakeLlmAdapter(lambda *_: GenerationTurn(content=LlmContent(role="model", parts=[]), text="")),
+        executor=executor,
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    scoped = agent._scoped_ctx(  # pyright: ignore[reportPrivateUsage]
+        ToolContext(player_id="p1", tags=frozenset(), services={}, channel_id="c9"),
+        skill_name="tables-probe", declared_services=[],
+    )
+    assert scoped.tables is None
+    assert scoped.channel_id == "c9"
 
 
 _PROMPT_CONTEXT_BODY = (

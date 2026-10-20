@@ -22,6 +22,7 @@ from core.events import EventBus
 from core.fallback_messages import IDLE_CHECK_MESSAGES
 from core.manifest import SkillManifest
 from core.registry import LoadedSkill, SkillRegistry
+from core.tables import TableBuilder, TableStore
 from core.threads import ThreadTranscript
 from core.tool_types import (
     ChartRef,
@@ -168,13 +169,13 @@ async def test_register_event_handlers_exposes_scheduler_only_when_declared() ->
     seen: list[object] = []
 
     async def handle(ctx: ToolContext, payload: dict[str, object]) -> None:
-        seen.append(ctx.scheduler)
+        seen.append((ctx.scheduler, ctx.tables))
 
     code = SkillCode(event_handlers=[EventHandlerSpec(fn=handle, event_name="players.first_seen")])
     declared_skill = LoadedSkill(
         manifest=SkillManifest(
             name="declared-skill", description="테스트용", examples=["예시"], category="메모",
-            game="common", version=1, services=["scheduler"],
+            game="common", version=1, services=["scheduler", "tables"],
         ),
         path=Path("."), code=code,
     )
@@ -189,10 +190,12 @@ async def test_register_event_handlers_exposes_scheduler_only_when_declared() ->
     registry._loaded = {"declared-skill": declared_skill, "undeclared-skill": undeclared_skill}  # pyright: ignore[reportPrivateUsage]
 
     fake_scheduler = object()
+    fake_tables = TableStore()
     bus = EventBus()
     _register_event_handlers(bus, registry)
     bus.bind_dispatch(
         services={}, tag_provider=_FakeTagProvider({"p1": set()}), settings=None, scheduler=fake_scheduler,
+        tables=fake_tables,
     )
 
     await bus.emit_notify("players.first_seen", {}, player_id="p1", guild_id=None)
@@ -200,8 +203,8 @@ async def test_register_event_handlers_exposes_scheduler_only_when_declared() ->
 
     # 두 핸들러의 실행 순서는 보장되지 않으니(둘 다 asyncio.create_task로 뜬다) 집합으로 본다.
     assert len(seen) == 2
-    assert fake_scheduler in seen
-    assert None in seen
+    assert (fake_scheduler, fake_tables) in seen
+    assert (None, None) in seen
 
 
 @pytest.mark.asyncio
@@ -698,6 +701,23 @@ async def test_poll_schedules_closes_an_idle_thread_and_queues_its_transcript_fo
         assert row is not None
         assert "크로노 연습할게" in row[0] and "<@1>" not in row[0]
         assert (row[1], row[2]) == ("thread-1", "m1")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_poll_schedules_expires_old_work_tables(tmp_path: Path) -> None:
+    client, _registry, executor = await build_client(_config(tmp_path))
+    try:
+        store = executor.tables
+        assert store is not None
+        table = TableBuilder().column("a").build()
+        _ = store.put("p1", "c1", table, now=0)  # 1970년에 만든 표
+        _ = store.put("p1", "c1", table)  # 지금 만든 표
+
+        await client._poll_schedules()  # pyright: ignore[reportPrivateUsage]
+
+        assert store.ids("p1", "c1") == ["t2"]
     finally:
         await client.close()
 
