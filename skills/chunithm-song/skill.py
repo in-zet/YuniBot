@@ -85,11 +85,15 @@ async def chart(ctx: ToolContext, chart: ChartRef) -> ToolResult:
 
 @tool(slash="상수")
 async def find_by_const(
-    ctx: ToolContext, min_const: float, max_const: float, difficulty: DifficultyRef
+    ctx: ToolContext, min_const: float, difficulty: DifficultyRef,
+    max_const: float | None = None, new_only: bool = False,
 ) -> ToolResult:
-    """상수 범위와 난이도로 채보 목록을 상수순으로 보여준다."""
+    """상수 범위와 난이도로 채보 목록을 상수순으로 보여준다. "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
+    max_const를 비운다(지어내지 않는다). 플레이어가 신곡만 말했으면 new_only를 켠다."""
     short_code = _difficulty_code(difficulty)
-    hits = ctx.songdb.find_by_const(min_const=min_const, max_const=max_const, difficulty=short_code)
+    hits = ctx.songdb.find_by_const(
+        min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
+    )
 
     lines = [f"{hit.song.title} — 상수 {hit.chart.const}" for hit in hits]
 
@@ -126,21 +130,30 @@ async def find_songs(
     difficulty: DifficultyRef | None = None,
     min_note_count: int | None = None,
     max_note_count: int | None = None,
+    new_only: bool = False,
+    sort_by: str = "const",
+    descending: bool = False,
 ) -> ToolResult:
-    """상수 범위·레벨·수록 버전·난이도·노트 수 범위를 한 번에 조합해 채보를 찾는다.
+    """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 조합해 채보를 찾는다.
     `/상수`·`/버전`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
-    조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다."""
-    if all(
+    조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다.
+    sort_by는 "const"(기본)·"note_count"·"title" 중 하나다. "노트 수 많은 순"처럼 말했으면
+    sort_by="note_count", descending=True로 준다."""
+    if not new_only and all(
         v is None
         for v in (min_const, max_const, level, version, difficulty, min_note_count, max_note_count)
     ):
-        return ToolResult(error="조건을 하나는 줘야 한다(상수 범위, 레벨, 버전, 난이도, 노트 수 중)")
+        return ToolResult(error="조건을 하나는 줘야 한다(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡 중)")
 
     short_code = _difficulty_code(difficulty)
-    hits = ctx.songdb.find_songs(
-        min_const=min_const, max_const=max_const, level=level, version=version,
-        difficulty=short_code, min_note_count=min_note_count, max_note_count=max_note_count,
-    )
+    try:
+        hits = ctx.songdb.find_songs(
+            min_const=min_const, max_const=max_const, level=level, version=version,
+            difficulty=short_code, min_note_count=min_note_count, max_note_count=max_note_count,
+            new_only=new_only, sort_by=sort_by, descending=descending,
+        )
+    except ValueError as exc:
+        return ToolResult(error=str(exc))
 
     lines = [f"{hit.song.title} {hit.chart.difficulty} — 상수 {hit.chart.const}" for hit in hits]
 

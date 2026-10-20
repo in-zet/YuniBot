@@ -145,6 +145,38 @@ def _load_seed(seed_path: Path) -> dict[str, SongRecord]:
     return songs
 
 
+_SORT_KEYS = ("const", "note_count", "title")
+
+
+def _sort_hits(hits: list[ConstRangeHit], *, sort_by: str, descending: bool) -> list[ConstRangeHit]:
+    """find_songs의 정렬. sort_by가 모르는 이름이면 ValueError — 호출부(스킬)가 사용자에게
+    보일 에러로 바꾼다. 값이 없는 채보(상수·노트 수 모름)는 방향과 무관하게 항상 맨 뒤,
+    그 안에서는 제목순이다. "title" 정렬은 값이 없는 경우가 없다. sort_by별로 갈라 쓰는 건
+    하나의 콜백에 담으면 (float|int|str)를 한 타입으로 비교하게 돼 타입체커가 거부해서다."""
+    if sort_by not in _SORT_KEYS:
+        raise ValueError(f"모르는 정렬 기준이다: {sort_by}")
+
+    def by_title(group: list[ConstRangeHit]) -> None:
+        group.sort(key=lambda hit: hit.song.title)
+
+    if sort_by == "title":
+        by_title(hits)
+        return hits
+
+    if sort_by == "note_count":
+        with_value = [hit for hit in hits if hit.chart.note_count is not None]
+        without_value = [hit for hit in hits if hit.chart.note_count is None]
+        by_title(with_value)
+        with_value.sort(key=lambda hit: cast(int, hit.chart.note_count), reverse=descending)
+    else:
+        with_value = [hit for hit in hits if hit.chart.const is not None]
+        without_value = [hit for hit in hits if hit.chart.const is None]
+        by_title(with_value)
+        with_value.sort(key=lambda hit: cast(float, hit.chart.const), reverse=descending)
+    by_title(without_value)
+    return with_value + without_value
+
+
 class SongDbService:
     """곡·채보 정보, 상수, 노트 수, 별칭, 국제판 수록 여부. 시드를 메모리에 한 번
     읽고, Chunimaru songdb로 국제판 가용성·신곡 여부·추정 상수 플래그를 덧씌운다."""
@@ -274,22 +306,24 @@ class SongDbService:
         return song.is_new if song is not None else False
 
     def find_by_const(
-        self, *, min_const: float, max_const: float, difficulty: str | None = None
+        self, *, min_const: float, max_const: float | None = None, difficulty: str | None = None,
+        new_only: bool = False,
     ) -> list[ConstRangeHit]:
         """상수 범위(양끝 포함)로, 지금 국제판에서 고를 수 있는 채보를 상수 오름차순(같으면
         제목순)으로 찾는다. difficulty는 짧은 코드("MAS" 등)다. 비우면 난이도를 가리지 않고
         그 상수 범위에 드는 채보를 전부 찾는다(2026-10-18 결정 — 상수는 채보 단위로 이미
-        유일하게 정해지므로 난이도로 좁힐 필요가 없다는 실기 피드백)."""
+        유일하게 정해지므로 난이도로 좁힐 필요가 없다는 실기 피드백). max_const를 비우면 위쪽 한계 없이
+        "min 이상"을 찾고, new_only면 신곡(`is_new`)만 본다(2026-10-20 — "신곡 중 14.7 이상" 실기)."""
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():
-            if title not in self._available_intl:
+            if title not in self._available_intl or (new_only and not song.is_new):
                 continue
             codes = [difficulty] if difficulty is not None else list(song.charts)
             for code in codes:
                 chart = song.charts.get(code)
                 if chart is None or not chart.is_available or chart.const is None:
                     continue
-                if min_const <= chart.const <= max_const:
+                if min_const <= chart.const and (max_const is None or chart.const <= max_const):
                     hits.append(ConstRangeHit(song=song, chart=chart))
         hits.sort(key=lambda hit: (hit.chart.const, hit.song.title))
         return hits
@@ -340,16 +374,24 @@ class SongDbService:
         difficulty: str | None = None,
         min_note_count: int | None = None,
         max_note_count: int | None = None,
+        new_only: bool = False,
+        sort_by: str = "const",
+        descending: bool = False,
     ) -> list[ConstRangeHit]:
-        """상수 범위·레벨·수록 버전·난이도·노트 수 범위를 한 번에 AND로 겹쳐 찾는다.
+        """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 AND로 겹쳐 찾는다.
         find_by_const/find_by_level/find_by_version은 각각 조건 하나(+난이도)만 받아서
         "15.0~15.2 상수 중 노트 수 1000개 이상"처럼 조건을 두 개 이상 동시에 거는 질문을
         못 받는다 — 그걸 위한 것이다. 준 조건만 보고 안 준 건 거르지 않는다. 조건을 하나도
-        안 주면(전부 None) 국제판 전체를 돌려준다 — "조건이 있어야 한다"는 판단은 이
-        메서드가 아니라 호출부(스킬)가 한다."""
+        안 주면(전부 None/False) 국제판 전체를 돌려준다 — "조건이 있어야 한다"는 판단은 이
+        메서드가 아니라 호출부(스킬)가 한다. new_only는 find_by_const와 같은 뜻이다(2026-10-20
+        "신곡 중 14.7 이상" 실기 결정을 그대로 따른다).
+
+        sort_by는 "const"(기본)·"note_count"·"title" 중 하나다. 값이 없는 채보(상수·노트 수를
+        모르는 채보)는 정렬 방향과 무관하게 항상 맨 뒤로 보낸다 — 모르는 값은 "내림차순으로 큰
+        것부터"에서도 맨 앞에 설 수 없다. 동점은 항상 제목순으로 묶는다(2026-10-20 결정)."""
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():
-            if title not in self._available_intl:
+            if title not in self._available_intl or (new_only and not song.is_new):
                 continue
             if version is not None and song.version != version:
                 continue
@@ -369,8 +411,7 @@ class SongDbService:
                 if max_note_count is not None and (chart.note_count is None or chart.note_count > max_note_count):
                     continue
                 hits.append(ConstRangeHit(song=song, chart=chart))
-        hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
-        return hits
+        return _sort_hits(hits, sort_by=sort_by, descending=descending)
 
     def find_by_artist(self, *, name: str) -> list[SongRecord]:
         """작곡가(아티스트 크레딧) 이름으로, 지금 국제판에서 고를 수 있는 곡을 제목순으로

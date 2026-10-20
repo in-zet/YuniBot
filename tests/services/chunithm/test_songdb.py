@@ -341,6 +341,32 @@ async def test_find_songs_without_any_filter_returns_more_than_a_narrowed_query(
     assert len(everything) > len(narrowed)
 
 
+async def test_find_songs_sort_by_note_count_descending(songdb: SongDbService) -> None:
+    hits = songdb.find_songs(min_const=12.0, max_const=13.0, sort_by="note_count", descending=True)
+    counts = [hit.chart.note_count for hit in hits if hit.chart.note_count is not None]
+    assert counts == sorted(counts, reverse=True)
+    # 노트 수를 모르는 채보가 있다면(이 범위엔 보통 없다) 방향과 무관하게 맨 뒤여야 한다.
+    none_positions = [i for i, hit in enumerate(hits) if hit.chart.note_count is None]
+    assert all(pos >= len(counts) for pos in none_positions)
+
+
+async def test_find_songs_sort_by_title_ascending(songdb: SongDbService) -> None:
+    hits = songdb.find_songs(min_const=12.0, max_const=13.0, sort_by="title")
+    titles = [hit.song.title for hit in hits]
+    assert titles == sorted(titles)
+
+
+async def test_find_songs_sort_default_matches_const_ascending_behavior(songdb: SongDbService) -> None:
+    default = songdb.find_songs(min_const=12.0, max_const=13.0)
+    explicit = songdb.find_songs(min_const=12.0, max_const=13.0, sort_by="const", descending=False)
+    assert default == explicit
+
+
+async def test_find_songs_unknown_sort_by_raises(songdb: SongDbService) -> None:
+    with pytest.raises(ValueError):
+        songdb.find_songs(min_const=12.0, max_const=13.0, sort_by="이상한기준")
+
+
 async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService) -> None:
     song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
     link = songdb.chart_link(song, song.charts["MAS"])
@@ -497,3 +523,20 @@ async def test_add_alias_matching_own_songs_global_alias_is_allowed(
     row = await songdb_with_conn.get_alias(guild_id="g1", alias="RFTS")
     assert row is not None
     assert row.song_title == "Reach For The Stars"
+
+
+async def test_find_by_const_without_max_has_no_upper_bound(songdb: SongDbService) -> None:
+    hits = songdb.find_by_const(min_const=12.0, difficulty="MAS")
+    bounded = songdb.find_by_const(min_const=12.0, max_const=13.0, difficulty="MAS")
+    assert len(hits) > len(bounded)
+    assert all(hit.chart.const is not None and hit.chart.const >= 12.0 for hit in hits)
+
+
+async def test_find_by_const_new_only_keeps_only_new_songs(songdb: SongDbService) -> None:
+    songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
+
+    hits = songdb.find_by_const(min_const=0.0, new_only=True)
+
+    assert hits
+    assert all(hit.song.is_new for hit in hits)
+    assert any(hit.song.title == "Ave Mujica" for hit in hits)

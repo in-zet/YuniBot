@@ -16,6 +16,7 @@ examples:
   - Zekk 작곡곡 뭐 있어?
   - LUMINOUS PLUS 버전 곡 다 보여 줘
   - 15.0에서 15.2 상수 중에 노트 수 1000개 넘는 곡 뭐 있어?
+  - 15 상수 곡들 노트 수 많은 순으로 보여줘
 category: 곡 정보
 game: chunithm
 version: 1
@@ -34,7 +35,7 @@ emits: [chunithm.song.viewed]
 - 노트 수가 비어 있는 채보는 노트 수를 "알 수 없음"으로 표시한다.
 - 곡 하나를 조회하면 `chunithm.song.viewed` 모으기 이벤트를 내고, 돌아온 조각을 곡 정보 아래에 붙인다.
 
-**상수 범위 검색**: 상수 범위와 난이도로 채보 목록을 낸다. 가나다순이 아니라 상수순이다.
+**상수 범위 검색**: 상수 범위와 난이도로 채보 목록을 낸다. 가나다순이 아니라 상수순이다. 위쪽 한계(`max`)는 선택이라 "14.7 이상"은 한계 없이 찾고, `new_only`를 켜면 신곡(`songdb`의 `is_new`)만 낸다(2026-10-20 결정 — "신곡 중 14.7 이상" 실기에서 모델이 15.5 상한을 지어내고 신곡 조건은 빠뜨렸다). 난이도는 여전히 필수다.
 
 **수록 버전 검색**: 버전 이름(문자열 그대로 비교, `SongRecord.version`과 같은 값)과 선택적 난이도로
 채보 목록을 낸다. 난이도를 안 주면 그 버전의 모든 채보를 난이도 가리지 않고 낸다 — `chunithm-folders`·
@@ -45,9 +46,11 @@ emits: [chunithm.song.viewed]
 일치라 "A vs. B" 같은 콜라보 크레딧도 걸린다. 아티스트는 채보가 아니라 곡 단위 값이라 난이도 인자가
 없다(2026-10-20 결정 — 상수·레벨·버전과 달리 난이도로 좁힐 대상 자체가 없다).
 
-**조합 검색**: 상수 범위·레벨·수록 버전·난이도·노트 수 범위 중 둘 이상을 AND로 동시에 거는 질문을
-위한 것이다(`find_by_const`/`find_by_version`은 조건 하나+난이도만 받는다). 조건을 하나도 안 주면
-범위가 너무 넓어 바로 에러를 돌려준다. 준 조건만 보고 안 준 건 거르지 않는다(2026-10-20 결정).
+**조합 검색**: 상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부 중 둘 이상을 AND로 동시에
+거는 질문을 위한 것이다(`find_by_const`/`find_by_version`은 조건 하나+난이도만 받는다). 조건을
+하나도 안 주면(`new_only`도 꺼진 채) 범위가 너무 넓어 바로 에러를 돌려준다. 준 조건만 보고 안 준
+건 거르지 않는다. 정렬 기준(`sort_by`: "const"·"note_count"·"title")과 방향(`descending`)도
+고를 수 있다 — 값을 모르는 채보는 방향과 무관하게 항상 맨 뒤다(2026-10-20 결정).
 
 **채보 뷰어 링크**
 
@@ -67,10 +70,10 @@ emits: [chunithm.song.viewed]
 | --- | --- | --- | --- | --- | --- | --- |
 | `info` | 곡 정보와 난이도별 채보 | `song: SongQuery` | `/곡` | 없음 | required | never |
 | `chart` | 채보 하나의 상수, 노트 수 | `chart: ChartRef` | 없음 | 없음 | optional | never |
-| `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `max`, `difficulty`: DifficultyRef | `/상수` | 없음 | required | never |
+| `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `difficulty`: DifficultyRef, `max`(선택), `new_only`(선택) | `/상수` | 없음 | required | never |
 | `find_by_version` | 수록 버전(+선택적 난이도)으로 채보 목록 | `version`, `difficulty: DifficultyRef \| None` | `/버전` | 없음 | required | never |
 | `find_by_artist` | 작곡가로 수록곡 목록 | `artist` | `/작곡가` | 없음 | required | never |
-| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count` | `/검색` | 없음 | required | never |
+| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only`, `sort_by`, `descending` | `/검색` | 없음 | required | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | 없음 | optional | never |
 | `alias_add` | 별칭 추가 | `song: SongQuery`, `alias` | `/별칭 추가` | 없음 | optional | never |
 | `alias_remove` | 별칭 삭제 | `alias` | `/별칭 삭제` | 없음(함수 안에서 추가한 사람 또는 `admin` 확인) | optional | never |
@@ -98,9 +101,11 @@ emits: [chunithm.song.viewed]
   없으면 없다고 한다(철자가 다를 수 있다고 알려 줘도 된다).
 - 수록 버전으로 찾을 때 난이도를 안 말했으면 `find_by_version`의 난이도를 비워 그 버전
   전체를 보여준다. 난이도를 말했으면 그 난이도만 좁힌다.
-- 상수·레벨·버전·난이도·노트 수 중 두 개 이상을 동시에 걸면 `find_songs`를 쓴다(상수 범위 하나만,
-  또는 버전 하나만이면 `find_by_const`/`find_by_version`이 먼저다 — 레벨만으로 찾는 건
+- 상수·레벨·버전·난이도·노트 수·신곡 중 두 개 이상을 동시에 걸면 `find_songs`를 쓴다(상수 범위
+  하나만, 또는 버전 하나만이면 `find_by_const`/`find_by_version`이 먼저다 — 레벨만으로 찾는 건
   `find_songs`뿐이다). 말하지 않은 조건은 비워 둔다 — 지어내지 않는다.
+- `find_songs`의 정렬 기준은 상수가 기본이다. "노트 수 순", "제목 순"처럼 말했으면 `sort_by`를
+  그에 맞게 바꾸고, "많은 순"·"높은 순"·"내림차순"이면 `descending`을 켠다.
 
 ## 테스트
 
@@ -112,6 +117,9 @@ emits: [chunithm.song.viewed]
 - `find_by_artist`가 대소문자를 가리지 않고 부분 일치로 찾는지, 콜라보 크레딧에도 걸리는지.
 - `find_songs`가 준 조건만 AND로 겹치는지(상수 범위+노트 수 조합 등), 조건이 하나도 없으면
   에러를 돌리는지.
+- `find_by_const`가 `max_const` 없이 "min 이상"을, `new_only`로 신곡만 찾는지.
+- `find_songs`의 `sort_by`("note_count"·"title")와 `descending`이 맞게 정렬하는지, 값이 없는
+  채보가 방향과 무관하게 맨 뒤로 가는지, 모르는 `sort_by` 값에 에러를 돌리는지.
 
 ## 미확인 사항
 
@@ -147,10 +155,17 @@ emits: [chunithm.song.viewed]
   아니라 시드를 메모리로 읽은 Python 객체라 전용 테이블을 새로 만들어야 하고, 그러면 임의 SQL 실행
   표면(다른 테이블 노출 위험, 검증 비용)이 새로 생긴다 — 기존 `find_by_*` 패턴을 확장한 조합 필터
   쪽이 안전하고 구조도 덜 바뀌어 이쪽을 택했다(사용자 결정).
-- `find_songs`는 모든 조건이 선택적이고 준 것만 AND로 겹친다. 정렬은 `find_by_level`/
-  `find_by_version`과 같은 "상수 오름차순(모르면 뒤), 같으면 제목순"을 쓴다 — 조건 조합에 따라
-  상수가 전혀 안 걸린 질문(레벨만 등)도 있을 수 있어 레벨 전용 정렬은 따로 안 만들었다.
-  `find_by_const`처럼 레벨/버전/난이도 전부 비우고 노트 수 범위만 주는 질문도 그대로 받는다.
+- `find_songs`는 모든 조건이 선택적이고 준 것만 AND로 겹친다. 정렬은 기본이 `find_by_level`/
+  `find_by_version`과 같은 "상수 오름차순(모르면 뒤), 같으면 제목순"이지만, `sort_by`("const"·
+  "note_count"·"title")와 `descending`으로 바꿀 수 있다 — "노트 수 많은 순" 같은 질문은 조건
+  조합과 별개로 정렬 자체를 바꿔 달라는 것이라 조건 인자와 나란히 두었다. 값을 모르는 채보(상수·
+  노트 수)는 정렬 방향과 무관하게 항상 맨 뒤에 두고 그 안에서는 제목순이다 — "내림차순으로 큰
+  것부터"에서도 모르는 값이 1등일 수는 없다는 판단이다. `find_by_const`처럼 레벨/버전/난이도
+  전부 비우고 노트 수 범위만 주는 질문도 그대로 받는다.
 - 조건을 하나도 안 주면 서비스 메서드 자체는 국제판 전체를 돌려주지만(단순함 유지), 스킬 도구
   단에서 먼저 막는다 — 전체 목록을 돌려주는 건 이 도구의 쓸모가 아니고, 결과가 너무 커진다.
+  `new_only`만 켜고 다른 조건을 안 준 것은 조건이 있는 것으로 친다.
+- 같은 날 `find_by_const`에 `new_only`·선택적 `max_const`가 먼저 들어왔다("신곡 중 14.7 이상"
+  실기, 별도 작업). `find_songs`도 같은 `new_only` 뜻을 그대로 받게 맞췄다 — 신곡 조건이 다른
+  조건(상수 범위 등)과 같이 걸릴 수 있는 건 조합 검색이 바로 받아야 할 경우다.
 - **기각**: 모델이 직접 쓰는 SQL 조회 도구 — 위 "계기" 참고.
