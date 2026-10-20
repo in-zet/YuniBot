@@ -119,7 +119,7 @@ skills/chunithm-border/
 | `name` | 예 | 소문자, 숫자, 하이픈. 도구 이름의 접두사가 된다. |
 | `description` | 예 | 무엇을 하고 언제 쓰는지. 항상 모델에 들어가므로 200자 이내. "할 수 있는 일" 안내도 이 글에서 만든다. |
 | `examples` | 예 | 이 스킬을 골라야 하는 질문 예시 2\~3개. 선택 정확도 시험에도 쓴다. |
-| `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 함께한 기록, 관리 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
+| `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 함께한 기록, 관리, 폴더 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
 | `game` | 예 | `chunithm` 또는 `common`. 다른 게임을 붙일 때 묶는 단위다. |
 | `version` | 예 | 스킬 버전. 바꾼 것을 추적한다. |
 | `services` | 예 | 쓰는 서비스 목록. 예: `songdb`, `chunithm_net`, `players`. 선언하지 않은 서비스는 못 쓴다. 코어 전용 맥락(`db` 원시 DB 연결, `player_data` 스킬 테이블 전체의 플레이어 데이터 집계·삭제, `registry_snapshot` 스킬 등록 현황, `usage` LLM 사용량)도 같은 방식으로 여기 적어야 받는다(account-link, admin처럼 꼭 필요한 공통 스킬만). |
@@ -497,7 +497,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 
 ## 스킬 문서 목록
 
-기본 스킬은 17개이고, 스킬마다 문서가 하나씩 있다. 각 문서에는 manifest, 동작 규칙, 도구, 이벤트, 데이터, 설정, `SKILL.md` 본문 초안, 테스트, 미확인 사항이 같은 순서로 들어 있다. 태그 열은 스킬을 쓰는 데 필요한 권한 태그다.
+기본 스킬은 18개이고, 스킬마다 문서가 하나씩 있다. 각 문서에는 manifest, 동작 규칙, 도구, 이벤트, 데이터, 설정, `SKILL.md` 본문 초안, 테스트, 미확인 사항이 같은 순서로 들어 있다. 태그 열은 스킬을 쓰는 데 필요한 권한 태그다.
 
 | 스킬 | 범위 | 하는 일 | 태그 |
 | --- | --- | --- | --- |
@@ -517,6 +517,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [chunithm-settings](skills/chunithm-settings.md) | 츄니즘 | 지금 계정의 인게임 설정 조회·변경, 즐겨찾기 곡 조회·추가·삭제 | `chunithm-linked` |
 | [chunithm-notes](skills/chunithm-notes.md) | 츄니즘 | 곡별 메모 | 없음 |
 | [chunithm-updates](skills/chunithm-updates.md) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
+| [chunithm-folders](skills/chunithm-folders.md) | 츄니즘 | 채보를 모은 이름 붙인 폴더 생성·조회, 조건 일괄 추가/삭제, 메모 | 없음 |
 | [web-qa](skills/web-qa.md) | 츄니즘 | 용어 사전에 없는 일반 질문을 검색해 출처와 함께 답하기 | 없음 |
 
 스킬끼리 주고받는 이벤트는 "이벤트, 예약 작업, 서비스" 절의 이벤트 목록에 모었다. 스킬 문서의 이벤트 표와 이 목록이 어긋나면 이 목록을 기준으로 맞춘다.
