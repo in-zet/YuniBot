@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,7 +21,7 @@ from core.registry import SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
 from core.skill_loading import Mode, SkillLoadState
-from core.tool_types import ToolContext
+from core.tool_types import Display, ToolContext, ToolResult
 from services.common.memory import RememberResult
 from tests.core.skill_factory import write_skill
 from tests.support.fake_llm import FakeLlmAdapter
@@ -354,6 +355,38 @@ async def test_agent_loop_run_surfaces_required_mode_display_in_result() -> None
     assert len(result.required_displays) == 1
     assert result.required_displays[0].content is not None
     assert "chunithm-border" in result.required_displays[0].content
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_keeps_only_the_last_omittable_display_of_the_same_tool() -> None:
+    # 삭제 전후로 목록 도구를 두 번 부르면 마지막 목록만 붙는다(실기 2026-10-20: 남은 목표가 두 번 나왔다).
+    registry = _registry()
+    calls = [
+        GenerationTurn(
+            content=LlmContent(role="model", parts=[]),
+            function_calls=[FunctionCallRequest(call_id=str(i), name="admin_skills", args={})],
+        )
+        for i in (1, 2)
+    ]
+    answer = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="끝")]), text="끝")
+    loop = AgentLoop(
+        llm=FakeLlmAdapter([*calls, answer]), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+        registry_snapshot=build_snapshot(registry),
+    )
+    served = iter(["첫 목록", "마지막 목록"])
+
+    async def fake_invoke(ctx: ToolContext, tool_name: str, args: dict[str, Any]) -> ToolResult:
+        return ToolResult(display=Display(content=next(served), omittable=True), display_mode="required")
+
+    loop._invoke = fake_invoke  # pyright: ignore[reportPrivateUsage]
+    ctx = ToolContext(player_id="p1", tags=frozenset({"admin"}), services={})
+    result = await loop.run(
+        ctx=ctx, skill_state=_state(registry, mode="full"), user_text="x", prompt_context_snippets=[]
+    )
+
+    assert [d.content for d in result.required_displays] == ["마지막 목록"]
 
 
 class _FakeMemoryService:
