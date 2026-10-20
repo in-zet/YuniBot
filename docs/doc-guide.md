@@ -12,6 +12,7 @@
 | `docs/doc-guide.md` | 이 문서 — 무엇을 어디에 쓸지의 규칙 |
 | `docs/start.md` / `docs/end.md` | 세션 시작·종료 시 밟을 절차 |
 | `docs/plan.md` | 범위 · 작업 단계 · 결정 기록 · 리스크 |
+| `docs/plan/YYYY-MM-DD_수정.md` | 그날 계획 밖에서 더한 단계의 상세(내용·파트·실기 미확인). `plan.md` §4에는 단계마다 한 줄과 이 파일의 절 번호만 둔다 |
 | `docs/conventions.md` | 개발 규칙(폴더·third_party·DB·시험·주석) |
 | `docs/pitfalls.md` | 실제로 겪은 함정 모음 |
 | `docs/design/00-core.md` | 코어 설계서 — 구조, 스킬 규격, 서비스, 이벤트, 권한, 인격, 운영 |
@@ -25,6 +26,7 @@
 | 쓰려는 내용 | 목적지 |
 |---|---|
 | 범위, 작업 단계, 여러 스킬에 걸친 결정, 리스크 | `plan.md` |
+| 계획 밖에서 더한 단계의 상세(내용·파트 구성·실기 미확인) | `docs/plan/YYYY-MM-DD_수정.md` (그날 날짜) |
 | 스킬 하나의 동작·도구·데이터, 그 스킬에서 정한 세부 | 그 스킬의 `docs/design/skills/<스킬>.md` |
 | 코어·서비스·이벤트·권한 규격 | `docs/design/00-core.md` |
 | 구조·DB·시험·주석 규칙 | `conventions.md` |

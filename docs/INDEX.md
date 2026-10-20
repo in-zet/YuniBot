@@ -10,6 +10,7 @@
 | `docs/INDEX.md` · `docs/doc-guide.md` | 이 문서 · 문서 관리 지침 | **관리대상** |
 | `docs/start.md` / `docs/end.md` | 세션 시작·종료 체크리스트(검증 명령은 `end.md` §1) | **관리대상** |
 | `docs/plan.md` | 범위 · 작업 단계 · 결정 기록 · 리스크 | **관리대상** |
+| `docs/plan/` | 날짜별 계획 수정(`YYYY-MM-DD_수정.md`) — 계획 밖에서 더한 단계의 상세. `plan.md` §4가 단계마다 가리킨다 | **관리대상** |
 | `docs/conventions.md` · `docs/pitfalls.md` | 개발 규칙 · 겪은 함정 | **관리대상** |
 | `docs/design/` | 기준 설계서: `00-core.md`(코어) + `skills/<스킬>.md` 19개 | **관리대상** |
 | `docs/reference/` | CHUNITHM-NET 페이지·Chunimaru 응답 저장본 — 파서 시험이 읽는다 | **읽기전용** |
