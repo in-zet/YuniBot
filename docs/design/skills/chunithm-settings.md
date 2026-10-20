@@ -51,8 +51,9 @@ tags: [chunithm-linked]
 | `list_favorites` | 즐겨찾기 곡 목록(제목) (표 반환) | 없음 | `/즐겨찾기 목록` | 표 | never |
 | `add_favorite` | 즐겨찾기에 곡 추가 | `song: SongQuery` | `/즐겨찾기 추가` | optional | never |
 | `remove_favorite` | 즐겨찾기에서 곡 삭제 | `song: SongQuery` | `/즐겨찾기 삭제` | optional | never |
+| `add_favorites` | 작업 표의 곡을 즐겨찾기에 일괄 추가(이미 있는 곡은 뺌) | `table: TableRef`(`nonempty=[곡]`) | 없음 | optional | bulk |
 
-모든 도구가 `cost="network"`(CHUNITHM-NET을 직접 부른다), `mutates=True`는 `change_settings`·`add_favorite`·`remove_favorite`에만 — 셋 다 요청한 본인 계정만 바꾼다(`PlayerRef` 인자 없이 `ctx.player_id`로 고정).
+모든 도구가 `cost="network"`(CHUNITHM-NET을 직접 부른다), `mutates=True`는 `change_settings`·`add_favorite`·`remove_favorite`·`add_favorites`에만 — 셋 다 요청한 본인 계정만 바꾼다(`PlayerRef` 인자 없이 `ctx.player_id`로 고정).
 
 ## 이벤트
 
@@ -84,3 +85,10 @@ tags: [chunithm-linked]
 ## 표로 바꾼 읽기 도구 (16단계 Part 4-3, 2026-10-20)
 
 `list_favorites`는 표를 돌려준다(표 모양은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1). 곡 단위 행(`chunithm.song`, 키 = 정식 제목), 칸 곡·곡 이름(원문)·작곡가·버전. 곡 DB에 없는 id는 곡 칸을 비우고 곡 이름(원문)에 "(모르는 곡 id N)"을 적으며, 가리키는 것은 `chunithm-settings.unknown_song`(키 = id)이다. `data`의 `titles`는 그대로 둔다.
+
+## 표로 즐겨찾기 일괄 추가 (16단계 Part 6-2d, 2026-10-20)
+
+`add_favorites(table)`: 즐겨찾기는 "지금 목록 읽기 → 전체 목록 쓰기" 두 번 호출이라(곡마다 호출이 아니다) 표의 곡 전부를 한 번에 더한다. `cost="network"`, `confirm="bulk"`. 표의 곡 칸(채보 행이면 그 곡)을 곡 단위로 한 번씩만 센다.
+- 실행 직전에 CHUNITHM-NET에서 지금 목록을 다시 읽어 이미 든 곡(`already`)과 곡 데이터에 없는 곡(`unknown`)을 뺀다. `dry_run`도 읽기는 하지만 쓰지 않고, `count`와 실행 결과는 실제로 더한 곡 수만이다.
+- 더할 곡이 없으면 쓰지 않는다. 쓰기에서 `ValueError`(CHUNITHM-NET 쪽 거절)면 그 문구를 에러로 돌려준다.
+- 일괄 삭제(`remove_favorites`)는 이번 범위에 넣지 않았다(계획 후보에 없었다).

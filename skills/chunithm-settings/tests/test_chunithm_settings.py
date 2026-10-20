@@ -10,8 +10,9 @@ import pytest
 from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.events import EventBus
-from core.tables import render_text
+from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import ToolContext
+from services.chunithm import table_columns as tc
 from services.chunithm.arcade_settings import ArcadeSettings
 from services.chunithm.songdb import SongRecord
 
@@ -87,6 +88,9 @@ class _FakeSongdb:
 
     def by_id(self, song_id: int) -> SongRecord | None:
         return self.songs_by_id.get(song_id)
+
+    def song_by_title(self, title: str) -> SongRecord | None:
+        return next((song for song in self.songs_by_id.values() if song.title == title), None)
 
 
 def _song(title: str, song_id: int) -> SongRecord:
@@ -257,3 +261,72 @@ async def test_remove_favorite_not_present_is_noop(skill: ModuleType) -> None:
 
     assert result.data["removed"] is False
     assert net.favorites == [3]
+
+
+# ---------------------------------------------------------------- add_favorites
+
+
+def _song_table(*titles: str) -> WorkTable:
+    builder = TableBuilder(unit="곡")
+    tc.add_columns(builder, tc.SONG)
+    builder.step("검색 결과")
+    for title in titles:
+        builder.row(tc.song_ref(title), {tc.SONG: tc.song_cell(title)})
+    return builder.build()
+
+
+def _songdb(*songs: SongRecord) -> _FakeSongdb:
+    return _FakeSongdb(songs_by_id={song.id: song for song in songs})
+
+
+async def test_add_favorites_adds_new_songs_in_one_write_and_skips_existing(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(favorites=[3])
+    songdb = _songdb(_song("A", 3), _song("B", 42), _song("C", 43))
+    ctx = _ctx(chunithm_net=net, songdb=songdb)
+
+    result = await skill.add_favorites(ctx, _song_table("A", "B", "C", "B"))
+
+    assert result.error is None
+    assert result.data["count"] == 2 and result.data["titles"] == ["B", "C"] and result.data["already"] == 1
+    assert net.favorites == [3, 42, 43]
+    assert "1개는 이미 즐겨찾기에 있음" in result.display.content
+
+
+async def test_add_favorites_dry_run_reads_but_writes_nothing(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(favorites=[])
+    ctx = _ctx(chunithm_net=net, songdb=_songdb(_song("A", 3), _song("B", 42)))
+
+    preview = await skill.add_favorites(ctx, _song_table("A", "B"), dry_run=True)
+
+    assert preview.data["count"] == 2
+    assert net.favorites == []
+
+
+async def test_add_favorites_nothing_new_does_not_write(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(favorites=[3])
+    ctx = _ctx(chunithm_net=net, songdb=_songdb(_song("A", 3)))
+
+    result = await skill.add_favorites(ctx, _song_table("A"))
+
+    assert result.error is None and result.data["count"] == 0
+    assert net.favorites == [3]
+
+
+async def test_add_favorites_counts_songs_missing_from_songdb(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(favorites=[])
+    ctx = _ctx(chunithm_net=net, songdb=_songdb(_song("A", 3)))
+
+    result = await skill.add_favorites(ctx, _song_table("A", "없는 곡"))
+
+    assert result.data["count"] == 1 and result.data["unknown"] == 1
+    assert net.favorites == [3]
+
+
+async def test_add_favorites_reports_login_problems(skill: ModuleType) -> None:
+    ctx = _ctx(chunithm_net=_FakeChunithmNet(error=ConnectionError()), songdb=_songdb(_song("A", 3)))
+    assert (await skill.add_favorites(ctx, _song_table("A"))).error is not None
+
+
+def test_add_favorites_is_a_network_bulk_mutation(skill: ModuleType) -> None:
+    spec = skill.add_favorites.__yuni_tool__
+    assert spec.cost == "network" and spec.mutates is True and spec.confirm == "bulk"
