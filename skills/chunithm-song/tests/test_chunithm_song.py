@@ -121,6 +121,21 @@ async def test_find_by_const_returns_sorted_results() -> None:
     assert result.data["count"] >= 1
 
 
+async def test_find_by_const_without_max_and_new_only_filters() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    ctx = _ctx_with_songdb(songdb)
+    mas = _resolved_difficulty("MASTER")
+
+    open_ended = await skill.find_by_const(ctx, min_const=12.0, difficulty=mas)
+    bounded = await skill.find_by_const(ctx, min_const=12.0, max_const=13.0, difficulty=mas)
+    new_only = await skill.find_by_const(ctx, min_const=12.0, difficulty=mas, new_only=True)
+
+    assert open_ended.data["count"] > bounded.data["count"]
+    assert new_only.data["count"] <= open_ended.data["count"]
+    assert set(new_only.data["titles"]) <= set(open_ended.data["titles"])
+
+
 async def test_find_by_version_without_difficulty_returns_all_available_charts() -> None:
     skill = _load_skill()
     songdb = SongDbService()

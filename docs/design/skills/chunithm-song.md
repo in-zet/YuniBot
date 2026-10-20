@@ -33,7 +33,7 @@ emits: [chunithm.song.viewed]
 - 노트 수가 비어 있는 채보는 노트 수를 "알 수 없음"으로 표시한다.
 - 곡 하나를 조회하면 `chunithm.song.viewed` 모으기 이벤트를 내고, 돌아온 조각을 곡 정보 아래에 붙인다.
 
-**상수 범위 검색**: 상수 범위와 난이도로 채보 목록을 낸다. 가나다순이 아니라 상수순이다.
+**상수 범위 검색**: 상수 범위와 난이도로 채보 목록을 낸다. 가나다순이 아니라 상수순이다. 위쪽 한계(`max`)는 선택이라 "14.7 이상"은 한계 없이 찾고, `new_only`를 켜면 신곡(`songdb`의 `is_new`)만 낸다(2026-10-20 결정 — "신곡 중 14.7 이상" 실기에서 모델이 15.5 상한을 지어내고 신곡 조건은 빠뜨렸다). 난이도는 여전히 필수다.
 
 **수록 버전 검색**: 버전 이름(문자열 그대로 비교, `SongRecord.version`과 같은 값)과 선택적 난이도로
 채보 목록을 낸다. 난이도를 안 주면 그 버전의 모든 채보를 난이도 가리지 않고 낸다 — `chunithm-folders`·
@@ -62,7 +62,7 @@ emits: [chunithm.song.viewed]
 | --- | --- | --- | --- | --- | --- | --- |
 | `info` | 곡 정보와 난이도별 채보 | `song: SongQuery` | `/곡` | 없음 | required | never |
 | `chart` | 채보 하나의 상수, 노트 수 | `chart: ChartRef` | 없음 | 없음 | optional | never |
-| `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `max`, `difficulty`: DifficultyRef | `/상수` | 없음 | required | never |
+| `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `difficulty`: DifficultyRef, `max`(선택), `new_only`(선택) | `/상수` | 없음 | required | never |
 | `find_by_version` | 수록 버전(+선택적 난이도)으로 채보 목록 | `version`, `difficulty: DifficultyRef \| None` | `/버전` | 없음 | required | never |
 | `find_by_artist` | 작곡가로 수록곡 목록 | `artist` | `/작곡가` | 없음 | required | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | 없음 | optional | never |

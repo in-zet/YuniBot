@@ -85,11 +85,15 @@ async def chart(ctx: ToolContext, chart: ChartRef) -> ToolResult:
 
 @tool(slash="상수")
 async def find_by_const(
-    ctx: ToolContext, min_const: float, max_const: float, difficulty: DifficultyRef
+    ctx: ToolContext, min_const: float, difficulty: DifficultyRef,
+    max_const: float | None = None, new_only: bool = False,
 ) -> ToolResult:
-    """상수 범위와 난이도로 채보 목록을 상수순으로 보여준다."""
+    """상수 범위와 난이도로 채보 목록을 상수순으로 보여준다. "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
+    max_const를 비운다(지어내지 않는다). 플레이어가 신곡만 말했으면 new_only를 켠다."""
     short_code = _difficulty_code(difficulty)
-    hits = ctx.songdb.find_by_const(min_const=min_const, max_const=max_const, difficulty=short_code)
+    hits = ctx.songdb.find_by_const(
+        min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
+    )
 
     lines = [f"{hit.song.title} — 상수 {hit.chart.const}" for hit in hits]
 

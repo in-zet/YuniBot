@@ -274,22 +274,24 @@ class SongDbService:
         return song.is_new if song is not None else False
 
     def find_by_const(
-        self, *, min_const: float, max_const: float, difficulty: str | None = None
+        self, *, min_const: float, max_const: float | None = None, difficulty: str | None = None,
+        new_only: bool = False,
     ) -> list[ConstRangeHit]:
         """상수 범위(양끝 포함)로, 지금 국제판에서 고를 수 있는 채보를 상수 오름차순(같으면
         제목순)으로 찾는다. difficulty는 짧은 코드("MAS" 등)다. 비우면 난이도를 가리지 않고
         그 상수 범위에 드는 채보를 전부 찾는다(2026-10-18 결정 — 상수는 채보 단위로 이미
-        유일하게 정해지므로 난이도로 좁힐 필요가 없다는 실기 피드백)."""
+        유일하게 정해지므로 난이도로 좁힐 필요가 없다는 실기 피드백). max_const를 비우면 위쪽 한계 없이
+        "min 이상"을 찾고, new_only면 신곡(`is_new`)만 본다(2026-10-20 — "신곡 중 14.7 이상" 실기)."""
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():
-            if title not in self._available_intl:
+            if title not in self._available_intl or (new_only and not song.is_new):
                 continue
             codes = [difficulty] if difficulty is not None else list(song.charts)
             for code in codes:
                 chart = song.charts.get(code)
                 if chart is None or not chart.is_available or chart.const is None:
                     continue
-                if min_const <= chart.const <= max_const:
+                if min_const <= chart.const and (max_const is None or chart.const <= max_const):
                     hits.append(ConstRangeHit(song=song, chart=chart))
         hits.sort(key=lambda hit: (hit.chart.const, hit.song.title))
         return hits

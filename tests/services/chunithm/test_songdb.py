@@ -455,3 +455,20 @@ async def test_add_alias_matching_own_songs_global_alias_is_allowed(
     row = await songdb_with_conn.get_alias(guild_id="g1", alias="RFTS")
     assert row is not None
     assert row.song_title == "Reach For The Stars"
+
+
+async def test_find_by_const_without_max_has_no_upper_bound(songdb: SongDbService) -> None:
+    hits = songdb.find_by_const(min_const=12.0, difficulty="MAS")
+    bounded = songdb.find_by_const(min_const=12.0, max_const=13.0, difficulty="MAS")
+    assert len(hits) > len(bounded)
+    assert all(hit.chart.const is not None and hit.chart.const >= 12.0 for hit in hits)
+
+
+async def test_find_by_const_new_only_keeps_only_new_songs(songdb: SongDbService) -> None:
+    songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
+
+    hits = songdb.find_by_const(min_const=0.0, new_only=True)
+
+    assert hits
+    assert all(hit.song.is_new for hit in hits)
+    assert any(hit.song.title == "Ave Mujica" for hit in hits)
