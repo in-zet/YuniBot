@@ -102,7 +102,7 @@
     - [X] 2-4 `chunithm-folders` `show_folder` 표 + `save_table` — 구현 완료(2026-10-20)
     - [X] 2-5 `chunithm-sync` `mark_stale` + `core/bot.py` `partial_row_hints` 연결 — 구현 완료(2026-10-20)
     - [X] 2-6 `rules.md` 정리·문서 — 구현 완료(2026-10-20)
-  - [ ] Part 3: 그림 표 `chunithm-image`
+  - [X] Part 3: 그림 표 `chunithm-image`(`table_image`, `ImageCache`·`jacket_url`, `SongRecord.jacket`, Pillow, Dockerfile `fonts-noto-cjk`) — 구현 완료(2026-10-20). 실기 미확인: "그림으로" 요청에서 모델이 `table_image`를 고르는지·PNG 첨부와 글자 표 중복 여부, Docker 이미지의 한글·일본어 글꼴, 캐릭터 그림·프레임 겹침(동기화 저장분), 첫 50장 받는 시간. 상세는 `docs/design/skills/chunithm-image.md`
   - [ ] Part 4: 나머지 목록 도구를 표로(15개)
   - [ ] Part 5: 표를 받아 칸을 더하거나 곡 행을 채보로 펼치는 도구(6개)
   - [ ] Part 6: id 입구 나누기(슬래시 전용 + 표 받는 모델 도구)와 표로 데이터 바꾸기 — Part 1~5 뒤

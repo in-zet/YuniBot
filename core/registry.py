@@ -24,7 +24,7 @@ CTX_FIELD_SERVICE_NAMES: frozenset[str] = frozenset(
 KNOWN_SERVICE_NAMES: frozenset[str] = frozenset(
     {
         "players", "settings", "memory", "notify", "yuni", "secrets", "arcades",
-        "websearch", "http", "chunithm_net", "songdb", "records", "terms",
+        "websearch", "http", "chunithm_net", "songdb", "records", "terms", "image_cache",
         *CTX_FIELD_SERVICE_NAMES,
     }
 )

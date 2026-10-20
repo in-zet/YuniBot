@@ -81,3 +81,22 @@ async def test_limiter_is_shared_per_host_not_per_url() -> None:
     assert a is b
     assert a is not c
     await service.aclose()
+
+
+async def test_per_call_interval_uses_its_own_limiter_per_host() -> None:
+    import hishel
+
+    client = hishel.AsyncCacheClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={})),
+        storage=hishel.AsyncInMemoryStorage(),
+    )
+    service = HttpService(client=client, min_interval_seconds=5.0)
+
+    default = service._limiter_for("https://example.test/a")
+    fast = service._limiter_for("https://example.test/a", 0.1)
+
+    assert default is not fast
+    assert fast is service._limiter_for("https://example.test/b", 0.1)
+    response = await service.get("https://example.test/a", min_interval_seconds=0.0)
+    assert response.status_code == 200
+    await service.aclose()

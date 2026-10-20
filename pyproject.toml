@@ -15,6 +15,7 @@ dependencies = [
     "httpx~=0.28.1",
     "httpx-aiohttp==0.2.0",
     "msgspec~=0.20.0",
+    "pillow>=11",
     "platformdirs~=4.5",
     "python-dotenv>=1.2.4",
     "pyyaml>=6.0.3",

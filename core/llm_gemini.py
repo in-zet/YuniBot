@@ -111,7 +111,8 @@ class GeminiLlmAdapter:
         thinking_level: str,
         on_retry: OnRetry | None = None,
     ) -> GenerationTurn:
-        provider_contents = [to_provider_content(c) for c in contents]
+        # Pillow가 깔리면 SDK의 입력 타입에 PIL 이미지가 끼어, 리스트가 불변이라 타입을 직접 넓혀 준다.
+        provider_contents: list[types.ContentUnion] = [to_provider_content(c) for c in contents]
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             tools=_to_provider_tool(tools) or None,

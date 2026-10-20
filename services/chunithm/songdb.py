@@ -64,6 +64,9 @@ class SongRecord:
     is_new: bool = False
     bpm: float | None = None
     version: str | None = None
+    # 재킷 그림. 시드의 재킷 파일 이름이거나, 시드에 없던 곡이면 Chunimaru가 준 전체 주소.
+    # 주소로 바꾸는 일은 `image_cache.jacket_url`이 한다.
+    jacket: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -122,6 +125,7 @@ def _load_seed(seed_path: Path) -> dict[str, SongRecord]:
                 charts={},
                 bpm=entry.get("bpm"),
                 version=entry.get("version"),
+                jacket=entry.get("jacket") or None,
             )
             songs[title] = song
         for c in entry.get("charts", []):
@@ -264,6 +268,11 @@ class SongDbService:
         """곡 제목과 난이도 코드로 채보 하나를 찾는다(고를 수 있는지는 가리지 않는다)."""
         song = self._songs.get(title)
         return song.charts.get(difficulty) if song is not None else None
+
+    def jacket_for(self, title: str) -> str | None:
+        """곡의 재킷 파일 이름(또는 전체 주소). 모르는 곡·재킷이 없는 곡은 None."""
+        song = self._songs.get(title)
+        return song.jacket if song is not None else None
 
     def note_count_for(self, title: str, difficulty: str) -> int | None:
         song = self._songs.get(title)
@@ -434,6 +443,8 @@ class SongDbService:
         new_available: set[str] = set()
         new_is_new: dict[str, bool] = {}
         new_songs: dict[str, SongRecord] = {}
+        # 시드에 재킷이 없던 곡만 Chunimaru 주소로 채운다(시드 값이 있으면 그대로 둔다).
+        new_jackets: dict[str, str] = {}
         chart_updates: list[tuple[str, str, ChartRecord]] = []
         for entry in cast("list[dict[str, Any]]", entries):
             title: str = entry["title"]
@@ -462,8 +473,11 @@ class SongDbService:
                         for code, chart_data in charts_data.items()
                     },
                     is_new=new_is_new[title],
+                    jacket=entry.get("jacket") or None,
                 )
                 continue
+            if song.jacket is None and entry.get("jacket"):
+                new_jackets[title] = entry["jacket"]
             for code, chart_data in charts_data.items():
                 existing = song.charts.get(code)
                 const = chart_data.get("const")
@@ -486,6 +500,8 @@ class SongDbService:
             existing_song = self._songs.get(title)
             if existing_song is not None:
                 existing_song.is_new = is_new
+        for title, jacket in new_jackets.items():
+            self._songs[title].jacket = jacket
         self._songs.update(new_songs)
         self._by_id.update({song.id: song for song in new_songs.values()})
         self._available_intl = new_available

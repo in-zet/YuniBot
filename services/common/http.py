@@ -20,18 +20,21 @@ class HttpService:
     def __init__(self, *, client: httpx.AsyncClient, min_interval_seconds: float = 1.0) -> None:
         self._client = client
         self._min_interval = min_interval_seconds
-        self._limiters: dict[str, AsyncLimiter] = {}
+        self._limiters: dict[tuple[str, float], AsyncLimiter] = {}
 
-    def _limiter_for(self, url: str) -> AsyncLimiter:
-        host = urlparse(url).netloc
-        if host not in self._limiters:
+    def _limiter_for(self, url: str, interval: float | None = None) -> AsyncLimiter:
+        interval = self._min_interval if interval is None else interval
+        key = (urlparse(url).netloc, interval)
+        if key not in self._limiters:
             # 간격이 0이면(테스트) 사실상 무제한으로 둔다 — AsyncLimiter는 time_period<=0을 거부한다.
-            period = self._min_interval if self._min_interval > 0 else 0.001
-            self._limiters[host] = AsyncLimiter(1, period)
-        return self._limiters[host]
+            period = interval if interval > 0 else 0.001
+            self._limiters[key] = AsyncLimiter(1, period)
+        return self._limiters[key]
 
-    async def get(self, url: str) -> httpx.Response:
-        async with self._limiter_for(url):
+    async def get(self, url: str, *, min_interval_seconds: float | None = None) -> httpx.Response:
+        """`min_interval_seconds`를 주면 이 호출만 그 간격(호스트별)으로 센다. 작은 그림 파일을
+        여러 장 받을 때처럼 기본 간격이 너무 느린 곳에 쓴다."""
+        async with self._limiter_for(url, min_interval_seconds):
             return await self._client.get(url)
 
     async def get_json(self, url: str) -> Any:

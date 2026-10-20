@@ -524,3 +524,36 @@ async def test_find_by_const_new_only_keeps_only_new_songs(songdb: SongDbService
     assert hits
     assert all(hit.song.is_new for hit in hits)
     assert any(hit.song.title == "Ave Mujica" for hit in hits)
+
+
+async def test_seed_loads_jacket_file_name(songdb: SongDbService) -> None:
+    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
+    assert song.jacket is not None
+    assert "/" not in song.jacket  # 주소가 아니라 파일 이름이다
+
+
+async def test_chunimaru_only_song_gets_chunimaru_jacket_url(songdb: SongDbService) -> None:
+    synthetic = {
+        "songs": [
+            {
+                "idx": 99_999,
+                "title": "시드에 없는 신곡",
+                "artist": "누군가",
+                "isNew": True,
+                "jacket": "https://chunimaru.example/jackets/zzz.webp",
+                "charts": {"MAS": {"const": 14.0, "isConstUnknown": False}},
+            }
+        ]
+    }
+    songdb._apply_chunimaru(synthetic)
+
+    song = songdb.by_id(99_999)
+    assert song is not None
+    assert song.jacket == "https://chunimaru.example/jackets/zzz.webp"
+
+
+async def test_chunimaru_overlay_keeps_seed_jacket(songdb: SongDbService) -> None:
+    before = (await songdb.resolve("B.B.K.K.B.K.K.", _CTX)).jacket
+    songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
+
+    assert (await songdb.resolve("B.B.K.K.B.K.K.", _CTX)).jacket == before

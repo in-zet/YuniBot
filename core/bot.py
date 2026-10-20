@@ -63,6 +63,7 @@ from core.tool_types import (
 from core.usage import UsageService
 from services.chunithm.chart_ref import ChartRefResolver
 from services.chunithm.chunithm_net import ChunithmNetService
+from services.chunithm.image_cache import ImageCache
 from services.chunithm.records import RecordsService
 from services.chunithm.songdb import SongDbService
 from services.chunithm.table_columns import PARTIAL_ROW_HINTS
@@ -602,6 +603,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     )
 
     services["http"] = http_service
+    services["image_cache"] = ImageCache(http=http_service, directory=config.db_path.parent / "images")
     services["notify"] = notify_service
 
     usage_service = UsageService(conn)
