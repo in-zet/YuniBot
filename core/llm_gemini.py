@@ -52,7 +52,8 @@ def _from_provider_response(response: types.GenerateContentResponse) -> Generati
     assert model_content is not None, "candidate에 content가 없다"
 
     model_parts = model_content.parts or []
-    text_parts = [p.text for p in model_parts if p.text]
+    # thought=True인 part는 모델의 생각이라 답에 싣지 않는다(raw에는 그대로 남는다).
+    text_parts = [p.text for p in model_parts if p.text and not p.thought]
     function_calls = [
         FunctionCallRequest(
             call_id=p.function_call.id,

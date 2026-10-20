@@ -82,6 +82,29 @@ async def test_generate_converts_text_only_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generate_leaves_thought_parts_out_of_answer_text() -> None:
+    adapter = GeminiLlmAdapter(api_key="fake")
+    content = types.Content(
+        role="model", parts=[types.Part(text="규칙을 정리한다", thought=True), types.Part(text="안녕")]
+    )
+    response = types.GenerateContentResponse(
+        candidates=[types.Candidate(content=content)],
+        usage_metadata=types.GenerateContentResponseUsageMetadata(prompt_token_count=1, candidates_token_count=1),
+    )
+    adapter._client.aio._models = _FakeModelsApi(response=response)  # pyright: ignore[reportAttributeAccessIssue]
+
+    turn = await adapter.generate(
+        model="gemini-3.8-flash",
+        system_instruction="규칙",
+        contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])],
+        tools=[],
+        thinking_level="low",
+    )
+
+    assert turn.text == "안녕"
+
+
+@pytest.mark.asyncio
 async def test_generate_converts_function_call_and_preserves_thought_signature() -> None:
     adapter = GeminiLlmAdapter(api_key="fake")
     call = types.FunctionCall(id="call-1", name="chunithm-border_lookup", args={"chart": "크로노 MAS"})
