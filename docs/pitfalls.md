@@ -16,3 +16,4 @@
 - **베스트30/신곡20 파서는 `achieved_at`을 채우지 않는다**: 플레이 날짜는 최근 플레이 이력(`parse_basic_recent_record`)에만 있다. 세션 날짜는 그걸로 정한다.
 - **국제판 공지 `news--date`는 월/일을 0으로 안 채운다**("2026.9.30", "2026.10.15") — 요일 span도 공백 없이 바로 붙는다("2026.9.30Wed"). 글자 수로 자르면 한 자리 월에서 깨진다. → 날짜 패턴을 정규식으로 뽑는다(`updates_calc._INTL_POSTED_DATE_RE`).
 - **일본판 공지 제목의 『』는 버전명 전용이 아니다**: 콜라보 이벤트 이름에도 쓴다(저장본의 "『いよわ』リバイバルイベント開催"). 국제판만 믿을 수 있다(`docs/design/skills/chunithm-updates.md` "구현 결정").
+- **스킬 `skill.py`에서 `@dataclass`를 쓰면 로드가 실패할 수 있다**: `from __future__ import annotations`와 함께 쓰면 `dataclasses`가 `sys.modules`에서 모듈을 찾는데, 레지스트리가 불러온 모듈은 등록돼 있지 않아 `NoneType has no attribute __dict__`로 "스킬 로드 실패"가 난다(`yuni-lore`, 2026-10-20). 단위 시험은 `sys.modules`에 직접 넣어 통과해도 `tests/core/test_contract.py`가 잡는다. → 단순한 값 묶음은 `NamedTuple`로 쓴다.

@@ -26,6 +26,7 @@ VALID_CATEGORIES: frozenset[str] = frozenset(
         "함께한 기록",
         "관리",
         "폴더",
+        "유니 설정",
     }
 )
 VALID_GAMES: frozenset[str] = frozenset({"chunithm", "common"})
