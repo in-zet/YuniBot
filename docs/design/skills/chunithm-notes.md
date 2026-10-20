@@ -38,6 +38,7 @@ listens: [chunithm.song.viewed, chunithm.plan.requested]
 | `list` | 내 메모 목록 (표 반환) | 없음 | `/메모 목록` | 표 | never |
 | `add_notes` | 곡·채보 표에 "내 메모" 칸 더하기 (새 표 반환) | `table: TableRef`(곡 칸 필요) | 없음 | 표 | never |
 | `delete` | 메모 삭제 | `song: SongQuery`, `difficulty`: DifficultyRef(선택) | `/메모 삭제` | optional | always |
+| `delete_notes` | 작업 표 행에 달린 내 메모 일괄 삭제 | `table: TableRef`(`nonempty=[곡]`) | 없음 | optional | always |
 
 ## 이벤트
 
@@ -80,3 +81,7 @@ listens: [chunithm.song.viewed, chunithm.plan.requested]
 - 곡 단위 행: 곡 전체 메모를 쓴다(채보 메모는 보지 않는다).
 - 메모가 없으면 원래 값 None·보일 글자 "메모 없음"이다. 본인 메모만 읽고 남의 공개 메모는 더하지 않는다.
 - 서식은 만들지 않아 더한 칸은 줄 끝에 붙는다. 메모 표(`list_notes`)에 쓰면 "메모" 칸과 "내 메모" 칸이 따로 있다.
+
+## 표로 일괄 삭제 (16단계 Part 6-2c, 2026-10-20)
+
+`delete_notes(table)`: 표 행마다 (곡, 난이도 코드)로 본인 메모를 지운다. 채보 행은 그 채보의 메모만, 곡 단위 행(난이도 칸 비음)은 곡 전체 메모(`difficulty=''`)만 지운다 — `add_notes`와 달리 곡 전체 메모로 대신하지 않는다(지우는 쪽에서 바뀌는 범위가 넓어지지 않게). 메모가 없던 행은 `missing`으로 알리고 `deleted_count`는 실제로 지운 개수만이다. 한 곡의 메모를 지우는 `delete`와 달리 `confirm="always"`로 두어 실행기가 항상 확인 버튼을 받는다(`dry_run` 미리보기 없음 — 지운 뒤 개수만 안다). 같은 곡을 가리키는 행이 여러 개여도 한 번만 센다.

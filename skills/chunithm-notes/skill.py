@@ -175,7 +175,7 @@ async def get_note(ctx: ToolContext, song: SongQuery, difficulty: DifficultyRef 
 
 @tool(slash="메모 목록")
 async def list_notes(ctx: ToolContext) -> ToolResult:
-    """내 메모 전체 목록을 표로 보여준다. 난이도가 빈 행은 곡 전체 메모다."""
+    """내 메모 전체 목록을 표로 보여준다. 난이도가 빈 행은 곡 전체 메모다. 이 표로 delete_notes를 부를 수 있다."""
     assert ctx.db is not None
     cursor = await ctx.db.execute(
         "SELECT song_title, difficulty, body, public, updated_at FROM notes_notes "
@@ -265,6 +265,41 @@ async def delete(ctx: ToolContext, song: SongQuery, difficulty: DifficultyRef | 
         display=Display(content="메모를 지웠어."),
         display_mode="optional",
     )
+
+
+@tool(mutates=True, confirm="always")
+async def delete_notes(ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG])]) -> ToolResult:
+    """작업 표(list_notes 결과 등)의 행에 달린 내 메모를 일괄로 지운다. 채보 행은 그 채보의 메모만, 곡 단위 행은 곡
+    전체 메모만 지운다(채보 행에 곡 전체 메모를 대신 지우지 않는다). 일부만 지우려면 table에 번호(예: "t3:2,4")나
+    거른 표를 가리킨다. 본인 메모만 지우고 메모가 없는 행은 건너뛴다. 항상 확인 버튼을 받은 뒤에 지운다."""
+    assert isinstance(table, WorkTable)
+    assert ctx.db is not None
+    keys = list(dict.fromkeys(_row_note_key(row) for row in table.rows))
+    deleted: list[tuple[str, str]] = []
+    for title, code in keys:
+        cursor = await ctx.db.execute(
+            "DELETE FROM notes_notes WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
+            (ctx.player_id, _GAME, title, code),
+        )
+        if cursor.rowcount:
+            deleted.append((title, code))
+    await ctx.db.commit()
+    missing = len(keys) - len(deleted)
+    if not deleted:
+        return ToolResult(error="지울 메모가 없어." + (f" ({missing}개는 이미 없음)" if missing else ""))
+    note = f" ({missing}개는 메모가 없어서 뺐어.)" if missing else ""
+    return ToolResult(
+        data={"deleted_count": len(deleted), "missing": missing, "notes": [_head(t, c) for t, c in deleted]},
+        display=Display(content=f"메모 {len(deleted)}개를 지웠어.{note}"),
+        display_mode="optional",
+    )
+
+
+def _row_note_key(row: Row) -> tuple[str, str]:
+    """표 행이 가리키는 메모의 (곡, 난이도 코드). 곡 단위 행(난이도 칸 비음)은 곡 전체 메모 키("")다."""
+    difficulty = row.cell(tc.DIFFICULTY).raw
+    code = LONG_TO_SHORT_DIFFICULTY.get(str(difficulty), str(difficulty)) if difficulty else ""
+    return str(row.cell(tc.SONG).raw), code
 
 
 # ---------------------------------------------------------------- 이벤트 핸들러

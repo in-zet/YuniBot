@@ -473,3 +473,39 @@ async def test_add_notes_prefers_chart_note_then_whole_song_note_and_marks_missi
         ("이 곡 전체", "이 곡 전체"), (None, "메모 없음"),
     ]
     assert result.data == {"count": 5, "with_note": 4}
+
+
+async def test_delete_notes_removes_exact_notes_only_and_counts_missing(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    songdb = SongDbService()
+    ctx = _ctx(db=db, player_id="p1", songdb=songdb)
+    both = await _song(songdb, "B.B.K.K.B.K.K.", ctx)
+    other = await _song(songdb, "Cthugha", ctx)
+    await skill.set_note(ctx, both, "곡 전체")
+    await skill.set_note(ctx, both, "마스 전용", difficulty=_mas())
+    await skill.set_note(ctx, other, "남길 메모")
+    await skill.set_note(_ctx(db=db, player_id="p2", songdb=songdb), both, "남의 메모", difficulty=_mas())
+    # 채보 행(EXP)에는 그 채보 메모가 없다 — 곡 전체 메모를 대신 지우지 않는다. 마스 행과 곡 단위 행은 지운다.
+    table = _title_table((both.title, "MAS"), (both.title, "EXP"), (both.title, None), (both.title, "MAS"))
+
+    result = await skill.delete_notes(ctx, table=table)
+
+    assert result.error is None
+    assert result.data["deleted_count"] == 2 and result.data["missing"] == 1
+    assert "1개는 메모가 없어서 뺐어" in result.display.content
+    left = {
+        (r["player_id"], r["song_title"], r["difficulty"])
+        for r in await (await db.execute("SELECT player_id, song_title, difficulty FROM notes_notes")).fetchall()
+    }
+    assert left == {("p1", other.title, ""), ("p2", both.title, "MAS")}  # 남의 메모는 그대로
+
+
+async def test_delete_notes_without_any_note_errors(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, player_id="p1")
+    result = await skill.delete_notes(ctx, table=_title_table(("메모 없는 곡", "MAS")))
+    assert result.error is not None
+
+
+def test_delete_notes_always_asks_for_confirmation(skill: ModuleType) -> None:
+    assert skill.delete_notes.__yuni_tool__.confirm == "always"
