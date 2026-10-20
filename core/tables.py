@@ -146,6 +146,36 @@ def derive_table(table: WorkTable, groups: Iterable[Group], *, steps: Iterable[s
     return replace(table, id="", groups=kept, summary=MappingProxyType({}), steps=(*table.steps, *steps))
 
 
+def extend_table(
+    table: WorkTable,
+    columns: Sequence[Column],
+    cells_for: Callable[[Row], Mapping[str, Cell]],
+    *,
+    steps: Iterable[str] = (),
+) -> WorkTable:
+    """칸을 더한 새 표(칸 더하기 도구의 바탕). 행은 그대로이고 `cells_for(행)`이 돌려준 셀이 그 행에 더해진다.
+    이미 있는 칸(이름이 같음)이면 정의는 그대로 두고 셀만 덮어쓴다. 보이는 이름만 겹치면 에러.
+    `derive_table`처럼 id와 요약은 비우고 표지 이름은 남긴다."""
+    known = {column.name for column in table.columns}
+    labels = {column.label for column in table.columns}
+    added: list[Column] = []
+    for column in columns:
+        if column.name in known:
+            continue
+        if column.label in labels:
+            raise TableError(f"칸 보이는 이름이 겹친다: {column.label}")
+        added.append(column)
+    groups = [
+        Group(
+            group.title,
+            tuple(Row(row.ref, MappingProxyType({**row.cells, **cells_for(row)})) for row in group.rows),
+        )
+        for group in table.groups
+    ]
+    derived = derive_table(table, groups, steps=steps)
+    return replace(derived, columns=(*table.columns, *added))
+
+
 def keep_rows(table: WorkTable, keep: Callable[[int, Row], bool], *, steps: Iterable[str] = ()) -> WorkTable:
     """`keep(번호, 행)`이 참인 행만 남긴 새 표. 번호는 원래 표의 번호다."""
     number = 0

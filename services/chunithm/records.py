@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
@@ -47,6 +48,7 @@ _SSS_SCORE = 1_007_500
 _DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 
 type ChartKey = tuple[str, str]
+_PB_KEYS_PER_QUERY = 400
 
 
 def _rating_str(value: Decimal | None) -> str:
@@ -588,6 +590,24 @@ class RecordsService:
         )
         row = await cursor.fetchone()
         return _pb_row_from(row) if row is not None else None
+
+    async def pb_rows_for(self, player_id: str, keys: Sequence[ChartKey]) -> dict[ChartKey, PbRow]:
+        """주어진 채보들의 PB를 한 번에 가져온다(기록 없는 채보는 결과에 없다). 변수 개수 상한을
+        넘지 않게 키를 나눠 묻는다."""
+        found: dict[ChartKey, PbRow] = {}
+        unique = list(dict.fromkeys(keys))
+        for start in range(0, len(unique), _PB_KEYS_PER_QUERY):
+            chunk = unique[start : start + _PB_KEYS_PER_QUERY]
+            pairs = ", ".join("(?, ?)" for _ in chunk)
+            cursor = await self._conn.execute(
+                f"SELECT {_PB_COLUMNS} FROM records_pb "
+                f"WHERE player_id = ? AND game = ? AND (song_title, difficulty) IN (VALUES {pairs})",
+                (player_id, _GAME, *(value for key in chunk for value in key)),
+            )
+            for row in await cursor.fetchall():
+                pb = _pb_row_from(row)
+                found[(pb.song_title, pb.difficulty)] = pb
+        return found
 
     async def all_pb_rows(self, player_id: str) -> list[PbRow]:
         """그 플레이어의 모든 PB(제목·난이도 순). 레이팅 순 정렬은 부르는 쪽이 한다."""

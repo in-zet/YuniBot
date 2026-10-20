@@ -98,7 +98,7 @@
   - [ ] Part 2: 첫 범위 스킬(곡 검색 4개·`best`·`add_scores`·폴더 보기/저장) — 세부 파트
     - [X] 2-1 공통 칸 `services/chunithm/table_columns.py` — 구현 완료(2026-10-20)
     - [X] 2-2 `chunithm-song` 곡 검색 4개 표로(`find_songs`의 `sort_by`·`descending` 제거, `find_by_artist`에 `difficulty`) — 구현 완료(2026-10-20)
-    - [ ] 2-3 `chunithm-report` `best` 표 + `add_scores`
+    - [X] 2-3 `chunithm-report` `best` 표 + `add_scores` — 구현 완료(2026-10-20)
     - [ ] 2-4 `chunithm-folders` `show_folder` 표 + `save_table`
     - [ ] 2-5 `chunithm-sync` `mark_stale` + `core/bot.py` `partial_row_hints` 연결
     - [ ] 2-6 `rules.md` 정리·문서

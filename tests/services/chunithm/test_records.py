@@ -839,6 +839,39 @@ async def test_pb_row_unknown_rating_is_none(conn, monkeypatch) -> None:
     assert await service.pb_row(player_id, song_title="존재하지않는곡", difficulty="MAS") is None
 
 
+async def test_pb_rows_for_returns_only_requested_keys_with_records(conn) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
+    every = await service.all_pb_rows(player_id)
+    wanted = [(every[0].song_title, every[0].difficulty), (every[1].song_title, every[1].difficulty)]
+
+    found = await service.pb_rows_for(player_id, [*wanted, ("존재하지않는곡", "MAS"), wanted[0]])
+
+    assert set(found) == set(wanted)
+    assert found[wanted[0]] == every[0]
+    assert await service.pb_rows_for(player_id, []) == {}
+
+
+async def test_pb_rows_for_splits_many_keys_across_queries(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
+    every = await service.all_pb_rows(player_id)
+    monkeypatch.setattr(records_module, "_PB_KEYS_PER_QUERY", 2)
+
+    found = await service.pb_rows_for(player_id, [(r.song_title, r.difficulty) for r in every])
+
+    assert len(found) == len(every)
+
+
+async def test_pb_rows_for_ignores_other_players(conn) -> None:
+    players, player_id, ctx, service = await _setup(conn)
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
+    every = await service.all_pb_rows(player_id)
+    other = await players.create_player()
+
+    assert await service.pb_rows_for(other.id, [(every[0].song_title, every[0].difficulty)]) == {}
+
+
 async def test_latest_overpower(conn) -> None:
     _, player_id, ctx, service = await _setup(conn)
     assert await service.latest_overpower(player_id) is None

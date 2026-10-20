@@ -116,3 +116,25 @@ def test_pb_cells_with_and_without_record() -> None:
 def test_partial_row_hint_names_difficulty_and_song() -> None:
     (hint,) = tc.PARTIAL_ROW_HINTS
     assert (hint.column, hint.given) == (tc.DIFFICULTY, tc.SONG)
+
+
+def test_partial_hint_gives_charts_of_advice_when_song_rows_are_dropped() -> None:
+    from core.tables import TableNeeds, TableStore, resolve_table_arg
+
+    builder = TableBuilder(unit="곡")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.row(tc.song_ref("곡A"), tc.song_cells(_song(), [tc.SONG, tc.DIFFICULTY]))
+    builder.row(
+        tc.chart_ref("곡A", "MAS"), tc.chart_cells(_song(), _chart(), [tc.SONG, tc.DIFFICULTY])
+    )
+    store = TableStore()
+    table_id = store.put("p1", "c1", builder.build())
+
+    arg = resolve_table_arg(
+        table_id, store=store, player_id="p1", channel_id="c1",
+        needs=TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY]), mutates=False,
+        partial_row_hints=tc.PARTIAL_ROW_HINTS,
+    )
+
+    assert arg.table.row_count == 1
+    assert "곡 단위 행(난이도 없음) 1개 뺌 — charts_of로 난이도를 정할 수 있다" in arg.table.steps

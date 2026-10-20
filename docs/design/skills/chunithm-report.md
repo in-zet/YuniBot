@@ -93,11 +93,13 @@ listens: [chunithm.sync.completed]
 | 함수 | 하는 일 | 인자 | 슬래시 | display |
 | --- | --- | --- | --- | --- |
 | `profile` | 프로필 | `player: PlayerRef`(기본 나) | `/프로필` | optional |
-| `best` | 베스트 30, 신곡 20 | `player: PlayerRef`, `kind`(best/new/둘 다) | `/베스트` | required(omittable) |
+| `best` | 베스트 30, 신곡 20 (표 반환) | `player: PlayerRef`, `kind`(best/new/둘 다) | `/베스트` | 표 |
 | `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만) | `player: PlayerRef`, `count` | `/최근` | required |
 | `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | `/기록` | optional |
 | `analyze` | 상수대별 평균, 랭크 분포 | `player: PlayerRef`, 상수 범위(선택) | `/분석` | required |
 | `candidates` | 레이팅 후보곡 | 상수 범위(선택), `count` | `/후보곡` | required |
+
+| `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
 
@@ -115,6 +117,8 @@ listens: [chunithm.sync.completed]
 
 - 레이팅과 평균은 지금 값을 말한다. 직전 동기화 대비 변화량은 동기화 리포트에만 나오고, 프로필·베스트 조회에는 안 붙는다.
 - 레이팅 하나만 물으면 말로 답하고, 목록과 분석은 표시물로 보여 준다.
+- `best`는 표로 나온다. 표 id를 받으면 행을 다시 나열하지 않고, 이어지는 요청("그중에 SSS 아닌 것")은 그 표에 `table_query`를 쓴다.
+- 곡 검색 같은 다른 채보 표에 점수·랭크·램프를 붙여 달라고 하면 `add_scores`를 쓴다(곡·난이도가 있는 행만 받는다). 기록이 없는 채보는 "기록 없음"으로 나온다. 누구 기록인지 말하지 않았으면 `player`를 비운다.
 - 나쁜 결과나 부족한 점수는 돌려 말하지 않고 숫자 그대로 전한다.
 - 다른 플레이어의 기록이 비공개라는 오류가 오면 비공개라고만 말한다. 다른 경로로 찾지 않는다.
 
@@ -125,6 +129,8 @@ listens: [chunithm.sync.completed]
 - 후보곡 순서가 레이팅 상승폭순인지.
 - 반응 단계 판정 경계값.
 - 비공개 플레이어 조회가 함수까지 오지 않는지.
+- `best`의 표: 묶음("베스트 30"·"신곡 20")과 묶음 평균, 요약(닉네임·레벨·레이팅), 랭크 칸 원래 값이 기준 점수인지, 글자 한 줄 모양이 예전 줄과 같고 램프는 숨는지.
+- `add_scores`: 곡·난이도가 없는 행은 실행기가 빼는지, PB 없는 채보가 "기록 없음"·원래 값 None인지, 남의 비공개 기록을 거절하는지, 두 번 불러도 칸이 겹치지 않는지.
 
 ## 미확인 사항
 
@@ -136,3 +142,8 @@ listens: [chunithm.sync.completed]
 - 전체 레이팅(computed_rating, 50으로 나눈 값)은 둘째 자리가 아니라 **넷째 자리에서 버린다** — 분모 5000(=2³×5⁴)이라 넷째 자리에서 정확히 끝나서다. CHUNITHM-NET 표시값은 둘째 자리까지만 보여주므로, `rating_mismatch` 대조는 전체 레이팅을 둘째 자리로 버린 뒤 비교한다(`records.save_sync`).
 - 베스트30 평균·신곡20 평균도 둘째 자리가 아니라 **넷째 자리에서 버린다**(사용자 확인 2026-10-18 — 세 지표를 같은 자리수로 통일). `records_calc.average_rating`의 기본값을 `places=4`로 바꿨다. 베스트30 평균(분모 3000)은 3이 섞여 넷째 자리에서도 정확히 끝나지는 않지만, 둘째 자리보다는 더 정밀한 값을 보여 준다.
 - **프로필·베스트에서 직전 동기화 대비 변화량을 뺐다**(사용자 확인 2026-10-18). 10/17에 세션 리포트용 변화량 스냅샷(`records.rating_deltas`)을 만들면서 "일관성 있게" 프로필·베스트에도 같이 붙였는데(b5ab365), 단순 조회에 변화량이 꼭 필요하다는 근거는 없었다 — 변화량은 세션(동기화) 맥락에서만 의미 있다. `profile`·`best`는 이제 `records.latest_sync_summary`(지금 값만)를 쓰고, `rating_deltas`는 동기화 리포트 조각(`on_sync_completed`)에만 남는다.
+
+## 구현 결정 (2026-10-20, 작업 표 Part 2)
+
+- `best`는 `ToolResult.table`을 돌려준다(`display` 없음). 가리키는 것 `chunithm.chart`, 칸: 곡·난이도·상수·점수·랭크·램프·곡 레이팅·기여(기여는 이 스킬만 아는 칸). 묶음은 "베스트 30"·"신곡 20"(묶음 요약: 평균), 순서는 프레임 순위 그대로. 표 요약: 닉네임·레벨(`records.player_profile`에 저장된 값이 있을 때만)·레이팅. `subject`는 대상 플레이어. 글자 한 줄 서식은 예전 줄 그대로(`{곡} {난이도} {상수}  {점수} {랭크}  곡 레이팅 {곡 레이팅}  기여 {기여}`)이고 램프는 글자 출력에서 숨긴다.
+- `add_scores`는 `core.tables.extend_table`(칸 더하기 공통 함수, 이미 있는 칸이면 셀을 덮어씀)로 새 표를 만든다. 원래 행의 가리키는 것은 그대로 두고 `subject`만 대상 플레이어로 바꾼다. `steps`에 "내 점수"(남이면 "{닉네임} 점수"). PB는 `records.pb_rows_for(player_id, keys)`로 가져온다(키 400개씩 나눠 묻는다). 이 두 도구가 랭크 기준 점수를 알려고 `terms` 서비스(`rank_scores()`)를 쓰므로 manifest `services`에 `terms`를 더했다.

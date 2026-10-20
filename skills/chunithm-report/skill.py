@@ -2,16 +2,34 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, NamedTuple
+from typing import Annotated, Any, NamedTuple
 
 from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 from chuni_penguin.types.score import RecentScore
 
 from core.decorators import on, tool
 from core.events import Section, Stage
-from core.tool_types import ChartRef, Display, PlayerRef, ToolContext, ToolResult
+from core.tables import (
+    Cell,
+    Row,
+    TableBuilder,
+    TableNeeds,
+    WorkTable,
+    cell,
+    extend_table,
+)
+from core.tool_types import (
+    ChartRef,
+    Display,
+    PlayerRef,
+    TableRef,
+    ToolContext,
+    ToolResult,
+)
+from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import (
     ChartUpdate,
@@ -19,6 +37,7 @@ from services.chunithm.records import (
     RatingDeltas,
     SyncDiff,
 )
+from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
 from services.common.players import Player
 
 # 판정 수(상세 판정)는 CHUNITHM-NET 플레이 상세 페이지를 한 곡씩 따로 열어야 붙는다.
@@ -131,9 +150,29 @@ async def profile(ctx: ToolContext, player: PlayerRef | None = None) -> ToolResu
     return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
 
 
+_CONTRIBUTION = "기여"
+_BEST_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
+# 한 줄 서식(램프는 글자 출력에서 숨긴다 — 줄 모양은 지금 베스트 줄 그대로).
+_BEST_ROW_FORMAT = "{곡} {난이도} {상수}  {점수} {랭크}  곡 레이팅 {곡 레이팅}  기여 {기여}"
+
+
+def _pb_row_cells(row: PbRow, rank_scores: dict[str, int]) -> dict[str, Cell]:
+    cells = {
+        tc.SONG: tc.song_cell(row.song_title),
+        tc.DIFFICULTY: tc.difficulty_cell(row.difficulty),
+        tc.CONST: tc.const_cell(row.const),
+        **tc.pb_cells(row, rank_scores),
+    }
+    cells[_CONTRIBUTION] = (
+        cell(float(row.rating / 50), _contribution(row.rating)) if row.rating is not None
+        else cell(None, _UNKNOWN)
+    )
+    return cells
+
+
 @tool(slash="베스트")
 async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind = BestKind.BOTH) -> ToolResult:
-    """베스트 30과 신곡 20 목록(채보, 점수, 곡 레이팅, 전체 레이팅 기여도)을 보여준다. kind는 best(베스트 30), new(신곡 20), both(둘 다)."""
+    """베스트 30과 신곡 20 표(채보, 점수, 곡 레이팅, 전체 레이팅 기여도)를 돌려준다. kind는 best(베스트 30), new(신곡 20), both(둘 다)."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
@@ -147,31 +186,74 @@ async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind
     summary = await ctx.records.latest_sync_summary(target.id)
     if summary is None:
         return ToolResult(error=_NOT_SYNCED_ERROR)
+    profile_row = await ctx.records.player_profile(target.id)
 
     # 변화량은 여기서 안 보여준다 — profile()과 같은 이유(동기화 리포트 전용).
-    data: dict[str, Any] = {
-        "player_id": target.id,
-        "kind": kind.value,
-        "computed_rating": _num(summary.computed_rating),
-    }
-    blocks: list[str] = [f"레이팅  {_num(summary.computed_rating)}"]
-    frames: list[tuple[str, str, list[PbRow], Decimal | None]] = []
+    frames: list[tuple[str, list[PbRow], Decimal | None]] = []
     if kind in (BestKind.BEST, BestKind.BOTH):
-        frames.append(("best", "베스트 30", best_rows, summary.best30_average))
+        frames.append(("베스트 30", best_rows, summary.best30_average))
     if kind in (BestKind.NEW, BestKind.BOTH):
-        frames.append(("new", "신곡 20", new_rows, summary.new20_average))
+        frames.append(("신곡 20", new_rows, summary.new20_average))
 
-    for key, title, rows, average in frames:
-        data[key] = [{**_pb_data(r), "contribution": _contribution(r.rating)} for r in rows]
-        data[f"{key}_average"] = _num(average)
-        lines = [f"{title}  평균 {_num(average)}"]
-        lines += [
-            f"{i}. {r.song_title} {r.difficulty}{_const_text(r.const)}  {_score(r.score)} {r.rank}  "
-            f"곡 레이팅 {_num(r.rating)}  기여 {_contribution(r.rating)}"
-            for i, r in enumerate(rows, start=1)
-        ]
-        blocks.append("\n".join(lines))
-    return ToolResult(data=data, display=Display(content="\n\n".join(blocks), omittable=True))
+    builder = TableBuilder(subject=target.id, unit="채보")
+    tc.add_columns(builder, *_BEST_COLUMNS, hidden_in_text=(tc.LAMP,))
+    builder.column(_CONTRIBUTION, value_type="number")
+    builder.row_formats([_BEST_ROW_FORMAT])
+    builder.step(" · ".join(title for title, _, _ in frames))
+    header: dict[str, str] = {"닉네임": summary.nickname or "(닉네임 없음)"}
+    if profile_row is not None and profile_row.level is not None:
+        header["레벨"] = str(profile_row.level)
+    header["레이팅"] = _num(summary.computed_rating)
+    builder.summary(header)
+
+    rank_scores = ctx.terms.rank_scores()
+    for title, rows, average in frames:
+        builder.group(title, {"평균": _num(average)})
+        for r in rows:
+            builder.row(tc.chart_ref(r.song_title, r.difficulty), _pb_row_cells(r, rank_scores))
+    return ToolResult(
+        data={"player_id": target.id, "kind": kind.value, "computed_rating": _num(summary.computed_rating)},
+        table=builder.build(),
+    )
+
+
+_SCORE_COLUMNS = (tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
+
+
+@tool()
+async def add_scores(
+    ctx: ToolContext,
+    table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])],
+    player: PlayerRef | None = None,
+) -> ToolResult:
+    """채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표를 돌려준다. player를 비우면 본인 기록이고, 기록이 없는 채보는 "기록 없음"이다."""
+    assert isinstance(table, WorkTable)
+    target = await _target_player(ctx, player)
+    if isinstance(target, ToolResult):
+        return target
+
+    def key_of(row: Row) -> tuple[str, str]:
+        difficulty = str(row.cell(tc.DIFFICULTY).raw)
+        return str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)
+
+    pbs = await ctx.records.pb_rows_for(target.id, [key_of(row) for row in table.rows])
+    rank_scores = ctx.terms.rank_scores()
+
+    if target.id == ctx.player_id:
+        owner = "내 점수"
+    else:
+        other = await ctx.records.latest_sync_summary(target.id)
+        owner = f"{other.nickname} 점수" if other is not None and other.nickname else "상대 점수"
+    extended = extend_table(
+        table,
+        tc.common_columns(*_SCORE_COLUMNS),
+        lambda row: tc.pb_cells(pbs.get(key_of(row)), rank_scores),
+        steps=[owner],
+    )
+    return ToolResult(
+        data={"player_id": target.id, "with_record": len(pbs)},
+        table=replace(extended, subject=target.id),
+    )
 
 
 def _recent_data(score: RecentScore) -> dict[str, Any]:

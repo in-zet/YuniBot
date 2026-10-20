@@ -17,13 +17,16 @@ from chuni_penguin.types.lamp import ClearLamp, ComboLamp
 from chuni_penguin.types.score import Judgements, RecentScore
 
 from core.events import Section
+from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import Display, ToolContext, ToolResult
+from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import (
     CandidateHit,
     ChartUpdate,
     FrameExit,
     PbRow,
+    PlayerProfile,
     RatingDeltas,
     SessionInfo,
     SyncDiff,
@@ -31,6 +34,7 @@ from services.chunithm.records import (
     UnchangedPlay,
 )
 from services.chunithm.songdb import ChartRecord, SongRecord
+from services.chunithm.terms import TermsService
 from services.common.players import Player
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -104,6 +108,18 @@ class _FakeRecords:
     hits: list[CandidateHit] = field(default_factory=list)
     diffs: dict[str, SyncDiff] = field(default_factory=dict)
     candidate_calls: list[dict[str, Any]] = field(default_factory=list)
+    profiles: dict[str, PlayerProfile] = field(default_factory=dict)
+
+    async def player_profile(self, player_id: str) -> PlayerProfile | None:
+        return self.profiles.get(player_id)
+
+    async def pb_rows_for(self, player_id: str, keys: list[tuple[str, str]]) -> dict[tuple[str, str], PbRow]:
+        wanted = set(keys)
+        return {
+            (r.song_title, r.difficulty): r
+            for r in self.pbs.get(player_id, [])
+            if (r.song_title, r.difficulty) in wanted
+        }
 
     async def latest_sync_summary(self, player_id: str) -> SyncLogSummary | None:
         return self.summaries.get(player_id)
@@ -203,6 +219,7 @@ def _ctx(
             "songdb": _FakeSongDb(consts),
             "players": _FakePlayers(players or [_player("me", public=False)]),
             "chunithm_net": net,
+            "terms": TermsService(),
         },
     )
     return _Fakes(ctx=ctx, records=records, net=net)
@@ -304,19 +321,58 @@ async def test_best_never_synced(skill: ModuleType) -> None:
     assert result.error is not None and "동기화" in result.error
 
 
-async def test_best_both_lists_rows_and_contribution(skill: ModuleType) -> None:
+def _titles_of(table: WorkTable | None) -> list[str]:
+    assert table is not None
+    return [str(row.cell(tc.SONG).raw) for row in table.rows]
+
+
+async def test_best_both_returns_table_with_groups_and_contribution(skill: ModuleType) -> None:
     f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.best(f.ctx)
 
-    assert result.error is None
-    assert result.display_mode == "required"
-    assert [r["song_title"] for r in result.data["best"]] == ["곡 A", "곡 B"]
-    assert [r["song_title"] for r in result.data["new"]] == ["신곡 C"]
-    # 전체 레이팅 기여도 = 곡 레이팅 / 50 (정확한 값, 반올림 없음)
-    assert result.data["best"][0]["contribution"] == "0.3462"
-    content = _content(result)
-    assert "곡 A" in content and "신곡 C" in content and "1,007,620" in content and "0.3462" in content
+    assert result.error is None and result.display is None
+    table = result.table
+    assert table is not None
+    assert table.subject == "me" and table.unit == "채보"
+    assert [g.title for g in table.groups] == ["베스트 30", "신곡 20"]
+    assert [g.summary["평균"] for g in table.groups] == ["17.02", "16.83"]
+    assert _titles_of(table) == ["곡 A", "곡 B", "신곡 C"]
+    assert table.summary["닉네임"] == "펭귄" and table.summary["레이팅"] == "16.94"
+    assert "레벨" not in table.summary
+    first = table.rows[0]
+    assert first.ref.kind == tc.CHART and tc.chart_key(first.ref) == ("곡 A", "MAS")
+    assert first.cell("기여").text == "0.3462"
+    assert first.cell(tc.SCORE).raw == 1_007_620
+    assert first.cell(tc.RANK).raw == 1_007_500  # 랭크 칸의 원래 값은 기준 점수
+    assert first.cell(tc.DIFFICULTY).raw == "MASTER" and first.cell(tc.DIFFICULTY).text == "MAS"
+    assert first.cell(tc.LAMP).raw == "FULL COMBO"
+    assert first.cell(tc.RATING).raw == 17.31
+
+
+async def test_best_text_line_keeps_the_old_shape_and_hides_lamp(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
+
+    result = await skill.best(f.ctx)
+
+    assert result.table is not None
+    text = render_text(result.table).content
+    assert "1. 곡 A MAS 15.3  1,007,620 SSS  곡 레이팅 17.31  기여 0.3462" in text
+    assert "FULL COMBO" not in text
+    assert "── 베스트 30 · 2채보 · 평균 17.02 ──" in text
+    assert "닉네임 펭귄 · 레이팅 16.94" in text
+
+
+async def test_best_shows_level_when_profile_was_saved(skill: ModuleType) -> None:
+    profile = PlayerProfile(
+        level=62, reincarnation_stars=None, character_image_url=None, character_frame_url=None,
+        updated_at="2026-10-17",
+    )
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, profiles={"me": profile}))
+
+    result = await skill.best(f.ctx)
+
+    assert result.table is not None and result.table.summary["레벨"] == "62"
 
 
 async def test_best_does_not_show_average_changes(skill: ModuleType) -> None:
@@ -325,13 +381,9 @@ async def test_best_does_not_show_average_changes(skill: ModuleType) -> None:
 
     result = await skill.best(f.ctx)
 
-    assert result.data["best_average"] == "17.02"
-    assert result.data["computed_rating"] == "16.94"
-    content = _content(result)
-    assert "레이팅  16.94" in content
-    assert "베스트 30  평균 17.02" in content
-    assert "신곡 20  평균 16.83" in content
-    assert "+0.04" not in content and "비교할 직전 기록 없음" not in content
+    assert result.table is not None
+    text = render_text(result.table).content
+    assert "+0.04" not in text and "비교할 직전 기록 없음" not in text
 
 
 async def test_best_kind_new_only(skill: ModuleType) -> None:
@@ -339,9 +391,9 @@ async def test_best_kind_new_only(skill: ModuleType) -> None:
 
     result = await skill.best(f.ctx, kind="new")
 
-    assert "best" not in result.data
-    assert [r["song_title"] for r in result.data["new"]] == ["신곡 C"]
-    assert "곡 A" not in _content(result)
+    assert result.table is not None
+    assert [g.title for g in result.table.groups] == ["신곡 20"]
+    assert _titles_of(result.table) == ["신곡 C"]
 
 
 async def test_best_invalid_kind_is_error(skill: ModuleType) -> None:
@@ -359,6 +411,100 @@ async def test_best_of_private_other_is_refused(skill: ModuleType) -> None:
     result = await skill.best(f.ctx, player=other)
 
     assert result.error is not None and "비공개" in result.error
+
+
+# ---------------------------------------------------------------- add_scores
+
+
+def _chart_table(*charts: tuple[str | None, str | None]) -> WorkTable:
+    """(곡 정식 제목 또는 None, 난이도 코드 또는 None)마다 한 행. 곡 없는 행·곡 단위 행도 만들 수 있다."""
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.step("테스트 표")
+    for title, difficulty in charts:
+        ref = tc.song_ref(title) if difficulty is None and title else tc.chart_ref(title or "", difficulty or "")
+        builder.row(ref, {tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell(difficulty)})
+    return builder.build()
+
+
+def _records_with_pbs() -> _FakeRecords:
+    return _FakeRecords(
+        pbs={"me": [_pb("곡 A", "MAS", 1_007_620, "SSS", 15.3, "17.31")], "other": [_pb("곡 B", "MAS", 990_000, "S+", 14.9, "14.90")]},
+        summaries={"other": SyncLogSummary(
+            nickname="상대", computed_rating=Decimal("15.00"), best30_average=None, new20_average=None,
+            last_synced_at="2026-10-17T03:00:00+00:00",
+        )},
+    )
+
+
+async def test_add_scores_adds_pb_columns_and_marks_missing_records(skill: ModuleType) -> None:
+    f = _ctx(records=_records_with_pbs())
+
+    result = await skill.add_scores(f.ctx, table=_chart_table(("곡 A", "MAS"), ("곡 B", "MAS")))
+
+    assert result.error is None
+    table = result.table
+    assert table is not None
+    assert [c.name for c in table.columns] == [tc.SONG, tc.DIFFICULTY, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING]
+    assert table.subject == "me" and table.steps == ("테스트 표", "내 점수")
+    have, missing = table.rows
+    assert have.cell(tc.SCORE).raw == 1_007_620 and have.cell(tc.RANK).text == "SSS"
+    assert missing.cell(tc.SCORE).raw is None and missing.cell(tc.SCORE).text == "기록 없음"
+    assert missing.cell(tc.LAMP).raw is None
+    assert result.data["with_record"] == 1
+
+
+async def test_add_scores_keeps_original_rows_and_refs(skill: ModuleType) -> None:
+    f = _ctx(records=_records_with_pbs())
+    source = _chart_table(("곡 A", "MAS"))
+
+    result = await skill.add_scores(f.ctx, table=source)
+
+    assert result.table is not None
+    assert result.table.rows[0].ref == source.rows[0].ref
+    assert source.column_by_name(tc.SCORE) is None  # 원래 표는 바뀌지 않는다
+
+
+async def test_add_scores_uses_the_other_players_records_when_public(skill: ModuleType) -> None:
+    other = _player("other", public=True)
+    f = _ctx(records=_records_with_pbs(), players=[_player("me"), other])
+
+    result = await skill.add_scores(f.ctx, table=_chart_table(("곡 A", "MAS"), ("곡 B", "MAS")), player=other)
+
+    assert result.table is not None
+    assert result.table.subject == "other"
+    assert result.table.steps[-1] == "상대 점수"
+    assert [r.cell(tc.SCORE).raw for r in result.table.rows] == [None, 990_000]
+
+
+async def test_add_scores_refuses_private_other(skill: ModuleType) -> None:
+    other = _player("other", public=False)
+    f = _ctx(records=_records_with_pbs(), players=[_player("me"), other])
+
+    result = await skill.add_scores(f.ctx, table=_chart_table(("곡 A", "MAS")), player=other)
+
+    assert result.error is not None and "비공개" in result.error
+    assert result.table is None
+
+
+async def test_add_scores_twice_overwrites_instead_of_duplicating_columns(skill: ModuleType) -> None:
+    f = _ctx(records=_records_with_pbs())
+    first = await skill.add_scores(f.ctx, table=_chart_table(("곡 A", "MAS")))
+    assert first.table is not None
+
+    second = await skill.add_scores(f.ctx, table=first.table)
+
+    assert second.table is not None
+    assert [c.name for c in second.table.columns].count(tc.SCORE) == 1
+
+
+def test_add_scores_declares_song_and_difficulty_needs() -> None:
+    from core.schema import build_arg_schema
+
+    skill = _load_skill()
+    table_arg = next(a for a in build_arg_schema(skill.add_scores).args if a.name == "table")
+    assert table_arg.table_needs is not None
+    assert table_arg.table_needs.nonempty == (tc.SONG, tc.DIFFICULTY)
 
 
 # ---------------------------------------------------------------- recent

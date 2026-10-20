@@ -10,6 +10,7 @@ from core.tables import (
     TABLE_FILE_ROWS,
     TABLE_TTL_SECONDS,
     Cell,
+    Column,
     Condition,
     PartialRowHint,
     RowRef,
@@ -21,6 +22,7 @@ from core.tables import (
     WorkTable,
     cell,
     describe_table,
+    extend_table,
     parse_table_arg,
     peek_rows,
     render_text,
@@ -838,3 +840,36 @@ def test_describe_table_lists_steps_unit_and_visible_columns_only() -> None:
     assert describe_table(table, stale=True).startswith("[살아 있는 표] t3 (동기화 전 값) — ")
     bare = dataclasses.replace(TableBuilder().column("a").build(), id="t1")
     assert "과정 없음" in describe_table(bare)
+
+
+def test_extend_table_adds_columns_cells_and_keeps_rows_groups_and_format() -> None:
+    source = _table()
+
+    extended = extend_table(
+        source,
+        [Column(name="score", label="점수", value_type="ScoreRef")],
+        lambda row: {"score": cell(1, "1")} if row.ref.key != "c" else {},
+        steps=["내 점수"],
+    )
+
+    assert [c.name for c in extended.columns] == ["song", "const", "score"]
+    assert [g.title for g in extended.groups] == ["15.5", "15.0"]
+    assert [row.ref for row in extended.rows] == [row.ref for row in source.rows]
+    assert extended.rows[0].cell("score").raw == 1 and not extended.rows[2].cell("score").filled
+    assert extended.steps == ("15 이상", "내 점수")
+    assert extended.row_formats == source.row_formats and extended.subject == "p1"
+    assert extended.id == "" and not extended.summary and not extended.groups[0].summary
+    assert source.column_by_name("score") is None
+
+
+def test_extend_table_overwrites_existing_column_cells_and_rejects_label_clash() -> None:
+    source = _table()
+
+    overwritten = extend_table(
+        source, [Column(name="const", label="상수", value_type="number")], lambda _row: {"const": cell(1.0, "1.0")}
+    )
+    assert [c.name for c in overwritten.columns] == ["song", "const"]
+    assert all(row.cell("const").raw == 1.0 for row in overwritten.rows)
+
+    with pytest.raises(TableError):
+        extend_table(source, [Column(name="other", label="상수")], lambda _row: {})

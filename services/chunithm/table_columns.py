@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import replace
 from decimal import Decimal
 
 from core.tables import (
@@ -74,12 +75,22 @@ _COLUMNS: dict[str, Column] = {
 }
 
 
-def add_columns(builder: TableBuilder, *names: str) -> TableBuilder:
-    """공통 칸을 주어진 순서대로 표에 더한다."""
+def common_columns(*names: str, hidden_in_text: Collection[str] = ()) -> list[Column]:
+    """공통 칸 정의를 주어진 순서대로 꺼낸다. `hidden_in_text`에 든 칸은 글자 출력에서 숨긴다."""
+    columns: list[Column] = []
     for name in names:
         column = _COLUMNS.get(name)
         if column is None:
             raise TableError(f"공통 칸이 아니다: {name}")
+        columns.append(replace(column, hidden_in_text=name in hidden_in_text))
+    return columns
+
+
+def add_columns(
+    builder: TableBuilder, *names: str, hidden_in_text: Collection[str] = ()
+) -> TableBuilder:
+    """공통 칸을 주어진 순서대로 표 만들기에 더한다."""
+    for column in common_columns(*names, hidden_in_text=hidden_in_text):
         builder.column(
             column.name, column.label, column.value_type, slash_only=column.slash_only,
             hidden_in_text=column.hidden_in_text, bare=column.bare,

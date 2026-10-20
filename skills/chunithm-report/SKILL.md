@@ -10,13 +10,15 @@ examples:
 category: 기록과 리포트
 game: chunithm
 version: 1
-services: [records, songdb, players, chunithm_net]
+services: [records, songdb, players, chunithm_net, terms]
 tags: [chunithm-synced]
 listens: [chunithm.sync.completed]
 ---
 
 - 레이팅과 평균은 지금 값을 말한다. 직전 동기화 대비 변화량은 동기화 리포트에만 나오고, 프로필·베스트 조회에는 안 붙는다.
 - 레이팅 하나만 물으면 말로 답하고, 목록과 분석은 표시물로 보여 준다.
+- `best`는 표로 나온다. 표 id를 받으면 행을 다시 나열하지 않고, 이어지는 요청("그중에 SSS 아닌 것")은 그 표에 `table_query`를 쓴다.
+- 곡 검색 같은 다른 채보 표에 점수·랭크·램프를 붙여 달라고 하면 `add_scores`를 쓴다(곡·난이도가 있는 행만 받는다). 기록이 없는 채보는 "기록 없음"으로 나온다. 누구 기록인지 말하지 않았으면 `player`를 비운다.
 - 나쁜 결과나 부족한 점수는 돌려 말하지 않고 숫자 그대로 전한다.
 - 다른 플레이어의 기록이 비공개라는 오류가 오면 비공개라고만 말한다. 다른 경로로 찾지 않는다.
 - 누구 기록인지 말하지 않았으면 `player`를 비워 둔다(본인 기록을 본다).
