@@ -12,6 +12,7 @@ from typing import Any
 
 from core.decorators import on, tool
 from core.events import Section, Stage, highest_stage
+from core.tables import EMPTY_CELL, Cell, RowRef, TableBuilder, cell
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -22,6 +23,7 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
+from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import PbRow, RatingDeltas
 from services.chunithm.records_calc import chart_rating
@@ -782,10 +784,86 @@ async def set_goal(
     )
 
 
+_GOAL = "chunithm-goals.goal"
+_G_KIND = "유형"
+_G_LABEL = "목표"
+_G_STATUS = "상태"
+_G_PROGRESS = "진행"
+_G_RATIO = "달성률"
+_G_REMAINING = "남은 양"
+_G_DUE = "기한"
+_G_PUBLIC = "공개"
+_G_ID = "id"
+_GOAL_LIST_FORMATS = (
+    "[{상태}] {목표}  {진행}  기한 {기한}",
+    "[{상태}] {목표}  {진행}",
+    "[{상태}] {목표}",
+)
+_KIND_LABELS: dict[str, str] = {
+    GoalKind.SONG.value: "곡",
+    GoalKind.RATING.value: "레이팅",
+    GoalKind.OVERPOWER.value: "오버파워",
+    GoalKind.FOLDER.value: "폴더",
+    GoalKind.FREEFORM.value: "자유",
+}
+
+
+_T_TARGET_SCORE = "목표 점수"
+_T_REMAINING = "남은 점수"
+_T_TARGET_LAMP = "목표 램프"
+_T_CURRENT_LAMP = "현재 램프"
+_TODO_FORMATS = (
+    "{곡} {난이도} {상수}  {점수} → {목표 점수}  (남은 {남은 점수}점)",
+    "{곡} {난이도} {상수}  {목표 램프} 목표  (현재 램프 {현재 램프})",
+    "{곡} {난이도}  {목표 램프} 목표",
+)
+# 곡 목표의 램프 값("full_combo")을 공통 칸 규약(`str(combo_lamp)`)의 원래 값으로.
+_LAMP_RAW: dict[str, str] = {SongLamp.FULL_COMBO.value: "FULL COMBO", SongLamp.ALL_JUSTICE.value: "ALL JUSTICE"}
+
+
+def _current_lamp_cell(combo_lamp: str | None) -> Cell:
+    """투두의 현재 램프. 기록이 없거나 램프가 없으면 "기록 없음"(줄에 늘 보여야 해서 원래 값은 "NONE")."""
+    if combo_lamp in (None, "", "NONE"):
+        return cell("NONE", "기록 없음")
+    return tc.lamp_cell(combo_lamp)
+
+
+def _goal_remaining(summary: dict[str, Any]) -> float | None:
+    """목표의 남은 양(곡 목표는 점수, 레이팅·오버파워는 값). 폴더·램프·자유 목표와 진행값 비공개는 None."""
+    for key in ("remaining_score", "remaining"):
+        if summary.get(key) is not None:
+            return float(summary[key])
+    return None
+
+
+def _goal_cells(goal: Any, summary: dict[str, Any]) -> dict[str, Cell]:
+    """목표 하나의 표 칸. 곡 목표만 곡·난이도가 차 있다. 진행값이 비공개면 달성률·남은 양의 원래 값은 None이다."""
+    ref = goal.target_ref
+    is_song = goal.kind == GoalKind.SONG.value
+    ratio = summary.get("achievement_ratio")
+    remaining = _goal_remaining(summary)
+    detail = _summary_text(goal, summary)
+    return {
+        _G_KIND: cell(_KIND_LABELS.get(goal.kind, goal.kind)),
+        tc.SONG: tc.song_cell(ref["song_title"]) if is_song else EMPTY_CELL,
+        tc.DIFFICULTY: tc.difficulty_cell(ref["difficulty"]) if is_song else EMPTY_CELL,
+        _G_LABEL: cell(_goal_label(goal)),
+        _G_STATUS: cell(goal.status, _STATUS_LABELS.get(goal.status, goal.status)),
+        _G_PROGRESS: cell(detail) if detail else EMPTY_CELL,
+        _G_RATIO: (
+            cell(float(Decimal(ratio)), f"{calc.ratio_percent(Decimal(ratio))}%") if ratio is not None else EMPTY_CELL
+        ),
+        _G_REMAINING: cell(remaining, f"{remaining:g}") if remaining is not None else EMPTY_CELL,
+        _G_DUE: cell(goal.due_at) if goal.due_at else EMPTY_CELL,
+        _G_PUBLIC: cell("공개" if goal.public else "비공개"),
+        _G_ID: cell(goal.id),
+    }
+
+
 @tool(slash="목표 목록")
 async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: GoalKind | None = None) -> ToolResult:
-    """목표 목록과 달성률·남은 양을 보여준다. 각 목표의 id(수정/진행/삭제에 쓴다)도 함께
-    보여준다. player를 주면 그 사람의 공개 목표만(본인이면 전체). 그 사람이 기록을 비공개로 해
+    """목표 목록과 달성률·남은 양을 표로 보여준다. 목표 id(수정/진행/삭제에 쓴다)는 슬래시 출력에만
+    붙는다. player를 주면 그 사람의 공개 목표만(본인이면 전체). 그 사람이 기록을 비공개로 해
     두었으면 목표 정의만 보이고 진행값은 빠진다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
@@ -797,9 +875,23 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
 
     # 목표의 public은 목표 정의만 공개한다. 진행값은 그 사람의 records_public을 따른다.
     show_progress = await _progress_visible(ctx, target.id)
+    if not rows:
+        return ToolResult(data={"player_id": target.id, "goals": []}, display=Display(content="목표가 없어."))
     items: list[dict[str, Any]] = []
-    lines: list[str] = []
-    slash_lines: list[str] = []  # 슬래시용: 목표마다 id가 붙는다(멘션 답에는 id를 안 보인다)
+    builder = TableBuilder(subject=target.id, unit="목표")
+    # 줄에는 목표·상태·진행·기한만 보인다(나머지는 거르기·정렬용).
+    builder.column(_G_KIND, hidden_in_text=True)
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, hidden_in_text=(tc.SONG, tc.DIFFICULTY))
+    builder.column(_G_LABEL)
+    builder.column(_G_STATUS)
+    builder.column(_G_PROGRESS)
+    builder.column(_G_RATIO, value_type="number", hidden_in_text=True)
+    builder.column(_G_REMAINING, value_type="number", hidden_in_text=True)
+    builder.column(_G_DUE)
+    builder.column(_G_PUBLIC, hidden_in_text=True)
+    builder.column(_G_ID, slash_only=True)
+    builder.row_formats(_GOAL_LIST_FORMATS)
+    builder.step(f"목표 목록{'' if kind is None else f' ({_KIND_LABELS[kind.value]})'}")
     for r in rows:
         summary = await _goal_summary(ctx, r) if show_progress else _hidden_summary()
         items.append(
@@ -809,22 +901,11 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
                 "duration_tag": r.duration_tag, "public": r.public, **summary,
             }
         )
-        status = _STATUS_LABELS.get(r.status, r.status)
-        detail = _summary_text(r, summary)
-        due = f"  기한 {r.due_at}" if r.due_at else ""
-        line = f"[{status}] {_goal_label(r)}{'  ' + detail if detail else ''}{due}"
-        lines.append(line)
-        slash_lines.append(f"{line}\n  id {r.id}")
+        builder.row(RowRef(_GOAL, r.id), _goal_cells(r, summary))
     return ToolResult(
+        # 목표 id(`goals`)는 Part 6에서 id를 받는 도구가 표를 받게 될 때까지 모델이 수정·진행·삭제에 쓴다.
         data={"player_id": target.id, "goals": items},
-        display=Display(
-            content="\n".join(lines) if lines else "목표가 없어.",
-            slash_content="\n".join(slash_lines) if slash_lines else None,
-            omittable=True,
-        ),
-        # required — "목표 보여줘"에 유니가 [[show]]를 빼먹어 목록이 안 붙던 실기(2026-10-20). id는 슬래시
-        # 전용(slash_content)이라 멘션 답에는 안 보이고, 일부만 묻는 말은 [[no_table]]로 뺀다.
-        display_mode="required",
+        table=builder.build(),
     )
 
 
@@ -1102,8 +1183,8 @@ async def todo_bulk(
 
 @tool(slash="투두 목록")
 async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolResult:
-    """미완료 To-Do 목록을 상수순(const, 기본) 또는 남은 점수순(remaining)으로 보여준다. 각 투두의
-    id(완료/삭제에 쓴다)도 함께 보여준다."""
+    """미완료 To-Do 목록을 상수순(const, 기본) 또는 남은 점수순(remaining)으로 표로 보여준다. 투두
+    id(완료/삭제에 쓴다)는 슬래시 출력에만 붙는다."""
     rows = await models.list_goals_for_player(
         ctx.db, ctx.player_id, kind=GoalKind.SONG.value, statuses=[GoalStatus.IN_PROGRESS.value]
     )
@@ -1138,28 +1219,41 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
     else:
         items.sort(key=lambda i: (i["const"] is None, -(i["const"] or 0.0)))
 
-    def _todo_line(i: dict[str, Any]) -> str:
-        const_text = "" if i["const"] is None else f" {i['const']}"
-        if i["lamp"] is not None:
-            return (
-                f"{i['song_title']} {i['difficulty']}{const_text}  {_LAMP_LABELS.get(i['lamp'], i['lamp'])} 목표  "
-                f"(현재 램프 {i['current_lamp'] or '기록 없음'})"
-            )
-        return (
-            f"{i['song_title']} {i['difficulty']}{const_text}  "
-            f"{i['current_score']:,} → {i['target_score']:,}  (남은 {i['remaining_score']:,}점)"
+    if not items:
+        return ToolResult(data={"todos": []}, display=Display(content="투두가 없어."))
+    builder = TableBuilder(subject=ctx.player_id, unit="투두")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE)
+    builder.column(_T_TARGET_SCORE, value_type="ScoreRef")
+    builder.column(_T_REMAINING, value_type="number")
+    builder.column(_T_TARGET_LAMP, value_type="LampRef")
+    builder.column(_T_CURRENT_LAMP, value_type="LampRef")
+    builder.column(_G_ID, slash_only=True)
+    builder.row_formats(_TODO_FORMATS)
+    builder.step(f"투두 ({'남은 점수순' if sort == TodoSort.REMAINING else '상수순'})")
+    for i in items:
+        lamp = i["lamp"]
+        builder.row(
+            RowRef(_GOAL, i["goal_id"]),
+            {
+                tc.SONG: tc.song_cell(i["song_title"]),
+                tc.DIFFICULTY: tc.difficulty_cell(i["difficulty"]),
+                tc.CONST: tc.const_cell(i["const"]),
+                # 램프 목표는 점수가 뜻이 없어 점수 칸을 비운다(줄에 "점수 0"이 붙지 않게).
+                tc.SCORE: tc.score_cell(i["current_score"]) if lamp is None else EMPTY_CELL,
+                _T_TARGET_SCORE: tc.score_cell(i["target_score"]) if i["target_score"] is not None else EMPTY_CELL,
+                _T_REMAINING: (
+                    cell(i["remaining_score"], f"{i['remaining_score']:,}")
+                    if i["remaining_score"] is not None else EMPTY_CELL
+                ),
+                _T_TARGET_LAMP: cell(_LAMP_RAW[lamp], _LAMP_LABELS[lamp]) if lamp is not None else EMPTY_CELL,
+                _T_CURRENT_LAMP: _current_lamp_cell(i["current_lamp"]) if lamp is not None else EMPTY_CELL,
+                _G_ID: cell(i["goal_id"]),
+            },
         )
-
-    lines = [_todo_line(i) for i in items]
-    slash_lines = [f"{line}\n  id {i['goal_id']}" for line, i in zip(lines, items, strict=True)]
     return ToolResult(
+        # 투두 id(`todos`)는 Part 6에서 id를 받는 도구가 표를 받게 될 때까지 모델이 완료·삭제에 쓴다.
         data={"todos": items},
-        display=Display(
-            content="\n".join(lines) if lines else "투두가 없어.",
-            slash_content="\n".join(slash_lines) if slash_lines else None,
-            omittable=True,
-        ),
-        display_mode="required",
+        table=builder.build(),
     )
 
 

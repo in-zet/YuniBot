@@ -18,6 +18,7 @@ from core.executor import ToolExecutor
 from core.permissions import InMemoryTagProvider
 from core.resolvers import ResolverRegistry
 from core.scheduler import Scheduler
+from core.tables import RowRef, render_text, summarize_table
 from core.tool_types import DifficultyRef, RankRef, ScoreRef, ToolContext
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import (
@@ -453,9 +454,10 @@ async def test_list_returns_own_goals(skill: ModuleType, db: aiosqlite.Connectio
     result = await skill.list_goals(ctx)
     assert result.error is None
     assert len(result.data["goals"]) == 1
-    # [[show]]를 빼먹어도 목록이 붙도록 required, 일부만 묻는 말은 [[no_table]]로 뺄 수 있게 omittable.
-    assert result.display_mode == "required"
-    assert result.display is not None and result.display.omittable
+    # 표로 나온다(코어가 마지막 표를 붙이므로 [[show]]를 빼먹어도 목록이 붙는다).
+    assert result.table is not None and result.table.subject == ctx.player_id
+    assert result.table.rows[0].ref == RowRef("chunithm-goals.goal", result.data["goals"][0]["goal_id"])
+    assert result.display is None
 
 
 async def test_list_for_other_player_only_shows_public_goals(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -1150,11 +1152,17 @@ async def test_list_goals_shows_rating_goal_achievement_ratio_and_remaining(
     assert Decimal(goal["achievement_ratio"]) == Decimal("0.5")
     assert goal["remaining"] == "0.1000"
     assert goal["song_rating_sum_needed"] == "5.0000"
-    content = result.display.content if result.display is not None else ""
-    assert "달성률 50.00%" in content
-    # I8: id는 슬래시 본문에만 있다(멘션 답에는 안 보인다).
+    assert result.table is not None
+    content = render_text(result.table).content
+    row = result.table.rows[0]
+    assert row.cell("달성률").raw == 0.5 and row.cell("달성률").text == "50.00%"
+    assert row.cell("남은 양").raw == 0.1
+    assert content.splitlines()[-1] == (
+        "1. [진행 중] 레이팅 17.0000  달성률 50.00% · 현재 16.9000 · 남은 0.1000 (곡 레이팅 합 5.0000)"
+    )
+    # I8: id는 슬래시 출력에만 있다(멘션 답에는 안 보인다).
     assert created.data["goal_id"] not in content
-    assert result.display is not None and created.data["goal_id"] in (result.display.slash_content or "")
+    assert created.data["goal_id"] in render_text(result.table, slash=True).content
 
 
 async def test_progress_computes_ratio_for_fresh_rating_goal_without_progress_rows(
@@ -1218,9 +1226,10 @@ async def test_todo_list_shows_goal_id_only_in_slash_content(skill: ModuleType, 
     created = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     result = await skill.todo_list(ctx)
     assert result.data["todos"][0]["goal_id"] == created.data["goal_id"]
-    assert result.display is not None
-    assert created.data["goal_id"] not in (result.display.content or "")
-    assert created.data["goal_id"] in (result.display.slash_content or "")
+    assert result.table is not None
+    assert created.data["goal_id"] not in render_text(result.table).content
+    assert created.data["goal_id"] in render_text(result.table, slash=True).content
+    assert "id" not in summarize_table(result.table)["columns"]  # 모델 요약에도 id 칸이 없다
 
 
 # ---------------------------------------------------------------- 사소한 항목
@@ -1355,7 +1364,10 @@ async def test_lamp_goal_in_todo_list_and_song_view(skill: ModuleType, db: aiosq
     listed = await skill.todo_list(ctx)
     assert listed.data["todos"][0]["lamp"] == "all_justice"
     assert listed.data["todos"][0]["remaining_score"] is None
-    assert "올 저스티스" in (listed.display.content if listed.display is not None else "")
+    assert listed.table is not None
+    assert render_text(listed.table).content.splitlines()[-1] == "1. 곡A MAS  올 저스티스 목표  현재 램프 기록 없음"  # 상수를 몰라 3번 서식
+    assert listed.table.rows[0].cell("목표 램프").raw == "ALL JUSTICE"
+    assert listed.table.rows[0].cell("현재 램프").text == "기록 없음"
     section = await skill.on_song_viewed(ctx, {"player_id": "p1", "song_title": "곡A", "difficulty": None})
     assert section is not None and "올 저스티스" in (section.display.content or "")
 
@@ -1391,10 +1403,13 @@ async def test_other_players_public_goal_hides_progress_when_records_private(
     assert goal["goal_id"] == goal_id and goal["kind"] == "rating" and goal["status"] == "in_progress"
     assert goal["current_value"] is None and goal["achievement_ratio"] is None
     assert "remaining" not in goal and "song_rating_sum_needed" not in goal
-    content = listed.display.content if listed.display is not None else ""
+    assert listed.table is not None
+    content = render_text(listed.table).content
     assert "레이팅 17.00" in content
     assert "16.90" not in content and "달성률" not in content
     assert "진행 상황은 비공개야" in content
+    row = listed.table.rows[0]
+    assert row.cell("달성률").raw is None and row.cell("남은 양").raw is None  # 비공개면 원래 값 None
 
     progress = await skill.progress(me_ctx, goal_id)
     assert progress.error is None
@@ -1414,7 +1429,8 @@ async def test_other_players_public_goal_shows_progress_when_records_public(
     goal = listed.data["goals"][0]
     assert goal["current_value"] == "16.90"
     assert Decimal(goal["achievement_ratio"]) == Decimal("0.5")
-    assert "달성률 50.00%" in (listed.display.content if listed.display is not None else "")
+    assert listed.table is not None
+    assert "달성률 50.00%" in render_text(listed.table).content
     progress = await skill.progress(me_ctx, goal_id)
     assert progress.data["current_value"] == "16.90"
 
@@ -1601,3 +1617,96 @@ async def test_notify_due_handler_skips_already_resolved_goal(skill: ModuleType,
 
     await skill.on_notify_due(ctx, {"goal_id": goal_id, "offset_days": 0})
     assert notify.dms == [] and notify.posts == []
+
+
+# ---------------------------------------------------------------- 16단계 Part 4-2: 목표·투두를 표로
+
+async def _goals_ctx(db: aiosqlite.Connection) -> ToolContext:
+    players = PlayersService(db)
+    me = await players.create_player()
+    return _ctx(db=db, player_id=me.id, tags=frozenset(), players=players)
+
+
+
+async def test_list_goals_table_columns_and_line_shapes(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = await _goals_ctx(db)
+    await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_005_000, due_at="2099-12-31")
+    await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습하기", public=True)
+
+    result = await skill.list_goals(ctx)
+
+    table = result.table
+    assert table is not None
+    assert [c.label for c in table.columns] == [
+        "유형", "곡", "난이도", "목표", "상태", "진행", "달성률", "남은 양", "기한", "공개", "id",
+    ]
+    song, free = table.rows
+    assert song.cell("유형").text == "곡" and song.cell("곡").raw == "곡A" and song.cell("난이도").text == "MAS"
+    assert free.cell("유형").text == "자유" and not free.cell("곡").filled and not free.cell("난이도").filled
+    assert song.cell("공개").text == "비공개" and free.cell("공개").text == "공개"
+    lines = render_text(table).content.splitlines()
+    assert lines[-2].startswith("1. [진행 중] 곡A MAS  1,005,000점")
+    assert lines[-2].endswith("기한 2099-12-31")
+    assert lines[-1] == "2. [진행 중] 연습하기"
+    assert table.steps == ("목표 목록",)
+
+
+async def test_list_goals_kind_filter_is_in_the_steps(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = await _goals_ctx(db)
+    await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습하기")
+
+    result = await skill.list_goals(ctx, kind=skill.GoalKind.FREEFORM)
+
+    assert result.table is not None and result.table.steps == ("목표 목록 (자유)",)
+
+
+async def test_list_goals_empty_is_a_message(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = await _goals_ctx(db)
+
+    result = await skill.list_goals(ctx)
+
+    assert result.table is None and result.display is not None and result.display.content == "목표가 없어."
+    assert result.data["goals"] == []
+
+
+async def test_todo_list_score_goal_line_and_cells(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0")]})
+    songdb = _FakeSongDb(note_counts={("곡A", "MAS"): 1000}, consts={("곡A", "MAS"): 15.0})
+    ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
+    await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
+
+    result = await skill.todo_list(ctx)
+
+    table = result.table
+    assert table is not None and table.subject == "p1"
+    assert [c.label for c in table.columns] == [
+        "곡", "난이도", "상수", "점수", "목표 점수", "남은 점수", "목표 램프", "현재 램프", "id",
+    ]
+    row = table.rows[0]
+    assert row.cell("점수").raw == 1_000_000 and row.cell("목표 점수").raw == 1_007_500
+    assert row.cell("남은 점수").raw == 7_500 and not row.cell("목표 램프").filled
+    assert render_text(table).content.splitlines()[-1] == "1. 곡A MAS 15.0  1,000,000 → 1,007,500  (남은 7,500점)"
+
+
+async def test_todo_list_lamp_goal_with_const_shows_current_lamp(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0", combo="FULL COMBO")]})
+    songdb = _FakeSongDb(consts={("곡A", "MAS"): 15.0})
+    ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
+    await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp.ALL_JUSTICE)
+
+    result = await skill.todo_list(ctx)
+
+    assert result.table is not None
+    assert render_text(result.table).content.splitlines()[-1] == (
+        "1. 곡A MAS 15.0  올 저스티스 목표  (현재 램프 FULL COMBO)"
+    )
+
+
+async def test_todo_list_empty_and_sort_step(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(db=db, tags=frozenset())
+    empty = await skill.todo_list(ctx)
+    assert empty.table is None and empty.display is not None and empty.display.content == "투두가 없어."
+
+    await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
+    by_remaining = await skill.todo_list(ctx, sort=skill.TodoSort.REMAINING)
+    assert by_remaining.table is not None and by_remaining.table.steps == ("투두 (남은 점수순)",)

@@ -118,12 +118,12 @@ emits: [chunithm.goal.completed]
 | 함수 | 하는 일 | 슬래시 | 태그 | display | confirm |
 | --- | --- | --- | --- | --- | --- |
 | `set` | 목표 만들기 (종류, 대상, 목표값, 기한, 꼬리표, 상위 목표, 공개) | `/목표 추가` | 없음 (레이팅·오버파워·폴더 목표만 함수 안에서 `chunithm-synced` 확인) | optional | never |
-| `list` | 목표 목록과 달성률 | `/목표 목록` | 없음 | required(omittable) | never |
+| `list` | 목표 목록과 달성률 (표 반환) | `/목표 목록` | 없음 | 표 | never |
 | `update` | 목표값·기한·알림 변경, 중단, 자유 목표 진행 기록 | `/목표 수정` | 없음 | optional | never |
 | `progress` | 목표 하나의 진행 기록과 페이스 | `/목표 진행` | 없음 | optional | never |
 | `todo_add` | 곡별 목표 한 건 | `/투두 추가` | 없음 | optional | never |
 | `todo_bulk` | 조건으로 일괄 추가 | `/투두 일괄` | 없음 (랭크 조건을 쓰면 함수 안에서 `chunithm-synced` 확인) | required | bulk |
-| `todo_list` | To-Do 목록 | `/투두 목록` | 없음 | required | never |
+| `todo_list` | To-Do 목록 (표 반환) | `/투두 목록` | 없음 | 표 | never |
 | `todo_done` | 수동 완료 | `/투두 완료` | 없음 | optional | never |
 | `delete` | 목표 삭제(여러 건 가능) | `/목표 삭제` | 없음 | optional | bulk |
 
@@ -193,7 +193,7 @@ emits: [chunithm.goal.completed]
 
 - `update()`에 `target_score: ScoreRef | None`을 추가했다. 곡 목표의 목표값을 랭크 이름("트리플" 등)으로 바꿔 달라고 하면, 기존엔 `target_value: float`만 받아 모델이 점수를 직접 계산해 넘겨야 했다 — 실기에서 "트리플(SSS)"을 1,000,000점(SS)으로 잘못 기억해 넘긴 사례가 나왔다(CLAUDE.md "숫자는 코드가 계산한다" 위반). `set_goal()`과 같은 `_score()`/`terms.resolve_score` 해석 경로를 타게 했다. `target_value`와 함께 줄 수 없고, 곡 목표가 아니면 거절한다. 같은 날 `target_value`가 곡 목표에 여전히 열려 있어서 모델이 또 그쪽으로 숫자를 직접 넘긴 사례가 재현됐다 — 곡 목표는 `target_value`를 코드로 아예 거절하게 바꿨다(`target_score`만).
 - `list`의 `display_mode`를 `required`에서 `optional`로 바꿨다(2026-10-18, 멘션 UX 미세 수정) — required였던 탓에 멘션에서 모델이 뭐라 답하든 목표 목록 전체(각 줄의 UUID `id`까지)가 항상 그대로 붙어 나갔다. 슬래시(`/목표 목록`)는 `display_mode`와 무관하게 항상 전체를 보여주므로 바뀌지 않는다 — 거긴 자동완성이 없어 다음 `/목표 수정`·`/목표 삭제`에 쓸 id를 사용자가 직접 봐야 한다.
-- **다시 `required`+`omittable` (2026-10-20)**: id를 `slash_content`로 옮겨 멘션 답에 id가 안 나가게 됐으므로 `optional`일 이유가 없어졌다. optional은 모델이 `[[show]]`를 빼먹으면 "목표 다 보여줘"에도 목록이 안 붙었다(실기). 일부만 묻는 말은 `[[no_table]]`로 뺀다.
+- (아래 결정은 16단계 Part 4-2에서 표 반환으로 대체됐다.) **다시 `required`+`omittable` (2026-10-20)**: id를 `slash_content`로 옮겨 멘션 답에 id가 안 나가게 됐으므로 `optional`일 이유가 없어졌다. optional은 모델이 `[[show]]`를 빼먹으면 "목표 다 보여줘"에도 목록이 안 붙었다(실기). 일부만 묻는 말은 `[[no_table]]`로 뺀다.
 
 ## 구현 결정 (2026-10-18, 9단계 Part 3: 기한 알림)
 
@@ -210,3 +210,12 @@ emits: [chunithm.goal.completed]
 - **안 쳐본 채보의 baseline**: 곡 목표를 세울 때 PB가 없으면 기준값(`baseline_value`)을 0 대신 목표 점수 − 15,000점(0 미만이면 0)으로 둔다(`_UNPLAYED_SONG_BASELINE_MARGIN`, 사용자 확인 2026-10-18). 0을 쓰면 달성률이 그냥 "현재/목표" 점수 비율이 돼 버려(예: 990,000/1,007,500=98.3%), 실제로는 한참 남았는데 거의 다 한 것처럼 보인다.
 - **남은 어택을 뺐다**: 곡별 목표의 "남은 양"은 이제 점수 차이(목표−현재)만 쓴다. 어택 환산(`records.remaining_to_target`)은 노트 수가 필요해 그걸 모르는 채보는 남은 양 자체가 "계산 불가"로 떴는데, 점수 차이만 쓰면 노트 수 없이도 항상 계산된다(사용자 확인 2026-10-18 — 어택 환산은 보더(`chunithm-border`) 확인 전용으로 남긴다). `todo_list`(remaining 정렬)·`on_plan_requested`(임박한 투두)의 정렬 기준도 남은 어택에서 남은 점수로 바꿨다.
 - **곡 정보 선조회 금지**: 곡별 목표를 세우거나 고칠 때 모델이 `chunithm-song` 같은 도구로 그 곡 정보를 먼저 찾아보지 않는다 — `chart` 해석기가 이미 정식 제목을 찾아 주므로 필요 없고, 플레이어가 묻지 않은 정보를 먼저 늘어놓을 이유가 없다(사용자 확인 2026-10-18, 실기에서 "Forsaken Tale Master" 목표를 세우며 `chunithm-song_info`를 세 번이나 부른 사례).
+
+## 표로 바꾼 읽기 도구 (16단계 Part 4-2, 2026-10-20)
+
+`list_goals`·`todo_list`는 표를 돌려준다(표 모양·서식은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2). 구현에서 정한 것:
+- 가리키는 것은 둘 다 `chunithm-goals.goal` = 목표 id. 목표 id 칸(`id`)은 `slash_only`라 슬래시 출력에만 `id …`로 붙고 멘션 답과 모델 요약에는 없다. 옛 `slash_content`는 지웠다.
+- `list_goals` 칸: 유형·곡·난이도·목표·상태·진행·달성률·남은 양·기한·공개·id. 곡 목표만 곡·난이도가 차 있다. "목표"·"진행"은 지금 줄을 만드는 `_goal_label`·`_summary_text`로 만든 글이다. 줄에는 목표·상태·진행·기한만 보인다(유형·곡·난이도·달성률·남은 양·공개는 `hidden_in_text`). 진행값이 비공개면 "진행" 칸은 "진행 상황은 비공개야"로 차 있고 달성률·남은 양의 원래 값은 None이다. `kind`를 걸면 과정(steps)에 "(곡)" 같은 말이 붙는다.
+- `todo_list` 칸: 곡·난이도·상수·점수(현재)·목표 점수·남은 점수·목표 램프·현재 램프·id. 램프 목표는 점수 칸을 비운다(줄에 "점수 0"이 붙지 않게). 과정은 "투두 (상수순)" 또는 "투두 (남은 점수순)"이다. `sort` 인자는 슬래시용으로 남는다.
+- **`data`의 `goals`·`todos`(목표 id 포함)는 남겼다.** 모델이 표 요약에서 id를 못 보므로, id를 받는 모델 도구(`update`·`progress`·`delete`·`todo_done`)는 Part 6에서 표를 받게 바뀔 때까지 이 목록의 id를 쓴다. Part 6에서 지운다.
+- 목록이 비면 표 없이 "목표가 없어."·"투두가 없어."만 낸다.
