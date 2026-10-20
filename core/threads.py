@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
-from core.fallback_messages import IDLE_CHECK_MESSAGE
+from core.fallback_messages import IDLE_CHECK_MESSAGES, pick
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ class ThreadManager:
 
         if session.state == "open":
             if (now - session.last_activity).total_seconds() >= session.idle_timeout:
-                await session.transport.send_message(IDLE_CHECK_MESSAGE)
+                await session.transport.send_message(pick(IDLE_CHECK_MESSAGES))
                 session.state = "checking"
                 session.checked_at = now
         elif session.state == "checking":

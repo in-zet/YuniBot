@@ -13,13 +13,14 @@ from core.conversation_skills import ConversationSkillStore
 from core.cooldown import CooldownTracker, check_monthly_cap
 from core.events import EventBus
 from core.fallback_messages import (
-    COOLDOWN_ACTIVE_MESSAGE,
-    LLM_FAILURE_MESSAGE,
-    MONTHLY_CAP_REACHED_MESSAGE,
-    PRIVATE_DM_FAILED_MESSAGE,
-    RETRY_WAIT_MESSAGE,
-    TOOL_CALL_CAP_MESSAGE,
-    WORKING_MESSAGE,
+    COOLDOWN_ACTIVE_MESSAGES,
+    LLM_FAILURE_MESSAGES,
+    MONTHLY_CAP_REACHED_MESSAGES,
+    PRIVATE_DM_FAILED_MESSAGES,
+    RETRY_WAIT_MESSAGES,
+    TOOL_CALL_CAP_MESSAGES,
+    WORKING_MESSAGES,
+    pick,
 )
 from core.response_assembly import assemble_response
 from core.skill_loading import Mode, SkillLoadState
@@ -239,13 +240,13 @@ class MentionEntry:
         if not self._cooldown.check(
             guild_id=cooldown_scope, player_id=player.id, cooldown_seconds=cooldown_seconds, now=now
         ):
-            await send(COOLDOWN_ACTIVE_MESSAGE, [])
+            await send(pick(COOLDOWN_ACTIVE_MESSAGES), [])
             return
 
         if guild_id is not None:
             cap_status = await check_monthly_cap(usage=self._usage, settings=self._settings, guild_id=guild_id, now=now)
             if cap_status.exceeded:
-                await send(MONTHLY_CAP_REACHED_MESSAGE, [])
+                await send(pick(MONTHLY_CAP_REACHED_MESSAGES), [])
                 return
 
         accounts = await self._players.accounts_for(player.id)
@@ -300,7 +301,7 @@ class MentionEntry:
                 except Exception:
                     logger.warning("펼친 스킬 목록 저장 실패", exc_info=True)
 
-        # RETRY_WAIT_MESSAGE(503 재시도)와 WORKING_MESSAGE(heavy 스킬)는 같은 "잠깐만
+        # RETRY_WAIT_MESSAGES(503 재시도)와 WORKING_MESSAGES(heavy 스킬)는 같은 "잠깐만
         # 기다려 달라" 취지라 이번 요청에서 둘 중 하나만, 한 번만 보낸다 — 실기 2026-10-18:
         # 시간 기다렸다가 보내는 방식(20초 타이머)은 도구 2개 이상 부르는 평범한 턴에도
         # 거의 매번 떴다. 이제 스킬이 heavy로 표시된 경우에만, 그 도구를 부르는 순간 바로
@@ -312,14 +313,14 @@ class MentionEntry:
             if notice_sent:
                 return
             notice_sent = True
-            await send(RETRY_WAIT_MESSAGE, [])
+            await send(pick(RETRY_WAIT_MESSAGES), [])
 
         async def on_heavy_call() -> None:
             nonlocal notice_sent
             if notice_sent:
                 return
             notice_sent = True
-            await send(WORKING_MESSAGE, [])
+            await send(pick(WORKING_MESSAGES), [])
 
         thread_end = ThreadEndRequest() if thread is not None else None
         async with typing:
@@ -331,7 +332,7 @@ class MentionEntry:
                 )
             except Exception:  # LLM/네트워크 어떤 실패든 디스코드 핸들러를 죽이지 않고 고정 문구로 돌린다
                 logger.warning("플레이어 %s의 멘션 처리 실패, 고정 문구로 응답한다", player.id, exc_info=True)
-                await send(LLM_FAILURE_MESSAGE, [])
+                await send(pick(LLM_FAILURE_MESSAGES), [])
                 return
 
         # 사용량 기록도 guild/DM을 가리지 않는다 — DM 멘션은 guild_id가 없어 쿨다운
@@ -350,7 +351,7 @@ class MentionEntry:
             )
 
         if result.hit_tool_call_cap and result.text is None:
-            await reply(TOOL_CALL_CAP_MESSAGE, [])
+            await reply(pick(TOOL_CALL_CAP_MESSAGES), [])
             return
 
         assembled = assemble_response(result)
@@ -363,8 +364,8 @@ class MentionEntry:
                     dm_failed = not await self._send_private(player.id, display.content) or dm_failed
             else:
                 public_displays.append(display)
-        text = assembled.text or LLM_FAILURE_MESSAGE
-        await reply(f"{text}\n{PRIVATE_DM_FAILED_MESSAGE}" if dm_failed else text, public_displays)
+        text = assembled.text or pick(LLM_FAILURE_MESSAGES)
+        await reply(f"{text}\n{pick(PRIVATE_DM_FAILED_MESSAGES)}" if dm_failed else text, public_displays)
         # 모델이 끝내자고 한 대화는 마무리 말을 보낸 뒤 닫는다(닫힘 훅이 전문을 저장한다).
         if thread is not None and thread_end is not None and thread_end.requested and self._threads is not None:
             await self._threads.close(thread.thread_id, reason="explicit")

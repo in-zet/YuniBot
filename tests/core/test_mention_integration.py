@@ -13,10 +13,10 @@ from core.cooldown import CooldownTracker
 from core.events import EventBus
 from core.executor import ToolExecutor
 from core.fallback_messages import (
-    COOLDOWN_ACTIVE_MESSAGE,
-    PRIVATE_DM_FAILED_MESSAGE,
-    RETRY_WAIT_MESSAGE,
-    WORKING_MESSAGE,
+    COOLDOWN_ACTIVE_MESSAGES,
+    PRIVATE_DM_FAILED_MESSAGES,
+    RETRY_WAIT_MESSAGES,
+    WORKING_MESSAGES,
 )
 from core.llm import (
     FunctionCallRequest,
@@ -447,7 +447,7 @@ async def test_dm_mention_gets_cooldown_and_usage_but_skips_monthly_cap() -> Non
     await entry.handle(trigger=trigger, history=[trigger], guild_id=None, now=now, send=_collect, typing=_NoopTyping())
 
     assert sent[0] == "답1"  # 월상한이 999999여도 DM이라 상한 검사 자체를 안 타서 막히지 않는다
-    assert COOLDOWN_ACTIVE_MESSAGE in sent[1]  # 두 번째는 DM도 쿨다운에 걸려야 한다
+    assert sent[1] in COOLDOWN_ACTIVE_MESSAGES  # 두 번째는 DM도 쿨다운에 걸려야 한다
     assert len(usage.recorded) == 1  # 쿨다운에 막힌 두 번째는 기록되지 않는다
     assert usage.recorded[0]["guild_id"] == "dm"
 
@@ -621,7 +621,7 @@ async def test_private_display_tells_the_player_when_the_dm_cannot_be_sent(tmp_p
     await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_collect, typing=_NoopTyping())
 
     [(text, displays)] = sent
-    assert PRIVATE_DM_FAILED_MESSAGE in text and displays == []
+    assert any(m in text for m in PRIVATE_DM_FAILED_MESSAGES) and displays == []
 
 
 _EMIT_TOOL_BODY = (
@@ -668,7 +668,7 @@ async def test_mention_tool_call_event_reaches_executors_shared_event_bus(tmp_pa
 
 class _RetryOnceLlmAdapter:
     """실제 어댑터의 재시도 루프를 흉내 내지 않고, on_retry를 한 번 부른 뒤 바로 최종 턴을
-    돌려준다 — core/mention.py가 그 신호를 받아 RETRY_WAIT_MESSAGE를 보내는지만 본다."""
+    돌려준다 — core/mention.py가 그 신호를 받아 RETRY_WAIT_MESSAGES 중 하나를 보내는지만 본다."""
 
     def __init__(self, final_turn: GenerationTurn) -> None:
         self._final_turn = final_turn
@@ -720,7 +720,7 @@ async def test_mention_sends_retry_wait_message_once_before_final_answer() -> No
         send=_record_send, typing=_NoopTyping(),
     )
 
-    assert sent == [RETRY_WAIT_MESSAGE, "다 됐다"]
+    assert len(sent) == 2 and sent[0] in RETRY_WAIT_MESSAGES and sent[1] == "다 됐다"
 
 
 class _SlowLlmAdapter:
@@ -773,7 +773,7 @@ async def test_mention_sends_working_message_when_heavy_skill_tool_is_called(tmp
         send=_record_send, typing=_NoopTyping(),
     )
 
-    assert sent == [WORKING_MESSAGE, "다 됐다"]
+    assert len(sent) == 2 and sent[0] in WORKING_MESSAGES and sent[1] == "다 됐다"
 
 
 @pytest.mark.asyncio

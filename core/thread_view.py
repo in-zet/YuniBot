@@ -5,10 +5,9 @@ from typing import Any
 
 import discord
 
+from core.fallback_messages import ENDED_MESSAGES, pick
 from core.threads import ThreadManager, ThreadSession
 from services.common.players import PlayersService
-
-ENDED_MESSAGE = "대화 끝! 또 필요하면 언제든 불러 줘~"
 
 
 class ThreadEndView(discord.ui.View):
@@ -30,4 +29,4 @@ class ThreadEndView(discord.ui.View):
     async def end_button(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
         await interaction.response.edit_message(view=None)
         await self._threads.close(self._thread_id, reason="explicit")
-        await interaction.followup.send(ENDED_MESSAGE)
+        await interaction.followup.send(pick(ENDED_MESSAGES))

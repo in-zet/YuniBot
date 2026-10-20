@@ -3,7 +3,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
-from core.thread_view import ENDED_MESSAGE, ThreadEndView
+from core.fallback_messages import ENDED_MESSAGES
+from core.thread_view import ThreadEndView
 from core.threads import ThreadManager, ThreadTranscript
 
 
@@ -64,4 +65,4 @@ async def test_pressing_the_button_closes_the_conversation_at_once() -> None:
     assert [t.closed_reason for t in closed] == ["explicit"]
     assert manager.session_for_channel("dm-1") is None
     assert interaction.response.edited == [None]  # 버튼을 지운다
-    assert interaction.followup.sent == [ENDED_MESSAGE]
+    assert len(interaction.followup.sent) == 1 and interaction.followup.sent[0] in ENDED_MESSAGES

@@ -9,7 +9,7 @@ from core.agent import AgentLoop
 from core.cooldown import CooldownTracker
 from core.events import EventBus
 from core.executor import ToolExecutor
-from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGE
+from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGES
 from core.llm import GenerationTurn, LlmContent, LlmPart
 from core.mention import (
     ChannelMessage,
@@ -194,4 +194,4 @@ async def test_mention_entry_cooldown_blocks_without_calling_llm() -> None:
     await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=now, send=lambda t, d: sent.append(t) or _noop(), typing=_NoopTyping())
 
     assert sent[0] == "호출됨"
-    assert COOLDOWN_ACTIVE_MESSAGE in sent[1]
+    assert sent[1] in COOLDOWN_ACTIVE_MESSAGES
