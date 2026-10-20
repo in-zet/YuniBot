@@ -15,6 +15,7 @@ from core.events import Section, Stage, highest_stage
 from core.tables import (
     EMPTY_CELL,
     Cell,
+    Row,
     RowRef,
     TableBuilder,
     TableNeeds,
@@ -1181,82 +1182,78 @@ async def todo_add(
     )
 
 
-@tool(slash="투두 일괄", mutates=True, confirm="bulk")
-async def todo_bulk(
+@tool(mutates=True, confirm="bulk")
+async def add_todos(
     ctx: ToolContext,
-    min_const: float,
-    max_const: float,
-    difficulty: DifficultyRef,
+    table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])],
     target_score: ScoreRef,
     *,
-    condition: FolderCondition = FolderCondition.RANK,
-    rank: RankRef | None = None,
     public: bool = False,
     dry_run: bool = False,
 ) -> ToolResult:
-    """상수 범위·난이도·현재 랭크(또는 클리어/풀콤보/올저스티스) 조건을 아직 못 채운 채보를 모아
-    To-Do로 일괄 추가한다. difficulty·rank·target_score는 플레이어가 말한 그대로(예: "마스",
-    "SSS") 넘긴다 — 해석기가 정식 값과 점수로 바꾼다. 이미 target_score를 넘긴 채보도 뺀다.
-    조건이 played가 아니면 CHUNITHM-NET 동기화(chunithm-synced)가 있어야 한다. 대상이 2개
-    이상이면 실행기가 먼저 대상 개수를 보여 주고 확인 버튼을 받은 뒤에 추가한다(0~1개면 바로
-    추가한다)."""
-    if condition != FolderCondition.PLAYED and _SYNCED_TAG not in ctx.tags:
-        return ToolResult(error="그 조건을 쓰려면 CHUNITHM-NET 동기화가 돼 있어야 해.")
-    resolved_rank = _rank(rank)
-    if condition == FolderCondition.RANK and resolved_rank is None:
-        return ToolResult(error="랭크 조건이면 목표 랭크(rank)를 알려 줘.")
+    """작업 표의 채보 행(곡·난이도가 있는 행)을 곡별 목표(To-Do)로 일괄 추가한다. target_score는 플레이어가 말한
+    그대로(예: "SSS") 넘긴다 — 해석기가 점수로 바꾼다(모든 행에 같은 목표 점수). 이미 target_score를 넘긴 채보와
+    이미 진행 중인 투두가 있는 채보는 뺀다. 조건("SSS 안 된 거")은 표에 점수·랭크 칸을 붙여 거른 표로 준다. 대상이
+    2개 이상이면 실행기가 먼저 대상 개수를 보여 주고 확인 버튼을 받은 뒤에 추가한다(0~1개면 바로 추가한다)."""
+    assert isinstance(table, WorkTable)
     score = _score(target_score)
     assert score is not None
-    rank_min_score = resolved_rank.min_score if resolved_rank is not None else None
-    difficulty_code = _difficulty_code(difficulty)
+    keys = list(dict.fromkeys(_goal_chart_key(row) for row in table.rows))
+    pbs = await ctx.records.pb_rows_for(ctx.player_id, keys)
 
-    hits = ctx.songdb.find_by_const(min_const=min_const, max_const=max_const, difficulty=difficulty_code)
-    rows = await ctx.records.all_pb_rows(ctx.player_id)
-    rows_by_key = {(r.song_title, r.difficulty): r for r in rows}
+    targets: list[tuple[str, str]] = []
+    reached = existing = 0
+    for key in keys:
+        pb = pbs.get(key)
+        if pb is not None and pb.score >= score:
+            reached += 1  # 이미 목표 점수를 넘겼다
+        elif await models.find_song_goal(ctx.db, ctx.player_id, song_title=key[0], difficulty=key[1]):
+            existing += 1  # 이미 투두가 있다
+        else:
+            targets.append(key)
 
-    targets: list[str] = []
-    for hit in hits:
-        row = rows_by_key.get((hit.song.title, difficulty_code))
-        if row is not None and _row_matches_condition(row, condition, rank_min_score):
-            continue  # 이미 조건을 채웠다
-        if row is not None and row.score >= score:
-            continue  # 조건은 못 채웠어도 목표 점수는 이미 넘겼다
-        if await models.find_song_goal(ctx.db, ctx.player_id, song_title=hit.song.title, difficulty=difficulty_code):
-            continue  # 이미 투두가 있다
-        targets.append(hit.song.title)
+    notes = [step for step in table.steps if "뺌" in step]
+    if reached:
+        notes.append(f"{reached}개는 이미 목표 점수를 넘김")
+    if existing:
+        notes.append(f"{existing}개는 이미 투두가 있음")
+    note_text = f" ({'; '.join(notes)})" if notes else ""
+    titles = [f"{title} {difficulty}" for title, difficulty in targets]
+    data: dict[str, Any] = {"count": len(targets), "charts": titles, "reached": reached, "existing": existing}
 
     if not targets:
         return ToolResult(
-            data={"count": 0, "song_titles": []},
-            display=Display(content="그 조건에 맞는 곡이 없어."),
-            display_mode="required",
+            data=data, display=Display(content=f"추가할 채보가 없어.{note_text}"), display_mode="required"
         )
     if dry_run:
         return ToolResult(
-            data={"count": len(targets), "song_titles": targets},
-            display=Display(content=f"투두 {len(targets)}개를 추가할게: {', '.join(targets)}"),
+            data=data,
+            display=Display(content=f"투두 {len(targets)}개를 추가할게: {', '.join(titles)}{note_text}"),
             display_mode="required",
         )
 
     now = datetime.now(UTC).isoformat()
-    created: list[str] = []
-    for title in targets:
-        goal_id = str(uuid.uuid4())
-        row = rows_by_key.get((title, difficulty_code))
+    for title, difficulty in targets:
+        pb = pbs.get((title, difficulty))
         await models.insert_goal(
-            ctx.db, id=goal_id, player_id=ctx.player_id, kind=GoalKind.SONG.value,
-            target_ref={"song_title": title, "difficulty": difficulty_code}, target_value=float(score),
-            baseline_value=float(row.score) if row is not None else 0.0, created_at=now, due_at=None,
-            duration_tag=None, parent_goal_id=None, public=public, notify_offsets=_default_notify_offsets(None),
-            guild_id=ctx.guild_id,
+            ctx.db, id=str(uuid.uuid4()), player_id=ctx.player_id, kind=GoalKind.SONG.value,
+            target_ref={"song_title": title, "difficulty": difficulty}, target_value=float(score),
+            baseline_value=(
+                float(pb.score) if pb is not None else max(0.0, float(score) - _UNPLAYED_SONG_BASELINE_MARGIN)
+            ),
+            created_at=now, due_at=None, duration_tag=None, parent_goal_id=None, public=public,
+            notify_offsets=_default_notify_offsets(None), guild_id=ctx.guild_id,
         )
-        created.append(goal_id)
-
     return ToolResult(
-        data={"count": len(created), "song_titles": targets, "goal_ids": created},
-        display=Display(content=f"{len(created)}개 투두를 추가했어."),
+        data=data,
+        display=Display(content=f"{len(targets)}개 투두를 추가했어.{note_text}"),
         display_mode="required",
     )
+
+
+def _goal_chart_key(row: Row) -> tuple[str, str]:
+    difficulty = str(row.cell(tc.DIFFICULTY).raw)
+    return str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)
 
 
 @tool(slash="투두 목록")

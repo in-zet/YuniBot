@@ -124,7 +124,7 @@ emits: [chunithm.goal.completed]
 | `progress` | 목표 하나의 진행 기록과 페이스 (`id` 입구, 슬래시 전용) | `/목표 진행` | 없음 | optional | never |
 | `goal_progress` | `progress`와 같은 일, 표의 목표 한 행(`table`, single) | 없음 | 없음 | optional | never |
 | `todo_add` | 곡별 목표 한 건 | `/투두 추가` | 없음 | optional | never |
-| `todo_bulk` | 조건으로 일괄 추가 | `/투두 일괄` | 없음 (랭크 조건을 쓰면 함수 안에서 `chunithm-synced` 확인) | required | bulk |
+| `add_todos` | 작업 표의 채보 행을 곡별 목표로 일괄 추가(`table`, `target_score`, `public`). 이미 목표 점수를 넘긴 채보·이미 투두가 있는 채보는 뺌 | 없음 | 없음 | required | bulk |
 | `todo_list` | To-Do 목록 (표 반환) | `/투두 목록` | 없음 | 표 | never |
 | `todo_done` | 수동 완료 (`id` 입구, 슬래시 전용) | `/투두 완료` | 없음 | optional | never |
 | `complete_todos` | 표의 곡 목표를 완료 처리(여러 건) | 없음 | 없음 | optional | bulk |
@@ -161,7 +161,7 @@ emits: [chunithm.goal.completed]
 
 ## 유니 지침 (SKILL.md 본문 초안)
 
-- 목표를 만들어 달라고 분명히 말한 때만 `set_goal`·`todo_add`·`todo_bulk`를 부른다. "17까지 얼마나
+- 목표를 만들어 달라고 분명히 말한 때만 `set_goal`·`todo_add`·`add_todos`를 부른다. "17까지 얼마나
   남았어?"처럼 남은 양만 묻는 말은 목표 설정이 아니다 — 목표를 만들지 말고, 이미 있는 목표의 진행
   (`progress`)이나 지금 레이팅(`chunithm-report`)으로 답한다. 목표가 없으면 "목표로 잡아 줄까?"라고
   되묻기만 한다(2026-10-19 실기: 남은 양 질문에 17.00 목표가 멋대로 만들어졌다).
@@ -231,3 +231,10 @@ emits: [chunithm.goal.completed]
 - `delete_goals`·`complete_todos`는 `confirm="bulk"`. 실행 직전에 행의 키로 DB를 다시 읽어 본인 목표로 남아 있는 것(완료는 진행 중인 곡 목표)만 대상으로 삼는다. `dry_run`의 `count`와 실행 결과(`deleted_count`·`completed_count`)는 실제로 바뀔 개수만 센다. 뺀 것은 `already_gone`·`already_done`으로 알리고 `display`에 "N개는 이미 없어서 뺐어"를 붙인다.
 - `todo_done`은 이제 이미 끝난 투두를 다시 완료 처리하지 않고 "찾지 못했어(없거나 이미 끝났어)"를 낸다(옛 동작은 상태를 가리지 않고 완료 이벤트를 또 냈다).
 - `update_goal`에는 `parent_goal_id`가 없다 — 상위 목표도 id인데 표에 그 칸이 없어 모델이 id를 지어낼 길만 열린다. 슬래시 `/목표 수정`에는 남아 있다.
+
+## 조건 일괄을 표로 대신함 (16단계 Part 6-2b, 2026-10-20)
+
+사용자 결정(2026-10-20): `todo_bulk`와 슬래시 `/투두 일괄`을 없애고 표를 받는 `add_todos(table, target_score, public)`로 바꿨다. 상수 범위·난이도는 곡 검색 도구가, "SSS 안 된" 같은 현재 랭크·램프 조건은 `add_scores`로 붙인 칸을 `table_query`로 거르는 일이 됐다(그래서 `condition`·`rank` 인자와 동기화 태그 검사도 없어졌다 — 점수·랭크 칸을 붙이는 도구가 태그를 확인한다).
+- 행마다 PB(`pb_rows_for`)와 진행 중인 투두(`find_song_goal`)를 지금 DB에서 다시 읽어 이미 `target_score`를 넘긴 채보(`reached`)와 이미 투두가 있는 채보(`existing`)를 뺀다. `dry_run`의 `count`와 실행 결과는 실제로 만들 개수만이고 뺀 수는 `notes`·`display`에 있다.
+- 기준점(`baseline_value`)은 `set_goal`과 같은 규칙으로 통일했다: PB가 있으면 PB 점수, 없으면 목표 점수보다 15,000 낮은 값(0 이하는 0). 옛 `todo_bulk`는 기록이 없으면 0을 썼다.
+- 램프 목표(풀콤보·올 저스티스)는 이 도구가 만들지 않는다(옛 `todo_bulk`도 점수 목표만 만들었다). `data`에 목표 id 목록은 없다.
