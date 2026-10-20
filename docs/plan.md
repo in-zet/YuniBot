@@ -103,7 +103,7 @@
     - [X] 2-5 `chunithm-sync` `mark_stale` + `core/bot.py` `partial_row_hints` 연결 — 구현 완료(2026-10-20)
     - [X] 2-6 `rules.md` 정리·문서 — 구현 완료(2026-10-20)
   - [X] Part 3: 그림 표 `chunithm-image`(`table_image`, `ImageCache`·`jacket_url`, `SongRecord.jacket`, Pillow, Dockerfile `fonts-noto-cjk`) — 구현 완료(2026-10-20). 실기 미확인: "그림으로" 요청에서 모델이 `table_image`를 고르는지·PNG 첨부와 글자 표 중복 여부, Docker 이미지의 한글·일본어 글꼴, 캐릭터 그림·프레임 겹침(동기화 저장분), 첫 50장 받는 시간. 상세는 `docs/design/skills/chunithm-image.md`
-  - [ ] Part 4: 나머지 목록 도구를 표로(15개)
+  - [X] Part 4: 나머지 목록 도구를 표로(15개)·`omittable` 정리 — 구현 완료(2026-10-20). 실기 미확인: 각 목록이 멘션에서 표로 붙는지(11행 이상은 .txt)·슬래시 출력 모양(id가 같은 줄 끝 `id …`로 바뀜), `/최근`의 판정 줄, `list_goals` 뒤 "2번 목표 삭제"가 아직은 id 문자열 도구로 가는 흐름(Part 6 전까지), `new_songs`·`history`의 기본 출력 가독성. 세부는 각 스킬 설계서의 "표로 바꾼 읽기 도구" 절
   - [ ] Part 5: 표를 받아 칸을 더하거나 곡 행을 채보로 펼치는 도구(6개)
   - [ ] Part 6: id 입구 나누기(슬래시 전용 + 표 받는 모델 도구)와 표로 데이터 바꾸기 — Part 1~5 뒤
 

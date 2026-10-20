@@ -89,25 +89,16 @@ def test_assemble_response_required_displays_survive_violation_without_show_tag(
     assert assembled.displays == [Display(content="필수 표")]
 
 
-def test_no_table_tag_drops_omittable_required_displays_only() -> None:
+def test_required_displays_stay_even_with_no_table_tag() -> None:
+    # [[no_table]]은 작업 표만 뺀다. 도구가 직접 낸 required 표시물(출처 등)은 그대로 붙는다.
     result = AgentTurnResult(
         text="17 넘는 곡은 세 곡이야. [[no_table]]",
         collected_data=[{"rating": 17.27}],
-        required_displays=[
-            Display(content="전체 표", omittable=True),
-            Display(content="출처", omittable=False),
-        ],
+        required_displays=[Display(content="출처")],
     )
     assembled = assemble_response(result)
     assert "[[no_table]]" not in assembled.text
     assert assembled.displays == [Display(content="출처")]
-
-
-def test_required_displays_stay_without_no_table_tag() -> None:
-    result = AgentTurnResult(
-        text="목록이야.", collected_data=[], required_displays=[Display(content="전체 표", omittable=True)]
-    )
-    assert assemble_response(result).displays == [Display(content="전체 표", omittable=True)]
 
 
 # ---- 작업 표 글자 출력 ----
@@ -121,12 +112,11 @@ def _table_result(*, rows: int = 2, **kwargs: object) -> AgentTurnResult:
     return AgentTurnResult(text="9곡이야", last_table_id="t4", last_table=table, turn_table_ids=["t4"], **kwargs)  # pyright: ignore[reportArgumentType]
 
 
-def test_last_table_is_drawn_as_a_required_omittable_display() -> None:
+def test_last_table_is_drawn_as_a_required_display() -> None:
     assembled = assemble_response(_table_result())
 
     assert len(assembled.displays) == 1
     display = assembled.displays[0]
-    assert display.omittable is True
     assert display.content == "15 이상\n1. S0\n2. S1"
     assert display.files == []
 

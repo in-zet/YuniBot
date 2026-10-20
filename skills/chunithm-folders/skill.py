@@ -233,7 +233,7 @@ async def show_folder(ctx: ToolContext, name: str) -> ToolResult:
         lines.append("채보가 없어.")
         return ToolResult(
             data={"name": folder["name"], "note": folder["note"], "count": 0},
-            display=Display(content="\n".join(lines), omittable=True),
+            display=Display(content="\n".join(lines)),
         )
 
     columns = (tc.SONG, tc.DIFFICULTY, tc.CONST)

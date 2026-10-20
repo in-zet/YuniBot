@@ -139,7 +139,7 @@ async def find_by_const(
         min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
     )
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="해당 범위의 채보가 없다.", omittable=True))
+        return ToolResult(data={"count": 0}, display=Display(content="해당 범위의 채보가 없다."))
     conditions = [_const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions))
 
@@ -153,7 +153,7 @@ async def find_by_version(
     short_code = _difficulty_code(difficulty)
     hits = ctx.songdb.find_by_version(version=version, difficulty=short_code)
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="해당 버전의 채보가 없다.", omittable=True))
+        return ToolResult(data={"count": 0}, display=Display(content="해당 버전의 채보가 없다."))
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code]))
 
 
@@ -186,7 +186,7 @@ async def find_songs(
         new_only=new_only,
     )
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="조건에 맞는 채보가 없다.", omittable=True))
+        return ToolResult(data={"count": 0}, display=Display(content="조건에 맞는 채보가 없다."))
     conditions = [
         _const_range_text(min_const, max_const),
         f"레벨 {level}" if level else None,
@@ -211,7 +211,7 @@ async def find_by_artist(
     if short_code is None:
         columns = (tc.SONG, tc.DIFFICULTY, tc.ARTIST, tc.VERSION)
         if not songs:
-            return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS, omittable=True))
+            return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS))
         builder = TableBuilder(unit="곡")
         tc.add_columns(builder, *columns).step(condition)
         for song in songs:
@@ -225,7 +225,7 @@ async def find_by_artist(
         if short_code in song.charts and song.charts[short_code].is_available
     ]
     if not charts:
-        return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS, omittable=True))
+        return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS))
     builder = TableBuilder(unit="채보")
     tc.add_columns(builder, *columns).step(f"{condition} {short_code}")
     for song, chart_record in charts:

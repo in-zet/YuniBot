@@ -199,7 +199,6 @@ class AgentLoop:
         tool_calls_made = 0
         tool_call_log: list[str] = []
         tool_call_counts: dict[str, int] = {}
-        omittable_index: dict[str, int] = {}
         llm_turns = 0
         heavy_notified = False
 
@@ -320,13 +319,8 @@ class AgentLoop:
                 elif tool_result.display is not None and tool_result.display_mode == "required":
                     # required는 00-core.md의 기본 표시 모드다 — 숫자 위반 검사와 무관하게
                     # 항상 붙는다(assemble_response가 이 리스트를 조건 없이 그대로 포함한다).
-                    # 같은 목록 도구를 한 턴에 또 부르면(삭제 전후 조회 등) 마지막 결과만 남긴다.
-                    if tool_result.display.omittable and call.name in omittable_index:
-                        result.required_displays[omittable_index[call.name]] = tool_result.display
-                    else:
-                        if tool_result.display.omittable:
-                            omittable_index[call.name] = len(result.required_displays)
-                        result.required_displays.append(tool_result.display)
+                    # 목록은 표로 나오고, 턴의 마지막 표 하나만 붙으므로 같은 도구를 또 불러도 겹치지 않는다.
+                    result.required_displays.append(tool_result.display)
                 response_parts.append(
                     LlmPart(
                         function_response=FunctionResultPart(
