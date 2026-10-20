@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.agent import AgentTurnResult
-from core.tool_types import Display
+from core.tool_types import Display, table_display
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,12 @@ def assemble_response(result: AgentTurnResult) -> AssembledResponse:
     # 위반의 "증거"가 아니다) — 그래서 위반 게이트를 거치지 않고, 강제로 보여줄 것들보다
     # 먼저 온다.
     required = [d for d in result.required_displays if not (omit_tables and d.omittable)]
+    # 턴의 마지막 표 하나만 글자로 그린다. 그림 표로 이미 그렸으면 다시 그리지 않는다.
+    table = result.last_table
+    if (
+        table is not None and not omit_tables and result.last_table_id not in result.drawn_table_ids
+    ):
+        required.append(table_display(table, stale=result.last_table_stale))
     displays = required + optional
 
     return AssembledResponse(text=clean_text, displays=displays, numeric_violation=violation)

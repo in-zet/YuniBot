@@ -1,5 +1,8 @@
+import dataclasses
+
 from core.agent import AgentTurnResult
 from core.response_assembly import assemble_response, extract_numbers, flatten_numbers
+from core.tables import RowRef, TableBuilder, cell
 from core.tool_types import Display
 
 
@@ -105,3 +108,61 @@ def test_required_displays_stay_without_no_table_tag() -> None:
         text="목록이야.", collected_data=[], required_displays=[Display(content="전체 표", omittable=True)]
     )
     assert assemble_response(result).displays == [Display(content="전체 표", omittable=True)]
+
+
+# ---- 작업 표 글자 출력 ----
+
+
+def _table_result(*, rows: int = 2, **kwargs: object) -> AgentTurnResult:
+    builder = TableBuilder(unit="채보").column("song", "곡", bare=True).step("15 이상")
+    for i in range(rows):
+        builder.row(RowRef("k", str(i)), {"song": cell(f"S{i}")})
+    table = dataclasses.replace(builder.build(), id="t4")
+    return AgentTurnResult(text="9곡이야", last_table_id="t4", last_table=table, turn_table_ids=["t4"], **kwargs)  # pyright: ignore[reportArgumentType]
+
+
+def test_last_table_is_drawn_as_a_required_omittable_display() -> None:
+    assembled = assemble_response(_table_result())
+
+    assert len(assembled.displays) == 1
+    display = assembled.displays[0]
+    assert display.omittable is True
+    assert display.content == "15 이상\n1. S0\n2. S1"
+    assert display.files == []
+
+
+def test_table_goes_after_other_required_displays() -> None:
+    result = _table_result()
+    result.required_displays.append(Display(content="출처"))
+
+    assert [d.content for d in assemble_response(result).displays] == ["출처", "15 이상\n1. S0\n2. S1"]
+
+
+def test_no_table_tag_skips_the_table() -> None:
+    result = _table_result()
+    result.text = "그냥 말만 할게 [[no_table]]"
+
+    assembled = assemble_response(result)
+    assert assembled.displays == []
+    assert "[[no_table]]" not in assembled.text
+
+
+def test_a_table_already_drawn_as_a_picture_is_not_drawn_as_text() -> None:
+    assert assemble_response(_table_result(drawn_table_ids=["t4"])).displays == []
+
+
+def test_a_picture_of_an_earlier_table_does_not_hide_the_last_one() -> None:
+    assert len(assemble_response(_table_result(drawn_table_ids=["t1"])).displays) == 1
+
+
+def test_stale_table_header_and_long_table_file() -> None:
+    result = _table_result(rows=11, last_table_stale=True)
+    display = assemble_response(result).displays[0]
+
+    assert (display.content or "").startswith("(동기화 전 값)\n15 이상\n11채보")
+    assert [f.name for f in display.files] == ["15이상.txt"]
+    assert b"11. S10" in display.files[0].data
+
+
+def test_no_table_means_no_table_display() -> None:
+    assert assemble_response(AgentTurnResult(text="안녕")).displays == []

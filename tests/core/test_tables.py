@@ -7,6 +7,7 @@ import pytest
 
 from core.tables import (
     PEEK_MAX_ROWS,
+    TABLE_FILE_ROWS,
     TABLE_TTL_SECONDS,
     Cell,
     Condition,
@@ -21,10 +22,13 @@ from core.tables import (
     cell,
     parse_table_arg,
     peek_rows,
+    render_text,
     resolve_table_arg,
     row_at,
+    row_text,
     select_rows,
     summarize_table,
+    table_file_name,
 )
 
 
@@ -665,3 +669,149 @@ def test_peek_rows_rejects_group_by_and_exclude() -> None:
         peek_rows(_score_table(), group_by="상수")
     with pytest.raises(TableError):
         peek_rows(_score_table(), exclude_rows=[1])
+
+
+# ---- 글자 출력 (row_text / render_text) ----
+
+
+def _fmt_table(*, formats: tuple[str, ...] = (), slash_only: bool = True) -> WorkTable:
+    builder = TableBuilder(unit="채보")
+    builder.column("song", "곡", bare=True).column("diff", "난이도", bare=True).column("const", "상수")
+    builder.column("score", "점수").column("goal", "목표 점수").column("left", "남은 점수")
+    builder.column("pub", "공개", hidden_in_text=True)
+    if slash_only:
+        builder.column("id", "아이디", slash_only=True)
+    cells = {
+        "song": cell("크로노"), "diff": cell("MAS"), "const": cell(15.2, "15.2"), "score": cell(1_005_000, "1,005,000"),
+        "goal": cell(1_007_500, "1,007,500"), "left": cell(2_500, "2,500"), "pub": cell(True, "공개"),
+    }
+    if slash_only:
+        cells["id"] = cell("g7")
+    builder.row(RowRef("k", "1"), cells)
+    builder.row(RowRef("k", "2"), {"song": cell("모모"), "diff": cell("EXP"), "const": cell(14.0, "14.0")})
+    return dataclasses.replace(builder.build(), row_formats=formats)
+
+
+def test_row_text_default_output_names_columns_and_skips_empty_ones() -> None:
+    table = _fmt_table()
+    first, second = table.rows
+    assert row_text(table, first) == "크로노  MAS  상수 15.2  점수 1,005,000  목표 점수 1,007,500  남은 점수 2,500"
+    assert row_text(table, second) == "모모  EXP  상수 14.0"  # 비어 있는 칸은 `-` 없이 뺀다
+
+
+def test_row_text_hides_hidden_in_text_and_shows_slash_only_only_for_slash() -> None:
+    table = _fmt_table()
+    first = table.rows[0]
+    assert "공개" not in row_text(table, first) and "g7" not in row_text(table, first)
+    assert row_text(table, first, slash=True).endswith("아이디 g7")
+    assert "공개" not in row_text(table, first, slash=True)
+
+
+FORMATS = ("{곡} {난이도} {상수}  {점수} → {목표 점수}  (남은 {남은 점수}점)", "{곡} {난이도} {상수}")
+
+
+def test_row_text_uses_first_format_whose_columns_are_all_filled() -> None:
+    table = _fmt_table(formats=FORMATS)
+    first, second = table.rows
+    assert row_text(table, first) == "크로노 MAS 15.2  1,005,000 → 1,007,500  (남은 2,500점)"
+    assert row_text(table, second) == "모모 EXP 14.0"  # 첫 서식은 칸이 비어 맞지 않아 둘째 서식
+
+
+def test_row_text_appends_columns_missing_from_the_format() -> None:
+    table = _fmt_table(formats=("{곡} {난이도}",))
+    assert row_text(table, table.rows[0]) == (
+        "크로노 MAS  상수 15.2  점수 1,005,000  목표 점수 1,007,500  남은 점수 2,500"
+    )
+
+
+def test_row_text_falls_back_to_default_when_no_format_fits_or_names_unknown_column() -> None:
+    table = _fmt_table(formats=("{곡} {없는 칸}", "{곡} {점수}"))
+    second = table.rows[1]
+    assert row_text(table, second) == "모모  EXP  상수 14.0"  # 맞는 서식이 없으면 기본 출력
+    assert row_text(table, table.rows[0]).startswith("크로노 1,005,000")
+
+
+def test_row_text_format_cannot_use_columns_hidden_from_this_output() -> None:
+    table = _fmt_table(formats=("{곡} {아이디}", "{곡}"))
+    assert row_text(table, table.rows[0]).startswith("크로노  ")  # 슬래시가 아니면 {아이디}가 있는 서식은 건너뛴다
+    assert row_text(table, table.rows[0], slash=True).startswith("크로노 g7")
+
+
+def _numbered_table(count: int, *, titled: bool = True, steps: tuple[str, ...] = ("15.0 상수 MAS",)) -> WorkTable:
+    builder = TableBuilder(unit="채보").column("song", "곡", bare=True)
+    builder.group("A" if titled else None, {"평균": "1"} if titled else None)
+    for i in range(1, count + 1):
+        if i == 3:
+            builder.group("B")
+        builder.row(RowRef("k", str(i)), {"song": cell(f"S{i}")})
+    return builder.summary({"레이팅": "16.98"}).steps(steps).build()
+
+
+def test_render_text_header_rules_and_numbers_continue_across_groups() -> None:
+    rendered = render_text(_numbered_table(4))
+    assert rendered.file is None
+    assert rendered.content.split("\n") == [
+        "15.0 상수 MAS",
+        "레이팅 16.98",
+        "── A · 2채보 · 평균 1 ──",
+        "1. S1",
+        "2. S2",
+        "── B · 2채보 ──",
+        "3. S3",
+        "4. S4",
+    ]
+
+
+def test_render_text_joins_steps_with_arrows_and_marks_stale() -> None:
+    rendered = render_text(_numbered_table(1, steps=("15 이상", "내 점수", "점수<SSS")), stale=True)
+    assert rendered.content.split("\n")[:2] == ["(동기화 전 값)", "15 이상 → 내 점수 → 점수<SSS"]
+
+
+def test_render_text_omits_the_rule_line_for_one_untitled_group() -> None:
+    builder = TableBuilder().column("a", bare=True).row(RowRef("k", "1"), {"a": cell("x")})
+    assert render_text(builder.build()).content == "1. x"
+
+
+def test_render_text_rule_line_for_untitled_group_among_others() -> None:
+    builder = TableBuilder(unit="곡").column("a", bare=True)
+    builder.group(None).row(RowRef("k", "1"), {"a": cell("x")})
+    builder.group("B").row(RowRef("k", "2"), {"a": cell("y")})
+    assert render_text(builder.build()).content.split("\n")[0] == "── 1곡 ──"
+
+
+def test_render_text_ten_rows_stay_in_the_message_and_eleven_go_to_a_file() -> None:
+    inline = render_text(_numbered_table(TABLE_FILE_ROWS))
+    assert inline.file is None and "10. S10" in inline.content
+
+    rendered = render_text(_numbered_table(TABLE_FILE_ROWS + 1, titled=False))
+    assert rendered.file is not None
+    name, data = rendered.file
+    assert name == "15.0상수MAS.txt"
+    assert "1. S1" not in rendered.content  # 메시지에는 머리말만
+    assert rendered.content.split("\n") == ["15.0 상수 MAS", "레이팅 16.98", "11채보 — 목록은 첨부 파일(15.0상수MAS.txt)"]
+    text = data.decode("utf-8")
+    assert text.split("\n")[:2] == ["15.0 상수 MAS", "레이팅 16.98"]
+    assert "11. S11" in text and "1. S1\n" in text
+
+
+def test_table_file_name_falls_back_to_table_txt() -> None:
+    assert table_file_name(_numbered_table(1, steps=())) == "table.txt"
+    assert table_file_name(_numbered_table(1, steps=("★ / ?",))) == "table.txt"
+    assert table_file_name(_numbered_table(1, steps=("점수<SSS",))) == "점수SSS.txt"
+
+
+def test_render_text_slash_shows_slash_only_columns() -> None:
+    table = _fmt_table()
+    assert "아이디 g7" not in render_text(table).content
+    assert "아이디 g7" in render_text(table, slash=True).content
+
+
+def test_numbers_in_text_file_and_rows_point_at_the_same_rows() -> None:
+    table = _numbered_table(TABLE_FILE_ROWS + 3, titled=False)
+    file = render_text(table).file
+    assert file is not None
+    data = file[1]
+    lines = [line for line in data.decode("utf-8").split("\n") if line[:1].isdigit() and ". " in line]
+    for line in lines:
+        number = int(line.split(".", 1)[0])
+        assert line == f"{number}. {row_text(table, row_at(table, number))}"

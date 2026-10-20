@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import enum
+import io
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -18,7 +19,7 @@ from core.permissions import TagRequirement, check_tags
 from core.registry_snapshot import RegistrySnapshot
 from core.schema import ArgSpec, build_arg_schema
 from core.slash_rules import callback_arg_name_problems, slash_path_problems
-from core.tool_types import ToolContext, ToolResult
+from core.tool_types import ToolContext, ToolResult, table_display
 from services.common.players import PlayersService
 
 if TYPE_CHECKING:
@@ -243,12 +244,17 @@ def render_result(result: ToolResult) -> dict[str, Any]:
         return {"content": result.error, "ephemeral": True}
 
     display = result.display
+    if display is None and result.table is not None:
+        # 슬래시는 표를 보관하지 않고 바로 그린다(slash_only 칸도 보인다).
+        display = table_display(result.table, stale=result.table_stale, slash=True)
     if display is not None and display.slash_content is not None:
         display = replace(display, content=display.slash_content)
     if display is not None and (display.content or display.embeds or display.view is not None):
         kwargs: dict[str, Any] = {"content": display.content, "embeds": list(display.embeds)}
         if display.view is not None:
             kwargs["view"] = display.view
+        if display.files:
+            kwargs["files"] = [discord.File(io.BytesIO(file.data), filename=file.name) for file in display.files]
         if display.ephemeral:
             kwargs["ephemeral"] = True
         return kwargs
@@ -271,17 +277,24 @@ async def respond(interaction: discord.Interaction, **kwargs: Any) -> None:
     비공개 팔로업으로 보낸다. 본문이 2000자를 넘으면 디스코드가 통째로 거절하므로 줄 경계에서 나눠
     첫 조각만 이 경로로 보내고(embeds·view도 여기 붙는다) 나머지는 팔로업으로 이어 보낸다."""
     ephemeral = kwargs.pop("ephemeral", False)
+    files: list[discord.File] = kwargs.pop("files", [])
     rest: list[str] = []
     content = kwargs.get("content")
     if content:
         first, *rest = split_message(content)
         kwargs["content"] = first
+    # 첨부 파일은 첫 조각에만 붙는다. 이미 보낸 응답을 고칠 때는 files가 아니라 attachments로 넘긴다.
+    if files:
+        kwargs["files"] = files
     if not interaction.response.is_done():
         await interaction.response.send_message(**kwargs, ephemeral=ephemeral)
     elif ephemeral:
         await interaction.delete_original_response()
         await interaction.followup.send(**kwargs, ephemeral=True)
     else:
+        if files:
+            kwargs.pop("files")
+            kwargs["attachments"] = files
         await interaction.edit_original_response(**kwargs)
     for chunk in rest:
         await interaction.followup.send(chunk, ephemeral=ephemeral)

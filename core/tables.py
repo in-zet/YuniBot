@@ -532,6 +532,95 @@ def summarize_table(table: WorkTable, *, stale: bool = False) -> dict[str, Any]:
     return summary
 
 
+# 행이 이 수를 넘으면(11행부터) 행 목록을 메시지에 펼치지 않고 .txt 파일로 첨부한다.
+TABLE_FILE_ROWS = 10
+STALE_NOTE = "(동기화 전 값)"
+_FORMAT_SLOT_RE = re.compile(r"\{([^{}]+)\}")
+_FILENAME_KEEP_RE = re.compile(r"[^\w.\-]+")
+
+
+def _visible_columns(table: WorkTable, *, slash: bool) -> list[Column]:
+    return [
+        column
+        for column in table.columns
+        if not column.hidden_in_text and (slash or not column.slash_only)
+    ]
+
+
+def row_text(table: WorkTable, row: Row, *, slash: bool = False) -> str:
+    """행 한 줄의 글. 보일 칸만 골라, 칸이 모두 찬 첫 한 줄 서식을 쓰고, 없으면 기본 출력(칸 이름 + 값)으로 쓴다."""
+    visible = _visible_columns(table, slash=slash)
+    by_label = {column.label: column for column in visible}
+    used: set[str] = set()
+    line: str | None = None
+    for fmt in table.row_formats:
+        labels = _FORMAT_SLOT_RE.findall(fmt)
+        if all(label in by_label and row.cell(by_label[label].name).filled for label in labels):
+            line = _FORMAT_SLOT_RE.sub(lambda m: row.cell(by_label[m.group(1)].name).text, fmt)
+            used = set(labels)
+            break
+    parts: list[str] = [] if line is None else [line]
+    for column in visible:
+        cell_ = row.cell(column.name)
+        if column.label in used or not cell_.filled:
+            continue
+        parts.append(cell_.text if column.bare and line is None else f"{column.label} {cell_.text}")
+    return "  ".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedTable:
+    """글자로 그린 표. `file`이 있으면 행 목록은 거기 있고 `content`에는 머리말만 있다."""
+
+    content: str
+    file: tuple[str, bytes] | None = None
+
+
+def _header_lines(table: WorkTable, *, stale: bool) -> list[str]:
+    lines: list[str] = []
+    if stale:
+        lines.append(STALE_NOTE)
+    if table.steps:
+        lines.append(" → ".join(table.steps))
+    if table.summary:
+        lines.append(" · ".join(f"{key} {value}" for key, value in table.summary.items()))
+    return lines
+
+
+def _body_lines(table: WorkTable, *, slash: bool) -> list[str]:
+    lines: list[str] = []
+    number = 0
+    bare_single = len(table.groups) == 1 and table.groups[0].title is None
+    for group in table.groups:
+        if not bare_single:
+            rule = [] if group.title is None else [group.title]
+            rule.append(f"{len(group.rows)}{table.unit}")
+            rule.extend(f"{key} {value}" for key, value in group.summary.items())
+            lines.append(f"── {' · '.join(rule)} ──")
+        for row in group.rows:
+            number += 1
+            lines.append(f"{number}. {row_text(table, row, slash=slash)}")
+    return lines
+
+
+def table_file_name(table: WorkTable) -> str:
+    """파일 이름은 `steps` 첫 항목에서 따온다(예 `15.0상수MAS.txt`). 쓸 글자가 없으면 `table.txt`."""
+    stem = _FILENAME_KEEP_RE.sub("", table.steps[0])[:40] if table.steps else ""
+    return f"{stem or 'table'}.txt"
+
+
+def render_text(table: WorkTable, *, stale: bool = False, slash: bool = False) -> RenderedTable:
+    """표를 글자로 그린다. 머리말(옛 값 표시·steps·요약) 뒤에 묶음마다 표지 줄과 `번호. 행 글`이 온다.
+    행이 `TABLE_FILE_ROWS`를 넘으면 머리말만 `content`에 두고 전체를 .txt 파일로 돌려준다."""
+    header = _header_lines(table, stale=stale)
+    body = _body_lines(table, slash=slash)
+    if table.row_count <= TABLE_FILE_ROWS:
+        return RenderedTable("\n".join([*header, *body]))
+    name = table_file_name(table)
+    note = f"{table.row_count}{table.unit} — 목록은 첨부 파일({name})"
+    return RenderedTable("\n".join([*header, note]), (name, "\n".join([*header, *body]).encode("utf-8")))
+
+
 class TableBuilder:
     """스킬이 표를 만드는 도우미. id는 비워 두고 코어가 보관할 때 붙인다."""
 

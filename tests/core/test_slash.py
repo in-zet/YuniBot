@@ -1,3 +1,4 @@
+import io
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -23,7 +24,7 @@ from core.slash import (
     respond,
     slash_path_problems,
 )
-from core.tables import TableStore
+from core.tables import RowRef, TableBuilder, TableStore, cell
 from core.tool_types import Display, ToolContext, ToolResult
 from services.common.players import PlayersService
 
@@ -348,6 +349,47 @@ def test_render_result_passes_display_through() -> None:
 
     assert kwargs["content"] == "표시물"
     assert "view" not in kwargs
+
+
+def test_render_result_draws_a_table_with_slash_only_columns_and_no_storing() -> None:
+    builder = TableBuilder(unit="개").column("name", "이름", bare=True).column("id", "아이디", slash_only=True)
+    builder.row(RowRef("k", "1"), {"name": cell("목표"), "id": cell("a2")})
+    kwargs = render_result(ToolResult(table=builder.build()))
+
+    assert kwargs["content"] == "1. 목표  아이디 a2"
+    assert "files" not in kwargs
+
+
+def test_render_result_attaches_a_long_table_as_a_file() -> None:
+    builder = TableBuilder(unit="개").column("name", "이름", bare=True).step("전체")
+    for i in range(12):
+        builder.row(RowRef("k", str(i)), {"name": cell(f"n{i}")})
+    kwargs = render_result(ToolResult(table=builder.build()))
+
+    (file,) = kwargs["files"]
+    assert isinstance(file, discord.File) and file.filename == "전체.txt"
+    assert "12. n11" in file.fp.read().decode("utf-8")
+    assert "n11" not in kwargs["content"]
+
+
+async def test_respond_attaches_files_to_the_first_message_only() -> None:
+    interaction = _fake(1)
+    file = discord.File(io.BytesIO(b"x"), filename="a.txt")
+    await respond(interaction, content="가\n" * 1500, files=[file])
+
+    first, *rest = interaction.calls
+    assert first["files"] == [file]
+    assert rest and all("files" not in call for call in rest)
+
+
+async def test_respond_edit_path_sends_files_as_attachments() -> None:
+    interaction = _fake(1)
+    await interaction.response.defer()
+    file = discord.File(io.BytesIO(b"x"), filename="a.txt")
+    await respond(interaction, content="안녕", files=[file])
+
+    assert interaction.calls[0]["attachments"] == [file]
+    assert "files" not in interaction.calls[0]
 
 
 def test_render_result_error_is_ephemeral() -> None:

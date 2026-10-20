@@ -11,7 +11,7 @@ from core.events import EventBus, Section
 from core.player_data import PlayerDataScanner
 from core.registry_snapshot import RegistrySnapshot
 from core.scheduler import Scheduler
-from core.tables import TableStore, WorkTable
+from core.tables import TableStore, WorkTable, render_text
 from core.usage import UsageService
 
 
@@ -62,6 +62,14 @@ class ToolContext:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class DisplayFile:
+    """표시물에 붙일 첨부 파일(이름과 바이트)."""
+
+    name: str
+    data: bytes
+
+
 @dataclass(slots=True, kw_only=True)
 class Display:
     """슬래시/멘션 응답에 붙일 표시물. 코어는 내용을 고치지 않고 그대로 보낸다."""
@@ -79,6 +87,8 @@ class Display:
     # required 표시물 중 질문이 표 전체가 아니라 조건에 맞는 일부일 때 유니가 `[[no_table]]`로 뺄 수 있는 것.
     # 출처처럼 반드시 붙어야 하는 표시물에는 켜지 않는다.
     omittable: bool = False
+    # 메시지에 첨부할 파일. 본문이 2000자를 넘어 나뉘어도 첫 조각에 붙는다.
+    files: list[DisplayFile] = field(default_factory=list)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -89,6 +99,8 @@ class ToolResult:
     table: WorkTable | None = None
     # 코어가 채운다(도구는 쓰지 않는다): 입력 표가 옛 값이어서 이 결과 표도 옛 값으로 보관해야 한다.
     table_stale: bool = False
+    # 그림 표 도구가 "이 표를 그렸다"고 알리는 표시(표 id). 코어는 그 턴의 마지막 표가 그려졌으면 글자로 다시 그리지 않는다.
+    drew_table: str | None = None
     display_mode: Literal["required", "optional"] = "required"
     error: str | None = None
 
@@ -133,3 +145,10 @@ class TableRef:
 STANDARD_REF_TYPES: frozenset[type] = frozenset(
     {PlayerRef, SongQuery, ChartRef, ArcadeRef, RankRef, DifficultyRef, LampRef, ScoreRef, TableRef}
 )
+
+
+def table_display(table: WorkTable, *, stale: bool = False, slash: bool = False) -> Display:
+    """표를 글자로 그려 표시물로 만든다. 멘션 응답과 슬래시가 같은 함수를 쓴다."""
+    rendered = render_text(table, stale=stale, slash=slash)
+    files = [DisplayFile(rendered.file[0], rendered.file[1])] if rendered.file is not None else []
+    return Display(content=rendered.content, omittable=True, files=files)

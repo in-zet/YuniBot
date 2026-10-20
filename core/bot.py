@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import io
 import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import aiosqlite
 import discord
@@ -265,7 +266,14 @@ class YuniClient(discord.Client):
             # 2000자를 넘으면 디스코드가 통째로 거절해 답이 아예 안 나간다 — 줄 경계에서 나눠 첫 조각만
             # 답장으로, 나머지는 이어서 보낸다.
             chunks = split_message(full_text)
-            sent = await message.reply(chunks[0], embeds=embeds, mention_author=False)
+            files = [
+                discord.File(io.BytesIO(file.data), filename=file.name) for display in displays for file in display.files
+            ]
+            # 첨부 파일은 첫 조각에만 붙는다.
+            reply_kwargs: dict[str, Any] = {"embeds": embeds, "mention_author": False}
+            if files:
+                reply_kwargs["files"] = files
+            sent = await message.reply(chunks[0], **reply_kwargs)
             for extra in chunks[1:]:
                 await message.channel.send(extra)
             return str(sent.id)

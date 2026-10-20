@@ -666,6 +666,10 @@ _TABLE_SKILL_BODY = (
     '    """테스트용: 받은 표를 그대로 새 표로 돌려준다."""\n'
     "    return ToolResult(table=TableBuilder.from_table(table).build())\n\n\n"
     "@tool()\n"
+    "async def draw(ctx: ToolContext, table: TableRef) -> ToolResult:\n"
+    '    """테스트용: 표를 그림으로 그렸다고 알린다."""\n'
+    "    return ToolResult(data={'drawn': True}, drew_table=table.id)\n\n\n"
+    "@tool()\n"
     "async def broken_table(ctx: ToolContext) -> ToolResult:\n"
     '    """테스트용: 표와 함께 에러를 낸다."""\n'
     '    return ToolResult(error="실패", table=TableBuilder().column("a").build())\n'
@@ -783,6 +787,15 @@ async def test_table_peek_gives_raw_values_to_the_model_and_the_number_check(tmp
     assert seen[0]["rows"] == [{"number": 1, "values": {"곡": "A", "점수": 1_005_000}}]
     assert result.collected_data == seen
     assert result.last_table_id is None and result.turn_table_ids == []
+
+
+@pytest.mark.asyncio
+async def test_a_table_drawn_by_a_picture_tool_is_recorded_as_drawn(tmp_path: Path) -> None:
+    result, seen, _store = await _run_table_turns(tmp_path, [("make", {}), ("draw", {"table": "t1"})])
+
+    assert seen[1] == {"drawn": True}
+    assert result.last_table_id == "t1"
+    assert result.drawn_table_ids == ["t1"]
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,7 @@ from core.prompt import PromptAssembler
 from core.registry import LoadedSkill
 from core.registry_snapshot import RegistrySnapshot
 from core.skill_loading import SkillLoadState
-from core.tables import summarize_table
+from core.tables import WorkTable, summarize_table
 from core.threads import ThreadEndRequest
 from core.tool_types import Display, ToolContext, ToolResult
 
@@ -56,6 +56,9 @@ class AgentTurnResult:
     last_table_id: str | None = None
     # 그림 표 도구가 이미 그린 표. 글자로 다시 그리지 않는다.
     drawn_table_ids: list[str] = field(default_factory=list)
+    # 마지막 표 본체와 옛 값 여부. 턴 끝 글자 출력(core/response_assembly.py)이 쓴다.
+    last_table: WorkTable | None = None
+    last_table_stale: bool = False
 
 
 class AgentLoop:
@@ -306,6 +309,8 @@ class AgentLoop:
                         "player %s: 도구 '%s' 완료 %.2f초",
                         ctx.player_id, call.name, time.monotonic() - tool_started,
                     )
+                if tool_result.drew_table is not None and tool_result.error is None:
+                    result.drawn_table_ids.append(tool_result.drew_table)
                 if tool_result.data:
                     result.collected_data.append(tool_result.data)
                 if tool_result.display is not None and tool_result.display_mode == "optional":
@@ -347,6 +352,8 @@ class AgentLoop:
         turn.last_table_id = table_id
         stored = store.get(ctx.player_id, ctx.channel_id, table_id)
         assert stored is not None
+        turn.last_table = stored
+        turn.last_table_stale = tool_result.table_stale
         tool_result.data = {**tool_result.data, **summarize_table(stored, stale=tool_result.table_stale)}
         return tool_result
 
