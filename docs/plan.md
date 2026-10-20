@@ -85,7 +85,7 @@
 - [X] 15. `yuni-lore`(설정집 읽기) — `2026-10-20_수정.md` §15
 - [ ] 16. 작업 표(설계 `00-core.md` "작업 표" 초안, 결정 대기 모두 정리·구현 전) — `2026-10-20_수정.md` §16
   - [X] Part 0: 동기화 때 플레이어 레벨·캐릭터 그림 주소 저장 — 구현 완료(2026-10-20, `records_profile`·`RecordsService.player_profile`). 실기 미확인: 실제 동기화 뒤 `records_profile`에 레벨·그림 주소가 들어가는지
-  - [ ] Part 1: 코어(표 구조·보관소·`TableRef`·`table_query`/`table_peek`·글자 출력·`Display.files`). 세부 파트 하나가 작업 단위이고, 끝날 때마다 사용자 지시를 기다린다(2026-10-20 사용자 결정). 시험은 세부 파트마다 그 파트 몫을 함께 쓴다(수정 문서 1-10을 나눠 담는다)
+  - [X] Part 1: 코어(표 구조·보관소·`TableRef`·`table_query`/`table_peek`·글자 출력·`Display.files`) — 구현 완료(2026-10-20). 세부 파트로 나눠 하다가 사용자가 "쭉 해라"고 해 1-5부터 한 번에 이었다. 실기 미확인: 표를 낸 도구가 아직 없어(Part 2부터) 실제 대화 확인은 Part 2 뒤에 한다. 시험은 세부 파트마다 그 파트 몫을 함께 쓴다(수정 문서 1-10을 나눠 담는다)
     - [X] 1-1 표 구조(`core/tables.py`: `WorkTable`·`Column`·`Cell`·`Row`·`Group`·`TableBuilder`·`row_at`) — 구현 완료(2026-10-20)
     - [X] 1-2 보관소(`TableStore`·`ToolContext.tables`·`channel_id`·만료·옛 값 표시) — 구현 완료(2026-10-20)
     - [X] 1-3 도구 결과와 인자(`ToolResult.table`·`TableRef`·`TableNeeds`·실행기의 표 해석) — 구현 완료(2026-10-20)
@@ -94,7 +94,7 @@
     - [X] 1-6 글자 출력(`render_text`·`row_text`·응답 조립) — 구현 완료(2026-10-20)
     - [X] 1-7 첨부 파일과 그림 표 표시(`Display.files`·`drew_table`·슬래시 경로) — 구현 완료(2026-10-20). 실기 미확인: 11행 이상 표가 .txt 첨부로 나가는지(멘션·슬래시)
     - [X] 1-8 수명 연결(`core/mention.py`: 묶기·`retain_only`·프롬프트 조각·번호 기준 줄) — 구현 완료(2026-10-20)
-    - [ ] 1-9 프롬프트(`prompts/rules.md`)
+    - [X] 1-9 프롬프트(`prompts/rules.md`) — 구현 완료(2026-10-20)
   - [ ] Part 2: 첫 범위 스킬(곡 검색 4개·`best`·`add_scores`·폴더 보기/저장)
   - [ ] Part 3: 그림 표 `chunithm-image`
   - [ ] Part 4: 나머지 목록 도구를 표로(15개)

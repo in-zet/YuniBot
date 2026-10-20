@@ -1210,7 +1210,7 @@ async def test_not_a_reply_has_no_replied_line_but_still_the_last_shown_table() 
     await _run(entry, trigger, [_yuni("m100"), trigger])
 
     prompt = _system_prompt(entry._agent._llm)  # pyright: ignore[reportPrivateUsage,reportArgumentType]
-    assert "답장한 메시지의 표" not in prompt
+    assert "답장한 메시지의 표: t" not in prompt
     assert "마지막으로 보여 준 표: t1" in prompt
 
 
@@ -1239,7 +1239,7 @@ async def test_table_pushed_out_of_the_context_is_deleted() -> None:
     await _run(entry, trigger, [_yuni("m100"), *later, trigger])
 
     assert store.ids("p1", "c1") == []
-    assert "[살아 있는 표]" not in _system_prompt(entry._agent._llm)  # pyright: ignore[reportPrivateUsage,reportArgumentType]
+    assert "[살아 있는 표] t" not in _system_prompt(entry._agent._llm)  # pyright: ignore[reportPrivateUsage,reportArgumentType]
 
 
 @pytest.mark.asyncio
