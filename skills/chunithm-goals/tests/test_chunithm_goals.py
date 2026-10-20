@@ -453,6 +453,9 @@ async def test_list_returns_own_goals(skill: ModuleType, db: aiosqlite.Connectio
     result = await skill.list_goals(ctx)
     assert result.error is None
     assert len(result.data["goals"]) == 1
+    # [[show]]를 빼먹어도 목록이 붙도록 required, 일부만 묻는 말은 [[no_table]]로 뺄 수 있게 omittable.
+    assert result.display_mode == "required"
+    assert result.display is not None and result.display.omittable
 
 
 async def test_list_for_other_player_only_shows_public_goals(skill: ModuleType, db: aiosqlite.Connection) -> None:

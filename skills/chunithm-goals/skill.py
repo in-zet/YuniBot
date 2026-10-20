@@ -820,12 +820,11 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
         display=Display(
             content="\n".join(lines) if lines else "목표가 없어.",
             slash_content="\n".join(slash_lines) if slash_lines else None,
+            omittable=True,
         ),
-        # optional — required면 모델이 뭐라 답하든 id 포함 전체 목록이 항상 붙는다(멘션에서
-        # "id xxxxx"가 매번 보이던 원인, 실기 2026-10-18). 슬래시(/목표 목록)는 core/slash.py의
-        # render_result가 display_mode와 무관하게 항상 보여주므로 id는 그대로 보인다 — 거기엔
-        # 자동완성이 없어 다음 /목표 수정·삭제에 그 id를 그대로 타이핑해야 한다.
-        display_mode="optional",
+        # required — "목표 보여줘"에 유니가 [[show]]를 빼먹어 목록이 안 붙던 실기(2026-10-20). id는 슬래시
+        # 전용(slash_content)이라 멘션 답에는 안 보이고, 일부만 묻는 말은 [[no_table]]로 뺀다.
+        display_mode="required",
     )
 
 
