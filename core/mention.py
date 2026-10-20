@@ -34,7 +34,7 @@ from services.common.players import DiscordAccount, Player
 # guild/DM을 가리지 않고 걸어야 하므로 이 문자열로 "서버가 아닌 대화"를 표시한다.
 _DM_SCOPE = "dm"
 
-MAX_CONTEXT_MESSAGES = 6
+MAX_CONTEXT_MESSAGES = 10
 
 logger = logging.getLogger(__name__)
 
