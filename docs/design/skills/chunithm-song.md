@@ -43,14 +43,20 @@ emits: [chunithm.song.viewed]
 그대로 노출한다(2026-10-20 결정).
 
 **작곡가 검색**: 아티스트 크레딧(`SongRecord.artist`)으로 수록곡을 찾는다. 대소문자 구분 없는 부분
-일치라 "A vs. B" 같은 콜라보 크레딧도 걸린다. 아티스트는 채보가 아니라 곡 단위 값이라 난이도 인자가
-없다(2026-10-20 결정 — 상수·레벨·버전과 달리 난이도로 좁힐 대상 자체가 없다).
+일치라 "A vs. B" 같은 콜라보 크레딧도 걸린다. 아티스트는 채보가 아니라 곡 단위 값이라 기본은 곡 단위
+행(난이도 칸 비움)의 표를 낸다(2026-10-20 결정). 선택 인자 `difficulty`를 주면(작업 표 Part 2,
+2026-10-20) 그 난이도의 채보 행으로 낸다 — 그 난이도가 없거나 고를 수 없는 곡은 빠진다.
 
 **조합 검색**: 상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부 중 둘 이상을 AND로 동시에
 거는 질문을 위한 것이다(`find_by_const`/`find_by_version`은 조건 하나+난이도만 받는다). 조건을
 하나도 안 주면(`new_only`도 꺼진 채) 범위가 너무 넓어 바로 에러를 돌려준다. 준 조건만 보고 안 준
-건 거르지 않는다. 정렬 기준(`sort_by`: "const"·"note_count"·"title")과 방향(`descending`)도
-고를 수 있다 — 값을 모르는 채보는 방향과 무관하게 항상 맨 뒤다(2026-10-20 결정).
+건 거르지 않는다. 순서는 상수 오름차순·모르면 뒤·같으면 제목순으로 고정이다. 다른 순서는 결과 표에
+`table_query`를 쓴다(작업 표 Part 2, 2026-10-20 — `sort_by`·`descending` 인자를 뺐다).
+
+**결과는 표** (작업 표 Part 2, 2026-10-20): 상수·버전·조합·작곡가 검색은 모두 작업 표를 돌려준다. 채보 행의
+가리키는 것은 `chunithm.chart`, 곡 단위 행은 `chunithm.song`이다. 칸은 곡·난이도·레벨·상수·노트 수·버전
+(`find_by_artist`는 작곡가 포함, 곡 단위 행은 곡·난이도·작곡가·버전). 표지 개수 단위는 "채보"(곡 단위 행은
+"곡"), `steps` 첫 항목은 검색 조건을 사람이 읽는 말이다. 결과가 없으면 표 없이 안내 문구만 낸다.
 
 **채보 뷰어 링크**
 
@@ -72,8 +78,8 @@ emits: [chunithm.song.viewed]
 | `chart` | 채보 하나의 상수, 노트 수 | `chart: ChartRef` | 없음 | 없음 | optional | never |
 | `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `difficulty`: DifficultyRef, `max`(선택), `new_only`(선택) | `/상수` | 없음 | required | never |
 | `find_by_version` | 수록 버전(+선택적 난이도)으로 채보 목록 | `version`, `difficulty: DifficultyRef \| None` | `/버전` | 없음 | required | never |
-| `find_by_artist` | 작곡가로 수록곡 목록 | `artist` | `/작곡가` | 없음 | required | never |
-| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only`, `sort_by`, `descending` | `/검색` | 없음 | required | never |
+| `find_by_artist` | 작곡가로 수록곡 목록 | `artist`, `difficulty: DifficultyRef \| None`(선택) | `/작곡가` | 없음 | required | never |
+| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only` | `/검색` | 없음 | required | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | 없음 | optional | never |
 | `alias_add` | 별칭 추가 | `song: SongQuery`, `alias` | `/별칭 추가` | 없음 | optional | never |
 | `alias_remove` | 별칭 삭제 | `alias` | `/별칭 삭제` | 없음(함수 안에서 추가한 사람 또는 `admin` 확인) | optional | never |
@@ -104,8 +110,10 @@ emits: [chunithm.song.viewed]
 - 상수·레벨·버전·난이도·노트 수·신곡 중 두 개 이상을 동시에 걸면 `find_songs`를 쓴다(상수 범위
   하나만, 또는 버전 하나만이면 `find_by_const`/`find_by_version`이 먼저다 — 레벨만으로 찾는 건
   `find_songs`뿐이다). 말하지 않은 조건은 비워 둔다 — 지어내지 않는다.
-- `find_songs`의 정렬 기준은 상수가 기본이다. "노트 수 순", "제목 순"처럼 말했으면 `sort_by`를
-  그에 맞게 바꾸고, "많은 순"·"높은 순"·"내림차순"이면 `descending`을 켠다.
+- 상수·버전·검색·작곡가 결과는 표로 나온다. 표 id를 받으면 행을 다시 나열하지 않는다. 결과는 상수
+  오름차순이고, "노트 수 많은 순"처럼 다른 순서나 추가 조건은 그 표에 `table_query`를 쓴다(다시 찾지 않는다).
+- `find_by_artist`는 플레이어가 난이도를 말했을 때만 `difficulty`를 준다. 말하지 않았으면 비우고,
+  곡 단위 표로 나온다.
 
 ## 테스트
 
@@ -118,8 +126,8 @@ emits: [chunithm.song.viewed]
 - `find_songs`가 준 조건만 AND로 겹치는지(상수 범위+노트 수 조합 등), 조건이 하나도 없으면
   에러를 돌리는지.
 - `find_by_const`가 `max_const` 없이 "min 이상"을, `new_only`로 신곡만 찾는지.
-- `find_songs`의 `sort_by`("note_count"·"title")와 `descending`이 맞게 정렬하는지, 값이 없는
-  채보가 방향과 무관하게 맨 뒤로 가는지, 모르는 `sort_by` 값에 에러를 돌리는지.
+- 네 검색 도구가 표를 돌려주는지(칸·가리키는 것·`steps`·단위), `find_songs` 순서가 상수 오름차순·모르면
+  뒤·같으면 제목순인지, `find_by_artist`가 난이도를 주면 채보 행을 내고 안 주면 곡 단위 행을 내는지.
 
 ## 미확인 사항
 
@@ -160,7 +168,8 @@ emits: [chunithm.song.viewed]
   "note_count"·"title")와 `descending`으로 바꿀 수 있다 — "노트 수 많은 순" 같은 질문은 조건
   조합과 별개로 정렬 자체를 바꿔 달라는 것이라 조건 인자와 나란히 두었다. 값을 모르는 채보(상수·
   노트 수)는 정렬 방향과 무관하게 항상 맨 뒤에 두고 그 안에서는 제목순이다 — "내림차순으로 큰
-  것부터"에서도 모르는 값이 1등일 수는 없다는 판단이다. `find_by_const`처럼 레벨/버전/난이도
+  것부터"에서도 모르는 값이 1등일 수는 없다는 판단이다(이 `sort_by`·`descending`은 작업 표 Part 2에서 `table_query`와
+  겹쳐 뺐다 — 순서는 고정). `find_by_const`처럼 레벨/버전/난이도
   전부 비우고 노트 수 범위만 주는 질문도 그대로 받는다.
 - 조건을 하나도 안 주면 서비스 메서드 자체는 국제판 전체를 돌려주지만(단순함 유지), 스킬 도구
   단에서 먼저 막는다 — 전체 목록을 돌려주는 건 이 도구의 쓸모가 아니고, 결과가 너무 커진다.

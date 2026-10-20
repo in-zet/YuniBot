@@ -152,6 +152,10 @@ class TermsService:
         if self._conn is not None:
             self._conn.row_factory = aiosqlite.Row
 
+    def rank_scores(self) -> dict[str, int]:
+        """랭크 정식 이름 -> 기준 점수. 작업 표의 랭크 칸 원래 값을 만들 때 쓴다."""
+        return {name: value for name, value in self._rank_values.items() if value is not None}
+
     async def resolve_rank(self, raw: str, ctx: ToolContext) -> ResolvedRank:
         canonical = self._rank_aliases.get(raw.strip().lower())
         if canonical is None:

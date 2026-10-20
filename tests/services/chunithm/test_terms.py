@@ -252,3 +252,10 @@ async def test_review_toggles_back_and_forth(terms_with_conn: TermsService) -> N
 
 async def test_review_unknown_proposal_returns_none(terms_with_conn: TermsService) -> None:
     assert await terms_with_conn.review("없는id", approve=True, reviewed_by="admin1") is None
+
+
+def test_rank_scores_maps_canonical_rank_to_base_score(terms: TermsService) -> None:
+    scores = terms.rank_scores()
+    assert scores["SSS"] == 1_007_500
+    assert scores["SSS+"] == 1_009_000
+    assert "AJC" not in scores  # 램프는 랭크가 아니다

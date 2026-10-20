@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from core.decorators import tool
 from core.events import Section
+from core.tables import TableBuilder, WorkTable
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -11,8 +12,9 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
+from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
-from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, SongRecord
+from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, ConstRangeHit, SongRecord
 from services.chunithm.terms import ResolvedDifficulty
 
 _DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
@@ -83,41 +85,76 @@ async def chart(ctx: ToolContext, chart: ChartRef) -> ToolResult:
     )
 
 
+_SEARCH_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION)
+_NO_ARTIST_SONGS = "해당 작곡가의 곡이 없다."
+
+
+def _num_text(value: float) -> str:
+    return f"{value:.1f}" if round(value, 1) == value else f"{value:g}"
+
+
+def _const_range_text(min_const: float | None, max_const: float | None) -> str | None:
+    if min_const is None and max_const is None:
+        return None
+    if max_const is None and min_const is not None:
+        return f"{_num_text(min_const)} 이상 상수"
+    if min_const is None and max_const is not None:
+        return f"{_num_text(max_const)} 이하 상수"
+    assert min_const is not None and max_const is not None
+    return f"{_num_text(min_const)}~{_num_text(max_const)} 상수"
+
+
+def _note_range_text(min_notes: int | None, max_notes: int | None) -> str | None:
+    if min_notes is None and max_notes is None:
+        return None
+    if max_notes is None:
+        return f"노트 {min_notes}개 이상"
+    if min_notes is None:
+        return f"노트 {max_notes}개 이하"
+    return f"노트 {min_notes}~{max_notes}개"
+
+
+def _chart_table(hits: list[ConstRangeHit], conditions: list[str | None]) -> WorkTable:
+    """채보 검색 결과를 표로. 순서는 서비스가 정한 그대로(상수 오름차순)다."""
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, *_SEARCH_COLUMNS)
+    builder.step(" ".join(c for c in conditions if c))
+    for hit in hits:
+        builder.row(
+            tc.chart_ref(hit.song.title, hit.chart.difficulty),
+            tc.chart_cells(hit.song, hit.chart, _SEARCH_COLUMNS),
+        )
+    return builder.build()
+
+
 @tool(slash="상수")
 async def find_by_const(
     ctx: ToolContext, min_const: float, difficulty: DifficultyRef,
     max_const: float | None = None, new_only: bool = False,
 ) -> ToolResult:
-    """상수 범위와 난이도로 채보 목록을 상수순으로 보여준다. "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
+    """상수 범위와 난이도로 채보 목록을 상수순으로 찾는다. "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
     max_const를 비운다(지어내지 않는다). 플레이어가 신곡만 말했으면 new_only를 켠다."""
     short_code = _difficulty_code(difficulty)
     hits = ctx.songdb.find_by_const(
         min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
     )
-
-    lines = [f"{hit.song.title} — 상수 {hit.chart.const}" for hit in hits]
-
-    return ToolResult(
-        data={"count": len(hits), "titles": [hit.song.title for hit in hits]},
-        display=Display(content="\n".join(lines) if lines else "해당 범위의 채보가 없다.", omittable=True),
-    )
+    if not hits:
+        return ToolResult(data={"count": 0}, display=Display(content="해당 범위의 채보가 없다.", omittable=True))
+    conditions = [_const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
+    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions))
 
 
 @tool(slash="버전")
 async def find_by_version(
     ctx: ToolContext, version: str, difficulty: DifficultyRef | None = None
 ) -> ToolResult:
-    """수록 버전으로 채보 목록을 상수순으로 보여준다. 난이도를 안 주면 그 버전의 모든 채보를
-    난이도 가리지 않고 보여준다."""
+    """수록 버전으로 채보 목록을 상수순으로 찾는다. 난이도를 안 주면 그 버전의 모든 채보를
+    난이도 가리지 않고 찾는다."""
     short_code = _difficulty_code(difficulty)
     hits = ctx.songdb.find_by_version(version=version, difficulty=short_code)
-
-    lines = [f"{hit.song.title} {hit.chart.difficulty} — 상수 {hit.chart.const}" for hit in hits]
-
-    return ToolResult(
-        data={"count": len(hits), "titles": [hit.song.title for hit in hits]},
-        display=Display(content="\n".join(lines) if lines else "해당 버전의 채보가 없다.", omittable=True),
-    )
+    if not hits:
+        return ToolResult(data={"count": 0}, display=Display(content="해당 버전의 채보가 없다.", omittable=True))
+    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code]))
 
 
 @tool(slash="검색")
@@ -131,14 +168,11 @@ async def find_songs(
     min_note_count: int | None = None,
     max_note_count: int | None = None,
     new_only: bool = False,
-    sort_by: str = "const",
-    descending: bool = False,
 ) -> ToolResult:
     """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 조합해 채보를 찾는다.
     `/상수`·`/버전`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
     조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다.
-    sort_by는 "const"(기본)·"note_count"·"title" 중 하나다. "노트 수 많은 순"처럼 말했으면
-    sort_by="note_count", descending=True로 준다."""
+    결과는 상수 오름차순 표다. 다른 순서가 필요하면 표에 `table_query`를 쓴다."""
     if not new_only and all(
         v is None
         for v in (min_const, max_const, level, version, difficulty, min_note_count, max_note_count)
@@ -146,34 +180,57 @@ async def find_songs(
         return ToolResult(error="조건을 하나는 줘야 한다(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡 중)")
 
     short_code = _difficulty_code(difficulty)
-    try:
-        hits = ctx.songdb.find_songs(
-            min_const=min_const, max_const=max_const, level=level, version=version,
-            difficulty=short_code, min_note_count=min_note_count, max_note_count=max_note_count,
-            new_only=new_only, sort_by=sort_by, descending=descending,
-        )
-    except ValueError as exc:
-        return ToolResult(error=str(exc))
-
-    lines = [f"{hit.song.title} {hit.chart.difficulty} — 상수 {hit.chart.const}" for hit in hits]
-
-    return ToolResult(
-        data={"count": len(hits), "titles": [hit.song.title for hit in hits]},
-        display=Display(content="\n".join(lines) if lines else "조건에 맞는 채보가 없다.", omittable=True),
+    hits = ctx.songdb.find_songs(
+        min_const=min_const, max_const=max_const, level=level, version=version,
+        difficulty=short_code, min_note_count=min_note_count, max_note_count=max_note_count,
+        new_only=new_only,
     )
+    if not hits:
+        return ToolResult(data={"count": 0}, display=Display(content="조건에 맞는 채보가 없다.", omittable=True))
+    conditions = [
+        _const_range_text(min_const, max_const),
+        f"레벨 {level}" if level else None,
+        f"{version} 버전" if version else None,
+        short_code,
+        _note_range_text(min_note_count, max_note_count),
+        "신곡만" if new_only else None,
+    ]
+    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions))
 
 
 @tool(slash="작곡가")
-async def find_by_artist(ctx: ToolContext, artist: str) -> ToolResult:
-    """작곡가(아티스트) 이름으로 국제판 수록곡을 찾는다."""
+async def find_by_artist(
+    ctx: ToolContext, artist: str, difficulty: DifficultyRef | None = None
+) -> ToolResult:
+    """작곡가(아티스트) 이름으로 국제판 수록곡을 찾는다. 사용자가 난이도를 말했을 때만 difficulty를 주고,
+    말하지 않았으면 비운다(곡 단위 행으로 나온다)."""
     songs = ctx.songdb.find_by_artist(name=artist)
+    short_code = _difficulty_code(difficulty)
+    condition = f"{artist} 작곡"
 
-    lines = [f"{song.title} — {song.artist}" for song in songs]
+    if short_code is None:
+        columns = (tc.SONG, tc.DIFFICULTY, tc.ARTIST, tc.VERSION)
+        if not songs:
+            return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS, omittable=True))
+        builder = TableBuilder(unit="곡")
+        tc.add_columns(builder, *columns).step(condition)
+        for song in songs:
+            builder.row(tc.song_ref(song.title), tc.song_cells(song, columns))
+        return ToolResult(data={"count": len(songs)}, table=builder.build())
 
-    return ToolResult(
-        data={"count": len(songs), "titles": [song.title for song in songs]},
-        display=Display(content="\n".join(lines) if lines else "해당 작곡가의 곡이 없다.", omittable=True),
-    )
+    columns = (tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.ARTIST, tc.VERSION)
+    charts = [
+        (song, song.charts[short_code])
+        for song in songs
+        if short_code in song.charts and song.charts[short_code].is_available
+    ]
+    if not charts:
+        return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS, omittable=True))
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, *columns).step(f"{condition} {short_code}")
+    for song, chart_record in charts:
+        builder.row(tc.chart_ref(song.title, short_code), tc.chart_cells(song, chart_record, columns))
+    return ToolResult(data={"count": len(charts)}, table=builder.build())
 
 
 @tool()

@@ -341,30 +341,14 @@ async def test_find_songs_without_any_filter_returns_more_than_a_narrowed_query(
     assert len(everything) > len(narrowed)
 
 
-async def test_find_songs_sort_by_note_count_descending(songdb: SongDbService) -> None:
-    hits = songdb.find_songs(min_const=12.0, max_const=13.0, sort_by="note_count", descending=True)
-    counts = [hit.chart.note_count for hit in hits if hit.chart.note_count is not None]
-    assert counts == sorted(counts, reverse=True)
-    # 노트 수를 모르는 채보가 있다면(이 범위엔 보통 없다) 방향과 무관하게 맨 뒤여야 한다.
-    none_positions = [i for i, hit in enumerate(hits) if hit.chart.note_count is None]
-    assert all(pos >= len(counts) for pos in none_positions)
-
-
-async def test_find_songs_sort_by_title_ascending(songdb: SongDbService) -> None:
-    hits = songdb.find_songs(min_const=12.0, max_const=13.0, sort_by="title")
-    titles = [hit.song.title for hit in hits]
-    assert titles == sorted(titles)
-
-
-async def test_find_songs_sort_default_matches_const_ascending_behavior(songdb: SongDbService) -> None:
-    default = songdb.find_songs(min_const=12.0, max_const=13.0)
-    explicit = songdb.find_songs(min_const=12.0, max_const=13.0, sort_by="const", descending=False)
-    assert default == explicit
-
-
-async def test_find_songs_unknown_sort_by_raises(songdb: SongDbService) -> None:
-    with pytest.raises(ValueError):
-        songdb.find_songs(min_const=12.0, max_const=13.0, sort_by="이상한기준")
+async def test_find_songs_order_is_const_ascending_unknown_last_then_title(songdb: SongDbService) -> None:
+    hits = songdb.find_songs(min_const=12.0, max_const=13.0)
+    keys = [(hit.chart.const, hit.song.title) for hit in hits]
+    assert keys == sorted(keys)
+    everything = songdb.find_songs()
+    consts = [hit.chart.const for hit in everything]
+    known = [c for c in consts if c is not None]
+    assert consts[: len(known)] == known and all(c is None for c in consts[len(known) :])
 
 
 async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService) -> None:

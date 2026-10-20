@@ -7,7 +7,9 @@ from types import ModuleType
 from typing import Any
 
 from core.events import EventBus, Section
+from core.tables import WorkTable
 from core.tool_types import Display, ToolContext
+from services.chunithm import table_columns as tc
 from services.chunithm.songdb import SongDbService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -20,6 +22,11 @@ def _load_skill() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _titles(table: WorkTable | None) -> list[str]:
+    assert table is not None
+    return [str(row.cell(tc.SONG).raw) for row in table.rows]
 
 
 def _ctx_with_songdb(songdb: SongDbService, *, guild_id: str | None = None) -> ToolContext:
@@ -119,6 +126,17 @@ async def test_find_by_const_returns_sorted_results() -> None:
 
     assert result.error is None
     assert result.data["count"] >= 1
+    table = result.table
+    assert table is not None and result.display is None
+    assert [c.name for c in table.columns] == [
+        tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION,
+    ]
+    assert table.unit == "채보"
+    assert table.steps[0] == "12.0~13.0 상수 MAS"
+    assert all(row.ref.kind == tc.CHART for row in table.rows)
+    consts = [row.cell(tc.CONST).raw for row in table.rows]
+    assert consts == sorted(consts)
+    assert table.row_count == result.data["count"]
 
 
 async def test_find_by_const_without_max_and_new_only_filters() -> None:
@@ -133,7 +151,13 @@ async def test_find_by_const_without_max_and_new_only_filters() -> None:
 
     assert open_ended.data["count"] > bounded.data["count"]
     assert new_only.data["count"] <= open_ended.data["count"]
-    assert set(new_only.data["titles"]) <= set(open_ended.data["titles"])
+    assert open_ended.table is not None and open_ended.table.steps[0] == "12.0 이상 상수 MAS"
+    # 신곡 표시는 Chunimaru 덧씌우기가 있어야 켜지므로 시드만으론 결과가 없을 수 있다 — 없으면 표 없이 안내만 온다.
+    if new_only.table is not None:
+        assert new_only.table.steps[0] == "12.0 이상 상수 MAS 신곡만"
+        assert set(_titles(new_only.table)) <= set(_titles(open_ended.table))
+    else:
+        assert new_only.data["count"] == 0
 
 
 async def test_find_by_version_without_difficulty_returns_all_available_charts() -> None:
@@ -144,7 +168,8 @@ async def test_find_by_version_without_difficulty_returns_all_available_charts()
 
     assert result.error is None
     assert result.data["count"] > 0
-    assert "可愛くてごめん" in result.data["titles"]
+    assert "可愛くてごめん" in _titles(result.table)
+    assert result.table is not None and result.table.steps[0] == "LUMINOUS 버전"
 
 
 async def test_find_by_version_with_difficulty_filters_to_one_chart() -> None:
@@ -157,17 +182,43 @@ async def test_find_by_version_with_difficulty_filters_to_one_chart() -> None:
 
     assert result.error is None
     assert result.data["count"] > 0
+    assert result.table is not None
+    assert {row.cell(tc.DIFFICULTY).text for row in result.table.rows} == {"MAS"}
 
 
-async def test_find_by_artist_returns_matching_songs() -> None:
+async def test_find_by_artist_without_difficulty_returns_song_rows() -> None:
     skill = _load_skill()
     songdb = SongDbService()
 
     result = await skill.find_by_artist(_ctx_with_songdb(songdb), artist="nora2r")
 
     assert result.error is None
-    assert result.data["count"] > 0
-    assert "B.B.K.K.B.K.K." in result.data["titles"]
+    table = result.table
+    assert table is not None
+    assert "B.B.K.K.B.K.K." in _titles(table)
+    assert table.unit == "곡"
+    assert table.steps == ("nora2r 작곡",)
+    assert [c.name for c in table.columns] == [tc.SONG, tc.DIFFICULTY, tc.ARTIST, tc.VERSION]
+    assert all(row.ref.kind == tc.SONG_KIND for row in table.rows)
+    assert all(not row.cell(tc.DIFFICULTY).filled for row in table.rows)
+
+
+async def test_find_by_artist_with_difficulty_returns_chart_rows() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    result = await skill.find_by_artist(
+        _ctx_with_songdb(songdb), artist="nora2r", difficulty=_resolved_difficulty("MASTER")
+    )
+
+    table = result.table
+    assert table is not None
+    assert table.unit == "채보"
+    assert table.steps == ("nora2r 작곡 MAS",)
+    assert "B.B.K.K.B.K.K." in _titles(table)
+    assert all(row.ref.kind == tc.CHART for row in table.rows)
+    assert all(row.cell(tc.DIFFICULTY).text == "MAS" for row in table.rows)
+    assert table.column_by_name(tc.CONST) is not None
 
 
 async def test_find_by_artist_no_match_shows_empty_message() -> None:
@@ -192,7 +243,9 @@ async def test_find_songs_combines_const_and_note_count() -> None:
     )
 
     assert result.error is None
-    assert "B.B.K.K.B.K.K." in result.data["titles"]
+    assert "B.B.K.K.B.K.K." in _titles(result.table)
+    assert result.table is not None
+    assert result.table.steps[0] == f"12.5 상수 노트 {notes}개 이상" or "12.5~12.5 상수" in result.table.steps[0]
 
 
 async def test_find_songs_without_any_filter_is_rejected() -> None:
@@ -215,28 +268,24 @@ async def test_find_songs_no_match_shows_empty_message() -> None:
     assert result.display is not None and "없다" in (result.display.content or "")
 
 
-async def test_find_songs_sort_by_note_count_descending() -> None:
+async def test_find_songs_orders_by_const_then_title_with_unknown_last() -> None:
     skill = _load_skill()
     songdb = SongDbService()
 
-    result = await skill.find_songs(
-        _ctx_with_songdb(songdb), min_const=12.0, max_const=13.0,
-        sort_by="note_count", descending=True,
-    )
+    result = await skill.find_songs(_ctx_with_songdb(songdb), min_const=12.0, max_const=13.0)
 
-    assert result.error is None
-    assert result.data["count"] > 0
+    table = result.table
+    assert table is not None
+    keys = [(row.cell(tc.CONST).raw, row.cell(tc.SONG).raw) for row in table.rows]
+    assert keys == sorted(keys)
 
 
-async def test_find_songs_unknown_sort_by_is_rejected() -> None:
+def test_find_songs_has_no_sort_arguments() -> None:
+    import inspect
+
     skill = _load_skill()
-    songdb = SongDbService()
-
-    result = await skill.find_songs(
-        _ctx_with_songdb(songdb), min_const=12.0, max_const=13.0, sort_by="이상한기준",
-    )
-
-    assert result.error is not None
+    params = inspect.signature(skill.find_songs).parameters
+    assert "sort_by" not in params and "descending" not in params
 
 
 async def test_chart_link_prefers_sdvxin_mapping() -> None:
