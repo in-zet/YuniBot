@@ -14,15 +14,15 @@ from services.common.yuni import YuniService
 from tests.support.fake_llm import FakeLlmAdapter
 
 
-async def test_line_picks_highest_stage_regardless_of_order() -> None:
+async def test_line_without_llm_has_no_stage_specific_fixed_text() -> None:
+    """단계별 고정 문구는 없다(2026-10-20) — LLM이 없으면 단계와 상관없이 중립 문구 하나다."""
     service = YuniService()
-    sections = [Section(stage="good"), Section(stage="great"), Section(stage="rest")]
-    assert await service.line(sections) == await service.line([Section(stage="great")])
+    lines = {await service.line([Section(stage=stage)]) for stage in ("great", "good", "close", "rest")}
+    assert lines == {await service.line([])}
 
 
-async def test_line_close_and_rest_differ() -> None:
-    service = YuniService()
-    assert await service.line([Section(stage="close")]) != await service.line([Section(stage="rest")])
+async def test_line_without_llm_uses_given_fallback() -> None:
+    assert await YuniService().line([Section(stage="great")], fallback="물어볼게!") == "물어볼게!"
 
 
 async def test_line_default_when_no_section_has_a_stage() -> None:
@@ -84,6 +84,16 @@ async def test_line_uses_llm_text_and_sends_persona_and_section_json() -> None:
     assert tools == []
     sent = json.loads(contents[0].parts[0].text or "")
     assert sent == {"stage": "great", "sections": [{"data": {"rating": 17.25}, "hint": "신기록"}]}
+
+
+async def test_line_sends_highest_stage_regardless_of_order() -> None:
+    llm = FakeLlmAdapter([_turn("대단해!")])
+    service = _service(llm)
+
+    _ = await service.line([Section(stage="good"), Section(stage="great", hint="신기록"), Section(stage="rest")])
+
+    sent = json.loads(llm.calls[0][2][0].parts[0].text or "")
+    assert sent["stage"] == "great"
 
 
 async def test_line_without_content_does_not_call_llm() -> None:
