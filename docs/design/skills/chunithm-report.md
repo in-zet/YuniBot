@@ -96,7 +96,8 @@ listens: [chunithm.sync.completed]
 | `best` | 베스트 30, 신곡 20 (표 반환) | `player: PlayerRef`, `kind`(best/new/둘 다) | `/베스트` | 표 |
 | `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만. 표 반환) | `player: PlayerRef`, `count` | `/최근` | 표 |
 | `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | `/기록` | optional |
-| `analyze` | 상수대별 평균, 랭크 분포 (표 반환) | `player: PlayerRef`, 상수 범위(선택) | `/분석` | 표 |
+| `analyze` | 상수대별 평균, 랭크 분포 (표 반환). 표를 주면 그 표의 채보만으로 통계 | `player: PlayerRef`, 상수 범위(선택), `table: TableRef \| None`(선택, 곡·난이도 필요) | 없음 | 표 |
+| `analyze_slash` | `analyze`의 슬래시 입구(표 없음) | `player: PlayerRef`, 상수 범위(선택) | `/분석`(`@slash_only`) | 표 |
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count` | `/후보곡` | 표 |
 
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
@@ -153,3 +154,13 @@ listens: [chunithm.sync.completed]
 
 - `best`는 `ToolResult.table`을 돌려준다(`display` 없음). 가리키는 것 `chunithm.chart`, 칸: 곡·난이도·상수·점수·랭크·램프·곡 레이팅·기여(기여는 이 스킬만 아는 칸). 묶음은 "베스트 30"·"신곡 20"(묶음 요약: 평균), 순서는 프레임 순위 그대로. 표 요약: 닉네임·레벨(`records.player_profile`에 저장된 값이 있을 때만)·레이팅. `subject`는 대상 플레이어. 글자 한 줄 서식은 예전 줄 그대로(`{곡} {난이도} {상수}  {점수} {랭크}  곡 레이팅 {곡 레이팅}  기여 {기여}`)이고 램프는 글자 출력에서 숨긴다.
 - `add_scores`는 `core.tables.extend_table`(칸 더하기 공통 함수, 이미 있는 칸이면 셀을 덮어씀)로 새 표를 만든다. 원래 행의 가리키는 것은 그대로 두고 `subject`만 대상 플레이어로 바꾼다. `steps`에 "내 점수"(남이면 "{닉네임} 점수"). PB는 `records.pb_rows_for(player_id, keys)`로 가져온다(키 400개씩 나눠 묻는다). 이 두 도구가 랭크 기준 점수를 알려고 `terms` 서비스(`rank_scores()`)를 쓰므로 manifest `services`에 `terms`를 더했다.
+
+## 표를 받는 상수대 통계 (16단계 Part 5-4, 2026-10-20)
+
+`analyze`에 선택 인자 `table`을 더했다. 표를 주면 그 표의 채보(곡·난이도가 찬 행만)로 `records.pb_rows_for(player)`를 읽어 같은
+`const_band_stats`로 상수대 통계를 낸다("이 폴더 랭크 분포"). 기록이 없는 채보는 세지 않고, `steps`에 "표의 N채보 중 기록 있는
+M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 단위 행이 있으면 실행기가 빼고 `charts_of`를 안내한다. 대상 플레이어는
+`player` 인자(기본 나)이고 공개 여부 검사는 지금과 같다.
+
+표를 받는 도구는 슬래시를 가질 수 없는 계약(`check_table_args_have_no_slash`) 때문에 `/분석`은 같은 일을 하는 `analyze_slash`
+(`@slash_only`, 표 인자 없음)로 나눴다. 둘이 같은 내부 함수 `_analyze`를 부른다(Part 6-1과 같은 입구 나누기). 표 없이 부르면 둘의 결과가 같다.

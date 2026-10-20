@@ -3,14 +3,32 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
 import aiosqlite
 
 from core.decorators import on, tool
 from core.events import Section
-from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
-from core.tool_types import DifficultyRef, Display, SongQuery, ToolContext, ToolResult
+from core.tables import (
+    EMPTY_CELL,
+    Cell,
+    Column,
+    Row,
+    RowRef,
+    TableBuilder,
+    TableNeeds,
+    WorkTable,
+    cell,
+    extend_table,
+)
+from core.tool_types import (
+    DifficultyRef,
+    Display,
+    SongQuery,
+    TableRef,
+    ToolContext,
+    ToolResult,
+)
 from services.chunithm import table_columns as tc
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, SongRecord
 from services.chunithm.terms import ResolvedDifficulty
@@ -195,6 +213,38 @@ async def list_notes(ctx: ToolContext) -> ToolResult:
             },
         )
     return ToolResult(data={"notes": items}, table=builder.build())
+
+
+_MY_NOTE = "내 메모"
+_NO_NOTE = "메모 없음"
+
+
+@tool()
+async def add_notes(ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG])]) -> ToolResult:
+    """곡·채보 표에 "내 메모" 칸을 더한 새 표를 돌려준다. 채보 행은 그 채보의 메모, 없으면 그 곡 전체 메모를
+    쓰고, 곡 단위 행은 곡 전체 메모를 쓴다. 메모가 없으면 "메모 없음"이다."""
+    assert isinstance(table, WorkTable)
+    assert ctx.db is not None
+    cursor = await ctx.db.execute(
+        "SELECT song_title, difficulty, body FROM notes_notes WHERE player_id = ? AND game = ?",
+        (ctx.player_id, _GAME),
+    )
+    bodies: dict[tuple[str, str], str] = {
+        (r["song_title"], r["difficulty"] or ""): r["body"] for r in await cursor.fetchall()
+    }
+
+    def cells_for(row: Row) -> dict[str, Cell]:
+        title = str(row.cell(tc.SONG).raw)
+        difficulty = row.cell(tc.DIFFICULTY).raw
+        code = LONG_TO_SHORT_DIFFICULTY.get(str(difficulty), str(difficulty)) if difficulty else ""
+        body = bodies.get((title, code)) if code else None
+        if body is None:
+            body = bodies.get((title, ""))
+        return {_MY_NOTE: cell(None, _NO_NOTE) if body is None else cell(body)}
+
+    extended = extend_table(table, [Column(name=_MY_NOTE, label=_MY_NOTE)], cells_for, steps=["내 메모"])
+    with_note = sum(1 for row in extended.rows if row.cell(_MY_NOTE).filled)
+    return ToolResult(data={"count": extended.row_count, "with_note": with_note}, table=extended)
 
 
 @tool(slash="메모 삭제", mutates=True, confirm="always")

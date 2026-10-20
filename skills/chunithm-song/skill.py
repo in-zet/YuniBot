@@ -8,7 +8,17 @@ from typing import Annotated
 
 from core.decorators import tool
 from core.events import Section
-from core.tables import Row, TableBuilder, TableNeeds, WorkTable, expand_rows
+from core.tables import (
+    Cell,
+    Column,
+    Row,
+    TableBuilder,
+    TableNeeds,
+    WorkTable,
+    cell,
+    expand_rows,
+    extend_table,
+)
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -290,6 +300,37 @@ async def chart_link(ctx: ToolContext, chart: ChartRef) -> ToolResult:
         display=Display(content=link.url),
         display_mode="optional",
     )
+
+
+_LINK = "채보 링크"
+
+
+@tool()
+async def add_links(
+    ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])]
+) -> ToolResult:
+    """채보 표에 "채보 링크" 칸을 더한 새 표를 돌려준다. 규칙은 chart_link와 같다(sdvx.in, 없으면 유튜브 검색)."""
+    assert isinstance(table, WorkTable)
+    mapped = 0
+
+    def cells_for(row: Row) -> dict[str, Cell]:
+        nonlocal mapped
+        title, code = _row_key(row)
+        song = ctx.songdb.song_by_title(title)
+        chart_record = None if song is None else song.charts.get(code)
+        if song is None or chart_record is None:
+            return {_LINK: cell(None, "링크 없음")}
+        link = ctx.songdb.chart_link(song, chart_record)
+        mapped += int(link.has_mapping)
+        return {_LINK: cell(link.url)}
+
+    extended = extend_table(table, [Column(name=_LINK, label=_LINK)], cells_for, steps=["채보 링크"])
+    return ToolResult(data={"count": extended.row_count, "with_mapping": mapped}, table=extended)
+
+
+def _row_key(row: Row) -> tuple[str, str]:
+    difficulty = str(row.cell(tc.DIFFICULTY).raw)
+    return str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)
 
 
 @tool(slash="별칭 추가", mutates=True)

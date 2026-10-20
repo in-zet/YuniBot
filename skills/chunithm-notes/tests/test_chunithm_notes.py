@@ -430,3 +430,46 @@ async def test_on_plan_requested_returns_my_notes_via_event_bus(skill: ModuleTyp
 class _NoTags:
     async def tags_for(self, player_id: str) -> set[str]:
         return set()
+
+
+# ---------------------------------------------------------------- add_notes
+
+
+def _title_table(*rows: tuple[str, str | None]):
+    from core.tables import TableBuilder
+    from services.chunithm import table_columns as tc
+
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.step("테스트 표")
+    for title, difficulty in rows:
+        ref = tc.chart_ref(title, difficulty) if difficulty else tc.song_ref(title)
+        builder.row(ref, {tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell(difficulty)})
+    return builder.build()
+
+
+async def test_add_notes_prefers_chart_note_then_whole_song_note_and_marks_missing(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    songdb = SongDbService()
+    ctx = _ctx(db=db, player_id="p1", songdb=songdb)
+    both = await _song(songdb, "B.B.K.K.B.K.K.", ctx)
+    whole_only = await _song(songdb, "Cthugha", ctx)
+    await skill.set_note(ctx, both, "곡 전체")
+    await skill.set_note(ctx, both, "마스 전용", difficulty=_mas())
+    await skill.set_note(ctx, whole_only, "이 곡 전체")
+    await skill.set_note(_ctx(db=db, player_id="p2", songdb=songdb), both, "남의 메모")
+    table = _title_table(
+        (both.title, "MAS"), (both.title, "EXP"), (both.title, None), (whole_only.title, "MAS"), ("메모 없는 곡", "MAS")
+    )
+
+    result = await skill.add_notes(ctx, table=table)
+
+    assert result.error is None and result.table is not None
+    assert result.table.steps == ("테스트 표", "내 메모")
+    bodies = [(r.cell("내 메모").raw, r.cell("내 메모").text) for r in result.table.rows]
+    assert bodies == [
+        ("마스 전용", "마스 전용"), ("곡 전체", "곡 전체"), ("곡 전체", "곡 전체"),
+        ("이 곡 전체", "이 곡 전체"), (None, "메모 없음"),
+    ]
+    assert result.data == {"count": 5, "with_note": 4}

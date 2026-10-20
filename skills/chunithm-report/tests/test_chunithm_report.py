@@ -692,6 +692,38 @@ async def test_analyze_const_range_filter(skill: ModuleType) -> None:
     assert "상수를 몰라 묶지 못한 채보" not in table.summary  # 범위를 주면 모르는 상수는 세지 않는다
 
 
+async def test_analyze_with_table_uses_only_that_tables_charts(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(pbs={"me": _analyze_rows()}))
+    source = _chart_table(("a", "MAS"), ("c", "MAS"), ("d", "EXP"), ("기록 없는 곡", "MAS"))
+
+    result = await skill.analyze(f.ctx, table=source)
+
+    assert result.error is None and result.table is not None
+    bands = {int(r.cell("상수대").raw): r for r in result.table.rows}
+    assert list(bands) == [15, 14]
+    assert bands[15].cell("채보 수").raw == 1 and bands[15].cell("평균 점수").raw == 1_007_000
+    assert bands[14].cell("채보 수").raw == 2
+    assert result.table.steps[-1] == "표의 4채보 중 기록 있는 3채보만"
+    assert "상수를 몰라 묶지 못한 채보" not in result.table.summary
+
+
+async def test_analyze_with_table_errors_when_no_chart_has_a_record(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(pbs={"me": _analyze_rows()}))
+
+    result = await skill.analyze(f.ctx, table=_chart_table(("기록 없는 곡", "MAS")))
+
+    assert result.table is None and result.error is not None and "기록" in result.error
+
+
+async def test_analyze_slash_entry_has_no_table_argument(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(pbs={"me": _analyze_rows()}))
+
+    result = await skill.analyze_slash(f.ctx)
+
+    assert result.table is not None and result.table.unit == "상수대"
+    assert skill.analyze_slash.__yuni_slash_only__.slash == "분석"
+
+
 async def test_analyze_empty_range_is_a_message(skill: ModuleType) -> None:
     f = _ctx(records=_FakeRecords(pbs={"me": _analyze_rows()}))
 

@@ -55,6 +55,10 @@ emits: [chunithm.song.viewed]
 (steps에 "펼칠 곡 단위 행 없음") 돌려준다. 칸·행을 바꾸는 로직은 코어의 `expand_rows`가 하고, 곡 데이터는
 `songdb`로만 읽는다.
 
+**표에 링크 더하기** (작업 표 Part 5-3, 2026-10-20): `add_links`는 "채보 링크" 칸을 더한 새 표를 돌려준다. 링크는
+`chart_link`와 같은 `songdb.chart_link`(sdvx.in, 없으면 유튜브 검색)이고, 곡 단위 행은 빠지며(`charts_of`로 먼저 펼친다),
+`songdb`에서 못 찾은 채보는 원래 값 None·"링크 없음"이다.
+
 **조합 검색**: 상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부 중 둘 이상을 AND로 동시에
 거는 질문을 위한 것이다(`find_by_const`/`find_by_version`은 조건 하나+난이도만 받는다). 조건을
 하나도 안 주면(`new_only`도 꺼진 채) 범위가 너무 넓어 바로 에러를 돌려준다. 준 조건만 보고 안 준
@@ -90,6 +94,7 @@ emits: [chunithm.song.viewed]
 | `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only` | `/검색` | 없음 | required | never |
 | `charts_of` | 표의 곡 단위 행을 채보 행으로 펼친 새 표 | `table: TableRef`(곡 칸 필요), `difficulty: DifficultyRef \| None`(선택, 없으면 MAS) | 없음 | 없음 | 표 | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | 없음 | optional | never |
+| `add_links` | 채보 표에 "채보 링크" 칸 더하기 | `table: TableRef`(곡·난이도 필요) | 없음 | 없음 | 표 | never |
 | `alias_add` | 별칭 추가 | `song: SongQuery`, `alias` | `/별칭 추가` | 없음 | optional | never |
 | `alias_remove` | 별칭 삭제 | `alias` | `/별칭 삭제` | 없음(함수 안에서 추가한 사람 또는 `admin` 확인) | optional | never |
 

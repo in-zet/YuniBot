@@ -36,6 +36,7 @@ listens: [chunithm.song.viewed, chunithm.plan.requested]
 | `set` | 메모 작성·수정·덧붙이기 | `song: SongQuery`, `difficulty`: DifficultyRef(선택), `text`, `append: bool`, `public: bool` | `/메모 쓰기` | optional | never |
 | `get` | 내 메모와 공개된 남의 메모 | `song: SongQuery`, `difficulty`: DifficultyRef(선택) | `/메모 보기` | optional | never |
 | `list` | 내 메모 목록 (표 반환) | 없음 | `/메모 목록` | 표 | never |
+| `add_notes` | 곡·채보 표에 "내 메모" 칸 더하기 (새 표 반환) | `table: TableRef`(곡 칸 필요) | 없음 | 표 | never |
 | `delete` | 메모 삭제 | `song: SongQuery`, `difficulty`: DifficultyRef(선택) | `/메모 삭제` | optional | always |
 
 ## 이벤트
@@ -71,3 +72,11 @@ listens: [chunithm.song.viewed, chunithm.plan.requested]
 ## 표로 바꾼 읽기 도구 (16단계 Part 4-3, 2026-10-20)
 
 `list`(코드 이름 `list_notes`)는 표를 돌려준다(표 모양·서식은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2). 가리키는 것 `chunithm-notes.note` = JSON(곡, 난이도 또는 빈 값). 칸 곡·난이도·메모·공개·수정 시각(글자 출력에서 숨김). 곡 전체 메모는 난이도 칸이 빈 곡 단위 행이고 두 번째 서식(`{곡}  ({공개})  {메모}`)으로 그려진다. 순서는 최근 수정순. 메모가 없으면 표 없이 "메모가 없어."만 낸다. `data`의 `notes`는 그대로 둔다.
+
+## 표에 칸 더하기 (16단계 Part 5-3, 2026-10-20)
+
+`add_notes(table)`는 DB를 바꾸지 않고 "내 메모" 칸을 더한 새 표를 돌려준다. 곡 칸이 빈 행은 빠진다.
+- 채보 행: 그 채보의 메모를 쓰고, 없으면 그 곡의 곡 전체 메모(난이도 빈 값)를 쓴다.
+- 곡 단위 행: 곡 전체 메모를 쓴다(채보 메모는 보지 않는다).
+- 메모가 없으면 원래 값 None·보일 글자 "메모 없음"이다. 본인 메모만 읽고 남의 공개 메모는 더하지 않는다.
+- 서식은 만들지 않아 더한 칸은 줄 끝에 붙는다. 메모 표(`list_notes`)에 쓰면 "메모" 칸과 "내 메모" 칸이 따로 있다.

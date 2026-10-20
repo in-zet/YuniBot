@@ -477,3 +477,46 @@ async def _resolve_difficulty(name: str) -> object:
     from services.chunithm.terms import TermsService
 
     return await TermsService().resolve_difficulty(name, _CTX_NO_GUILD)
+
+
+# ---------------------------------------------------------------- add_links
+
+
+def _chart_table(*charts: tuple[str, str | None]) -> WorkTable:
+    from core.tables import TableBuilder
+
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.step("테스트 표")
+    for title, difficulty in charts:
+        ref = tc.chart_ref(title, difficulty) if difficulty else tc.song_ref(title)
+        builder.row(ref, {tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell(difficulty)})
+    return builder.build()
+
+
+async def test_add_links_adds_the_same_link_chart_link_gives() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    title = _titles_with(songdb, "MAS", want=True, count=1)[0]
+    song = songdb.song_by_title(title)
+    assert song is not None
+    expected = songdb.chart_link(song, song.charts["MAS"])
+
+    result = await skill.add_links(_ctx_with_songdb(songdb), table=_chart_table((title, "MAS")))
+
+    assert result.error is None and result.table is not None
+    row = result.table.rows[0]
+    assert row.cell("채보 링크").raw == expected.url
+    assert result.table.steps == ("테스트 표", "채보 링크")
+    assert result.data["with_mapping"] == int(expected.has_mapping)
+    assert row.ref == tc.chart_ref(title, "MAS")
+
+
+async def test_add_links_marks_charts_the_songdb_does_not_know() -> None:
+    skill = _load_skill()
+
+    result = await skill.add_links(_ctx_with_songdb(SongDbService()), table=_chart_table(("없는 곡 xyz", "MAS")))
+
+    assert result.table is not None
+    assert result.table.rows[0].cell("채보 링크").raw is None
+    assert result.table.rows[0].cell("채보 링크").text == "링크 없음"

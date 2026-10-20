@@ -11,7 +11,7 @@ from typing import Annotated, Any, NamedTuple
 from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 from chuni_penguin.types.score import RecentScore
 
-from core.decorators import on, tool
+from core.decorators import on, slash_only, tool
 from core.events import Section, Stage
 from core.tables import (
     EMPTY_CELL,
@@ -244,10 +244,7 @@ async def add_scores(
     if isinstance(target, ToolResult):
         return target
 
-    def key_of(row: Row) -> tuple[str, str]:
-        difficulty = str(row.cell(tc.DIFFICULTY).raw)
-        return str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)
-
+    key_of = _table_chart_key
     pbs = await ctx.records.pb_rows_for(target.id, [key_of(row) for row in table.rows])
     rank_scores = ctx.terms.rank_scores()
 
@@ -413,20 +410,47 @@ def const_band_stats(
     return bands, unknown
 
 
-@tool(slash="분석")
+@tool()
 async def analyze(
+    ctx: ToolContext,
+    player: PlayerRef | None = None,
+    min_const: float | None = None,
+    max_const: float | None = None,
+    table: Annotated[TableRef | None, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])] = None,
+) -> ToolResult:
+    """플레이한 채보를 상수대(정수 단위)로 묶어 평균 점수와 랭크 분포를 보여준다. 상수 범위로 거를 수 있다.
+    표를 주면 그 표의 채보만으로 통계를 낸다("이 폴더 랭크 분포"). 기록이 없는 채보는 세지 않는다."""
+    assert table is None or isinstance(table, WorkTable)
+    return await _analyze(ctx, player, min_const, max_const, table)
+
+
+@slash_only(slash="분석")
+async def analyze_slash(
     ctx: ToolContext,
     player: PlayerRef | None = None,
     min_const: float | None = None,
     max_const: float | None = None,
 ) -> ToolResult:
     """플레이한 채보를 상수대(정수 단위)로 묶어 평균 점수와 랭크 분포를 보여준다. 상수 범위로 거를 수 있다."""
+    return await _analyze(ctx, player, min_const, max_const, None)
+
+
+async def _analyze(
+    ctx: ToolContext, player: PlayerRef | None, min_const: float | None, max_const: float | None,
+    table: WorkTable | None,
+) -> ToolResult:
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
-    rows = await ctx.records.all_pb_rows(target.id)
-    if not rows:
-        return ToolResult(error=_NOT_SYNCED_ERROR)
+    if table is None:
+        rows = await ctx.records.all_pb_rows(target.id)
+        if not rows:
+            return ToolResult(error=_NOT_SYNCED_ERROR)
+    else:
+        found = await ctx.records.pb_rows_for(target.id, [_table_chart_key(row) for row in table.rows])
+        rows = list(found.values())
+        if not rows:
+            return ToolResult(error="그 표의 채보에 플레이 기록이 없어.")
     bands, unknown = const_band_stats(rows, min_const=min_const, max_const=max_const)
 
     unknown_text = f"상수를 몰라 묶지 못한 채보 {unknown}개"
@@ -445,6 +469,8 @@ async def analyze(
     builder.column(_BAND_RANKS)
     builder.row_formats([_ANALYZE_FORMAT])
     builder.step(" ".join(["상수대 분석", *_const_range_texts(min_const, max_const)]))
+    if table is not None:
+        builder.step(f"표의 {table.row_count}채보 중 기록 있는 {len(rows)}채보만")
     if unknown:
         builder.summary({"상수를 몰라 묶지 못한 채보": f"{unknown}개"})
     for b in bands:
@@ -461,6 +487,11 @@ async def analyze(
         data={"player_id": target.id, "min_const": min_const, "max_const": max_const, "unknown_const_count": unknown},
         table=builder.build(),
     )
+
+
+def _table_chart_key(row: Row) -> tuple[str, str]:
+    difficulty = str(row.cell(tc.DIFFICULTY).raw)
+    return str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)
 
 
 @tool(slash="후보곡")
