@@ -49,8 +49,18 @@ services: [songdb, records]
 | --- | --- | --- | --- | --- | --- | --- |
 | `lookup` | 랭크별 허용 어택 개수 | `chart: ChartRef`, `rank`: RankRef(선택) | `/보더` | 없음 | optional | never |
 | `remaining` | 내 최고 점수에서 목표 랭크까지 남은 점수(질문에 어택을 명시했을 때만 어택도) | `chart: ChartRef`, `rank`: RankRef, `include_attacks: bool = False` | `/남은어택` | `chunithm-synced` | optional | never |
+| `add_borders` | 채보 표에 "<랭크> 허용 어택" 칸 더하기 | `table: TableRef`(곡·난이도 필요), `rank`: RankRef | 없음 | 없음 | 표 | never |
+| `add_remaining` | 채보 표에 "<랭크>까지 남은 점수" 칸 더하기 | `table: TableRef`(곡·난이도 필요), `rank`: RankRef | 없음 | `chunithm-synced` | 표 | never |
 
 `data`에는 랭크별 허용 어택, 남은 점수를 계산한 값으로 넣는다(남은 어택은 `include_attacks`일 때만). 유니가 직접 빼거나 나누지 않는다.
+
+**표에 칸 더하기** (작업 표 Part 5-2, 2026-10-20): 두 도구 모두 DB를 바꾸지 않고 새 표를 돌려준다. 곡 단위 행(난이도 없음)은
+빠지고, 모델은 `charts_of`로 먼저 펼친다. 노트 수는 표의 칸이 아니라 `songdb`에서 다시 읽는다(`lookup`·`remaining`과 같은 출처).
+- `add_borders`: 칸 이름 "<랭크> 허용 어택"(값 종류 숫자). 계산은 `lookup`과 같은 `allowed_attacks`다. 노트 수가 없으면 보일 글자
+  "계산 불가", 원래 값 None.
+- `add_remaining`: 칸 이름 "<랭크>까지 남은 점수"(숫자). 계산은 `remaining`과 같은 `remaining_to_target`이고 내 최고 점수 기준이다.
+  이미 넘었으면 원래 값 0·보일 글자 "달성", 기록이 없으면 None·"기록 없음", 노트 수가 없으면 None·"계산 불가". 어택은 더하지 않는다.
+- 표의 `subject`는 바꾸지 않는다(남의 기록 표에 내 남은 점수를 더해도 표 주인은 그대로). 서식은 만들지 않아 더한 칸은 줄 끝에 붙는다.
 
 ## 이벤트
 

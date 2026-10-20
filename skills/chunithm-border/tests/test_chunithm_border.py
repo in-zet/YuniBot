@@ -6,7 +6,9 @@ from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
 
+from core.tables import TableBuilder, WorkTable
 from core.tool_types import ToolContext
+from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.songdb import ChartRecord, SongRecord
 from services.chunithm.terms import ResolvedRank
@@ -183,3 +185,104 @@ async def test_remaining_locked_without_chunithm_synced_shows_how_to_get_it() ->
     assert outcome.result.error is not None
     assert outcome.result.error != "모르는 명령이에요"
     assert "동기화" in outcome.result.error
+
+
+# ---------------------------------------------------------------- add_borders / add_remaining
+
+
+class _FakeSongDb:
+    def __init__(self, note_counts: dict[str, int | None]) -> None:
+        self._songs = {
+            title: SongRecord(
+                title=title, aliases=(), artist="", id=i,
+                charts={"MAS": ChartRecord(difficulty="MAS", const=13.0, note_count=count)},
+            )
+            for i, (title, count) in enumerate(note_counts.items())
+        }
+
+    def song_by_title(self, title: str) -> SongRecord | None:
+        return self._songs.get(title)
+
+
+class _TableRecords(_FakeRecords):
+    def __init__(self, scores: dict[str, int]) -> None:
+        super().__init__(best_score=None)
+        self._scores = scores
+
+    async def pb_rows_for(self, player_id: str, keys):
+        from services.chunithm.records import PbRow
+
+        return {
+            key: PbRow(
+                song_title=key[0], difficulty=key[1], score=self._scores[key[0]], rank="S", clear_lamp="CLEAR",
+                combo_lamp="NONE", chain_lamp="NONE", const=13.0, rating=None, session_id=None, updated_at="",
+            )
+            for key in keys if key[0] in self._scores
+        }
+
+
+def _table_ctx(note_counts: dict[str, int | None], scores: dict[str, int] | None = None) -> ToolContext:
+    return ToolContext(
+        player_id="p1", tags=frozenset(),
+        services={"records": _TableRecords(scores or {}), "songdb": _FakeSongDb(note_counts)},
+    )
+
+
+def _chart_table(*titles: str) -> WorkTable:
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.step("테스트 표")
+    for title in titles:
+        builder.row(tc.chart_ref(title, "MAS"), {tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell("MAS")})
+    return builder.build()
+
+
+_SSS = ResolvedRank(canonical="SSS", min_score=1_007_500)
+
+
+async def test_add_borders_adds_allowed_attacks_and_marks_unknown_note_counts() -> None:
+    skill = _load_skill()
+    ctx = _table_ctx({"곡 A": 3000, "곡 B": None})
+
+    result = await skill.add_borders(ctx, table=_chart_table("곡 A", "곡 B"), rank=_SSS)
+
+    assert result.error is None and result.table is not None
+    table = result.table
+    assert table.steps == ("테스트 표", "SSS 보더")
+    known, unknown = table.rows
+    assert known.cell("SSS 허용 어택").raw == 14.7 and known.cell("SSS 허용 어택").text == "14.70"
+    assert unknown.cell("SSS 허용 어택").raw is None and unknown.cell("SSS 허용 어택").text == "계산 불가"
+    assert result.data == {"rank": "SSS", "count": 2, "unknown": 1}
+
+
+async def test_add_remaining_reports_remaining_score_per_chart() -> None:
+    skill = _load_skill()
+    ctx = _table_ctx(
+        {"곡 A": 3000, "곡 B": 3000, "곡 C": 3000, "곡 D": None},
+        {"곡 A": 1_000_000, "곡 C": 1_008_000, "곡 D": 1_000_000},
+    )
+
+    result = await skill.add_remaining(ctx, table=_chart_table("곡 A", "곡 B", "곡 C", "곡 D"), rank=_SSS)
+
+    assert result.error is None and result.table is not None
+    name = "SSS까지 남은 점수"
+    a, b, c, d = result.table.rows
+    assert a.cell(name).raw == 7_500 and a.cell(name).text == "7500점"
+    assert b.cell(name).raw is None and b.cell(name).text == "기록 없음"
+    assert c.cell(name).raw == 0 and c.cell(name).text == "달성"
+    assert d.cell(name).raw is None and d.cell(name).text == "계산 불가"
+    assert result.data["with_record"] == 3
+
+
+async def test_border_tools_keep_rows_and_leave_the_source_table_alone() -> None:
+    skill = _load_skill()
+    ctx = _table_ctx({"곡 A": 3000}, {"곡 A": 1_000_000})
+    source = _chart_table("곡 A")
+
+    borders = await skill.add_borders(ctx, table=source, rank=_SSS)
+    both = await skill.add_remaining(ctx, table=borders.table, rank=_SSS)
+
+    assert both.table is not None
+    assert both.table.rows[0].ref == source.rows[0].ref
+    assert [c.name for c in both.table.columns] == [tc.SONG, tc.DIFFICULTY, "SSS 허용 어택", "SSS까지 남은 점수"]
+    assert source.column_by_name("SSS 허용 어택") is None

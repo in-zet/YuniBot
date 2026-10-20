@@ -1,9 +1,21 @@
 # skills/chunithm-border/skill.py
 from __future__ import annotations
 
+from typing import Annotated
+
 from core.decorators import tool
-from core.tool_types import ChartRef, Display, RankRef, ToolContext, ToolResult
+from core.tables import Cell, Column, Row, TableNeeds, WorkTable, cell, extend_table
+from core.tool_types import (
+    ChartRef,
+    Display,
+    RankRef,
+    TableRef,
+    ToolContext,
+    ToolResult,
+)
+from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
+from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
 from services.chunithm.terms import ResolvedRank
 
 # chunithm-border.md "계산" 표가 명시한 기준 점수 — terms 서비스를 또 부르지 않고
@@ -73,4 +85,72 @@ async def remaining(
 
     return ToolResult(
         data=data, display=Display(content=content, slash_content=slash_content), display_mode="optional"
+    )
+
+
+_CHART_NEEDS = TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])
+
+
+def _chart_key(row: Row) -> tuple[str, str]:
+    difficulty = str(row.cell(tc.DIFFICULTY).raw)
+    return str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)
+
+
+def _note_count(ctx: ToolContext, key: tuple[str, str]) -> int | None:
+    """표 행의 노트 수는 칸을 믿지 않고 곡 데이터에서 다시 읽는다(lookup·remaining과 같은 출처)."""
+    song = ctx.songdb.song_by_title(key[0])
+    chart = None if song is None else song.charts.get(key[1])
+    return None if chart is None else chart.note_count
+
+
+@tool()
+async def add_borders(
+    ctx: ToolContext, table: Annotated[TableRef, _CHART_NEEDS], rank: RankRef
+) -> ToolResult:
+    """채보 표에 "<랭크> 허용 어택" 칸을 더한 새 표를 돌려준다. 저스티스 0·미스 0 기준 허용 어택이고,
+    노트 수를 모르는 채보는 "계산 불가"다."""
+    assert isinstance(table, WorkTable)
+    assert isinstance(rank, ResolvedRank)
+    name = f"{rank.canonical} 허용 어택"
+
+    def cells_for(row: Row) -> dict[str, Cell]:
+        attacks = ctx.records.allowed_attacks(_note_count(ctx, _chart_key(row)), rank.min_score)
+        return {name: cell(None, "계산 불가") if attacks is None else cell(float(attacks), str(attacks))}
+
+    extended = extend_table(
+        table, [Column(name=name, label=name, value_type="number")], cells_for,
+        steps=[f"{rank.canonical} 보더"],
+    )
+    unknown = sum(1 for row in extended.rows if row.cell(name).raw is None)
+    return ToolResult(data={"rank": rank.canonical, "count": extended.row_count, "unknown": unknown}, table=extended)
+
+
+@tool(tags=["chunithm-synced"])
+async def add_remaining(
+    ctx: ToolContext, table: Annotated[TableRef, _CHART_NEEDS], rank: RankRef
+) -> ToolResult:
+    """채보 표에 내 최고 점수에서 "<랭크>까지 남은 점수" 칸을 더한 새 표를 돌려준다. 이미 넘었으면 "달성",
+    기록이 없거나 노트 수를 모르면 값이 없다("기록 없음"·"계산 불가"). 어택은 더하지 않는다."""
+    assert isinstance(table, WorkTable)
+    assert isinstance(rank, ResolvedRank)
+    name = f"{rank.canonical}까지 남은 점수"
+    pbs = await ctx.records.pb_rows_for(ctx.player_id, [_chart_key(row) for row in table.rows])
+
+    def cells_for(row: Row) -> dict[str, Cell]:
+        key = _chart_key(row)
+        pb = pbs.get(key)
+        if pb is None:
+            return {name: cell(None, tc.NO_RECORD)}
+        result = ctx.records.remaining_to_target(_note_count(ctx, key), pb.score, rank.min_score)
+        if result is None:
+            return {name: cell(None, "계산 불가")}
+        remaining_score = max(result[0], 0)
+        return {name: cell(remaining_score, "달성" if remaining_score == 0 else f"{remaining_score}점")}
+
+    extended = extend_table(
+        table, [Column(name=name, label=name, value_type="number")], cells_for,
+        steps=[f"내 점수 기준 {rank.canonical}까지"],
+    )
+    return ToolResult(
+        data={"rank": rank.canonical, "count": extended.row_count, "with_record": len(pbs)}, table=extended
     )
