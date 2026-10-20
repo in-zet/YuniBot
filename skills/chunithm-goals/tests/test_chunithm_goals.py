@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -18,7 +18,15 @@ from core.executor import ToolExecutor
 from core.permissions import InMemoryTagProvider
 from core.resolvers import ResolverRegistry
 from core.scheduler import Scheduler
-from core.tables import RowRef, render_text, summarize_table
+from core.tables import (
+    RowRef,
+    TableBuilder,
+    TableStore,
+    WorkTable,
+    cell,
+    render_text,
+    summarize_table,
+)
 from core.tool_types import DifficultyRef, RankRef, ScoreRef, ToolContext
 from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.records import (
@@ -531,7 +539,7 @@ async def test_update_via_executor_with_raw_string_enum_args(
     ctx = _ctx(db=db, tags=frozenset())
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
     outcome = await _executor().invoke(
-        skill.update.__yuni_tool__, ctx,
+        skill.update.__yuni_slash_only__, ctx,
         {"goal_id": created.data["goal_id"], "status": "stopped", "duration_tag": "short"},
     )
     assert outcome.result is not None and outcome.result.error is None
@@ -808,7 +816,7 @@ async def test_todo_bulk_via_executor_with_many_targets_needs_confirm_before_wri
 async def test_delete_via_executor_single_goal_runs_without_confirm(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
-    outcome = await _executor().invoke(skill.delete.__yuni_tool__, ctx, {"goal_ids": created.data["goal_id"]})
+    outcome = await _executor().invoke(skill.delete.__yuni_slash_only__, ctx, {"goal_ids": created.data["goal_id"]})
     assert outcome.needs_confirm is False
     assert outcome.result is not None and outcome.result.data["deleted_count"] == 1
     assert await skill.models.fetch_goal(db, created.data["goal_id"]) is None
@@ -822,7 +830,7 @@ async def test_delete_via_executor_many_goals_needs_confirm_before_deleting(
     b = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습2")
     executor = _executor()
     outcome = await executor.invoke(
-        skill.delete.__yuni_tool__, ctx, {"goal_ids": f"{a.data['goal_id']},{b.data['goal_id']}"}
+        skill.delete.__yuni_slash_only__, ctx, {"goal_ids": f"{a.data['goal_id']},{b.data['goal_id']}"}
     )
     assert outcome.needs_confirm is True
     assert outcome.confirm_token is not None
@@ -864,6 +872,155 @@ async def test_todo_done_marks_achieved_and_emits_event(skill: ModuleType, db: a
     assert len(received) == 1
     assert received[0]["goal_id"] == goal_id
     assert received[0]["kind"] == "song"
+
+
+# ---------------------------------------------------------------- Part 6-1: 표를 받는 모델용 도구
+
+
+def _table_exec() -> tuple[ToolExecutor, TableStore]:
+    store = TableStore()
+    terms = TermsService()
+    resolvers = ResolverRegistry()
+    resolvers.register(DifficultyRef, _TermsAdapter(terms.resolve_difficulty))
+    resolvers.register(RankRef, _TermsAdapter(terms.resolve_rank))
+    resolvers.register(ScoreRef, _TermsAdapter(terms.resolve_score))
+    executor = ToolExecutor(
+        resolvers=resolvers, tag_provider=InMemoryTagProvider(), tag_definitions={}, tables=store
+    )
+    return executor, store
+
+
+async def _player_ctx(db: aiosqlite.Connection) -> ToolContext:
+    players = PlayersService(db)
+    me = await players.create_player()
+    return _ctx(db=db, player_id=me.id, tags=frozenset(), players=players)
+
+
+async def _goal_table(skill: ModuleType, db: aiosqlite.Connection, store: TableStore, ctx: ToolContext) -> tuple[ToolContext, WorkTable]:
+    ctx = replace(ctx, channel_id="c1")
+    listed = await skill.list_goals(ctx)
+    assert listed.table is not None
+    store.put(ctx.player_id, "c1", listed.table, now=0)
+    return ctx, listed.table
+
+
+async def test_model_tools_have_table_arg_and_no_slash(skill: ModuleType) -> None:
+    for name in ("update_goal", "goal_progress", "delete_goals", "complete_todos"):
+        spec = getattr(skill, name).__yuni_tool__
+        assert spec.slash is None
+    for name, slash in (("update", "목표 수정"), ("progress", "목표 진행"), ("delete", "목표 삭제"), ("todo_done", "투두 완료")):
+        assert getattr(skill, name).__yuni_slash_only__.slash == slash
+
+
+async def test_delete_goals_removes_only_the_numbered_rows(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    executor, store = _table_exec()
+    ctx = await _player_ctx(db)
+    ids = [(await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description=f"연습{i}")).data["goal_id"] for i in range(3)]
+    ctx, table = await _goal_table(skill, db, store, ctx)
+    numbered = {row.ref.key: n for n, row in enumerate(table.rows, start=1)}
+
+    outcome = await executor.invoke(skill.delete_goals.__yuni_tool__, ctx, {"table": f"t1:{numbered[ids[0]]}"})
+    assert outcome.result is not None and outcome.result.error is None
+    assert outcome.result.data["deleted_count"] == 1
+    assert await skill.models.fetch_goal(db, ids[0]) is None
+    assert await skill.models.fetch_goal(db, ids[1]) is not None
+
+
+async def test_delete_goals_skips_already_deleted_and_counts_only_real_changes(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    ctx = await _player_ctx(db)
+    ids = [(await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description=f"연습{i}")).data["goal_id"] for i in range(3)]
+    _, store = _table_exec()
+    ctx, table = await _goal_table(skill, db, store, ctx)
+    await skill.models.delete_goals(db, [ids[0]])  # 표를 찍은 뒤 사라졌다
+
+    preview = await skill.delete_goals(ctx, table, dry_run=True)
+    assert preview.data["count"] == 2
+    assert preview.data["already_gone"] == 1
+    assert "1개는 이미 없어서" in preview.display.content
+
+    result = await skill.delete_goals(ctx, table)
+    assert result.data["deleted_count"] == 2
+    assert "1개는 이미 없어서" in result.display.content
+
+
+async def test_delete_goals_never_touches_other_players_goal(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    other = await skill.set_goal(_ctx(db=db, player_id="p2", tags=frozenset()), skill.GoalKind.FREEFORM, description="남")
+    ctx = await _player_ctx(db)
+    builder = TableBuilder(subject=ctx.player_id, unit="목표")
+    builder.column("목표")
+    builder.row(RowRef("chunithm-goals.goal", other.data["goal_id"]), {"목표": cell("남")})
+    forged = builder.build()
+    result = await skill.delete_goals(ctx, forged)
+    assert result.error is not None
+    assert await skill.models.fetch_goal(db, other.data["goal_id"]) is not None
+
+
+async def test_update_goal_changes_the_single_row(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    executor, store = _table_exec()
+    ctx = await _player_ctx(db)
+    created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
+    ctx, _ = await _goal_table(skill, db, store, ctx)
+
+    outcome = await executor.invoke(
+        skill.update_goal.__yuni_tool__, ctx, {"table": "t1", "target_score": "SSS", "status": "in_progress"}
+    )
+    assert outcome.result is not None and outcome.result.error is None
+    goal = await skill.models.fetch_goal(db, created.data["goal_id"])
+    assert goal.target_value == 1_007_500.0
+
+
+async def test_update_goal_requires_exactly_one_row(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    executor, store = _table_exec()
+    ctx = await _player_ctx(db)
+    await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="a")
+    await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="b")
+    ctx, _ = await _goal_table(skill, db, store, ctx)
+
+    outcome = await executor.invoke(skill.update_goal.__yuni_tool__, ctx, {"table": "t1", "public": True})
+    assert outcome.result is not None and outcome.result.error is not None
+
+
+async def test_goal_progress_shows_the_row_goal(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    executor, store = _table_exec()
+    ctx = await _player_ctx(db)
+    created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
+    ctx, _ = await _goal_table(skill, db, store, ctx)
+
+    outcome = await executor.invoke(skill.goal_progress.__yuni_tool__, ctx, {"table": "t1"})
+    assert outcome.result is not None and outcome.result.error is None
+    assert outcome.result.data["goal_id"] == created.data["goal_id"]
+
+
+async def test_complete_todos_completes_song_goals_and_drops_other_kinds(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    executor, store = _table_exec()
+    ctx = await _player_ctx(db)
+    song = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
+    free = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
+    ctx, _ = await _goal_table(skill, db, store, ctx)
+
+    outcome = await executor.invoke(skill.complete_todos.__yuni_tool__, ctx, {"table": "t1"})
+    assert outcome.result is not None and outcome.result.error is None
+    assert outcome.result.data["completed_count"] == 1
+    assert (await skill.models.fetch_goal(db, song.data["goal_id"])).status == "achieved"
+    assert (await skill.models.fetch_goal(db, free.data["goal_id"])).status == "in_progress"
+
+
+async def test_complete_todos_skips_already_done(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = await _player_ctx(db)
+    ids = [(await skill.todo_add(ctx, _chart(t), 1_007_500)).data["goal_id"] for t in ("곡A", "곡B", "곡C")]
+    _, store = _table_exec()
+    ctx, table = await _goal_table(skill, db, store, ctx)
+    await skill.models.update_goal(db, ids[0], status="achieved")
+
+    preview = await skill.complete_todos(ctx, table, dry_run=True)
+    assert preview.data["count"] == 2 and preview.data["already_done"] == 1
+    result = await skill.complete_todos(ctx, table)
+    assert result.data["completed_count"] == 2
+    assert "1개는 이미 끝났거나 없어서" in result.display.content
 
 
 # ---------------------------------------------------------------- Step 5: on_sync_completed(order=30)

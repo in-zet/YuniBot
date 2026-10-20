@@ -8,11 +8,19 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from core.decorators import on, tool
+from core.decorators import on, slash_only, tool
 from core.events import Section, Stage, highest_stage
-from core.tables import EMPTY_CELL, Cell, RowRef, TableBuilder, cell
+from core.tables import (
+    EMPTY_CELL,
+    Cell,
+    RowRef,
+    TableBuilder,
+    TableNeeds,
+    WorkTable,
+    cell,
+)
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
@@ -20,6 +28,7 @@ from core.tool_types import (
     PlayerRef,
     RankRef,
     ScoreRef,
+    TableRef,
     ToolContext,
     ToolResult,
 )
@@ -862,8 +871,8 @@ def _goal_cells(goal: Any, summary: dict[str, Any]) -> dict[str, Cell]:
 
 @tool(slash="목표 목록")
 async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: GoalKind | None = None) -> ToolResult:
-    """목표 목록과 달성률·남은 양을 표로 보여준다. 목표 id(수정/진행/삭제에 쓴다)는 슬래시 출력에만
-    붙는다. player를 주면 그 사람의 공개 목표만(본인이면 전체). 그 사람이 기록을 비공개로 해
+    """목표 목록과 달성률·남은 양을 표로 보여준다. 이 표로 update_goal·goal_progress·delete_goals·
+    complete_todos를 부른다(목표 id는 슬래시 출력에만 붙고 모델은 id를 다루지 않는다). player를 주면 그 사람의 공개 목표만(본인이면 전체). 그 사람이 기록을 비공개로 해
     두었으면 목표 정의만 보이고 진행값은 빠진다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
@@ -898,7 +907,7 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
     return ToolResult(data={"player_id": target.id, "count": len(rows)}, table=builder.build())
 
 
-@tool(slash="목표 수정", mutates=True)
+@slash_only(slash="목표 수정", mutates=True)
 async def update(
     ctx: ToolContext,
     goal_id: str,
@@ -917,6 +926,51 @@ async def update(
     그대로 — 점수 환산은 해석기가 한다)로 바꾼다. 레이팅·오버파워 목표는 target_value를 쓴다.
     notify_offsets는 기한 며칠 전에 알릴지 쉼표로(예: "7,1,0"), 빈 문자열이면 알림을 끈다.
     goal_id는 `/목표 목록`에 나오는 id다. 본인 목표만 바꿀 수 있다."""
+    return await _update_goal(
+        ctx, goal_id, target_value=target_value, target_score=target_score, due_at=due_at,
+        duration_tag=duration_tag, parent_goal_id=parent_goal_id, status=status, public=public,
+        notify_offsets=notify_offsets,
+    )
+
+
+@tool(mutates=True)
+async def update_goal(
+    ctx: ToolContext,
+    table: Annotated[TableRef, TableNeeds(ref_kind=_GOAL, single=True)],
+    *,
+    target_value: float | None = None,
+    target_score: ScoreRef | None = None,
+    due_at: str | None = None,
+    duration_tag: DurationTag | None = None,
+    status: GoalStatus | None = None,
+    public: bool | None = None,
+    notify_offsets: str | None = None,
+) -> ToolResult:
+    """목표 표(list_goals·todo_list 결과)의 목표 하나를 고친다. 표에 행이 여러 개면 table에 번호(예: "t3:2")로
+    하나를 가리킨다. 목표값·기한(YYYY-MM-DD)·기간 꼬리표·상태·공개 여부·알림 시점을 바꾼다(자유 목표의
+    진행은 상태로 기록한다). 곡 목표의 점수는 target_score(점수 숫자나 랭크 이름을 원문 그대로 — 점수 환산은
+    해석기가 한다)로 바꾼다. 레이팅·오버파워 목표는 target_value를 쓴다. notify_offsets는 기한 며칠 전에 알릴지
+    쉼표로(예: "7,1,0"), 빈 문자열이면 알림을 끈다. 본인 목표만 바꿀 수 있다."""
+    assert isinstance(table, WorkTable)
+    return await _update_goal(
+        ctx, table.rows[0].ref.key, target_value=target_value, target_score=target_score, due_at=due_at,
+        duration_tag=duration_tag, parent_goal_id=None, status=status, public=public, notify_offsets=notify_offsets,
+    )
+
+
+async def _update_goal(
+    ctx: ToolContext,
+    goal_id: str,
+    *,
+    target_value: float | None,
+    target_score: ScoreRef | None,
+    due_at: str | None,
+    duration_tag: DurationTag | None,
+    parent_goal_id: str | None,
+    status: GoalStatus | None,
+    public: bool | None,
+    notify_offsets: str | None,
+) -> ToolResult:
     goal = await models.fetch_goal(ctx.db, goal_id)
     if goal is None or goal.player_id != ctx.player_id:
         return ToolResult(error="그 목표를 찾지 못했어.")
@@ -995,12 +1049,28 @@ async def update(
     )
 
 
-@tool(slash="목표 진행")
+@slash_only(slash="목표 진행")
 async def progress(ctx: ToolContext, goal_id: str) -> ToolResult:
     """목표 하나의 지금 달성률·남은 양, 진행 기록과 페이스(기한이 있을 때)를 보여준다. 레이팅
     목표면 곡별 목표(To-Do)를 모두 달성했을 때의 예상 레이팅도 함께 보여준다. goal_id는
     `/목표 목록`에 나오는 id다. 남의 목표는 공개한 것만 볼 수 있고, 그 사람이 기록을
     비공개로 해 두었으면 진행값(현재값·달성률·남은 양·기록·예상 레이팅)은 빼고 보여준다."""
+    return await _goal_progress(ctx, goal_id)
+
+
+@tool()
+async def goal_progress(
+    ctx: ToolContext, table: Annotated[TableRef, TableNeeds(ref_kind=_GOAL, single=True)]
+) -> ToolResult:
+    """목표 표(list_goals·todo_list 결과)의 목표 하나의 지금 달성률·남은 양, 진행 기록과 페이스(기한이 있을 때)를
+    보여준다. 표에 행이 여러 개면 table에 번호(예: "t3:2")로 하나를 가리킨다. 레이팅 목표면 곡별 목표(To-Do)를
+    모두 달성했을 때의 예상 레이팅도 함께 보여준다. 남의 목표는 공개한 것만 볼 수 있고, 그 사람이 기록을
+    비공개로 해 두었으면 진행값(현재값·달성률·남은 양·기록·예상 레이팅)은 빼고 보여준다."""
+    assert isinstance(table, WorkTable)
+    return await _goal_progress(ctx, table.rows[0].ref.key)
+
+
+async def _goal_progress(ctx: ToolContext, goal_id: str) -> ToolResult:
     goal = await models.fetch_goal(ctx.db, goal_id)
     if goal is None:
         return ToolResult(error="그 목표를 찾지 못했어.")
@@ -1043,6 +1113,7 @@ async def progress(ctx: ToolContext, goal_id: str) -> ToolResult:
             lines.append(f"곡별 목표를 모두 달성하면 예상 레이팅 {calc.truncate4(projected)}")
 
     # id는 다음 /목표 수정·삭제에 타이핑할 때만 필요하다 — 멘션 답에는 슬래시 본문에만 붙인다.
+    # (모델용 goal_progress는 같은 표 행을 가리키므로 id를 따로 말할 필요가 없다.)
     return ToolResult(
         data=data,
         display=Display(content="\n".join(lines), slash_content="\n".join([*lines, f"id {goal.id}"])),
@@ -1050,30 +1121,48 @@ async def progress(ctx: ToolContext, goal_id: str) -> ToolResult:
     )
 
 
-@tool(slash="목표 삭제", mutates=True, confirm="bulk")
+@slash_only(slash="목표 삭제", mutates=True, confirm="bulk")
 async def delete(ctx: ToolContext, goal_ids: str, *, dry_run: bool = False) -> ToolResult:
     """목표를 지운다(`/목표 목록`의 id, 쉼표로 여러 개 지정할 수 있다). 본인 목표만 지울 수
     있다. 2개 이상을 지울 때는 실행기가 지울 개수를 보여 주고 확인 버튼을 받은 뒤에 지운다."""
     ids = [g.strip() for g in goal_ids.split(",") if g.strip()]
+    return await _delete_goals(ctx, ids, dry_run=dry_run)
+
+
+@tool(mutates=True, confirm="bulk")
+async def delete_goals(
+    ctx: ToolContext, table: Annotated[TableRef, TableNeeds(ref_kind=_GOAL)], *, dry_run: bool = False
+) -> ToolResult:
+    """목표 표(list_goals·todo_list 결과)의 목표를 지운다. 일부만 지우려면 table에 번호(예: "t3:2,4")나 거른
+    표를 가리킨다. 본인 목표만 지운다. 이미 없는 목표는 건너뛴다. 2개 이상을 지울 때는 실행기가 지울 개수를
+    보여 주고 확인 버튼을 받은 뒤에 지운다."""
+    assert isinstance(table, WorkTable)
+    return await _delete_goals(ctx, [row.ref.key for row in table.rows], dry_run=dry_run)
+
+
+async def _delete_goals(ctx: ToolContext, ids: list[str], *, dry_run: bool) -> ToolResult:
+    """지금 DB를 다시 읽어 본인 목표로 남아 있는 것만 지운다(이미 없는 것은 센다)."""
     owned: list[str] = []
-    for gid in ids:
+    for gid in dict.fromkeys(ids):
         goal = await models.fetch_goal(ctx.db, gid)
         if goal is not None and goal.player_id == ctx.player_id:
             owned.append(gid)
+    gone = len(dict.fromkeys(ids)) - len(owned)
     if not owned:
-        return ToolResult(error="지울 수 있는 목표가 없어.")
+        return ToolResult(error="지울 수 있는 목표가 없어." + (f" ({gone}개는 이미 없음)" if gone else ""))
+    skipped = f" ({gone}개는 이미 없어서 뺐어.)" if gone else ""
     if dry_run:
         return ToolResult(
-            data={"count": len(owned), "goal_ids": owned},
-            display=Display(content=f"목표 {len(owned)}개를 지울게."),
+            data={"count": len(owned), "goal_ids": owned, "already_gone": gone},
+            display=Display(content=f"목표 {len(owned)}개를 지울게.{skipped}"),
             display_mode="optional",
         )
     for gid in owned:
         await _cancel_schedules(ctx, gid)
     count = await models.delete_goals(ctx.db, owned)
     return ToolResult(
-        data={"deleted_count": count, "goal_ids": owned},
-        display=Display(content=f"{count}개 지웠어."),
+        data={"deleted_count": count, "goal_ids": owned, "already_gone": gone},
+        display=Display(content=f"{count}개 지웠어.{skipped}"),
         display_mode="optional",
     )
 
@@ -1172,8 +1261,8 @@ async def todo_bulk(
 
 @tool(slash="투두 목록")
 async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolResult:
-    """미완료 To-Do 목록을 상수순(const, 기본) 또는 남은 점수순(remaining)으로 표로 보여준다. 투두
-    id(완료/삭제에 쓴다)는 슬래시 출력에만 붙는다."""
+    """미완료 To-Do 목록을 상수순(const, 기본) 또는 남은 점수순(remaining)으로 표로 보여준다. 이 표로
+    complete_todos·delete_goals·update_goal을 부른다(투두 id는 슬래시 출력에만 붙는다)."""
     rows = await models.list_goals_for_player(
         ctx.db, ctx.player_id, kind=GoalKind.SONG.value, statuses=[GoalStatus.IN_PROGRESS.value]
     )
@@ -1242,16 +1331,58 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST) -> ToolRe
     return ToolResult(data={"count": len(items)}, table=builder.build())
 
 
-@tool(slash="투두 완료", mutates=True)
+@slash_only(slash="투두 완료", mutates=True)
 async def todo_done(ctx: ToolContext, goal_id: str) -> ToolResult:
     """To-Do를 수동으로 완료 처리한다. goal_id는 `/투두 목록`에 나오는 id다."""
-    goal = await models.fetch_goal(ctx.db, goal_id)
-    if goal is None or goal.player_id != ctx.player_id or goal.kind != GoalKind.SONG.value:
-        return ToolResult(error="그 투두를 찾지 못했어.")
-    await _complete_goal(ctx, goal)
+    result = await _complete_todos(ctx, [goal_id], dry_run=False)
+    if result.error is not None:
+        return ToolResult(error="그 투두를 찾지 못했어(없거나 이미 끝났어).")
     return ToolResult(
         data={"goal_id": goal_id, "status": GoalStatus.ACHIEVED.value},
         display=Display(content="완료 처리했어."),
+        display_mode="optional",
+    )
+
+
+@tool(mutates=True, confirm="bulk")
+async def complete_todos(
+    ctx: ToolContext,
+    table: Annotated[TableRef, TableNeeds(ref_kind=_GOAL, nonempty=[tc.SONG, tc.DIFFICULTY])],
+    *,
+    dry_run: bool = False,
+) -> ToolResult:
+    """투두 표(todo_list·list_goals 결과)의 곡 목표를 수동으로 완료 처리한다. 일부만 하려면 table에 번호
+    (예: "t3:2,4")나 거른 표를 가리킨다. 곡 목표가 아닌 행(레이팅·폴더 등)은 빠지고, 이미 끝났거나 없는
+    투두는 건너뛴다. 2개 이상이면 실행기가 개수를 보여 주고 확인 버튼을 받은 뒤에 처리한다."""
+    assert isinstance(table, WorkTable)
+    return await _complete_todos(ctx, [row.ref.key for row in table.rows], dry_run=dry_run)
+
+
+async def _complete_todos(ctx: ToolContext, ids: list[str], *, dry_run: bool) -> ToolResult:
+    """지금 DB를 다시 읽어 진행 중인 본인의 곡 목표만 완료 처리한다. 없거나 이미 끝난 것은 센다."""
+    targets: list[Any] = []
+    for gid in dict.fromkeys(ids):
+        goal = await models.fetch_goal(ctx.db, gid)
+        if (
+            goal is not None and goal.player_id == ctx.player_id and goal.kind == GoalKind.SONG.value
+            and goal.status == GoalStatus.IN_PROGRESS.value
+        ):
+            targets.append(goal)
+    skipped_count = len(dict.fromkeys(ids)) - len(targets)
+    if not targets:
+        return ToolResult(error="완료 처리할 투두가 없어." + (f" ({skipped_count}개는 이미 끝났거나 없음)" if skipped_count else ""))
+    skipped = f" ({skipped_count}개는 이미 끝났거나 없어서 뺐어.)" if skipped_count else ""
+    if dry_run:
+        return ToolResult(
+            data={"count": len(targets), "already_done": skipped_count},
+            display=Display(content=f"투두 {len(targets)}개를 완료 처리할게.{skipped}"),
+            display_mode="optional",
+        )
+    for goal in targets:
+        await _complete_goal(ctx, goal)
+    return ToolResult(
+        data={"completed_count": len(targets), "already_done": skipped_count, "status": GoalStatus.ACHIEVED.value},
+        display=Display(content=f"{len(targets)}개 완료 처리했어.{skipped}"),
         display_mode="optional",
     )
 

@@ -119,13 +119,17 @@ emits: [chunithm.goal.completed]
 | --- | --- | --- | --- | --- | --- |
 | `set` | 목표 만들기 (종류, 대상, 목표값, 기한, 꼬리표, 상위 목표, 공개) | `/목표 추가` | 없음 (레이팅·오버파워·폴더 목표만 함수 안에서 `chunithm-synced` 확인) | optional | never |
 | `list` | 목표 목록과 달성률 (표 반환) | `/목표 목록` | 없음 | 표 | never |
-| `update` | 목표값·기한·알림 변경, 중단, 자유 목표 진행 기록 | `/목표 수정` | 없음 | optional | never |
-| `progress` | 목표 하나의 진행 기록과 페이스 | `/목표 진행` | 없음 | optional | never |
+| `update` | 목표값·기한·알림 변경, 중단, 자유 목표 진행 기록 (`id` 입구, 슬래시 전용) | `/목표 수정` | 없음 | optional | never |
+| `update_goal` | `update`와 같은 일, 표의 목표 한 행을 가리킨다(`table`, single). 상위 목표(`parent_goal_id`)는 id라 뺐다 | 없음 | 없음 | optional | never |
+| `progress` | 목표 하나의 진행 기록과 페이스 (`id` 입구, 슬래시 전용) | `/목표 진행` | 없음 | optional | never |
+| `goal_progress` | `progress`와 같은 일, 표의 목표 한 행(`table`, single) | 없음 | 없음 | optional | never |
 | `todo_add` | 곡별 목표 한 건 | `/투두 추가` | 없음 | optional | never |
 | `todo_bulk` | 조건으로 일괄 추가 | `/투두 일괄` | 없음 (랭크 조건을 쓰면 함수 안에서 `chunithm-synced` 확인) | required | bulk |
 | `todo_list` | To-Do 목록 (표 반환) | `/투두 목록` | 없음 | 표 | never |
-| `todo_done` | 수동 완료 | `/투두 완료` | 없음 | optional | never |
-| `delete` | 목표 삭제(여러 건 가능) | `/목표 삭제` | 없음 | optional | bulk |
+| `todo_done` | 수동 완료 (`id` 입구, 슬래시 전용) | `/투두 완료` | 없음 | optional | never |
+| `complete_todos` | 표의 곡 목표를 완료 처리(여러 건) | 없음 | 없음 | optional | bulk |
+| `delete` | 목표 삭제, 여러 건 가능 (`id` 입구, 슬래시 전용) | `/목표 삭제` | 없음 | optional | bulk |
+| `delete_goals` | 표의 목표 삭제(여러 건) | 없음 | 없음 | optional | bulk |
 
 다른 플레이어의 공개된 목표는 `list`에 `player: PlayerRef`를 넘겨 본다.
 
@@ -217,5 +221,13 @@ emits: [chunithm.goal.completed]
 - 가리키는 것은 둘 다 `chunithm-goals.goal` = 목표 id. 목표 id 칸(`id`)은 `slash_only`라 슬래시 출력에만 `id …`로 붙고 멘션 답과 모델 요약에는 없다. `list_goals`·`todo_list`의 옛 `slash_content`는 지웠다(`set_goal`·`progress`는 그대로 쓴다).
 - `list_goals` 칸: 유형·곡·난이도·목표·상태·진행·달성률·남은 양·기한·공개·id. 곡 목표만 곡·난이도가 차 있다. "목표"·"진행"은 지금 줄을 만드는 `_goal_label`·`_summary_text`로 만든 글이다. 줄에는 목표·상태·진행·기한만 보인다(유형·곡·난이도·달성률·남은 양·공개는 `hidden_in_text`). 진행값이 비공개면 "진행" 칸은 "진행 상황은 비공개야"로 차 있고 달성률·남은 양의 원래 값은 None이다. `kind`를 걸면 과정(steps)에 "(곡)" 같은 말이 붙는다.
 - `todo_list` 칸: 곡·난이도·상수·점수(현재)·목표 점수·남은 점수·목표 램프·현재 램프·id. 램프 목표는 점수 칸을 비운다(줄에 "점수 0"이 붙지 않게). 과정은 "투두 (상수순)" 또는 "투두 (남은 점수순)"이다. `sort` 인자는 슬래시용으로 남는다.
-- **`data`에서 목표 id 목록(`goals`·`todos`)을 지웠다(사용자 결정 2026-10-20).** `data`에는 `count`(와 `player_id`)만 있다. 그래서 id를 받는 모델 도구(`update`·`progress`·`delete`·`todo_done`)는 Part 6에서 표를 받게 바뀔 때까지 대화로 쓸 수 없다(SKILL.md가 슬래시 명령으로 안내하게 한다). 슬래시는 그대로다.
+- **`data`에서 목표 id 목록(`goals`·`todos`)을 지웠다(사용자 결정 2026-10-20).** `data`에는 `count`(와 `player_id`)만 있다. 그래서 id를 받는 도구(`update`·`progress`·`delete`·`todo_done`)는 Part 6-1에서 입구를 나눴다(아래 절). 슬래시는 그대로다.
 - 목록이 비면 표 없이 "목표가 없어."·"투두가 없어."만 낸다.
+
+## id 입구 나누기 (16단계 Part 6-1, 2026-10-20)
+
+`update`·`progress`·`delete`·`todo_done`은 `@slash_only`로 바꿔 슬래시 이름과 id 인자를 그대로 두고, 모델은 표를 받는 새 도구를 쓴다. 둘은 내부 함수(`_update_goal`·`_goal_progress`·`_delete_goals`·`_complete_todos`) 하나를 같이 부른다.
+- 모델 도구 4개는 `TableNeeds(ref_kind="chunithm-goals.goal")`로 목표 행만 받는다. `update_goal`·`goal_progress`는 `single=True`(번호로 한 행을 가리켜야 한다). `complete_todos`는 곡·난이도 칸이 찬 행만 받는다(레이팅·폴더 목표 행은 실행기가 뺀다). 곡 목표가 아니면 내부 함수가 한 번 더 거른다.
+- `delete_goals`·`complete_todos`는 `confirm="bulk"`. 실행 직전에 행의 키로 DB를 다시 읽어 본인 목표로 남아 있는 것(완료는 진행 중인 곡 목표)만 대상으로 삼는다. `dry_run`의 `count`와 실행 결과(`deleted_count`·`completed_count`)는 실제로 바뀔 개수만 센다. 뺀 것은 `already_gone`·`already_done`으로 알리고 `display`에 "N개는 이미 없어서 뺐어"를 붙인다.
+- `todo_done`은 이제 이미 끝난 투두를 다시 완료 처리하지 않고 "찾지 못했어(없거나 이미 끝났어)"를 낸다(옛 동작은 상태를 가리지 않고 완료 이벤트를 또 냈다).
+- `update_goal`에는 `parent_goal_id`가 없다 — 상위 목표도 id인데 표에 그 칸이 없어 모델이 id를 지어낼 길만 열린다. 슬래시 `/목표 수정`에는 남아 있다.
