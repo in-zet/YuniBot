@@ -94,14 +94,20 @@ listens: [chunithm.sync.completed]
 | --- | --- | --- | --- | --- |
 | `profile` | 프로필 | `player: PlayerRef`(기본 나) | `/프로필` | optional |
 | `best` | 베스트 30, 신곡 20 (표 반환) | `player: PlayerRef`, `kind`(best/new/둘 다) | `/베스트` | 표 |
-| `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만) | `player: PlayerRef`, `count` | `/최근` | required |
+| `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만. 표 반환) | `player: PlayerRef`, `count` | `/최근` | 표 |
 | `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | `/기록` | optional |
-| `analyze` | 상수대별 평균, 랭크 분포 | `player: PlayerRef`, 상수 범위(선택) | `/분석` | required |
-| `candidates` | 레이팅 후보곡 | 상수 범위(선택), `count` | `/후보곡` | required |
+| `analyze` | 상수대별 평균, 랭크 분포 (표 반환) | `player: PlayerRef`, 상수 범위(선택) | `/분석` | 표 |
+| `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count` | `/후보곡` | 표 |
 
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
+
+**표로 바꾼 읽기 도구 (16단계 Part 4-1, 2026-10-20).** 표 모양은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2를 따른다. 구현에서 정한 것:
+- `recent`: 가리키는 것 `chunithm-report.play` = JSON(순번, 플레이 시각, 곡, 난이도). 칸 곡·난이도·점수·랭크·JC·J·A·M·플레이 시각(글자 출력에서 숨김). 판정 상세를 못 받은 행(앞 20개 밖)은 판정 칸이 비어 두 번째 서식(`{곡} {난이도}  {점수} {랭크}`)으로 그려진다. 21행 이상이면 표 요약에 "판정 수 앞 20개에만 있음". 행이 없으면 표 없이 "최근 플레이가 없어."만 낸다.
+- `analyze`: 가리키는 것 `chunithm-report.const_band` = 상수대(정수). 칸 상수대·채보 수·평균 점수·랭크 분포. 곡 칸 없음. 상수를 몰라 못 묶은 채보 수는 표 요약, 묶인 상수대가 하나도 없으면 표 없이 문장만 낸다.
+- `candidates`: `chunithm.chart` 행. 칸 곡·난이도·상수·점수·SSS까지 남은 점수·상승폭. 노트 수를 몰라 남은 점수가 "계산 불가"인 행은 그 칸이 비어(빈 칸 생략 규칙) 두 번째 서식으로 그려지므로, 그 개수를 표 요약("SSS까지 남은 점수 N채보는 계산 불가")에 적는다.
+- 세 도구 모두 행 목록을 `data`에 싣지 않는다(`best`와 같다). 행 값은 `table_peek`으로 본다.
 
 ## 이벤트
 

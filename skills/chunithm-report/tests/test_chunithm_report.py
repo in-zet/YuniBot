@@ -517,16 +517,56 @@ async def test_recent_enriches_only_first_twenty_with_judgements(skill: ModuleTy
     result = await skill.recent(f.ctx, count=25)
 
     assert result.error is None
-    assert result.display_mode == "required"
     assert f.net.enrich_calls == [("me", 25, 20)]
-    plays = result.data["plays"]
-    assert len(plays) == 25
-    assert all(p["judgements"] is not None for p in plays[:20])
-    assert all(p["judgements"] is None for p in plays[20:])
-    assert plays[0]["judgements"] == {"justice_critical": 1990, "justice": 8, "attack": 2, "miss": 0}
-    assert "20" in _content(result)  # 판정 수가 앞 20개에만 있다는 안내
+    table = result.table
+    assert table is not None and table.row_count == 25 and table.subject == "me"
+    assert [c.label for c in table.columns] == ["곡", "난이도", "점수", "랭크", "JC", "J", "A", "M", "플레이 시각"]
+    rows = table.rows
+    assert all(r.cell("JC").filled for r in rows[:20])
+    assert not any(r.cell("JC").filled for r in rows[20:])
+    assert [rows[0].cell(n).raw for n in ("JC", "J", "A", "M")] == [1990, 8, 2, 0]
+    assert table.summary["판정 수"] == "앞 20개에만 있음"
+    assert result.data["detail_limit"] == 20
+    assert "plays" not in result.data
     # 두 호출 모두 ctx를 넘긴다 — 서비스가 인증 실패 때 만료 처리(태그 해제·이벤트)를 할 수 있게.
     assert f.net.ctx_passed == [f.ctx, f.ctx]
+
+
+async def test_recent_rows_keep_the_old_line_shape(skill: ModuleType) -> None:
+    f = _ctx(net=_FakeChunithmNet([_recent("곡0", 1_007_500), _recent("곡1", 1_000_000)]))
+
+    result = await skill.recent(f.ctx, count=1)
+    assert result.table is not None
+    assert render_text(result.table).content.splitlines()[-1] == "1. 곡0 MAS  1,007,500 SSS  JC 1990 / J 8 / A 2 / M 0"
+
+    f = _ctx(net=_FakeChunithmNet([_recent("곡0", 1_007_500)] * 25))
+    result = await skill.recent(f.ctx, count=25)
+    assert result.table is not None
+    lines = render_text(result.table, slash=True)
+    assert lines.file is not None
+    body = lines.file[1].decode()
+    assert "21. 곡0 MAS  1,007,500 SSS" in body and "21. 곡0 MAS  1,007,500 SSS  JC" not in body
+    assert "플레이 시각" not in body and "10/16" not in body  # 플레이 시각은 글자 출력에서 숨긴다
+
+
+async def test_recent_same_chart_can_repeat_with_distinct_refs(skill: ModuleType) -> None:
+    f = _ctx(net=_FakeChunithmNet([_recent("곡", 1_000_000), _recent("곡", 1_000_000)]))
+
+    result = await skill.recent(f.ctx, count=2)
+
+    assert result.table is not None
+    keys = [r.ref.key for r in result.table.rows]
+    assert len(set(keys)) == 2 and all(r.ref.kind == "chunithm-report.play" for r in result.table.rows)
+    assert result.table.rows[0].cell("플레이 시각").text == "10/16 20:00"
+
+
+async def test_recent_empty(skill: ModuleType) -> None:
+    f = _ctx(net=_FakeChunithmNet([]))
+
+    result = await skill.recent(f.ctx, count=5)
+
+    assert result.error is None and result.table is None
+    assert "없" in _content(result)
 
 
 async def test_recent_count_limits_shown_plays(skill: ModuleType) -> None:
@@ -535,7 +575,7 @@ async def test_recent_count_limits_shown_plays(skill: ModuleType) -> None:
 
     result = await skill.recent(f.ctx, count=5)
 
-    assert len(result.data["plays"]) == 5
+    assert result.table is not None and result.table.row_count == 5
     # 보여 줄 5개만 넘긴다 — 상세 판정 요청(네트워크)을 쓸데없이 20번 하지 않는다.
     assert f.net.enrich_calls == [("me", 5, 20)]
 
@@ -620,16 +660,21 @@ async def test_analyze_groups_by_integer_const_band(skill: ModuleType) -> None:
     result = await skill.analyze(f.ctx)
 
     assert result.error is None
-    assert result.display_mode == "required"
-    bands = {b["band"]: b for b in result.data["bands"]}
+    table = result.table
+    assert table is not None and table.subject == "me" and table.unit == "상수대"
+    bands = {int(r.cell("상수대").raw): r for r in table.rows}
     assert list(bands) == [15, 14]  # 높은 상수대부터
-    assert bands[15]["count"] == 2
-    assert bands[15]["average_score"] == 1_008_000
-    assert bands[15]["ranks"] == {"SSS+": 1, "SS+": 1}
-    assert bands[14]["average_score"] == 995_000  # (1,000,000 + 990,001) // 2
-    assert bands[14]["ranks"] == {"SS": 1, "S+": 1}
+    assert bands[15].cell("채보 수").raw == 2
+    assert bands[15].cell("평균 점수").raw == 1_008_000
+    assert bands[15].cell("랭크 분포").text == "SSS+ 1, SS+ 1"
+    assert bands[14].cell("평균 점수").raw == 995_000  # (1,000,000 + 990,001) // 2
+    assert bands[14].cell("랭크 분포").text == "SS 1, S+ 1"
+    assert table.summary["상수를 몰라 묶지 못한 채보"] == "1개"
     assert result.data["unknown_const_count"] == 1
-    assert "15대" in _content(result)
+    assert render_text(table).content.splitlines()[-2:] == [
+        "1. 15대  2채보  평균 1,008,000  (SSS+ 1, SS+ 1)",
+        "2. 14대  2채보  평균 995,000  (SS 1, S+ 1)",
+    ]
     assert "attack" not in str(result.data).lower()  # 어택·미스 비중은 없다(chunithm-report.md "분석")
 
 
@@ -638,10 +683,22 @@ async def test_analyze_const_range_filter(skill: ModuleType) -> None:
 
     result = await skill.analyze(f.ctx, min_const=15.0, max_const=15.5)
 
-    bands = result.data["bands"]
-    assert [b["band"] for b in bands] == [15]
-    assert bands[0]["count"] == 1
-    assert bands[0]["average_score"] == 1_007_000
+    table = result.table
+    assert table is not None
+    assert [r.cell("상수대").raw for r in table.rows] == [15]
+    assert table.rows[0].cell("채보 수").raw == 1
+    assert table.rows[0].cell("평균 점수").raw == 1_007_000
+    assert "15.0~15.5" in table.steps[0]
+    assert "상수를 몰라 묶지 못한 채보" not in table.summary  # 범위를 주면 모르는 상수는 세지 않는다
+
+
+async def test_analyze_empty_range_is_a_message(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(pbs={"me": _analyze_rows()}))
+
+    result = await skill.analyze(f.ctx, min_const=17.0)
+
+    assert result.table is None
+    assert "없" in _content(result)
 
 
 async def test_analyze_of_private_other_is_refused(skill: ModuleType) -> None:
@@ -670,12 +727,19 @@ async def test_candidates_passes_range_and_count_for_self(skill: ModuleType) -> 
     result = await skill.candidates(f.ctx, min_const=14.5, max_const=15.5, count=5)
 
     assert f.records.candidate_calls == [{"player_id": "me", "min_const": 14.5, "max_const": 15.5, "count": 5}]
-    assert result.display_mode == "required"
-    assert [h["song_title"] for h in result.data["candidates"]] == ["곡 A", "곡 B"]
-    assert result.data["candidates"][0]["upside"] == "0.50"
-    assert result.data["candidates"][1]["remaining_score"] is None
-    content = _content(result)
-    assert "곡 A" in content and "7,500" in content and "계산 불가" in content
+    table = result.table
+    assert table is not None and table.subject == "me"
+    assert [r.cell("곡").raw for r in table.rows] == ["곡 A", "곡 B"]  # 순서는 상승폭 큰 순 그대로
+    assert [r.cell("상승폭").text for r in table.rows] == ["0.50", "0.30"]
+    assert table.rows[0].cell("SSS까지 남은 점수").raw == 7_500
+    assert table.rows[1].cell("SSS까지 남은 점수").raw is None
+    assert "14.5~15.5" in table.steps[0]
+    assert table.summary["SSS까지 남은 점수"] == "1채보는 계산 불가"
+    assert render_text(table).content.splitlines()[-2:] == [
+        "1. 곡 A MAS 15.0  현재 1,000,000  SSS까지 7,500점  상승폭 +0.50",
+        "2. 곡 B MAS 15.0  현재 1,000,000  상승폭 +0.30",
+    ]
+    assert result.data["count"] == 2 and "candidates" not in result.data
 
 
 async def test_candidates_empty(skill: ModuleType) -> None:
@@ -684,7 +748,8 @@ async def test_candidates_empty(skill: ModuleType) -> None:
     result = await skill.candidates(f.ctx)
 
     assert result.error is None
-    assert result.data["candidates"] == []
+    assert result.table is None
+    assert result.data["count"] == 0
     assert "없" in _content(result)
 
 

@@ -1,6 +1,7 @@
 # skills/chunithm-report/skill.py
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import replace
 from decimal import Decimal
@@ -13,8 +14,10 @@ from chuni_penguin.types.score import RecentScore
 from core.decorators import on, tool
 from core.events import Section, Stage
 from core.tables import (
+    EMPTY_CELL,
     Cell,
     Row,
+    RowRef,
     TableBuilder,
     TableNeeds,
     WorkTable,
@@ -104,6 +107,15 @@ def _contribution(rating: Decimal | None) -> str:
     # 전체 레이팅 = (베스트30 + 신곡20 곡 레이팅 합) / 50. 곡 레이팅이 둘째 자리 값이라 /50은
     # 넷째 자리에서 정확히 끝난다(반올림이 필요 없다).
     return _UNKNOWN if rating is None else str(rating / 50)
+
+
+def _const_range_texts(min_const: float | None, max_const: float | None) -> list[str]:
+    """표의 과정(steps)에 적는 상수 범위."""
+    if min_const is None and max_const is None:
+        return []
+    low = "" if min_const is None else f"{min_const:.1f}"
+    high = "" if max_const is None else f"{max_const:.1f}"
+    return [f"상수 {low}~{high}"]
 
 
 def _pb_data(row: PbRow) -> dict[str, Any]:
@@ -256,26 +268,39 @@ async def add_scores(
     )
 
 
-def _recent_data(score: RecentScore) -> dict[str, Any]:
-    judgements: dict[str, int] | None = None
-    if score.judgements is not None:
-        j = score.judgements
-        judgements = {"justice_critical": j.justice_critical, "justice": j.justice, "attack": j.attack, "miss": j.miss}
-        if j.justice_heaven is not None:
-            judgements["justice_heaven"] = j.justice_heaven
-    return {
-        "song_title": score.song.title,
-        "difficulty": score.chart.difficulty.short(),
-        "score": score.score,
-        "rank": str(score.rank),
-        "achieved_at": score.achieved_at.isoformat() if score.achieved_at is not None else None,
-        "judgements": judgements,
-    }
+_CONST_BAND = "chunithm-report.const_band"
+_BAND = "상수대"
+_BAND_COUNT = "채보 수"
+_BAND_AVERAGE = "평균 점수"
+_BAND_RANKS = "랭크 분포"
+_ANALYZE_FORMAT = "{상수대}대  {채보 수}채보  평균 {평균 점수}  ({랭크 분포})"
+_REMAINING = "SSS까지 남은 점수"
+_UPSIDE = "상승폭"
+_CANDIDATE_FORMATS = (
+    "{곡} {난이도} {상수}  현재 {점수}  SSS까지 {SSS까지 남은 점수}점  상승폭 +{상승폭}",
+    "{곡} {난이도} {상수}  현재 {점수}  상승폭 +{상승폭}",
+)
+_PLAY = "chunithm-report.play"
+_PLAY_TIME = "플레이 시각"
+_JUDGEMENT_COLUMNS = ("JC", "J", "A", "M")
+_RECENT_FORMATS = (
+    "{곡} {난이도}  {점수} {랭크}  JC {JC} / J {J} / A {A} / M {M}",
+    "{곡} {난이도}  {점수} {랭크}",
+)
+
+
+def _judgement_cells(score: RecentScore) -> dict[str, Cell]:
+    """판정 수 칸. 판정 상세를 못 받은 플레이(앞 20개 밖)는 칸을 만들지 않는다."""
+    j = score.judgements
+    if j is None:
+        return {}
+    values = (j.justice_critical, j.justice, j.attack, j.miss)
+    return {name: cell(value) for name, value in zip(_JUDGEMENT_COLUMNS, values, strict=True)}
 
 
 @tool(slash="최근", cost="network")
 async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int = 10) -> ToolResult:
-    """CHUNITHM-NET 최근 플레이 이력을 count개 보여준다. 판정 수는 앞 20개에만 붙는다."""
+    """CHUNITHM-NET 최근 플레이 이력을 count개 표로 보여준다. 판정 수는 앞 20개에만 붙는다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
@@ -293,21 +318,36 @@ async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int =
             return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
         return ToolResult(error="그 사람은 CHUNITHM-NET 로그인이 안 돼 있어서 최근 기록을 못 가져와.")
 
-    plays = [_recent_data(s) for s in scores]
-    lines: list[str] = []
-    for i, p in enumerate(plays, start=1):
-        line = f"{i}. {p['song_title']} {p['difficulty']}  {_score(p['score'])} {p['rank']}"
-        j = p["judgements"]
-        if j is not None:
-            line += f"  JC {j['justice_critical']} / J {j['justice']} / A {j['attack']} / M {j['miss']}"
-        lines.append(line)
-    if not lines:
-        lines.append("최근 플레이가 없어.")
-    elif len(plays) > _DETAIL_LIMIT:
-        lines.append(f"판정 수는 앞 {_DETAIL_LIMIT}개에만 있어.")
+    if not scores:
+        return ToolResult(data={"player_id": target.id, "count": 0}, display=Display(content="최근 플레이가 없어."))
+    builder = TableBuilder(subject=target.id, unit="플레이")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.SCORE, tc.RANK)
+    for name in _JUDGEMENT_COLUMNS:
+        builder.column(name, value_type="number")
+    builder.column(_PLAY_TIME, hidden_in_text=True)
+    builder.row_formats(_RECENT_FORMATS)
+    builder.step("최근 플레이")
+    if len(scores) > _DETAIL_LIMIT:
+        builder.summary({"판정 수": f"앞 {_DETAIL_LIMIT}개에만 있음"})
+    rank_scores = ctx.terms.rank_scores()
+    for number, score in enumerate(scores, start=1):
+        difficulty = score.chart.difficulty.short()
+        played = score.achieved_at.isoformat() if score.achieved_at is not None else ""
+        key = json.dumps([number, played, score.song.title, difficulty], ensure_ascii=False)
+        builder.row(
+            RowRef(_PLAY, key),
+            {
+                tc.SONG: tc.song_cell(score.song.title),
+                tc.DIFFICULTY: tc.difficulty_cell(difficulty),
+                tc.SCORE: tc.score_cell(score.score),
+                tc.RANK: tc.rank_cell(str(score.rank), rank_scores),
+                **_judgement_cells(score),
+                _PLAY_TIME: cell(played, f"{score.achieved_at:%m/%d %H:%M}") if played else EMPTY_CELL,
+            },
+        )
     return ToolResult(
-        data={"player_id": target.id, "plays": plays, "detail_limit": _DETAIL_LIMIT},
-        display=Display(content="\n".join(lines), omittable=True),
+        data={"player_id": target.id, "count": len(scores), "detail_limit": _DETAIL_LIMIT},
+        table=builder.build(),
     )
 
 
@@ -389,26 +429,37 @@ async def analyze(
         return ToolResult(error=_NOT_SYNCED_ERROR)
     bands, unknown = const_band_stats(rows, min_const=min_const, max_const=max_const)
 
-    lines: list[str] = []
-    for b in bands:
-        dist = ", ".join(f"{rank} {n}" for rank, n in b.ranks.items())
-        lines.append(f"{b.band}대  {b.chart_count}채보  평균 {_score(b.average_score)}  ({dist})")
-    if not lines:
-        lines.append("그 상수 범위에 플레이한 채보가 없어.")
+    unknown_text = f"상수를 몰라 묶지 못한 채보 {unknown}개"
+    if not bands:
+        lines = ["그 상수 범위에 플레이한 채보가 없어."]
+        if unknown:
+            lines.append(unknown_text)
+        return ToolResult(
+            data={"player_id": target.id, "min_const": min_const, "max_const": max_const, "unknown_const_count": unknown},
+            display=Display(content="\n".join(lines)),
+        )
+    builder = TableBuilder(subject=target.id, unit="상수대")
+    builder.column(_BAND, value_type="number")
+    builder.column(_BAND_COUNT, value_type="number")
+    builder.column(_BAND_AVERAGE, value_type="ScoreRef")
+    builder.column(_BAND_RANKS)
+    builder.row_formats([_ANALYZE_FORMAT])
+    builder.step(" ".join(["상수대 분석", *_const_range_texts(min_const, max_const)]))
     if unknown:
-        lines.append(f"상수를 몰라 묶지 못한 채보 {unknown}개")
+        builder.summary({"상수를 몰라 묶지 못한 채보": f"{unknown}개"})
+    for b in bands:
+        builder.row(
+            RowRef(_CONST_BAND, str(b.band)),
+            {
+                _BAND: cell(b.band),
+                _BAND_COUNT: cell(b.chart_count),
+                _BAND_AVERAGE: tc.score_cell(b.average_score),
+                _BAND_RANKS: cell(", ".join(f"{rank} {n}" for rank, n in b.ranks.items())),
+            },
+        )
     return ToolResult(
-        data={
-            "player_id": target.id,
-            "min_const": min_const,
-            "max_const": max_const,
-            "bands": [
-                {"band": b.band, "count": b.chart_count, "average_score": b.average_score, "ranks": b.ranks}
-                for b in bands
-            ],
-            "unknown_const_count": unknown,
-        },
-        display=Display(content="\n".join(lines), omittable=True),
+        data={"player_id": target.id, "min_const": min_const, "max_const": max_const, "unknown_const_count": unknown},
+        table=builder.build(),
     )
 
 
@@ -416,30 +467,41 @@ async def analyze(
 async def candidates(
     ctx: ToolContext, min_const: float | None = None, max_const: float | None = None, count: int = 10
 ) -> ToolResult:
-    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 보여준다. SSS를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. SSS까지 남은 점수를 붙인다. 상수 범위로 거를 수 있다."""
+    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 표로 보여준다. SSS를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. SSS까지 남은 점수를 붙인다. 상수 범위로 거를 수 있다."""
     hits = await ctx.records.candidates(ctx.player_id, min_const=min_const, max_const=max_const, count=max(1, count))
-    items = [
-        {
-            "song_title": h.song_title, "difficulty": h.difficulty, "const": h.const, "upside": str(h.upside),
-            "current_score": h.current_score, "remaining_score": h.remaining_score,
-        }
-        for h in hits
-    ]
-    lines: list[str] = []
-    for i, h in enumerate(hits, start=1):
-        if h.remaining_score is None:
-            remaining = f"SSS까지 {_UNKNOWN}"
-        else:
-            remaining = f"SSS까지 {_score(h.remaining_score)}점"
-        lines.append(
-            f"{i}. {h.song_title} {h.difficulty} {h.const}  현재 {_score(h.current_score)}  {remaining}  "
-            f"상승폭 +{h.upside}"
+    if not hits:
+        return ToolResult(
+            data={"min_const": min_const, "max_const": max_const, "count": 0},
+            display=Display(content="지금 조건으로는 레이팅을 올릴 후보곡이 없어."),
         )
-    if not lines:
-        lines.append("지금 조건으로는 레이팅을 올릴 후보곡이 없어.")
+    builder = TableBuilder(subject=ctx.player_id, unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE)
+    builder.column(_REMAINING, value_type="number")
+    builder.column(_UPSIDE, value_type="number")
+    builder.row_formats(_CANDIDATE_FORMATS)
+    builder.step(" ".join(["레이팅 후보곡 (상승폭 큰 순)", *_const_range_texts(min_const, max_const)]))
+    unknown = sum(1 for h in hits if h.remaining_score is None)
+    if unknown:
+        # 노트 수를 몰라 남은 점수를 못 구한 채보는 그 칸이 비어 줄에서 빠진다. 빠졌다는 사실은 여기서 알린다.
+        builder.summary({"SSS까지 남은 점수": f"{unknown}채보는 {_UNKNOWN}"})
+    for h in hits:
+        builder.row(
+            tc.chart_ref(h.song_title, h.difficulty),
+            {
+                tc.SONG: tc.song_cell(h.song_title),
+                tc.DIFFICULTY: tc.difficulty_cell(h.difficulty),
+                tc.CONST: tc.const_cell(h.const),
+                tc.SCORE: tc.score_cell(h.current_score),
+                _REMAINING: (
+                    cell(h.remaining_score, _score(h.remaining_score))
+                    if h.remaining_score is not None else cell(None, _UNKNOWN)
+                ),
+                _UPSIDE: cell(float(h.upside), str(h.upside)),
+            },
+        )
     return ToolResult(
-        data={"min_const": min_const, "max_const": max_const, "candidates": items},
-        display=Display(content="\n".join(lines), omittable=True),
+        data={"min_const": min_const, "max_const": max_const, "count": len(hits)},
+        table=builder.build(),
     )
 
 
