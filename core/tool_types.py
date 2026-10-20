@@ -87,6 +87,8 @@ class ToolResult:
     display: Display | None = None
     # 여러 항목을 돌려주는 도구의 결과. 표를 돌려주는 도구는 display를 비운다(코어가 표를 그려 붙인다).
     table: WorkTable | None = None
+    # 코어가 채운다(도구는 쓰지 않는다): 입력 표가 옛 값이어서 이 결과 표도 옛 값으로 보관해야 한다.
+    table_stale: bool = False
     display_mode: Literal["required", "optional"] = "required"
     error: str | None = None
 

@@ -20,6 +20,7 @@ from core.tables import (
     parse_table_arg,
     resolve_table_arg,
     row_at,
+    summarize_table,
 )
 
 
@@ -449,3 +450,28 @@ def test_table_needs_normalizes_sequences_to_tuples() -> None:
     assert needs.columns == ("a",)
     assert needs.nonempty == ("b", "c")
     assert needs.ref_kind is None and needs.single is False
+
+
+# ---- 모델에 주는 표 요약 ----
+
+
+def test_summarize_table_gives_the_model_only_what_it_may_see() -> None:
+    builder = TableBuilder(subject="p1", unit="채보").column("song", "곡").column("id", "아이디", slash_only=True)
+    builder.group("15.5", {"평균": "15.5"}).row(RowRef("k", "secret"), {"song": cell("A"), "id": cell("g1")})
+    builder.group("15.0").row(RowRef("k", "secret2"), {"song": cell("B"), "id": cell("g2")})
+    table = dataclasses.replace(builder.summary({"레이팅": "16.98"}).steps(["15 이상", "내 점수"]).build(), id="t3")
+
+    summary = summarize_table(table)
+
+    assert summary == {
+        "table": "t3", "rows": 2, "unit": "채보", "columns": ["곡"],
+        "groups": [{"title": "15.5", "rows": 1, "summary": {"평균": "15.5"}}, {"title": "15.0", "rows": 1}],
+        "steps": ["15 이상", "내 점수"], "summary": {"레이팅": "16.98"},
+    }
+    assert "secret" not in str(summary) and "p1" not in str(summary)
+    assert summarize_table(table, stale=True)["stale"] is True
+
+
+def test_summarize_table_omits_empty_parts() -> None:
+    table = dataclasses.replace(TableBuilder().column("a").row(RowRef("k", "1"), {"a": cell("x")}).build(), id="t1")
+    assert summarize_table(table) == {"table": "t1", "rows": 1, "unit": "개", "columns": ["a"]}

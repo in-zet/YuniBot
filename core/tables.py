@@ -310,6 +310,31 @@ def _apply_needs(table: WorkTable, needs: TableNeeds, hints: Sequence[PartialRow
     return replace(reduced, steps=(*table.steps, *reasons))
 
 
+def summarize_table(table: WorkTable, *, stale: bool = False) -> dict[str, Any]:
+    """모델이 표에 대해 받는 전부. 행 값·가리키는 것의 키·`subject`·`slash_only` 칸은 넣지 않는다."""
+    summary: dict[str, Any] = {
+        "table": table.id,
+        "rows": table.row_count,
+        "unit": table.unit,
+        "columns": [column.label for column in table.columns if not column.slash_only],
+    }
+    if any(group.title is not None for group in table.groups):
+        groups: list[dict[str, Any]] = []
+        for group in table.groups:
+            entry: dict[str, Any] = {"title": group.title, "rows": len(group.rows)}
+            if group.summary:
+                entry["summary"] = dict(group.summary)
+            groups.append(entry)
+        summary["groups"] = groups
+    if table.steps:
+        summary["steps"] = list(table.steps)
+    if table.summary:
+        summary["summary"] = dict(table.summary)
+    if stale:
+        summary["stale"] = True
+    return summary
+
+
 class TableBuilder:
     """스킬이 표를 만드는 도우미. id는 비워 두고 코어가 보관할 때 붙인다."""
 

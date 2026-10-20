@@ -21,7 +21,7 @@ from core.registry import SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
 from core.skill_loading import Mode, SkillLoadState
-from core.tables import TableStore
+from core.tables import RowRef, TableBuilder, TableStore, cell
 from core.tool_types import Display, ToolContext, ToolResult
 from services.common.memory import RememberResult
 from tests.core.skill_factory import write_skill
@@ -398,7 +398,7 @@ async def test_agent_loop_keeps_only_the_last_omittable_display_of_the_same_tool
     )
     served = iter(["첫 목록", "마지막 목록"])
 
-    async def fake_invoke(ctx: ToolContext, tool_name: str, args: dict[str, Any]) -> ToolResult:
+    async def fake_invoke(ctx: ToolContext, tool_name: str, args: dict[str, Any], **_kw: Any) -> ToolResult:
         return ToolResult(display=Display(content=next(served), omittable=True), display_mode="required")
 
     loop._invoke = fake_invoke  # pyright: ignore[reportPrivateUsage]
@@ -644,6 +644,169 @@ async def test_agent_loop_hides_tables_from_skill_that_did_not_declare_them(tmp_
     )
     assert scoped.tables is None
     assert scoped.channel_id == "c9"
+
+
+_TABLE_SKILL_BODY = (
+    "from typing import Annotated\n"
+    "from core.decorators import tool\n"
+    "from core.tables import RowRef, TableBuilder, TableNeeds, cell\n"
+    "from core.tool_types import TableRef, ToolContext, ToolResult\n\n\n"
+    "@tool()\n"
+    "async def make(ctx: ToolContext) -> ToolResult:\n"
+    '    """테스트용: 표를 만든다."""\n'
+    '    builder = TableBuilder(subject="p1", unit="채보").column("song", "곡").column("score", "점수", "number")\n'
+    '    builder.column("id", "아이디", slash_only=True)\n'
+    '    builder.group("A", {"평균": "1007500"})\n'
+    '    builder.row(RowRef("chunithm.chart", "secret-key"), {"song": cell("크로노"), "score": cell(1007500, "1,007,500"), "id": cell("g1")})\n'
+    '    builder.group("B")\n'
+    '    builder.row(RowRef("chunithm.chart", "k2"), {"song": cell("B곡"), "score": cell(900000, "900,000")})\n'
+    '    return ToolResult(data={}, table=builder.summary({"레이팅": "17.04"}).step("테스트").build())\n\n\n'
+    "@tool()\n"
+    "async def echo(ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=['song'])]) -> ToolResult:\n"
+    '    """테스트용: 받은 표를 그대로 새 표로 돌려준다."""\n'
+    "    return ToolResult(table=TableBuilder.from_table(table).build())\n\n\n"
+    "@tool()\n"
+    "async def broken_table(ctx: ToolContext) -> ToolResult:\n"
+    '    """테스트용: 표와 함께 에러를 낸다."""\n'
+    '    return ToolResult(error="실패", table=TableBuilder().column("a").build())\n'
+)
+
+
+async def _run_table_turns(
+    tmp_path: Path, calls: list[tuple[str, dict[str, Any]]], *, store: TableStore | None = None,
+    channel_id: str | None = "c1", before: Any = None,
+) -> tuple[Any, list[dict[str, object]], TableStore]:
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "table-skill", _TABLE_SKILL_BODY)
+    registry = SkillRegistry([skills_root])
+    registry.load()
+    assert "table-skill" in {s.manifest.name for s in registry.enabled_skills()}, registry.failures()
+    store = store if store is not None else TableStore()
+    if before is not None:
+        before(store)
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
+        tag_definitions=registry.tag_definitions(), tables=store,
+    )
+    seen: list[dict[str, object]] = []
+    queue = list(calls)
+
+    def script(
+        model: str, system: str, contents: list[LlmContent], tools: list[ToolDeclaration]
+    ) -> GenerationTurn:
+        last = contents[-1]
+        for part in last.parts:
+            if part.function_response is not None:
+                seen.append(part.function_response.response)
+        if queue:
+            name, args = queue.pop(0)
+            return GenerationTurn(
+                content=LlmContent(role="model", parts=[]),
+                function_calls=[FunctionCallRequest(call_id=str(len(seen)), name=f"table-skill_{name}", args=args)],
+            )
+        return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="끝")]), text="끝")
+
+    loop = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=executor,
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, channel_id=channel_id)
+    result = await loop.run(
+        ctx=ctx, skill_state=_state(registry, mode="full"), user_text="x", prompt_context_snippets=[]
+    )
+    return result, seen, store
+
+
+@pytest.mark.asyncio
+async def test_table_result_is_stored_and_the_model_gets_only_the_summary(tmp_path: Path) -> None:
+    result, seen, store = await _run_table_turns(tmp_path, [("make", {})])
+
+    assert seen == [
+        {
+            "table": "t1", "rows": 2, "unit": "채보", "columns": ["곡", "점수"],
+            "groups": [{"title": "A", "rows": 1, "summary": {"평균": "1007500"}}, {"title": "B", "rows": 1}],
+            "steps": ["테스트"], "summary": {"레이팅": "17.04"},
+        }
+    ]
+    assert result.turn_table_ids == ["t1"]
+    assert result.last_table_id == "t1"
+    assert result.drawn_table_ids == []
+    stored = store.get("p1", "c1", "t1")
+    assert stored is not None and stored.row_count == 2
+    # 모델이 받지 않은 값은 숫자 대조 자료에도 없다
+    assert result.collected_data == seen
+    assert "1,007,500" not in str(result.collected_data) and "secret-key" not in str(result.collected_data)
+    assert result.required_displays == []
+
+
+@pytest.mark.asyncio
+async def test_last_table_follows_the_latest_table_of_the_turn(tmp_path: Path) -> None:
+    result, seen, _store = await _run_table_turns(tmp_path, [("make", {}), ("echo", {"table": "t1"})])
+
+    assert result.turn_table_ids == ["t1", "t2"]
+    assert result.last_table_id == "t2"
+    assert seen[1]["table"] == "t2"
+
+
+@pytest.mark.asyncio
+async def test_number_on_a_table_made_this_turn_is_refused(tmp_path: Path) -> None:
+    result, seen, _store = await _run_table_turns(tmp_path, [("make", {}), ("echo", {"table": "t1:1"})])
+
+    assert seen[1] == {"error": "번호는 사람이 본 표에만 쓴다"}
+    assert result.turn_table_ids == ["t1"]
+
+
+@pytest.mark.asyncio
+async def test_number_on_a_table_from_an_earlier_turn_is_allowed(tmp_path: Path) -> None:
+    def seed(store: TableStore) -> None:
+        builder = TableBuilder().column("song", "곡")
+        builder.row(RowRef("chunithm.chart", "1"), {"song": cell("A")})
+        builder.row(RowRef("chunithm.chart", "2"), {"song": cell("B")})
+        _ = store.put("p1", "c1", builder.build(), now=0)
+
+    result, seen, _store = await _run_table_turns(tmp_path, [("echo", {"table": "t1:2"})], before=seed)
+
+    assert seen[0]["rows"] == 1
+    assert seen[0]["table"] == "t2"
+    assert seen[0]["steps"] == ["2번"]
+    assert result.last_table_id == "t2"
+
+
+@pytest.mark.asyncio
+async def test_table_made_from_a_stale_table_is_stale(tmp_path: Path) -> None:
+    def seed(store: TableStore) -> None:
+        builder = TableBuilder(subject="p1").column("song", "곡")
+        builder.row(RowRef("chunithm.chart", "1"), {"song": cell("A")})
+        _ = store.put("p1", "c1", builder.build(), now=0)
+        store.mark_stale("p1")
+
+    result, seen, store = await _run_table_turns(
+        tmp_path, [("echo", {"table": "t1"}), ("make", {})], before=seed
+    )
+
+    assert seen[0]["stale"] is True
+    assert "stale" not in seen[1]
+    assert store.is_stale("p1", "c1", "t2")
+    assert not store.is_stale("p1", "c1", "t3")
+    assert result.last_table_id == "t3"
+
+
+@pytest.mark.asyncio
+async def test_tool_error_with_table_stores_nothing(tmp_path: Path) -> None:
+    result, seen, store = await _run_table_turns(tmp_path, [("broken_table", {})])
+
+    assert seen == [{"error": "실패"}]
+    assert result.last_table_id is None and result.turn_table_ids == []
+    assert store.ids("p1", "c1") == []
+
+
+@pytest.mark.asyncio
+async def test_table_cannot_be_kept_without_a_channel(tmp_path: Path) -> None:
+    result, seen, _store = await _run_table_turns(tmp_path, [("make", {})], channel_id=None)
+
+    assert seen == [{"error": "이 자리에서는 표를 보관할 수 없다"}]
+    assert result.last_table_id is None
 
 
 _PROMPT_CONTEXT_BODY = (

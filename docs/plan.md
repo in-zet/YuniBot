@@ -89,7 +89,7 @@
     - [X] 1-1 표 구조(`core/tables.py`: `WorkTable`·`Column`·`Cell`·`Row`·`Group`·`TableBuilder`·`row_at`) — 구현 완료(2026-10-20)
     - [X] 1-2 보관소(`TableStore`·`ToolContext.tables`·`channel_id`·만료·옛 값 표시) — 구현 완료(2026-10-20)
     - [X] 1-3 도구 결과와 인자(`ToolResult.table`·`TableRef`·`TableNeeds`·실행기의 표 해석) — 구현 완료(2026-10-20)
-    - [ ] 1-4 에이전트 처리(표 요약·`last_table_id` 등)
+    - [X] 1-4 에이전트 처리(표 요약·`last_table_id` 등) — 구현 완료(2026-10-20)
     - [ ] 1-5 코어 내장 도구(`select_rows`·`table_query`·`table_peek`)
     - [ ] 1-6 글자 출력(`render_text`·`row_text`·응답 조립)
     - [ ] 1-7 첨부 파일과 그림 표 표시(`Display.files`·`drew_table`·슬래시 경로)

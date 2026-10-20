@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,6 +24,7 @@ from core.prompt import PromptAssembler
 from core.registry import LoadedSkill
 from core.registry_snapshot import RegistrySnapshot
 from core.skill_loading import SkillLoadState
+from core.tables import summarize_table
 from core.threads import ThreadEndRequest
 from core.tool_types import Display, ToolContext, ToolResult
 
@@ -49,6 +50,12 @@ class AgentTurnResult:
     used_admin_tool: bool = False
     # 마지막 LLM 왕복에서 실제로 답한 모델. 보조 모델로 넘어간 턴이면 그 이름이고, 아니면 None.
     served_model: str | None = None
+    # 이번 턴에 만든 표 전부(보관소 id). 번호(`rows`·`"t3:2"`)는 사람이 본 표에만 쓰므로 이 표들에는 거절한다.
+    turn_table_ids: list[str] = field(default_factory=list)
+    # 이번 턴의 마지막 표. 턴 끝에 이 표 하나만 글자로 그린다.
+    last_table_id: str | None = None
+    # 그림 표 도구가 이미 그린 표. 글자로 다시 그리지 않는다.
+    drawn_table_ids: list[str] = field(default_factory=list)
 
 
 class AgentLoop:
@@ -284,7 +291,11 @@ class AgentLoop:
                     )
                 else:
                     tool_started = time.monotonic()
-                    tool_result = await self._invoke(inner_ctx, call.name, call.args)
+                    tool_result = await self._invoke(
+                        inner_ctx, call.name, call.args, turn_table_ids=result.turn_table_ids
+                    )
+                    if tool_result.table is not None and tool_result.error is None:
+                        tool_result = self._keep_table(inner_ctx, tool_result, result)
                     logger.info(
                         "player %s: 도구 '%s' 완료 %.2f초",
                         ctx.player_id, call.name, time.monotonic() - tool_started,
@@ -318,7 +329,24 @@ class AgentLoop:
             # (call-parts가 response-parts보다 항상 먼저 와야 하는 thought-signature 순서 규칙).
             contents.append(LlmContent(role="user", parts=response_parts))
 
-    async def _invoke(self, ctx: ToolContext, tool_name: str, args: dict[str, Any]) -> ToolResult:
+    def _keep_table(self, ctx: ToolContext, tool_result: ToolResult, turn: AgentTurnResult) -> ToolResult:
+        """도구가 돌려준 표를 보관소에 넣고, 모델에게는 표 요약만 돌려준다."""
+        store = self._executor.tables
+        table = tool_result.table
+        assert table is not None
+        if store is None or ctx.channel_id is None:
+            return ToolResult(error="이 자리에서는 표를 보관할 수 없다")
+        table_id = store.put(ctx.player_id, ctx.channel_id, table, stale=tool_result.table_stale)
+        turn.turn_table_ids.append(table_id)
+        turn.last_table_id = table_id
+        stored = store.get(ctx.player_id, ctx.channel_id, table_id)
+        assert stored is not None
+        tool_result.data = {**tool_result.data, **summarize_table(stored, stale=tool_result.table_stale)}
+        return tool_result
+
+    async def _invoke(
+        self, ctx: ToolContext, tool_name: str, args: dict[str, Any], *, turn_table_ids: Collection[str] = ()
+    ) -> ToolResult:
         if tool_name == "list_capabilities":
             from core.capabilities import build_capabilities_text
 
@@ -349,6 +377,7 @@ class AgentLoop:
 
         outcome = await self._executor.invoke(
             spec, scoped_ctx, args, skill_tags=skill_tags, skill_tags_any=skill_tags_any, skill_name=skill_name,
+            turn_table_ids=turn_table_ids,
         )
         if outcome.needs_confirm:
             # 멘션 경로에는 확인 버튼을 낼 인터랙션이 없다(대화 스레드 중이라 상호작용
@@ -359,6 +388,7 @@ class AgentLoop:
                 outcome.confirm_token, confirmed=True, player_id=scoped_ctx.player_id
             )
         assert outcome.result is not None
+        outcome.result.table_stale = outcome.stale_input
         return outcome.result
 
     def _scoped_ctx(

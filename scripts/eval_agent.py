@@ -19,7 +19,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from dotenv import load_dotenv
 from google.genai.errors import ServerError
@@ -93,10 +93,10 @@ class _RecordingAgentLoop(AgentLoop):
         super().__init__(*args, **kwargs)  # type: ignore[arg-type]
         self.first_tool_name: str | None = None
 
-    async def _invoke(self, ctx: ToolContext, tool_name: str, args: dict[str, object]):  # type: ignore[override]
+    async def _invoke(self, ctx: ToolContext, tool_name: str, args: dict[str, object], **kwargs: Any):  # type: ignore[override]
         if self.first_tool_name is None:
             self.first_tool_name = tool_name
-        return await super()._invoke(ctx, tool_name, args)
+        return await super()._invoke(ctx, tool_name, args, **kwargs)
 
 
 async def _run_with_retry(
