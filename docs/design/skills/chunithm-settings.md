@@ -46,8 +46,8 @@ tags: [chunithm-linked]
 
 | 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
 | --- | --- | --- | --- | --- | --- |
-| `current_settings` | 지금 계정의 인게임 설정을 바로 읽어 보여줌(저장 안 함) | 없음 | `/현재설정` | optional | never |
-| `change_settings` | 말한 항목만 바꾸고 전체 반영 결과를 보여줌 | 다섯 항목 전부 `str \| None = None` | `/게임설정 변경` | optional | never |
+| `current_settings` | 지금 계정의 인게임 설정을 바로 읽어 보여줌(저장 안 함) | 없음 | `/현재설정` | required | never |
+| `change_settings` | 말한 항목만 바꾸고 전체 반영 결과를 보여줌 | 다섯 항목 전부 `str \| None = None` | `/게임설정 변경` | required | never |
 | `list_favorites` | 즐겨찾기 곡 목록(제목) | 없음 | `/즐겨찾기 목록` | required | never |
 | `add_favorite` | 즐겨찾기에 곡 추가 | `song: SongQuery` | `/즐겨찾기 추가` | optional | never |
 | `remove_favorite` | 즐겨찾기에서 곡 삭제 | `song: SongQuery` | `/즐겨찾기 삭제` | optional | never |
@@ -64,7 +64,7 @@ tags: [chunithm-linked]
 
 ## 유니 지침 (SKILL.md 본문 초안)
 
-- 설정 변경은 확인 없이 말하면 바로 반영하되, 결과에는 반영된 뒤 전체 설정값을 꼭 같이 보여준다.
+- 설정 변경은 확인 없이 말하면 바로 반영하되, 결과에는 반영된 뒤 전체 설정값을 꼭 같이 보여준다. 2026-10-20 실기로 표시물을 `required`로 바꿨다 — 모델이 `optional` 표시물과 똑같은 내용을 말로도 적어 같은 내용이 두 번 나오고, 설정값을 옮겨 적다 판정 타이밍 A·B를 거꾸로 말했다. `data`의 설정 키도 내부 이름 대신 화면 이름(스피드, 판정 타이밍 A 등)으로 낸다.
 - 바꿀 수 있는 값은 정해진 선택지뿐이다. 잘못된 값을 말하면 도구가 돌려준 오류를 그대로 전한다.
 - 로그인이 안 돼 있거나 점검 중이거나 만료됐으면 그 사실만 말하고 끝낸다.
 

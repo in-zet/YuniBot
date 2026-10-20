@@ -108,8 +108,19 @@ async def test_current_settings_reads_live(skill: ModuleType) -> None:
     result = await skill.current_settings(ctx)
 
     assert result.error is None
-    assert result.data["settings"]["speed"] == "1.50"
+    assert result.data["settings"]["스피드"] == "1.50"
     assert result.display is not None and "1.50" in result.display.content
+    assert result.display_mode == "required"  # 모델이 값을 다시 옮겨 적다 A·B를 바꿔 말한 적이 있어 표시물로 고정한다
+
+
+async def test_settings_data_uses_screen_labels_not_internal_names(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(settings=_settings(play_timing_offset="0.0", judge_timing_offset="0.8"))
+
+    result = await skill.current_settings(_ctx(chunithm_net=net))
+
+    assert result.data["settings"]["판정 타이밍 A"] == "0.0"
+    assert result.data["settings"]["판정 타이밍 B"] == "0.8"
+    assert "play_timing_offset" not in result.data["settings"]
 
 
 @pytest.mark.parametrize(
@@ -141,9 +152,10 @@ async def test_change_settings_updates_only_requested_fields(skill: ModuleType) 
     result = await skill.change_settings(ctx, speed="9.00")
 
     assert result.error is None
-    assert result.data["changed"] == ["speed"]
-    assert result.data["settings"]["speed"] == "9.00"
-    assert result.data["settings"]["guide_sound"] == "5"
+    assert result.data["changed"] == ["스피드"]
+    assert result.data["settings"]["스피드"] == "9.00"
+    assert result.data["settings"]["가이드음"] == "5"
+    assert result.display_mode == "required"
 
 
 async def test_change_settings_unknown_value_returns_error(skill: ModuleType) -> None:

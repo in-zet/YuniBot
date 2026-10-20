@@ -5,10 +5,16 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.decorators import tool
 from core.tool_types import Display, SongQuery, ToolContext, ToolResult
-from services.chunithm.arcade_settings import named_from_settings, settings_line
+from services.chunithm.arcade_settings import FIELD_LABELS, named_from_settings, settings_line
 from services.chunithm.songdb import SongRecord
 
 _CHANGEABLE_FIELDS = ("speed", "field_wall_position", "play_timing_offset", "judge_timing_offset", "guide_sound")
+
+
+def _labeled(named: dict[str, str]) -> dict[str, str]:
+    """`play_timing_offset`·`judge_timing_offset` 같은 내부 이름은 모델이 A·B에 거꾸로 짝지은 적이 있다
+    (2026-10-20 실기: 판정 A 0.0·B 0.8을 A 0.8·B 0.0으로 말함). data는 화면에 보이는 이름(판정 타이밍 A)으로 낸다."""
+    return {FIELD_LABELS[key]: value for key, value in named.items()}
 
 
 @tool(slash="현재설정", cost="network")
@@ -25,9 +31,9 @@ async def current_settings(ctx: ToolContext) -> ToolResult:
 
     named = named_from_settings(settings)
     return ToolResult(
-        data={"settings": named},
+        data={"settings": _labeled(named)},
         display=Display(content=settings_line(named)),
-        display_mode="optional",
+        display_mode="required",
     )
 
 
@@ -41,7 +47,8 @@ async def change_settings(
     guide_sound: str | None = None,
 ) -> ToolResult:
     """스피드·필드 월·판정 타이밍 A·B·가이드음 중 말한 항목만 바꾼다. 값은 CHUNITHM-NET
-    설정 페이지에 실제로 있는 표시값 그대로 받는다(예: 스피드 "9.00", 가이드음 "5")."""
+    설정 페이지에 실제로 있는 표시값 그대로 받는다(예: 스피드 "9.00", 가이드음 "5").
+    play_timing_offset는 판정 타이밍 A, judge_timing_offset는 판정 타이밍 B다."""
     changes = {
         name: value
         for name, value in zip(_CHANGEABLE_FIELDS, (speed, field_wall_position, play_timing_offset, judge_timing_offset, guide_sound), strict=True)
@@ -63,9 +70,9 @@ async def change_settings(
 
     named = named_from_settings(settings)
     return ToolResult(
-        data={"settings": named, "changed": list(changes)},
+        data={"settings": _labeled(named), "changed": [FIELD_LABELS[key] for key in changes]},
         display=Display(content="바꿨어 — " + settings_line(named)),
-        display_mode="optional",
+        display_mode="required",
     )
 
 
