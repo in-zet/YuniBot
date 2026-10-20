@@ -723,6 +723,27 @@ async def test_poll_schedules_expires_old_work_tables(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_closing_a_thread_drops_the_work_tables_of_that_thread_channel(tmp_path: Path) -> None:
+    client, _registry, executor = await build_client(_config(tmp_path))
+    try:
+        store = executor.tables
+        assert store is not None
+        table = TableBuilder().column("a").build()
+        _ = store.put("p1", "thread-1", table, now=0)
+        _ = store.put("p1", "c1", table, now=0)
+        closed: list[ThreadTranscript] = []
+        session, _transport = await _open_test_thread(client, player_id="p1", closed=closed)
+        assert client._threads is not None  # pyright: ignore[reportPrivateUsage]
+
+        await client._threads.close(session.thread_id, reason="explicit")  # pyright: ignore[reportPrivateUsage]
+
+        assert store.ids("p1", "thread-1") == []
+        assert store.ids("p1", "c1") == ["t1"]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_closing_the_client_closes_open_threads_as_shutdown(tmp_path: Path) -> None:
     client, _registry, _executor = await build_client(_config(tmp_path))
     closed: list[ThreadTranscript] = []

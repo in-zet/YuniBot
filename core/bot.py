@@ -583,6 +583,9 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     client_holder: list[YuniClient] = []
 
     async def _on_thread_closed(transcript: ThreadTranscript) -> None:
+        # 대화 스레드 안의 표는 스레드가 열려 있는 동안만 산다.
+        if transcript.channel_id is not None:
+            table_store.drop_channel(transcript.channel_id)
         await queue_thread_memory(
             memory_service, transcript, now=datetime.datetime.now().timestamp()  # noqa: DTZ005 - 멘션 경로의 now.timestamp()와 같은 서버 로컬 시간 기준
         )
@@ -688,6 +691,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         event_bus=event_bus,
         known_skill_names=known_skill_names, skill_loading_mode=config.skill_loading_mode,
         address=address_resolver, conversation_skills=conversation_skills, threads=thread_manager,
+        tables=table_store,
     )
 
     async def _react_memory_saved(pending: PendingSummary) -> None:

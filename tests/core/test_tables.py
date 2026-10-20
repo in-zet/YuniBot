@@ -20,6 +20,7 @@ from core.tables import (
     TableStore,
     WorkTable,
     cell,
+    describe_table,
     parse_table_arg,
     peek_rows,
     render_text,
@@ -815,3 +816,25 @@ def test_numbers_in_text_file_and_rows_point_at_the_same_rows() -> None:
     for line in lines:
         number = int(line.split(".", 1)[0])
         assert line == f"{number}. {row_text(table, row_at(table, number))}"
+
+
+def test_discard_and_drop_channel() -> None:
+    store = TableStore()
+    for player, channel in [("p1", "c1"), ("p1", "c1"), ("p2", "c1"), ("p1", "c2")]:
+        _ = store.put(player, channel, _subject_table(), now=0)
+    store.discard("p1", "c1", "t1")
+    store.discard("p1", "c1", "t9")  # 없는 표는 무시한다
+    assert store.ids("p1", "c1") == ["t2"]
+    store.drop_channel("c1")
+    assert store.ids("p1", "c1") == [] and store.ids("p2", "c1") == []
+    assert store.ids("p1", "c2") == ["t1"]
+
+
+def test_describe_table_lists_steps_unit_and_visible_columns_only() -> None:
+    builder = TableBuilder(unit="채보").column("song", "곡").column("id", "아이디", slash_only=True)
+    builder.row(RowRef("k", "1"), {"song": cell("A"), "id": cell("g")})
+    table = dataclasses.replace(builder.steps(["15 이상", "내 점수"]).build(), id="t3")
+    assert describe_table(table) == "[살아 있는 표] t3 — 15 이상 → 내 점수 (1채보, 칸: 곡)"
+    assert describe_table(table, stale=True).startswith("[살아 있는 표] t3 (동기화 전 값) — ")
+    bare = dataclasses.replace(TableBuilder().column("a").build(), id="t1")
+    assert "과정 없음" in describe_table(bare)

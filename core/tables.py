@@ -621,6 +621,14 @@ def render_text(table: WorkTable, *, stale: bool = False, slash: bool = False) -
     return RenderedTable("\n".join([*header, note]), (name, "\n".join([*header, *body]).encode("utf-8")))
 
 
+def describe_table(table: WorkTable, *, stale: bool = False) -> str:
+    """살아 있는 표를 프롬프트에 한 줄로 알린다. 행 값은 넣지 않는다."""
+    flag = f" {STALE_NOTE}" if stale else ""
+    process = " → ".join(table.steps) if table.steps else "과정 없음"
+    labels = "·".join(column.label for column in table.columns if not column.slash_only)
+    return f"[살아 있는 표] {table.id}{flag} — {process} ({table.row_count}{table.unit}, 칸: {labels})"
+
+
 class TableBuilder:
     """스킬이 표를 만드는 도우미. id는 비워 두고 코어가 보관할 때 붙인다."""
 
@@ -816,6 +824,17 @@ class TableStore:
             if stored.message_id is None or stored.message_id not in alive_message_ids
         ]:
             del tables[table_id]
+
+    def discard(self, player_id: str, channel_id: str, table_id: str) -> None:
+        """표 하나를 지운다(이 턴의 마지막이 아닌 중간 표)."""
+        tables = self._tables.get((player_id, channel_id))
+        if tables is not None:
+            tables.pop(table_id, None)
+
+    def drop_channel(self, channel_id: str) -> None:
+        """그 채널의 표를 모든 플레이어 몫으로 지운다(대화 스레드가 닫힐 때)."""
+        for key in [key for key in self._tables if key[1] == channel_id]:
+            del self._tables[key]
 
     def expire(self, now: float) -> int:
         """만든 지 24시간이 지난 표를 지우고 지운 개수를 돌려준다."""

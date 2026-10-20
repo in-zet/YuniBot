@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, cast
 
-from core.agent import AgentLoop
+from core.agent import AgentLoop, AgentTurnResult
 from core.conversation_skills import ConversationSkillStore
 from core.cooldown import CooldownTracker, check_monthly_cap
 from core.events import EventBus
@@ -24,6 +24,7 @@ from core.fallback_messages import (
 )
 from core.response_assembly import assemble_response
 from core.skill_loading import Mode, SkillLoadState
+from core.tables import TableStore, describe_table
 from core.threads import ThreadEndRequest, ThreadManager, ThreadSession
 from core.tool_types import Display, ToolContext
 from services.common.memory import PendingMessage, strip_mentions
@@ -168,6 +169,7 @@ class MentionEntry:
         address: _AddressLike | None = None,
         conversation_skills: ConversationSkillStore | None = None,
         threads: ThreadManager | None = None,
+        tables: TableStore | None = None,
     ) -> None:
         self._agent = agent
         self._players = players
@@ -191,6 +193,44 @@ class MentionEntry:
         self._address = address
         self._conversation_skills = conversation_skills
         self._threads = threads
+        self._tables = tables
+
+    def _table_snippets(
+        self, *, player_id: str, trigger: ChannelMessage, context: list[ChannelMessage], thread: ThreadSession | None
+    ) -> list[str]:
+        """맥락 안에 살아 있는 표를 프롬프트 조각으로 알린다. 스레드가 아닐 때는 맥락 밖 표를 먼저 지운다."""
+        channel = trigger.channel_id
+        if self._tables is None or channel is None:
+            return []
+        if thread is None:
+            self._tables.retain_only(player_id, channel, {m.message_id for m in context if m.is_bot})
+        snippets: list[str] = []
+        for table_id in self._tables.ids(player_id, channel):
+            table = self._tables.get(player_id, channel, table_id)
+            if table is not None:
+                snippets.append(describe_table(table, stale=self._tables.is_stale(player_id, channel, table_id)))
+        if not snippets:
+            return []
+        replied = (
+            self._tables.table_for_message(player_id, channel, trigger.reference_id) if trigger.reference_id else None
+        )
+        if replied is not None:
+            snippets.append(f"답장한 메시지의 표: {replied}")
+        last = self._tables.last_bound(player_id, channel)
+        if last is not None:
+            snippets.append(f"마지막으로 보여 준 표: {last}")
+        return snippets
+
+    def _settle_tables(self, *, player_id: str, trigger: ChannelMessage, result: AgentTurnResult, sent_id: str | None) -> None:
+        """이 턴의 마지막 표를 유니 답장 메시지에 묶고, 나머지 중간 표는 지운다."""
+        channel = trigger.channel_id
+        if self._tables is None or channel is None:
+            return
+        for table_id in result.turn_table_ids:
+            if table_id != result.last_table_id or sent_id is None:
+                self._tables.discard(player_id, channel, table_id)
+        if result.last_table_id is not None and sent_id is not None:
+            self._tables.bind(player_id, channel, result.last_table_id, sent_id)
 
     async def _carried_skills(self, trigger: ChannelMessage, context: list[ChannelMessage]) -> list[str]:
         """답장 사슬에서 가장 가까운 유니 메시지가 남긴 '펼쳐 둔 스킬'을 찾는다. 답장이 아니면 새 대화다."""
@@ -277,6 +317,7 @@ class MentionEntry:
             prompt_context_snippets.append("이 플레이어는 유니를 처음 멘션했다.")
         if thread is not None and thread.guidance:
             prompt_context_snippets.append(thread.guidance)
+        prompt_context_snippets.extend(self._table_snippets(player_id=player.id, trigger=trigger, context=context, thread=thread))
 
         # 요청한 본인의 호칭과 메모리만 프롬프트에 넣는다(00-core.md "주입 범위"). 호칭은 코드가 정한
         # 최종 이름이고, 모델은 "상"을 직접 붙이지 않는다.
@@ -305,7 +346,7 @@ class MentionEntry:
             mode=cast("Mode", self._skill_loading_mode), known_skills=self._known_skill_names, opened=carried,
         )
 
-        async def reply(text: str, displays: list[Display]) -> None:
+        async def reply(text: str, displays: list[Display]) -> str | None:
             # 이 답장에 단 답장이 같은 스킬을 펼친 채 시작하도록, 유니가 보낸 메시지 id에 목록을 남긴다.
             sent_id = await send(text, displays)
             if thread is not None:
@@ -318,6 +359,7 @@ class MentionEntry:
                     )
                 except Exception:
                     logger.warning("펼친 스킬 목록 저장 실패", exc_info=True)
+            return sent_id
 
         # RETRY_WAIT_MESSAGES(503 재시도)와 WORKING_MESSAGES(heavy 스킬)는 같은 "잠깐만
         # 기다려 달라" 취지라 이번 요청에서 둘 중 하나만, 한 번만 보낸다 — 실기 2026-10-18:
@@ -383,7 +425,8 @@ class MentionEntry:
             else:
                 public_displays.append(display)
         text = assembled.text or pick(LLM_FAILURE_MESSAGES)
-        await reply(f"{text}\n{pick(PRIVATE_DM_FAILED_MESSAGES)}" if dm_failed else text, public_displays)
+        sent_id = await reply(f"{text}\n{pick(PRIVATE_DM_FAILED_MESSAGES)}" if dm_failed else text, public_displays)
+        self._settle_tables(player_id=player.id, trigger=trigger, result=result, sent_id=sent_id)
         # 모델이 끝내자고 한 대화는 마무리 말을 보낸 뒤 닫는다(닫힘 훅이 전문을 저장한다).
         if thread is not None and thread_end is not None and thread_end.requested and self._threads is not None:
             await self._threads.close(thread.thread_id, reason="explicit")

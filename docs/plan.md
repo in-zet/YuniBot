@@ -93,7 +93,7 @@
     - [X] 1-5 코어 내장 도구(`select_rows`·`table_query`·`table_peek`) — 구현 완료(2026-10-20)
     - [X] 1-6 글자 출력(`render_text`·`row_text`·응답 조립) — 구현 완료(2026-10-20)
     - [X] 1-7 첨부 파일과 그림 표 표시(`Display.files`·`drew_table`·슬래시 경로) — 구현 완료(2026-10-20). 실기 미확인: 11행 이상 표가 .txt 첨부로 나가는지(멘션·슬래시)
-    - [ ] 1-8 수명 연결(`core/mention.py`: 묶기·`retain_only`·프롬프트 조각·번호 기준 줄) — 사용자가 1-7까지만 말해서 이후 순서는 1-7 뒤에 다시 확인
+    - [X] 1-8 수명 연결(`core/mention.py`: 묶기·`retain_only`·프롬프트 조각·번호 기준 줄) — 구현 완료(2026-10-20)
     - [ ] 1-9 프롬프트(`prompts/rules.md`)
   - [ ] Part 2: 첫 범위 스킬(곡 검색 4개·`best`·`add_scores`·폴더 보기/저장)
   - [ ] Part 3: 그림 표 `chunithm-image`

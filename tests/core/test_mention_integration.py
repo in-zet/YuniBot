@@ -32,6 +32,7 @@ from core.prompt import PromptAssembler
 from core.registry import SkillRegistry
 from core.registry_snapshot import build_snapshot
 from core.resolvers import ResolverRegistry
+from core.tables import RowRef, TableBuilder, TableStore, cell
 from core.threads import ThreadSession
 from core.tool_types import Display, ToolContext
 from services.common.notify import NotifyService
@@ -188,12 +189,13 @@ def _mention_entry(
     notify: Any | None = None,
     conversation_skills: Any | None = None,
     threads: Any | None = None,
+    tables: TableStore | None = None,
 ) -> tuple[MentionEntry, _FakeUsage]:
     registry = _registry(*extra_skill_dirs)
     bus = event_bus if event_bus is not None else EventBus()
     executor = ToolExecutor(
         resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(),
-        tag_definitions=registry.tag_definitions(), event_bus=bus,
+        tag_definitions=registry.tag_definitions(), event_bus=bus, tables=tables,
     )
     prompt = PromptAssembler(rules_text=Path("prompts/rules.md").read_text(), persona_text=Path("prompts/persona.md").read_text(), registry=registry)
     snapshot = build_snapshot(registry) if registry_snapshot_enabled else None
@@ -211,7 +213,7 @@ def _mention_entry(
         settings=_FakeSettings(), usage=usage_obj, bot_discord_id="bot", agent_model=agent_model,
         memory=memory if memory is not None else _FakeMemory(), event_bus=bus,
         known_skill_names={s.manifest.name for s in registry.enabled_skills()}, skill_loading_mode="instructions",
-        address=address, conversation_skills=conversation_skills, threads=threads,
+        address=address, conversation_skills=conversation_skills, threads=threads, tables=tables,
     )
     return entry, usage_obj
 
@@ -1084,3 +1086,185 @@ async def test_thread_stays_open_when_the_model_does_not_end_it() -> None:
     )
 
     assert manager.session_for_channel("c1") is session
+
+
+# ---- 작업 표 수명 ----
+
+_TABLE_TOOL_BODY = (
+    "from core.tables import RowRef, TableBuilder, cell\n\n\n"
+    "@tool()\n"
+    "async def make_table(ctx: ToolContext) -> ToolResult:\n"
+    '    """테스트용: 표를 만든다."""\n'
+    '    builder = TableBuilder(subject="p1", unit="채보").column("song", "곡", bare=True).step("테스트 표")\n'
+    '    builder.row(RowRef("chunithm.chart", "1"), {"song": cell("크로노")})\n'
+    "    return ToolResult(table=builder.build())\n"
+)
+
+
+def _call(name: str, call_id: str = "1") -> GenerationTurn:
+    return GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id=call_id, name=name, args={})],
+    )
+
+
+def _say(text: str) -> GenerationTurn:
+    return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text=text)]), text=text)
+
+
+def _trigger(message_id: str, *, reference_id: str | None = None, channel_id: str | None = "c1") -> ChannelMessage:
+    return ChannelMessage(
+        message_id=message_id, author_discord_id="p1", is_bot=False, content="표 보여 줘", mentions_bot=True,
+        reference_id=reference_id, channel_id=channel_id,
+    )
+
+
+def _yuni(message_id: str) -> ChannelMessage:
+    return ChannelMessage(message_id=message_id, author_discord_id="bot", is_bot=True, content="표야", channel_id="c1")
+
+
+async def _run(entry: MentionEntry, trigger: ChannelMessage, history: list[ChannelMessage], *, sent_id: str = "m100") -> list[list[Display]]:
+    shown: list[list[Display]] = []
+
+    async def _send(text: str, displays: list[Display]) -> str | None:
+        shown.append(displays)
+        return sent_id
+
+    await entry.handle(
+        trigger=trigger, history=history, guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC),
+        send=_send, typing=_NoopTyping(),
+    )
+    return shown
+
+
+def _system_prompt(script: FakeLlmAdapter) -> str:
+    return script.calls[-1][1]
+
+
+@pytest.mark.asyncio
+async def test_only_the_last_table_of_a_turn_is_kept_and_bound_to_the_reply(tmp_path: Path) -> None:
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "test-tables", _TABLE_TOOL_BODY)
+    store = TableStore()
+    turns = [_call("test-tables_make_table", "1"), _call("test-tables_make_table", "2"), _say("두 번 만들었어")]
+    entry, _usage = _mention_entry(turns, extra_skill_dirs=(skills_root,), tables=store)
+    trigger = _trigger("1")
+
+    shown = await _run(entry, trigger, [trigger])
+
+    assert store.ids("p1", "c1") == ["t2"]  # 중간 표 t1은 버린다
+    assert store.table_for_message("p1", "c1", "m100") == "t2"
+    assert store.last_bound("p1", "c1") == "t2"
+    assert [d.content for d in shown[0]] == ["테스트 표\n1. 크로노"]  # 마지막 표만 그린다
+
+
+@pytest.mark.asyncio
+async def test_no_table_is_stored_when_there_is_no_channel(tmp_path: Path) -> None:
+    skills_root = tmp_path / "skills"
+    _ = write_skill(skills_root, "test-tables", _TABLE_TOOL_BODY)
+    store = TableStore()
+    entry, _usage = _mention_entry(
+        [_call("test-tables_make_table"), _say("끝")], extra_skill_dirs=(skills_root,), tables=store
+    )
+    trigger = _trigger("1", channel_id=None)
+
+    await _run(entry, trigger, [trigger])
+
+    assert store.ids("p1", "c1") == []
+
+
+def _store_with_bound_table(*, stale: bool = False) -> TableStore:
+    store = TableStore()
+    builder = TableBuilder(subject="p1", unit="채보").column("song", "곡").column("score", "점수", "number")
+    builder.column("id", "아이디", slash_only=True)
+    builder.row(RowRef("k", "1"), {"song": cell("A"), "score": cell(1), "id": cell("g1")})
+    builder.steps(["15.0 상수 MAS", "내 점수"])
+    _ = store.put("p1", "c1", builder.build(), now=0, stale=stale)
+    store.bind("p1", "c1", "t1", "m100")
+    return store
+
+
+@pytest.mark.asyncio
+async def test_alive_tables_and_number_base_lines_go_into_the_prompt() -> None:
+    store = _store_with_bound_table()
+    llm_turns = [_say("응")]
+    entry, _usage = _mention_entry(llm_turns, tables=store)
+    llm = entry._agent._llm  # pyright: ignore[reportPrivateUsage]
+    trigger = _trigger("2", reference_id="m100")
+
+    await _run(entry, trigger, [_yuni("m100"), trigger])
+
+    prompt = _system_prompt(llm)  # pyright: ignore[reportArgumentType]
+    assert "[살아 있는 표] t1 — 15.0 상수 MAS → 내 점수 (1채보, 칸: 곡·점수)" in prompt
+    assert "아이디" not in prompt  # slash_only 칸은 알리지 않는다
+    assert "답장한 메시지의 표: t1" in prompt
+    assert "마지막으로 보여 준 표: t1" in prompt
+
+
+@pytest.mark.asyncio
+async def test_not_a_reply_has_no_replied_line_but_still_the_last_shown_table() -> None:
+    store = _store_with_bound_table()
+    entry, _usage = _mention_entry([_say("응")], tables=store)
+    trigger = _trigger("2")
+
+    await _run(entry, trigger, [_yuni("m100"), trigger])
+
+    prompt = _system_prompt(entry._agent._llm)  # pyright: ignore[reportPrivateUsage,reportArgumentType]
+    assert "답장한 메시지의 표" not in prompt
+    assert "마지막으로 보여 준 표: t1" in prompt
+
+
+@pytest.mark.asyncio
+async def test_stale_table_is_flagged_in_the_prompt() -> None:
+    store = _store_with_bound_table(stale=True)
+    entry, _usage = _mention_entry([_say("응")], tables=store)
+    trigger = _trigger("2")
+
+    await _run(entry, trigger, [_yuni("m100"), trigger])
+
+    assert "[살아 있는 표] t1 (동기화 전 값) —" in _system_prompt(entry._agent._llm)  # pyright: ignore[reportPrivateUsage,reportArgumentType]
+
+
+@pytest.mark.asyncio
+async def test_table_pushed_out_of_the_context_is_deleted() -> None:
+    store = _store_with_bound_table()
+    entry, _usage = _mention_entry([_say("응")], tables=store)
+    # 유니의 m100 뒤로 플레이어 메시지가 10개를 넘으면 m100은 맥락 밖이다
+    later = [
+        ChannelMessage(message_id=f"p{i}", author_discord_id="p1", is_bot=False, content="잡담", channel_id="c1")
+        for i in range(11)
+    ]
+    trigger = _trigger("2")
+
+    await _run(entry, trigger, [_yuni("m100"), *later, trigger])
+
+    assert store.ids("p1", "c1") == []
+    assert "[살아 있는 표]" not in _system_prompt(entry._agent._llm)  # pyright: ignore[reportPrivateUsage,reportArgumentType]
+
+
+@pytest.mark.asyncio
+async def test_other_players_and_channels_tables_are_left_alone() -> None:
+    store = _store_with_bound_table()
+    _ = store.put("p2", "c1", TableBuilder().column("a").build(), now=0)
+    _ = store.put("p1", "c2", TableBuilder().column("a").build(), now=0)
+    entry, _usage = _mention_entry([_say("응")], tables=store)
+    trigger = _trigger("2")
+
+    await _run(entry, trigger, [trigger])  # 맥락에 m100이 없다
+
+    assert store.ids("p1", "c1") == []
+    assert store.ids("p2", "c1") == ["t1"] and store.ids("p1", "c2") == ["t1"]
+
+
+@pytest.mark.asyncio
+async def test_thread_keeps_its_tables_until_the_thread_closes() -> None:
+    store = _store_with_bound_table()
+    entry, _usage = _mention_entry([_say("응")], tables=store)
+    trigger = _trigger("2")
+
+    snippets = entry._table_snippets(  # pyright: ignore[reportPrivateUsage]
+        player_id="p1", trigger=trigger, context=[trigger], thread=cast("ThreadSession", object())
+    )
+
+    assert store.ids("p1", "c1") == ["t1"]  # 맥락에 m100이 없어도 지우지 않는다
+    assert snippets[0].startswith("[살아 있는 표] t1")
