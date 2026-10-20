@@ -15,7 +15,7 @@ import aiosqlite
 import pytest
 
 from core.events import EventBus, Section
-from core.tables import RowRef, render_text
+from core.tables import RowRef, TableBuilder, WorkTable, cell, render_text
 from core.tool_types import Display, ToolContext
 from services.chunithm.records import ChartUpdate, RatingDeltas, SessionInfo, SyncDiff
 from services.chunithm.songdb import SongDbService
@@ -387,6 +387,14 @@ async def test_history_only_shows_the_players_own_records(skill: ModuleType, db:
 # ---------------------------------------------------------------- 약속
 
 
+def _promise_table(*promise_ids: str) -> WorkTable:
+    builder = TableBuilder(subject="p1", unit="약속")
+    builder.column("약속")
+    for promise_id in promise_ids:
+        builder.row(RowRef("yuni-bond.promise", promise_id), {"약속": cell(promise_id)})
+    return builder.build()
+
+
 async def test_promise_lifecycle(skill: ModuleType, db: aiosqlite.Connection) -> None:
     saved = await skill.promise_set(_ctx(db), text="다음엔  크로노\n연습할게")
     assert saved.data["text"] == "다음엔 크로노 연습할게"
@@ -402,7 +410,7 @@ async def test_promise_lifecycle(skill: ModuleType, db: aiosqlite.Connection) ->
     assert saved.data["id"] not in render_text(table).content  # id는 슬래시 출력에만
     assert saved.data["id"] in render_text(table, slash=True).content
 
-    closed = await skill.promise_close(_ctx(db), promise_id=saved.data["id"])
+    closed = await skill.close_promises(_ctx(db), listed.table)
     assert closed.error is None
     assert (await skill.promise_list(_ctx(db))).data == {"count": 0}
 
@@ -425,13 +433,29 @@ async def test_open_promises_are_capped(skill: ModuleType, db: aiosqlite.Connect
 async def test_promise_tools_only_touch_the_players_own_promises(skill: ModuleType, db: aiosqlite.Connection) -> None:
     saved = await skill.promise_set(_ctx(db, player_id="p1"), text="내 약속")
 
-    assert (await skill.promise_close(_ctx(db, player_id="p2"), promise_id=saved.data["id"])).error is not None
+    assert (await skill.close_promises(_ctx(db, player_id="p2"), _promise_table(saved.data["id"]))).error is not None
     assert (await skill.promise_list(_ctx(db, player_id="p2"))).data == {"count": 0}
+
+
+async def test_close_promises_closes_several_and_counts_only_real_changes(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    first = await skill.promise_set(_ctx(db), text="연습1")
+    second = await skill.promise_set(_ctx(db), text="연습2")
+    table = _promise_table(first.data["id"], second.data["id"])
+    await skill.close_promises(_ctx(db), _promise_table(first.data["id"]))  # 표를 찍은 뒤 이미 닫혔다
+
+    result = await skill.close_promises(_ctx(db), table)
+
+    assert result.data["closed_count"] == 1 and result.data["already_closed"] == 1
+    assert result.data["texts"] == ["연습2"]
+    assert "1개는 이미 닫혀 있어서" in result.display.content
+    assert (await skill.close_promises(_ctx(db), table)).error is not None  # 이제 열린 약속이 없다
 
 
 async def test_dropping_a_promise_is_not_the_same_as_keeping_it(skill: ModuleType, db: aiosqlite.Connection) -> None:
     saved = await skill.promise_set(_ctx(db), text="연습")
-    await skill.promise_close(_ctx(db), promise_id=saved.data["id"], kept=False)
+    await skill.close_promises(_ctx(db), _promise_table(saved.data["id"]), kept=False)
 
     assert [r["status"] for r in await _rows(db, "SELECT status FROM yuni_bond_promises")] == ["dropped"]
 
@@ -499,7 +523,7 @@ async def test_prompt_context_skips_expired_and_closed_promises(skill: ModuleTyp
         "INSERT INTO yuni_bond_promises (id, player_id, text, created_on) VALUES ('old', 'p1', '옛 약속', '2026-09-01')"
     )
     saved = await skill.promise_set(_ctx(db), text="닫을 약속")
-    await skill.promise_close(_ctx(db), promise_id=saved.data["id"])
+    await skill.close_promises(_ctx(db), _promise_table(saved.data["id"]))
 
     assert await skill.open_promises(_ctx(db)) is None
 

@@ -9,15 +9,22 @@ import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import aiosqlite
 
 from core.decorators import on, prompt_context, tool
 from core.events import Section
 from core.resolvers import ResolutionError
-from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
-from core.tool_types import ArcadeRef, Display, SongQuery, ToolContext, ToolResult
+from core.tables import EMPTY_CELL, RowRef, TableBuilder, TableNeeds, WorkTable, cell
+from core.tool_types import (
+    ArcadeRef,
+    Display,
+    SongQuery,
+    TableRef,
+    ToolContext,
+    ToolResult,
+)
 from services.chunithm import table_columns as tc
 from services.chunithm.songdb import SongRecord
 from services.common.arcades import Arcade
@@ -624,7 +631,7 @@ async def promise_set(ctx: ToolContext, text: str, song: SongQuery | None = None
 
 @tool(slash="약속")
 async def promise_list(ctx: ToolContext) -> ToolResult:
-    """내 열린 약속을 보여 준다."""
+    """내 열린 약속을 표로 보여 준다. 이 표로 close_promises를 불러 닫는다."""
     rows = await _open_promises(_db(ctx), ctx.player_id, limit=_OPEN_PROMISE_CAP)
     if not rows:
         return ToolResult(
@@ -661,24 +668,38 @@ async def promise_list(ctx: ToolContext) -> ToolResult:
 
 
 @tool(mutates=True)
-async def promise_close(ctx: ToolContext, promise_id: str, kept: bool = True) -> ToolResult:
-    """열린 약속을 닫는다. 지켰으면 kept=True, 그냥 접기로 했으면 kept=False. 본인 약속만 닫는다."""
+async def close_promises(
+    ctx: ToolContext,
+    table: Annotated[TableRef, TableNeeds(ref_kind=_PROMISE)],
+    kept: bool = True,
+) -> ToolResult:
+    """약속 표(promise_list 결과)의 열린 약속을 닫는다. 일부만 닫으려면 table에 번호(예: "t3:2")나 거른 표를
+    가리킨다. 지켰으면 kept=True, 그냥 접기로 했으면 kept=False. 본인 약속만 닫고, 이미 닫힌 약속은 건너뛴다."""
+    assert isinstance(table, WorkTable)
     db = _db(ctx)
-    cursor = await db.execute(
-        "SELECT text FROM yuni_bond_promises WHERE id = ? AND player_id = ? AND status = 'open'",
-        (promise_id, ctx.player_id),
-    )
-    row = await cursor.fetchone()
-    if row is None:
-        return ToolResult(error="그런 열린 약속이 없다")
-    _ = await db.execute(
-        "UPDATE yuni_bond_promises SET status = ?, closed_on = ? WHERE id = ?",
-        ("done" if kept else "dropped", _today().isoformat(), promise_id),
-    )
+    ids = list(dict.fromkeys(row.ref.key for row in table.rows))
+    closed: list[str] = []
+    for promise_id in ids:
+        cursor = await db.execute(
+            "SELECT text FROM yuni_bond_promises WHERE id = ? AND player_id = ? AND status = 'open'",
+            (promise_id, ctx.player_id),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            continue
+        _ = await db.execute(
+            "UPDATE yuni_bond_promises SET status = ?, closed_on = ? WHERE id = ?",
+            ("done" if kept else "dropped", _today().isoformat(), promise_id),
+        )
+        closed.append(row["text"])
     await db.commit()
+    already = len(ids) - len(closed)
+    if not closed:
+        return ToolResult(error="닫을 수 있는 열린 약속이 없다" + (f"({already}개는 이미 닫혔거나 없음)" if already else ""))
+    note = f" ({already}개는 이미 닫혀 있어서 뺐어.)" if already else ""
     return ToolResult(
-        data={"id": promise_id, "text": row["text"], "kept": kept},
-        display=Display(content="약속을 닫았어."), display_mode="optional",
+        data={"closed_count": len(closed), "already_closed": already, "texts": closed, "kept": kept},
+        display=Display(content=f"약속 {len(closed)}개를 닫았어.{note}"), display_mode="optional",
     )
 
 
