@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from core.fallback_messages import IDLE_CHECK_MESSAGE
 from core.threads import ThreadManager, ThreadTranscript
 
 
@@ -218,7 +219,7 @@ async def test_failing_session_does_not_block_other_sessions() -> None:
 
     # 첫 세션의 send_message가 예외를 던져도 두 번째 세션의 확인 메시지는 처리된다
     await manager.check_idle(now=base + timedelta(seconds=301))
-    assert good_transport.sent == ["다 끝났나요?"]
+    assert good_transport.sent == [IDLE_CHECK_MESSAGE]
     assert good.state == "checking"
 
     # 두 번째 세션의 닫기도 첫 세션 실패에 막히지 않는다

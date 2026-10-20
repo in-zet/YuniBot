@@ -8,7 +8,7 @@ import discord
 from core.threads import ThreadManager, ThreadSession
 from services.common.players import PlayersService
 
-ENDED_MESSAGE = "대화를 마쳤어."
+ENDED_MESSAGE = "대화 끝! 또 필요하면 언제든 불러 줘~"
 
 
 class ThreadEndView(discord.ui.View):

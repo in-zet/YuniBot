@@ -19,6 +19,7 @@ from core.bot import (  # pyright: ignore[reportPrivateUsage]
 from core.config import CoreConfig
 from core.decorators import EventHandlerSpec, ScheduleSpec, SkillCode
 from core.events import EventBus
+from core.fallback_messages import IDLE_CHECK_MESSAGE
 from core.manifest import SkillManifest
 from core.registry import LoadedSkill, SkillRegistry
 from core.threads import ThreadTranscript
@@ -688,7 +689,7 @@ async def test_poll_schedules_closes_an_idle_thread_and_queues_its_transcript_fo
         )
 
         await client._poll_schedules()  # pyright: ignore[reportPrivateUsage]
-        assert transport.sent == ["다 끝났나요?"]
+        assert transport.sent == [IDLE_CHECK_MESSAGE]
         await client._poll_schedules()  # pyright: ignore[reportPrivateUsage]
 
         assert [t.closed_reason for t in closed] == ["timeout"]

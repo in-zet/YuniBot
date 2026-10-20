@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
+from core.fallback_messages import IDLE_CHECK_MESSAGE
+
 logger = logging.getLogger(__name__)
 
 ClosedReason = Literal["explicit", "timeout", "shutdown"]
@@ -152,7 +154,7 @@ class ThreadManager:
 
         if session.state == "open":
             if (now - session.last_activity).total_seconds() >= session.idle_timeout:
-                await session.transport.send_message("다 끝났나요?")
+                await session.transport.send_message(IDLE_CHECK_MESSAGE)
                 session.state = "checking"
                 session.checked_at = now
         elif session.state == "checking":
