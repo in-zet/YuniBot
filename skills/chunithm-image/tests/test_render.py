@@ -100,8 +100,8 @@ def test_split_pages_numbers_match_table_numbers() -> None:
     assert [n for n, _ in table.numbered_rows()] == list(range(1, 11))
 
 
-def test_card_page_limit_is_50_and_list_is_30() -> None:
-    assert render.CARD_PAGE_LIMIT == 50
+def test_card_page_is_8_lines_and_list_is_30_rows() -> None:
+    assert render.CARD_PAGE_ROWS == 8
     assert render.LIST_PAGE_LIMIT == 30
 
 
@@ -120,8 +120,33 @@ def test_render_small_card_table_gives_one_png() -> None:
     assert height > render._JACKET
 
 
-def test_render_card_splits_at_50() -> None:
-    files = render.render_pages(_chart_table(51), layout="card", jackets={})
+def test_card_grid_is_at_most_eight_wide_and_shorter_than_five_wide() -> None:
+    table = _chart_table(40)
+    jackets = {f"곡 {i}": _png() for i in range(40)}
+
+    (_, data), = render.render_pages(table, layout="card", jackets=jackets)
+
+    width, height = _size(data)
+    assert width == 2 * render._MARGIN + 8 * render._CARD_W + 7 * render._GAP
+    assert height < 2400  # 5열이면 8줄이라 이보다 길었다
+
+
+def test_split_pages_counts_grid_lines_not_cards() -> None:
+    table = _chart_table(0, groups=(10, 3))  # 8열: 묶음1 2줄, 묶음2 1줄
+
+    assert [[len(s.rows) for s in page] for page in render.split_pages(table, 2, 8)] == [[10], [3]]
+    assert [[len(s.rows) for s in page] for page in render.split_pages(table, 3, 8)] == [[10, 3]]
+
+
+def test_split_pages_cuts_big_group_by_lines() -> None:
+    pages = render.split_pages(_chart_table(150), 8, 8)
+
+    assert [sum(len(s.rows) for s in page) for page in pages] == [64, 64, 22]
+
+
+def test_render_card_splits_at_8_lines() -> None:
+    assert len(render.render_pages(_chart_table(64), layout="card", jackets={})) == 1
+    files = render.render_pages(_chart_table(65), layout="card", jackets={})
 
     assert len(files) == 2
     assert [name for name, _ in files] == sorted({name for name, _ in files})
@@ -245,7 +270,7 @@ def test_score_font_shrinks_so_score_and_rank_fit_on_one_line() -> None:
 
 
 def test_stale_and_page_notes_do_not_crash_and_multi_page_names_are_numbered() -> None:
-    files = render.render_pages(_chart_table(60), layout="card", jackets={}, stale=True)
+    files = render.render_pages(_chart_table(70), layout="card", jackets={}, stale=True)
     assert [name.rsplit("_", 1)[-1] for name, _ in files] == ["1.png", "2.png"]
 
 

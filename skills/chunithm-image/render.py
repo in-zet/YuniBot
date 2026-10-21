@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 Layout = Literal["card", "list"]
 
-CARD_PAGE_LIMIT = 50
+CARD_PAGE_ROWS = 8  # 카드 그림 한 장의 최대 줄 수(개수가 아니라 줄로 센다, 2026-10-21 결정)
 LIST_PAGE_LIMIT = 30
 
 _MARGIN = 24
@@ -215,15 +215,17 @@ class Segment:
         return number - self.first_number + 1
 
 
-def split_pages(table: WorkTable, limit: int) -> list[list[Segment]]:
-    """한 쪽에 `limit`행까지. 묶음 경계에서 자르고, 묶음 하나가 `limit`보다 크면 그 안에서 자른다."""
+def split_pages(table: WorkTable, limit: int, columns: int = 1) -> list[list[Segment]]:
+    """한 쪽에 `limit`줄까지(한 줄에 `columns`행). 묶음마다 새 줄에서 시작한다. 묶음 경계에서 자르고,
+    묶음 하나가 `limit`줄보다 크면 그 안에서 자른다."""
     numbered = iter(table.numbered_rows())
+    per_page = limit * columns
     units: list[Segment] = []
     for group in table.groups:
         rows = tuple(next(numbered) for _ in group.rows)
         first_number = rows[0][0] if rows else 1
-        for start in range(0, max(len(rows), 1), limit):
-            chunk = rows[start : start + limit]
+        for start in range(0, max(len(rows), 1), per_page):
+            chunk = rows[start : start + per_page]
             if chunk:
                 units.append(
                     Segment(group.title, len(rows), group.summary, chunk, continued=start > 0, first_number=first_number)
@@ -231,11 +233,12 @@ def split_pages(table: WorkTable, limit: int) -> list[list[Segment]]:
     pages: list[list[Segment]] = []
     used = 0
     for unit in units:
-        if not pages or used + len(unit.rows) > limit:
+        lines = -(-len(unit.rows) // columns)
+        if not pages or used + lines > limit:
             pages.append([])
             used = 0
         pages[-1].append(unit)
-        used += len(unit.rows)
+        used += lines
     return pages
 
 
@@ -371,6 +374,7 @@ _INFO_LINE = 34
 _TITLE_LINE = 26  # 재킷 안 곡명 줄 높이
 _CARD_RATING_SIZE = 18  # 곡 레이팅만 다른 글자보다 크게(2026-10-21 실기)
 _GRADIENT_MAX_ALPHA = 220
+_MAX_COLUMNS = 8  # 한 줄 카드 수 상한 — 세로가 너무 길면 디스코드 미리보기가 화질을 깎는다(2026-10-21 실기)
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,13 +482,17 @@ def _draw_card(
             draw.text((right - _width(font, rank_text), cy), rank_text, font=font, fill=_rank_color(rank_text))
 
 
+def card_columns(table: WorkTable) -> int:
+    """카드 한 줄의 장수. 표 전체 크기로 정해서 쪽마다 폭이 같다."""
+    return min(_MAX_COLUMNS, max(3, table.row_count))
+
+
 def _draw_cards(
     segments: Sequence[Segment], table: WorkTable, jackets: Mapping[str, Image.Image | None],
     profile: HeaderProfile | None, *, stale: bool, page: int, pages: int,
 ) -> Image.Image:
     lines = _card_lines(table)
-    count = sum(len(segment.rows) for segment in segments)
-    columns = min(5, max(3, count))
+    columns = card_columns(table)
     width = _MARGIN * 2 + columns * _CARD_W + (columns - 1) * _GAP
     bare = len(table.groups) == 1 and table.groups[0].title is None
 
@@ -611,9 +619,8 @@ def render_pages(
 ) -> list[tuple[str, bytes]]:
     """표를 그림으로 그려 (파일 이름, PNG 바이트) 목록으로 돌려준다. 쪽 상한을 넘으면 여러 장이다.
     `jackets`는 곡 제목 → 재킷 그림 바이트(받기 실패·없음은 None 또는 빠짐 → 빈 사각형)."""
-    limit = CARD_PAGE_LIMIT if layout == "card" else LIST_PAGE_LIMIT
+    pages = split_pages(table, CARD_PAGE_ROWS, card_columns(table)) if layout == "card" else split_pages(table, LIST_PAGE_LIMIT)
     opened = {title: _open(data) for title, data in jackets.items()}
-    pages = split_pages(table, limit)
     draw_page = _draw_cards if layout == "card" else _draw_list
     stem = table_file_name(table).removesuffix(".txt")
     files: list[tuple[str, bytes]] = []
