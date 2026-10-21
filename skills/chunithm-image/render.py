@@ -346,6 +346,7 @@ _GAP = 12
 _INFO_TOP = _CARD_PAD + _JACKET + 6
 _INFO_LINE = 34
 _TITLE_LINE = 26  # 재킷 안 곡명 줄 높이
+_CARD_RATING_SIZE = 18  # 곡 레이팅만 다른 글자보다 크게(2026-10-21 실기)
 _GRADIENT_MAX_ALPHA = 220
 
 
@@ -437,9 +438,9 @@ def _draw_card(
             draw.text((left, cy), f"상수 {const.text}", font=_font(13, False), fill=_MUTED)
         rating = row.cell(tc.RATING)
         if rating.filled:
-            font = _font(14, True)
+            font = _font(_CARD_RATING_SIZE, True)
             width = _width(font, rating.text)
-            draw.text((right - width, cy - 1), rating.text, font=font, fill=_TEXT)
+            draw.text((right - width, cy - 3), rating.text, font=font, fill=_TEXT)
         cy += _INFO_LINE
     if lines.score_rank:
         score, rank = row.cell(tc.SCORE), row.cell(tc.RANK)
@@ -509,8 +510,8 @@ def _draw_list_row(
     if tc.RATING in names:
         rating = row.cell(tc.RATING)
         if rating.text:
-            font = _font(16, True)
-            draw.text((right - _width(font, rating.text), y + 24), rating.text, font=font, fill=_TEXT)
+            font = _font(19, True)
+            draw.text((right - _width(font, rating.text), y + 20), rating.text, font=font, fill=_TEXT)
         right -= 114
     if tc.LAMP in names:
         _draw_lamp(draw, (right - 64, y + 26), row)
