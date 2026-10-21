@@ -10,6 +10,7 @@ examples:
   - 15.0에서 15.2 상수 중에 노트 수 1000개 넘는 곡 뭐 있어?
   - 신곡 중에 14.7 이상 레벨도 같이 보여줘
   - 15 상수 곡들 노트 수 많은 순으로 보여줘
+  - 링버 해금곡 마스터 상수표 보여 줘
 category: 곡 정보
 game: chunithm
 version: 1
@@ -26,6 +27,15 @@ emits: [chunithm.song.viewed]
   없으면 없다고 한다(철자가 다를 수 있다고 알려 줘도 된다).
 - 수록 버전으로 찾을 때 난이도를 안 말했으면 `find_by_version`의 난이도를 비워 그 버전
   전체를 보여준다. 난이도를 말했으면 그 난이도만 좁힌다.
+- 수록 버전 이름은 곡 DB의 것만 쓴다: CHUNITHM, CHUNITHM PLUS, AIR, AIR PLUS, STAR, STAR PLUS, AMAZON, AMAZON PLUS,
+  CRYSTAL, CRYSTAL PLUS, PARADISE, PARADISE LOST, Mate, NEW, NEW PLUS, SUN, SUN PLUS, LUMINOUS, LUMINOUS PLUS, VERSE,
+  X-VERSE, X-VERSE-X. 이 목록에 없는 말을 버전으로 짐작해 `find_by_version`에 넣지 않는다. "VERSE"가 들어 있어도
+  X-VERSE나 VERSE로 줄여 읽지 않는다.
+- **Linked VERSE(링크드 버스, 링버)는 수록 버전이 아니라 X-VERSE에서 생긴 해금 시스템**이다. 그 해금곡은
+  `find_linked_verse`로 찾는다(게이트별 묶음 표, `gate`로 한 게이트만). 상수표·그림을 달라고 하면서 난이도를 안
+  말했으면 `difficulty`를 MAS로 준다. 해금 조건·진행 방법을 물으면 `chunithm-terms`의 `explain`("Linked VERSE")으로
+  답하고, 그 이상은 지어내지 않는다.
+- 버전 목록에도 용어집에도 없는 이름(이벤트·모드명)은 곡을 짐작해 찍지 말고 어떤 걸 말하는지 되묻는다.
 - 상수 범위를 찾을 때 플레이어가 위쪽 한계를 말하지 않았으면("14.7 이상") `max_const`를 비운다. 한계를 지어내지
   않는다. "신곡" 조건이 있으면 `new_only`를 켠다.
 - 상수·레벨·버전·난이도·노트 수·신곡 중 두 개 이상을 동시에 걸면 `find_songs`를 쓴다(상수 범위 하나만,

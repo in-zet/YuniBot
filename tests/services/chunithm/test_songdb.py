@@ -564,3 +564,26 @@ def test_song_by_title_finds_by_exact_title_only(songdb: SongDbService) -> None:
     assert song is not None and song.title == "B.B.K.K.B.K.K."
     assert songdb.song_by_title("b.b.k.k.b.k.k.") is None  # 별칭·대소문자 풀이는 resolve의 일
     assert songdb.song_by_title("없는 곡") is None
+
+
+def test_linked_verse_titles_all_exist_in_songdb(songdb: SongDbService) -> None:
+    """linked_verse.yaml의 제목이 곡 DB 제목과 글자까지 같아야 한다(오타가 나면 조용히 빠지므로 대조한다)."""
+    from services.chunithm.songdb import (
+        _load_linked_verse,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    titles = [t for _gate, ts in _load_linked_verse(Path("services/chunithm/data/linked_verse.yaml")) for t in ts]
+    assert len(titles) == len(set(titles)) == 24
+    missing = [t for t in titles if songdb.song_by_title(t) is None]
+    assert missing == []
+    assert {hit.song.title for hit in songdb.find_linked_verse()} == set(titles)
+
+
+def test_find_linked_verse_filters_by_gate_and_difficulty(songdb: SongDbService) -> None:
+    hits = songdb.find_linked_verse(gate="전도 악곡", difficulty="MAS")
+    assert len(hits) == 11
+    assert {hit.gate for hit in hits} == {"전도 악곡"}
+    assert {hit.chart.difficulty for hit in hits} == {"MAS"}
+    with pytest.raises(ValueError, match="모르는 게이트"):
+        songdb.find_linked_verse(gate="없는게이트")
+    assert songdb.linked_verse_gates()[0] == "ORIGIN"

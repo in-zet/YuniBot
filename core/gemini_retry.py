@@ -42,6 +42,17 @@ def is_retryable(exc: genai_errors.APIError) -> bool:
     return exc.code in _RETRYABLE_CODES
 
 
+async def _timeout_as_504[T](call: Callable[[], Awaitable[T]]) -> T:
+    """클라이언트 쪽 타이머가 서버의 504보다 먼저 끊으면 날것 `TimeoutError`가 올라와 재시도·보조 모델 전환을
+    건너뛴다(2026-10-21, 데드라인을 20초로 줄인 뒤 확인). 같은 뜻의 504로 바꿔 같은 경로를 타게 한다."""
+    try:
+        return await call()
+    except TimeoutError as exc:
+        raise genai_errors.APIError(
+            504, {"error": {"message": "클라이언트 요청 타임아웃", "status": "DEADLINE_EXCEEDED"}}
+        ) from exc
+
+
 async def call_with_retry[T](
     call: Callable[[], Awaitable[T]],
     *,
@@ -53,7 +64,7 @@ async def call_with_retry[T](
     attempt = 0
     while True:
         try:
-            return await call()
+            return await _timeout_as_504(call)
         except genai_errors.APIError as exc:
             attempt += 1
             if (

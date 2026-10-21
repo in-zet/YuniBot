@@ -186,6 +186,33 @@ async def test_find_by_version_with_difficulty_filters_to_one_chart() -> None:
     assert {row.cell(tc.DIFFICULTY).text for row in result.table.rows} == {"MAS"}
 
 
+async def test_find_linked_verse_groups_by_gate_in_unlock_order() -> None:
+    skill = _load_skill()
+
+    result = await skill.find_linked_verse(_ctx_with_songdb(SongDbService()), difficulty=_resolved_difficulty("MASTER"))
+
+    assert result.error is None
+    table = result.table
+    assert table is not None
+    assert result.data == {"count": 24, "songs": 24}  # 해금곡 24곡, 곡마다 MAS 하나
+    assert [g.title for g in table.groups][:3] == ["ORIGIN", "AIR", "STAR"]
+    assert [g.title for g in table.groups][-2:] == ["UNIVERSE", "ENDING"]
+    assert table.steps == ("Linked VERSE MAS",)
+    assert "神鳴" in _titles(table) and "Linked Tune" in _titles(table)
+
+
+async def test_find_linked_verse_gate_filter_and_unknown_gate() -> None:
+    skill = _load_skill()
+    ctx = _ctx_with_songdb(SongDbService())
+
+    one = await skill.find_linked_verse(ctx, gate="sun", difficulty=_resolved_difficulty("MASTER"))
+    assert _titles(one.table) == ["Sweet & Sour"]
+    assert one.table is not None and one.table.steps == ("Linked VERSE sun MAS",)
+
+    unknown = await skill.find_linked_verse(ctx, gate="VERSE2")
+    assert unknown.error is not None and "ORIGIN" in unknown.error and "전도 악곡" in unknown.error
+
+
 async def test_find_by_artist_without_difficulty_returns_song_rows() -> None:
     skill = _load_skill()
     songdb = SongDbService()

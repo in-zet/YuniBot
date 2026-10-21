@@ -165,12 +165,43 @@ async def find_by_version(
     ctx: ToolContext, version: str, difficulty: DifficultyRef | None = None
 ) -> ToolResult:
     """수록 버전으로 채보 목록을 상수순으로 찾는다. 난이도를 안 주면 그 버전의 모든 채보를
-    난이도 가리지 않고 찾는다."""
+    난이도 가리지 않고 찾는다. version은 곡 DB의 버전 이름(VERSE, X-VERSE, X-VERSE-X 등)이어야 한다.
+    Linked VERSE(링버) 같은 해금 시스템·모드 이름이면 쓰지 않는다."""
     short_code = _difficulty_code(difficulty)
     hits = ctx.songdb.find_by_version(version=version, difficulty=short_code)
     if not hits:
         return ToolResult(data={"count": 0}, display=Display(content="해당 버전의 채보가 없다."))
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code]))
+
+
+@tool()
+async def find_linked_verse(
+    ctx: ToolContext, gate: str | None = None, difficulty: DifficultyRef | None = None
+) -> ToolResult:
+    """Linked VERSE(링크드 버스, 링버)의 해금곡 채보를 게이트별 묶음 표로 찾는다. Linked VERSE는 수록 버전이 아니라
+    X-VERSE에서 시작한 해금 시스템이라 `find_by_version`으로는 찾을 수 없다. gate를 비우면 전부(ORIGIN, AIR, STAR,
+    AMAZON, CRYSTAL, PARADISE, NEW, SUN, LUMINOUS, VERSE, 전도 악곡, UNIVERSE, ENDING), 난이도를 안 주면 곡마다 모든
+    난이도다. 상수표나 그림을 달라고 하면 난이도를 MAS로 준다."""
+    short_code = _difficulty_code(difficulty)
+    try:
+        hits = ctx.songdb.find_linked_verse(gate=gate, difficulty=short_code)
+    except ValueError:
+        return ToolResult(error=f"그런 게이트는 없다. 게이트: {', '.join(ctx.songdb.linked_verse_gates())}")
+    if not hits:
+        return ToolResult(data={"count": 0}, display=Display(content="해당하는 해금곡 채보가 없다."))
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, *_SEARCH_COLUMNS)
+    builder.step(" ".join(c for c in ["Linked VERSE", gate, short_code] if c))
+    current: str | None = None
+    for hit in hits:
+        if hit.gate != current:
+            builder.group(hit.gate)
+            current = hit.gate
+        builder.row(
+            tc.chart_ref(hit.song.title, hit.chart.difficulty),
+            tc.chart_cells(hit.song, hit.chart, _SEARCH_COLUMNS),
+        )
+    return ToolResult(data={"count": len(hits), "songs": len({h.song.title for h in hits})}, table=builder.build())
 
 
 @tool(slash="검색")

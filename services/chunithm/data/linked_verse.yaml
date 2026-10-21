@@ -1,0 +1,42 @@
+# services/chunithm/data/linked_verse.yaml
+# Linked VERSE(X-VERSE에서 시작한 해금 시스템)의 해금곡. 게이트 순서가 곧 표시 순서다.
+# 출처: 나무위키 "Linked VERSE" (2026-10-21 확인). 접근 조건 같은 서술은 담지 않는다.
+# 제목은 songdb의 곡 제목과 글자까지 같아야 한다 — tests/services/chunithm/test_songdb.py가 대조한다.
+# 곡 DB의 수록 버전(X-VERSE / X-VERSE-X)과는 별개의 묶음이다.
+- gate: ORIGIN
+  songs: ["神鳴"]
+- gate: AIR
+  songs: ["Tru'nembra"]
+- gate: STAR
+  songs: ["Everything Will Be One"]
+- gate: AMAZON
+  songs: ["OUTRAGE"]
+- gate: CRYSTAL
+  songs: ["輪廻玲々"]
+- gate: PARADISE
+  songs: ["創 -汝ら新世界へ歩む者なり-"]
+- gate: NEW
+  songs: ["轆轤首"]
+- gate: SUN
+  songs: ["Sweet & Sour"]
+- gate: LUMINOUS
+  songs: ["Phantom Crisis"]
+- gate: VERSE
+  songs: ["月葬", "YOUNITHM"]
+- gate: 전도 악곡
+  songs:
+    - "PANDORA PARADOXXX"
+    - "μ3"
+    - "ALTER EGO"
+    - "Marigold"
+    - "超MANJIラッシュ"
+    - "†渚の小悪魔ラヴリィ～レイディオ†"
+    - "glory MAX -to the MAXimum-"
+    - "Ré：Ré"
+    - "Lips XTC -Sorist Remix-"
+    - "DESTRUCTION 3,2,1"
+    - "聖者の息吹"
+- gate: UNIVERSE
+  songs: ["Melodiniq"]
+- gate: ENDING
+  songs: ["Linked Tune"]

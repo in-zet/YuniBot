@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 import aiosqlite
+import yaml
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
@@ -18,7 +19,9 @@ _SEED_PATH = (
     Path(__file__).parent.parent.parent
     / "third_party" / "chuni_penguin" / "database" / "seeds" / "songs.json"
 )
+_LINKED_VERSE_PATH = Path(__file__).parent / "data" / "linked_verse.yaml"
 _MAX_CANDIDATES = 8
+_CHART_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 
 # terms.resolve_difficulty()가 돌려주는 정식 긴 이름("MASTER")을 이 서비스가 쓰는
 # 짧은 코드("MAS")로 바꾼다. chart_ref.py도 이 매핑을 그대로 쓴다(중복 정의하지 않는다).
@@ -76,6 +79,15 @@ class ConstRangeHit:
 
 
 @dataclass(slots=True, kw_only=True)
+class LinkedVerseHit:
+    """Linked VERSE 해금곡의 채보 하나와 그 곡이 풀리는 게이트."""
+
+    gate: str
+    song: SongRecord
+    chart: ChartRecord
+
+
+@dataclass(slots=True, kw_only=True)
 class ChartLinkInfo:
     url: str
     has_mapping: bool
@@ -87,6 +99,12 @@ class AliasRow:
     alias: str
     song_title: str
     added_by: str
+
+
+def _load_linked_verse(path: Path) -> list[tuple[str, list[str]]]:
+    """(게이트, 곡 제목들)을 파일 순서대로. 이 파일이 Linked VERSE 해금곡의 유일한 출처다."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    return [(item["gate"], list(item["songs"])) for item in raw]
 
 
 def _note_count(chart: dict[str, Any]) -> int | None:
@@ -153,8 +171,15 @@ class SongDbService:
     """곡·채보 정보, 상수, 노트 수, 별칭, 국제판 수록 여부. 시드를 메모리에 한 번
     읽고, Chunimaru songdb로 국제판 가용성·신곡 여부·추정 상수 플래그를 덧씌운다."""
 
-    def __init__(self, seed_path: Path = _SEED_PATH, *, conn: aiosqlite.Connection | None = None) -> None:
+    def __init__(
+        self,
+        seed_path: Path = _SEED_PATH,
+        *,
+        conn: aiosqlite.Connection | None = None,
+        linked_verse_path: Path = _LINKED_VERSE_PATH,
+    ) -> None:
         self._songs = _load_seed(seed_path)
+        self._linked_verse = _load_linked_verse(linked_verse_path)
         # Chunimaru가 아직 한 번도 안 덧씌워졌으면 시드 자신의 available 플래그로
         # 근사한다(완벽하지 않지만 기동 중 네트워크 장애에도 안 죽게 하는 하한선이다).
         raw = json.loads(seed_path.read_text(encoding="utf-8"))
@@ -395,6 +420,32 @@ class SongDbService:
                     continue
                 hits.append(ConstRangeHit(song=song, chart=chart))
         hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
+        return hits
+
+    def linked_verse_gates(self) -> list[str]:
+        """Linked VERSE 게이트 이름을 해금 순서대로."""
+        return [gate for gate, _titles in self._linked_verse]
+
+    def find_linked_verse(self, *, gate: str | None = None, difficulty: str | None = None) -> list[LinkedVerseHit]:
+        """Linked VERSE 해금곡의 채보를 게이트 순서(같은 게이트 안에서는 파일 순서, 곡 안에서는 난이도 순)로 돌려준다.
+        gate는 대소문자를 가리지 않고 게이트 이름과 같아야 한다(모르는 이름이면 ValueError). difficulty를 주면
+        그 난이도 하나만 본다. 곡 DB에 없거나 국제판에서 고를 수 없는 곡·채보는 뺀다."""
+        wanted = None if gate is None else gate.strip().casefold()
+        if wanted is not None and wanted not in {g.casefold() for g in self.linked_verse_gates()}:
+            raise ValueError(f"모르는 게이트다: {gate}")
+        hits: list[LinkedVerseHit] = []
+        for gate_name, titles in self._linked_verse:
+            if wanted is not None and gate_name.casefold() != wanted:
+                continue
+            for title in titles:
+                song = self._songs.get(title)
+                if song is None or title not in self._available_intl:
+                    continue
+                codes = [difficulty] if difficulty is not None else [c for c in _CHART_ORDER if c in song.charts]
+                for code in codes:
+                    chart = song.charts.get(code)
+                    if chart is not None and chart.is_available:
+                        hits.append(LinkedVerseHit(gate=gate_name, song=song, chart=chart))
         return hits
 
     def find_by_artist(self, *, name: str) -> list[SongRecord]:

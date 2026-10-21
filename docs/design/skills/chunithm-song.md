@@ -90,6 +90,7 @@ emits: [chunithm.song.viewed]
 | `chart` | 채보 하나의 상수, 노트 수 | `chart: ChartRef` | 없음 | 없음 | optional | never |
 | `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `difficulty`: DifficultyRef, `max`(선택), `new_only`(선택) | `/상수` | 없음 | required | never |
 | `find_by_version` | 수록 버전(+선택적 난이도)으로 채보 목록 | `version`, `difficulty: DifficultyRef \| None` | `/버전` | 없음 | required | never |
+| `find_linked_verse` | Linked VERSE 해금곡 채보를 게이트별 묶음 표로(게이트·난이도로 좁힘) | `gate: str \| None`, `difficulty: DifficultyRef \| None` | 없음 | required | never |
 | `find_by_artist` | 작곡가로 수록곡 목록 | `artist`, `difficulty: DifficultyRef \| None`(선택) | `/작곡가` | 없음 | required | never |
 | `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only` | `/검색` | 없음 | required | never |
 | `charts_of` | 표의 곡 단위 행을 채보 행으로 펼친 새 표 | `table: TableRef`(곡 칸 필요), `difficulty: DifficultyRef \| None`(선택, 없으면 MAS) | 없음 | 없음 | 표 | never |
@@ -192,3 +193,12 @@ emits: [chunithm.song.viewed]
   실기, 별도 작업). `find_songs`도 같은 `new_only` 뜻을 그대로 받게 맞췄다 — 신곡 조건이 다른
   조건(상수 범위 등)과 같이 걸릴 수 있는 건 조합 검색이 바로 받아야 할 경우다.
 - **기각**: 모델이 직접 쓰는 SQL 조회 도구 — 위 "계기" 참고.
+
+## 구현 결정 (2026-10-21, Linked VERSE 해금곡 `find_linked_verse` 추가)
+
+- 사고: 사용자가 "링크드 버스(링버)"라고 했는데 유니가 "VERSE"만 떼어 `find_by_version(version='VERSE')`로 찍었다. Linked VERSE는 수록 버전이 아니라 X-VERSE에서 시작한 해금 시스템이라, 곡 DB의 `version` 필드로는 찾을 수 없다(해금곡이 `X-VERSE`·`X-VERSE-X` 두 버전에 흩어져 있다).
+- 해금곡 목록은 `services/chunithm/data/linked_verse.yaml`(게이트 순서, 게이트마다 곡 제목)이 유일한 출처다. 출처는 나무위키 "Linked VERSE"(2026-10-21 확인)이고 접근 조건 같은 서술은 담지 않는다(그건 용어집 `terms.yaml`의 "Linked VERSE" 항목이 짧게 말한다). 24곡은 곡 DB 제목과 글자까지 같아야 하고 `tests/services/chunithm/test_songdb.py`가 대조한다.
+- `SongDbService.find_linked_verse(gate, difficulty)`가 게이트 순서·파일 순서·난이도 순으로 돌려주고, 곡 DB에 없거나 국제판에서 고를 수 없는 곡·채보는 뺀다. 모르는 게이트면 ValueError(스킬이 게이트 목록을 안내한다). 표는 게이트를 묶음 제목으로 쓰며 `charts_of`·`add_scores`·`table_image`로 그대로 이어진다.
+- 난이도를 안 주면 곡마다 모든 난이도(98채보)라, SKILL.md가 상수표·그림 요청에는 MAS로 주라고 안내한다.
+- SKILL.md에 곡 DB의 수록 버전 이름 22개와 "목록에 없는 말은 버전으로 짐작하지 않고, 용어집(`explain`)을 보거나 되묻는다"를 넣었다.
+- 실기 미확인: "링버 해금곡 마스터 상수표" 요청이 `find_linked_verse` → `table_image`로 이어지는지, "링버가 뭐야?"에 용어집이 쓰이는지.

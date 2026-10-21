@@ -255,6 +255,26 @@ async def test_deadline_exceeded_goes_straight_to_fallback_model() -> None:
 
 
 @pytest.mark.asyncio
+async def test_client_side_timeout_goes_to_fallback_model_like_504() -> None:
+    """2026-10-21: 클라이언트 타이머가 서버 504보다 먼저 끊어 날것 TimeoutError가 올라와도 보조 모델로 넘긴다."""
+    api = _ModelAwareApi({"main": TimeoutError(), "backup": _fake_response(text="보조 답", function_call=None)})
+
+    turn = await _generate_with_fallback(api, fallback_model="backup")
+
+    assert api.called_models == ["main", "backup"]
+    assert turn.model == "backup"
+
+
+@pytest.mark.asyncio
+async def test_client_side_timeout_without_fallback_retries_once() -> None:
+    api = _ModelAwareApi({"main": TimeoutError()})
+
+    with pytest.raises(genai_errors.APIError):
+        await _generate_with_fallback(api, fallback_model=None)
+    assert api.called_models == ["main", "main"]
+
+
+@pytest.mark.asyncio
 async def test_exhausted_503_retries_then_fallback_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("core.gemini_retry.asyncio.sleep", lambda _delay: _NoopAwaitable())
     api = _ModelAwareApi({"main": _server_error(503), "backup": _fake_response(text="보조 답", function_call=None)})

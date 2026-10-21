@@ -153,6 +153,15 @@ async def test_explain_concept_term_from_yaml(terms: TermsService) -> None:
     assert "저스티스 크리티컬" in (explanation.meaning or "")
 
 
+async def test_explain_linked_verse_by_korean_aliases(terms: TermsService) -> None:
+    """2026-10-21: 링버를 VERSE 버전으로 오해한 사고. 수록 버전이 아니라 해금 시스템이라고 답해야 한다."""
+    for alias in ("링버", "링크드 버스", "링크드버스", "linked verse"):
+        explanation = await terms.explain(alias, _CTX)
+        assert explanation is not None and explanation.canonical == "Linked VERSE"
+        assert "수록 버전 이름이 아니다" in (explanation.meaning or "")
+        assert "나무위키" in explanation.source
+
+
 async def test_explain_unknown_term_returns_none(terms: TermsService) -> None:
     assert await terms.explain("이런용어는없다", _CTX) is None
 
