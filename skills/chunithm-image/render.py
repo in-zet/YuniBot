@@ -166,14 +166,18 @@ def _chip(
     return x + width
 
 
-def _number_badge(draw: ImageDraw.ImageDraw, xy: tuple[int, int], number: int) -> int:
-    """순서 번호 띠를 그리고 오른쪽 끝 x를 돌려준다."""
+def _number_badge(draw: ImageDraw.ImageDraw, xy: tuple[int, int], number: int, table_number: int | None = None) -> int:
+    """순서 번호 띠를 그리고 오른쪽 끝 x를 돌려준다. 묶음 안 번호(`number`)와 표 번호가 다르면 뒤에 작게 `(표 번호)`."""
     font = _font(11, True)
     text = f"#{number}"
+    extra = f"({table_number})" if table_number is not None and table_number != number else ""
+    extra_font = _font(9, False)
     x, y = xy
-    width = _width(font, text) + _fs(8)
+    width = _width(font, text) + (_width(extra_font, extra) + _fs(4) if extra else 0) + _fs(8)
     draw.rounded_rectangle((x, y, x + width, y + _fs(17)), radius=_fs(4), fill=(0, 0, 0, 170))
     draw.text((x + _fs(4), y + _fs(2)), text, font=font, fill=(255, 255, 255))
+    if extra:
+        draw.text((x + _fs(4) + _width(font, text) + _fs(4), y + _fs(5)), extra, font=extra_font, fill=(200, 205, 225))
     return x + width
 
 
@@ -188,6 +192,11 @@ class Segment:
     summary: Mapping[str, str]
     rows: tuple[tuple[int, Row], ...]
     continued: bool = False
+    first_number: int = 1  # 이 묶음 첫 행의 표 번호 — 묶음 안 번호는 `표 번호 - first_number + 1`
+
+    def local_number(self, number: int) -> int:
+        """그림에 크게 찍는 번호. 묶음마다 1부터 다시 센다(표 번호는 괄호로 병기)."""
+        return number - self.first_number + 1
 
 
 def split_pages(table: WorkTable, limit: int) -> list[list[Segment]]:
@@ -196,10 +205,13 @@ def split_pages(table: WorkTable, limit: int) -> list[list[Segment]]:
     units: list[Segment] = []
     for group in table.groups:
         rows = tuple(next(numbered) for _ in group.rows)
+        first_number = rows[0][0] if rows else 1
         for start in range(0, max(len(rows), 1), limit):
             chunk = rows[start : start + limit]
             if chunk:
-                units.append(Segment(group.title, len(rows), group.summary, chunk, continued=start > 0))
+                units.append(
+                    Segment(group.title, len(rows), group.summary, chunk, continued=start > 0, first_number=first_number)
+                )
     pages: list[list[Segment]] = []
     used = 0
     for unit in units:
@@ -416,7 +428,8 @@ def _fit_score_font(score: str, rank: str | None) -> ImageFont.FreeTypeFont | Im
 
 
 def _draw_card(
-    canvas: Image.Image, origin: tuple[int, int], number: int, row: Row, jacket: Image.Image | None, lines: _CardLines
+    canvas: Image.Image, origin: tuple[int, int], number: int, table_number: int, row: Row,
+    jacket: Image.Image | None, lines: _CardLines,
 ) -> None:
     draw = ImageDraw.Draw(canvas, "RGBA")
     x, y = origin
@@ -426,7 +439,7 @@ def _draw_card(
     _paste_fit(canvas, jacket, box)
     _draw_title_over_jacket(canvas, box, row.cell(tc.SONG).text)
     draw = ImageDraw.Draw(canvas, "RGBA")
-    badge_end = _number_badge(draw, (jx + 4, jy + 4), number)
+    badge_end = _number_badge(draw, (jx + 4, jy + 4), number, table_number)
     _draw_lamp(draw, (badge_end + 4, jy + 4), row)
     _draw_difficulty(draw, (jx + _JACKET - 4, jy + 4), row)
 
@@ -484,7 +497,10 @@ def _draw_cards(
         for index, (number, row) in enumerate(segment.rows):
             col, line = index % columns, index // columns
             origin = (_MARGIN + col * (_CARD_W + _GAP), y + line * (lines.height + _GAP))
-            _draw_card(canvas, origin, number, row, jackets.get(row.cell(tc.SONG).text), lines)
+            _draw_card(
+                canvas, origin, segment.local_number(number), number, row,
+                jackets.get(row.cell(tc.SONG).text), lines,
+            )
         y += -(-len(segment.rows) // columns) * (lines.height + _GAP) + 8
     return canvas
 
@@ -497,11 +513,16 @@ _LIST_JACKET = 80
 
 
 def _draw_list_row(
-    canvas: Image.Image, y: int, number: int, row: Row, jacket: Image.Image | None, names: set[str]
+    canvas: Image.Image, y: int, number: int, table_number: int, row: Row, jacket: Image.Image | None,
+    names: set[str],
 ) -> None:
     draw = ImageDraw.Draw(canvas, "RGBA")
     draw.rounded_rectangle((_MARGIN, y, _LIST_W - _MARGIN, y + _LIST_ROW_H - 6), radius=10, fill=_PANEL)
-    draw.text((_MARGIN + 14, y + 26), f"#{number}", font=_font(13, True), fill=_MUTED)
+    if table_number == number:
+        draw.text((_MARGIN + 14, y + 26), f"#{number}", font=_font(13, True), fill=_MUTED)
+    else:  # 묶음 안 번호가 크게, 표 번호는 그 아래 작게(행을 가리킬 때 쓰는 번호)
+        draw.text((_MARGIN + 14, y + 14), f"#{number}", font=_font(13, True), fill=_MUTED)
+        draw.text((_MARGIN + 14, y + 46), f"({table_number})", font=_font(10, False), fill=_MUTED)
     jx = _MARGIN + 82
     _paste_fit(canvas, jacket, (jx, y + 2, jx + _LIST_JACKET, y + 2 + _LIST_JACKET - 4))
 
@@ -559,7 +580,9 @@ def _draw_list(
         if not bare:
             y = _draw_band(draw, _LIST_W, y, segment, table.unit)
         for number, row in segment.rows:
-            _draw_list_row(canvas, y, number, row, jackets.get(row.cell(tc.SONG).text), names)
+            _draw_list_row(
+                canvas, y, segment.local_number(number), number, row, jackets.get(row.cell(tc.SONG).text), names
+            )
             y += _LIST_ROW_H
         y += 8
     return canvas

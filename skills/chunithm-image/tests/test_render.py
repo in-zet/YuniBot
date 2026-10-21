@@ -253,3 +253,41 @@ def test_stale_and_page_notes_do_not_crash_and_multi_page_names_are_numbered() -
 def test_table_without_score_columns_renders(layout: str) -> None:
     files = render.render_pages(_chart_table(5, scores=False), layout=layout, jackets={})
     assert len(files) == 1
+
+
+def test_local_number_restarts_per_group_and_keeps_table_number() -> None:
+    table = _chart_table(0, groups=(3, 2))
+
+    pages = render.split_pages(table, 50)
+
+    segments = [segment for page in pages for segment in page]
+    assert [segment.first_number for segment in segments] == [1, 4]
+    assert [[segment.local_number(number) for number, _ in segment.rows] for segment in segments] == [[1, 2, 3], [1, 2]]
+    assert [[number for number, _ in segment.rows] for segment in segments] == [[1, 2, 3], [4, 5]]
+
+
+def test_local_number_continues_in_split_chunk_of_one_group() -> None:
+    table = _chart_table(0, groups=(5, 4))
+
+    segments = [segment for page in render.split_pages(table, 3) for segment in page]
+
+    second_group = [segment for segment in segments if segment.title == "묶음2"]
+    assert [[segment.local_number(number) for number, _ in segment.rows] for segment in second_group] == [[1, 2, 3], [4]]
+    assert all(segment.first_number == 6 for segment in second_group)
+
+
+def test_number_badge_is_wider_when_table_number_differs() -> None:
+    image = Image.new("RGBA", (300, 60))
+    draw = render.ImageDraw.Draw(image)
+
+    same = render._number_badge(draw, (0, 0), 3, 3)
+    differs = render._number_badge(draw, (0, 0), 3, 33)
+
+    assert differs > same
+    assert render._number_badge(draw, (0, 0), 3) == same
+
+
+@pytest.mark.parametrize("layout", ["card", "list"])
+def test_grouped_table_renders_with_local_numbers(layout: str) -> None:
+    files = render.render_pages(_chart_table(0, groups=(3, 2)), layout=layout, jackets={})
+    assert len(files) == 1
