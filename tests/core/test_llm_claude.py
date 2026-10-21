@@ -119,14 +119,14 @@ async def test_generate_omits_tools_kwarg_when_no_tools_declared() -> None:
     assert fake_messages.captured_kwargs["tools"] is anthropic.omit
 
 
-def test_to_provider_content_replays_raw_model_turn_verbatim() -> None:
+def test_to_provider_content_replays_raw_model_blocks() -> None:
     message = _fake_message(text="안녕", tool_use=None)
     content = LlmContent(role="model", parts=[LlmPart(text="안녕")], raw=message)
 
     provider_message = to_provider_content(content)
 
     assert provider_message["role"] == "assistant"
-    assert provider_message["content"] is message.content
+    assert provider_message["content"] == message.content  # 사고 블록이 없으면 그대로
 
 
 def test_to_provider_content_builds_tool_result_block_keyed_by_call_id() -> None:
@@ -306,3 +306,16 @@ async def test_generate_retries_timeout_only_once(monkeypatch: pytest.MonkeyPatc
         )
 
     assert api.calls == 2  # 첫 시도 + 재시도 한 번
+
+
+def test_to_provider_content_drops_thinking_blocks_when_replaying_a_model_turn() -> None:
+    from anthropic.types import ThinkingBlock
+
+    tool_use = ToolUseBlock(type="tool_use", id="call-1", name="t", input={})
+    message = _fake_message(text="먼저 찾아볼게", tool_use=tool_use)
+    message.content.insert(0, ThinkingBlock(type="thinking", thinking="", signature="sig"))
+    content = LlmContent(role="model", parts=[LlmPart(text="먼저 찾아볼게")], raw=message)
+
+    provider_message = to_provider_content(content)
+
+    assert [block.type for block in cast("list[Any]", provider_message["content"])] == ["text", "tool_use"]

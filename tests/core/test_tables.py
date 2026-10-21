@@ -527,7 +527,7 @@ def _where(column: str, op: str, value: Any, text: str | None = None) -> Conditi
     return Condition(column=column, op=op, value=value, text=str(value) if text is None else text)
 
 
-def test_where_compares_with_the_columns_value_and_missing_values_pass() -> None:
+def test_where_compares_with_the_columns_value_and_missing_values_pass_only_below_or_not_equal() -> None:
     out = select_rows(_score_table(), where=[_where("점수", "<", 1_007_500, "SSS")])
     assert _songs(out) == ["A", "B", "D", "E"]  # 점수 없는 E는 통과, C(1,008,000)는 탈락
     assert out.steps == ("원본", "점수<SSS")
@@ -537,11 +537,11 @@ def test_where_compares_with_the_columns_value_and_missing_values_pass() -> None
 @pytest.mark.parametrize(
     ("op", "value", "expected"),
     [
-        ("==", 1_000_000, ["D", "E"]),
+        ("==", 1_000_000, ["D"]),
         ("!=", 1_000_000, ["A", "B", "C", "E"]),
         ("<=", 1_000_000, ["B", "D", "E"]),
-        (">", 1_000_000, ["A", "C", "E"]),
-        (">=", 1_005_000, ["A", "C", "E"]),
+        (">", 1_000_000, ["A", "C"]),
+        (">=", 1_005_000, ["A", "C"]),
     ],
 )
 def test_where_operators(op: str, value: int, expected: list[str]) -> None:
@@ -553,7 +553,7 @@ def test_where_conditions_are_anded_and_contains_works_on_text() -> None:
     out = select_rows(table, where=[_where("상수", ">=", 15.5), _where("점수", ">", 1_000_000)])
     assert _songs(out) == ["A", "C"]
     assert _songs(select_rows(table, where=[_where("곡", "contains", "a")])) == ["A"]  # 대소문자 무시
-    assert _songs(select_rows(table, where=[_where("램프", "==", "FULL COMBO")])) == ["A", "B", "D", "E"]
+    assert _songs(select_rows(table, where=[_where("램프", "==", "FULL COMBO")])) == ["A", "D"]
 
 
 def test_where_errors() -> None:
@@ -1021,5 +1021,70 @@ def test_ordered_ref_column_sorts_and_compares_by_its_order_not_alphabetically()
         builder.row(RowRef("k", str(key)), {"song": cell(f"s{key}"), "diff": cell(diff)})
     table = builder.build()
     assert _songs(select_rows(table, sort="난이도", descending=True)) == ["s2", "s1", "s3", "s4", "s5"]  # ULTIMA, MASTER, EXPERT, BASIC, 없음
-    assert _songs(select_rows(table, where=[_where("난이도", ">=", "MASTER")])) == ["s1", "s2", "s5"]  # 값 없는 행은 통과
+    assert _songs(select_rows(table, where=[_where("난이도", ">=", "MASTER")])) == ["s1", "s2"]  # 값 없는 행은 "이상"에 탈락
     assert [g.title for g in select_rows(table, group_by="난이도").groups] == ["ULTIMA", "MASTER", "EXPERT", "BASIC", "(없음)"]
+
+
+def test_where_drops_rows_without_a_value_for_conditions_that_need_a_value() -> None:
+    table = _score_table()  # E는 점수 없음
+    for op, value in ((">=", 1_000_000), (">", 0), ("==", 1_000_000)):
+        assert "E" not in _songs(select_rows(table, where=[_where("점수", op, value)])), op
+    assert "E" not in _songs(select_rows(table, where=[_where("램프", "contains", "FULL")]))
+    assert "E" in _songs(select_rows(table, where=[_where("점수", "<=", 1_000_000)]))  # "못 한 것"에는 안 친 채보가 든다
+    assert "E" in _songs(select_rows(table, where=[_where("점수", "!=", 1_000_000)]))
+
+
+def _rating_table() -> WorkTable:
+    builder = TableBuilder(subject="p1", unit="채보")
+    builder.column("song", "곡", bare=True).column("rating", "곡 레이팅", "number")
+    values = [("A", 16.8341), ("B", 16.89), ("C", 16.9), ("D", 16.81), ("E", 17.05), ("F", None)]
+    for key, (song, rating) in enumerate(values, start=1):
+        builder.row(
+            RowRef("chunithm.chart", str(key)),
+            {"song": cell(song), "rating": cell(rating, "-" if rating is None else f"{rating:.2f}")},
+        )
+    return builder.build()
+
+
+def test_group_step_groups_by_interval_biggest_first_and_sorts_inside() -> None:
+    out = select_rows(
+        _rating_table(), where=[_where("곡 레이팅", ">=", 16.8)], group_by="곡 레이팅", group_step="0.1",
+        sort="곡 레이팅", descending=True,
+    )
+
+    assert [(g.title, [str(r.cell("song").raw) for r in g.rows]) for g in out.groups] == [
+        ("17.00~17.09", ["E"]),
+        ("16.90~16.99", ["C"]),
+        ("16.80~16.89", ["B", "A", "D"]),  # 안은 곡 레이팅 내림차순
+    ]
+    assert "F" not in _songs(out)  # 값 없는 행은 "이상"에서 이미 탈락
+    assert out.steps[-2] == "곡 레이팅 0.1 단위 묶음"
+
+
+def test_group_step_puts_rows_without_a_value_last() -> None:
+    out = select_rows(_rating_table(), group_by="곡 레이팅", group_step="0.1")
+
+    assert [g.title for g in out.groups][-1] == "(없음)"
+
+
+def test_group_step_with_integer_step_names_the_whole_range() -> None:
+    out = select_rows(_score_table(), group_by="점수", group_step="10000")
+
+    assert [g.title for g in out.groups] == ["1,000,000~1,009,999", "990,000~999,999", "(없음)"]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"group_by": "곡", "group_step": "0.1"}, "구간으로 묶을 수 없다"),
+        ({"group_by": "곡 레이팅", "group_step": "abc"}, "숫자가 아니다"),
+        ({"group_by": "곡 레이팅", "group_step": "0"}, "0보다 큰"),
+        ({"group_by": "곡 레이팅", "group_step": "NaN"}, "0보다 큰"),
+        ({"group_by": "곡 레이팅", "group_step": "Infinity"}, "0보다 큰"),
+        ({"group_by": "", "group_step": "0.1"}, "칸 이름을 줄 때만"),
+        ({"group_step": "0.1"}, "칸 이름을 줄 때만"),
+    ],
+)
+def test_group_step_rejects_bad_use(kwargs: dict[str, Any], message: str) -> None:
+    with pytest.raises(TableError, match=message):
+        select_rows(_rating_table(), **kwargs)

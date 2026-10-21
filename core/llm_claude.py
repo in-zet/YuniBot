@@ -34,12 +34,15 @@ _DEFAULT_MAX_TOKENS = 4096
 
 def to_provider_content(content: LlmContent) -> MessageParam:
     """코어가 만든(함수 실행 결과를 담은) LlmContent를 Claude MessageParam으로 바꾼다.
-    모델이 낸 턴(raw가 채워진 LlmContent)은 이 함수를 타지 않고 raw(실제 Message)를 그대로
-    재생한다 — Claude도 확장 사고(thinking) 블록은 받은 그대로 돌려줘야 하므로, Gemini
-    어댑터의 thought-signature 보존과 같은 이유로 raw를 우선한다."""
+    모델이 낸 턴(raw가 채워진 LlmContent)은 이 함수를 타지 않고 raw(실제 Message)를 재생하되
+    사고(thinking) 블록은 뺀다. 사고 블록의 서명은 그 블록을 만든 도구 목록·시스템 프롬프트에 묶여 있어서,
+    `open_skill` 뒤처럼 한 멘션 안에서 도구 목록이 바뀌면 그대로 돌려보낼 때 API가 400으로 거절한다
+    ("The `tools` list differs from the one this block was created with", 2026-10-21 실측).
+    사고 블록을 빼도 응답은 유효하다(생각은 다음 턴에 모델이 다시 한다)."""
     if content.raw is not None:
         message: Message = content.raw
-        return {"role": "assistant", "content": message.content}
+        kept = [block for block in message.content if block.type not in ("thinking", "redacted_thinking")]
+        return {"role": "assistant", "content": kept}
 
     blocks: list[Any] = []
     for part in content.parts:
@@ -100,7 +103,7 @@ class ClaudeLlmAdapter:
 
     thinking_level은 Claude의 `output_config.effort`(low/medium/high)로 넘긴다. 확장 사고 예산
     (`thinking.type=enabled`)은 이 모델이 받지 않고, 사고는 모델이 effort에 맞춰 알아서 켠다.
-    사고 블록은 raw 재생(to_provider_content)으로 그대로 돌려보낸다.
+    사고 블록은 다음 요청에 돌려보내지 않는다(to_provider_content 참고).
 
     시스템 프롬프트(와 그 앞의 도구 목록)에 프롬프트 캐시 중단점을 둔다 — 한 멘션이 도구를 부르며
     여러 번 왕복할 때 같은 앞부분을 다시 읽는다."""

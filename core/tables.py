@@ -5,6 +5,7 @@ import re
 import time
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Any, Literal, Self, TypedDict
 
@@ -235,6 +236,8 @@ def _numbers_step(numbers: Collection[int]) -> str:
 
 COMPARE_OPS: frozenset[str] = frozenset({"==", "!=", "<", "<=", ">", ">=", "contains"})
 _ORDERING_OPS: frozenset[str] = frozenset({"<", "<=", ">", ">="})
+# 값이 없는 행이 통과하는 비교(2026-10-21 결정, 그전엔 모든 조건을 통과시키는 임시 결정이었다).
+_MISSING_PASSES: frozenset[str] = frozenset({"!=", "<", "<="})
 # 크기 비교(<, <=, >, >=)를 할 수 없는 칸 종류. 이름이 같은지만 본다(순서 목록을 가진 칸은 예외).
 _UNORDERED_TYPES: frozenset[str] = frozenset({"LampRef", "DifficultyRef"})
 # 값의 크기가 뜻을 가지는 칸 종류. 이 칸으로 묶으면 묶음을 큰 값부터 늘어놓는다(그 밖의 칸은 나온 순서).
@@ -315,7 +318,9 @@ def _is_ordered(column: Column) -> bool:
 
 def _passes(raw: Any, op: str, value: Any, column: Column) -> bool:
     if raw is None:
-        return True  # 값이 없는 행은 어떤 조건이든 통과한다(임시 결정)
+        # 값이 없는 행(안 친 채보의 점수·곡 레이팅 등)은 "아니다"·"더 작다"는 조건만 통과한다 — "SSS 못 한 것"에
+        # 안 친 채보가 들어가야 한다. "16.8 이상", "같다", "포함"처럼 값이 있어야 성립하는 조건에는 탈락한다.
+        return op in _MISSING_PASSES
     if column.order and op in _ORDERING_OPS:
         raw, value = _order_key(column, raw), _order_key(column, value)
         if raw is None or value is None:
@@ -362,16 +367,45 @@ def _sorted_rows(
     return [*(item for _key, item in present), *absent]
 
 
-def _regroup(groups: list[_NumberedGroup], column: Column, *, descending: bool) -> list[_NumberedGroup]:
+def _bucket_floor(raw: Any, step: Decimal) -> Decimal | None:
+    """`raw`가 속한 구간의 아래 끝(step의 배수). 값이 없으면 None."""
+    if raw is None:
+        return None
+    try:
+        return (Decimal(str(raw)) // step) * step
+    except InvalidOperation:
+        raise TableError("숫자가 아닌 값은 구간으로 묶을 수 없다") from None
+
+
+def _bucket_title(low: Decimal, step: Decimal) -> str:
+    """구간 이름. 0.1 단위면 "16.80~16.89", 정수 단위면 "1,007,000~1,007,999"."""
+    if step == step.to_integral_value():
+        return f"{int(low):,}~{int(low + step - 1):,}"
+    exponent = step.normalize().as_tuple().exponent
+    assert isinstance(exponent, int)  # 유한한 수만 들어온다(`_parse_step`이 거른다)
+    places = -exponent + 1
+    unit = Decimal(1).scaleb(-places)
+    return f"{low:.{places}f}~{low + step - unit:.{places}f}"
+
+
+def _regroup(
+    groups: list[_NumberedGroup], column: Column, *, descending: bool, step: Decimal | None = None
+) -> list[_NumberedGroup]:
     """칸 값마다 묶음을 만든다. 숫자·점수·순서가 있는 칸은 `descending`(기본은 큰 값부터)으로 늘어놓고, 글 칸은
-    그 값이 처음 나온 순서를 지킨다(앞에서 정렬해 둔 순서가 묶음 순서가 된다). 값이 없는 행의 묶음은 맨 뒤."""
+    그 값이 처음 나온 순서를 지킨다(앞에서 정렬해 둔 순서가 묶음 순서가 된다). 값이 없는 행의 묶음은 맨 뒤.
+    `step`을 주면 값이 아니라 그 크기의 구간("16.80~16.89")마다 묶는다."""
     buckets: dict[Any, list[tuple[int, Row]]] = {}
     titles: dict[Any, str] = {}
     for _title, rows in groups:
         for item in rows:
             cell_ = item[1].cell(column.name)
-            buckets.setdefault(cell_.raw, []).append(item)
-            titles.setdefault(cell_.raw, cell_.text or "(없음)")
+            if step is None:
+                key, title = cell_.raw, cell_.text or "(없음)"
+            else:
+                key = _bucket_floor(cell_.raw, step)
+                title = "(없음)" if key is None else _bucket_title(key, step)
+            buckets.setdefault(key, []).append(item)
+            titles.setdefault(key, title)
     keys = [key for key in buckets if key is not None]
     if column.order:
         known = sorted((key for key in keys if key in column.order), key=column.order.index, reverse=descending)
@@ -386,6 +420,18 @@ def _regroup(groups: list[_NumberedGroup], column: Column, *, descending: bool) 
     return [(titles[key], buckets[key]) for key in keys]
 
 
+def _parse_step(column: Column, text: str) -> Decimal:
+    if column.order or column.value_type not in {"number", "ScoreRef"}:
+        raise TableError(f"'{column.label}' 칸은 구간으로 묶을 수 없다(숫자·점수 칸만 된다)")
+    try:
+        step = Decimal(text.strip())
+    except InvalidOperation:
+        raise TableError(f"구간 크기 '{text}'는 숫자가 아니다") from None
+    if not step.is_finite() or step <= 0:
+        raise TableError("구간 크기는 0보다 큰 유한한 수여야 한다")
+    return step
+
+
 def _select_numbered(
     table: WorkTable,
     *,
@@ -396,6 +442,7 @@ def _select_numbered(
     descending: bool = False,
     limit: int | None = None,
     group_by: str | None = None,
+    group_step: str | None = None,
     distinct_by: str | None = None,
 ) -> tuple[list[_NumberedGroup], list[str]]:
     """거르기·정렬 엔진. 순서는 번호 고르기 → where → 다시 묶기 → 정렬 → 칸 값이 겹치는 행 줄이기 → 묶음마다 limit이다."""
@@ -418,14 +465,19 @@ def _select_numbered(
             for t, rs in groups
         ]
         steps.append(_condition_step(condition))
+    if group_step is not None and group_by is None:
+        raise TableError("group_step은 group_by에 칸 이름을 줄 때만 쓴다")
     sort_column = None if sort is None else _column_by_label(table, sort)
     presorted = False
     if group_by is not None:
         if group_by == "":
+            if group_step is not None:
+                raise TableError("group_step은 group_by에 칸 이름을 줄 때만 쓴다")
             groups = [(None, [item for _t, rs in groups for item in rs])]
             steps.append("묶음 풀기")
         else:
             group_column = _column_by_label(table, group_by)
+            step = None if group_step is None else _parse_step(group_column, group_step)
             if sort_column is not None and not _is_ordered(group_column):
                 # 글 칸의 묶음은 나온 순서를 따르므로, 먼저 전체를 정렬해 그 순서가 묶음 순서가 되게 한다.
                 flat = [item for _t, rs in groups for item in rs]
@@ -433,8 +485,8 @@ def _select_numbered(
                 groups = presorted_groups
                 presorted = True
             by_sort = sort_column is not None and sort_column.name == group_column.name
-            groups = _regroup(groups, group_column, descending=descending if by_sort else True)
-            steps.append(f"{group_by}별 묶음")
+            groups = _regroup(groups, group_column, descending=descending if by_sort else True, step=step)
+            steps.append(f"{group_by}별 묶음" if step is None else f"{group_by} {group_step} 단위 묶음")
     if sort_column is not None:
         if not presorted:
             groups = [(t, _sorted_rows(rs, sort_column, descending=descending)) for t, rs in groups]
