@@ -61,7 +61,12 @@ async def test_generate_converts_text_only_response() -> None:
     assert turn.usage.input_tokens == 10
     assert turn.usage.output_tokens == 4
     assert fake_messages.captured_kwargs is not None
-    assert fake_messages.captured_kwargs["system"] == "규칙"
+    # 시스템 프롬프트는 캐시 중단점이 붙은 블록으로 보낸다.
+    assert fake_messages.captured_kwargs["system"] == [
+        {"type": "text", "text": "규칙", "cache_control": {"type": "ephemeral"}}
+    ]
+    # thinking_level은 effort로 넘어간다.
+    assert fake_messages.captured_kwargs["output_config"] == {"effort": "low"}
     assert fake_messages.captured_kwargs["model"] == "claude-haiku-5-5"
 
 
@@ -155,3 +160,149 @@ def test_to_provider_content_marks_tool_error_result() -> None:
 
     blocks = cast("list[dict[str, Any]]", provider_message["content"])
     assert blocks[0]["is_error"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_counts_cache_tokens_into_input_total() -> None:
+    adapter = ClaudeLlmAdapter(api_key="fake")
+    message = _fake_message(text="답", tool_use=None)
+    message.usage = Usage(
+        input_tokens=50, output_tokens=7, cache_read_input_tokens=900, cache_creation_input_tokens=100
+    )
+    adapter._client.messages = _FakeMessagesApi(response=message)  # pyright: ignore[reportAttributeAccessIssue]
+
+    turn = await adapter.generate(
+        model="claude-haiku-5-5", system_instruction="규칙",
+        contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="medium",
+    )
+
+    # Anthropic의 input_tokens는 캐시 읽기·쓰기를 뺀 값이라 더해야 UsageInfo의 "전체 입력"이 된다.
+    assert turn.usage.input_tokens == 1050
+    assert turn.usage.cached_input_tokens == 900
+    assert turn.usage.output_tokens == 7
+
+
+def test_tool_result_block_serializes_non_json_values() -> None:
+    import datetime
+
+    block = to_provider_content(
+        LlmContent(
+            role="user",
+            parts=[
+                LlmPart(
+                    function_response=FunctionResultPart(
+                        name="t", call_id="c1", response={"when": datetime.date(2026, 10, 21)}
+                    )
+                )
+            ],
+        )
+    )
+
+    content = cast("list[dict[str, Any]]", block["content"])
+    assert json.loads(content[0]["content"]) == {"when": "2026-10-21"}
+
+
+@pytest.mark.asyncio
+async def test_generate_retries_overloaded_and_reports_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    import anthropic
+    import httpx2
+
+    sleeps: list[float] = []
+
+    async def _no_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("core.claude_retry.asyncio.sleep", _no_sleep)
+
+    overloaded = anthropic.InternalServerError(
+        "overloaded", response=httpx2.Response(529, request=httpx2.Request("POST", "https://x")), body=None
+    )
+    ok = _fake_message(text="답", tool_use=None)
+
+    @dataclass
+    class _Flaky:
+        remaining: int = 2
+
+        async def create(self, **kwargs: Any) -> Any:
+            if self.remaining > 0:
+                self.remaining -= 1
+                raise overloaded
+            return ok
+
+    adapter = ClaudeLlmAdapter(api_key="fake")
+    adapter._client.messages = _Flaky()  # pyright: ignore[reportAttributeAccessIssue]
+    retries: list[tuple[int, float]] = []
+
+    async def _on_retry(attempt: int, delay: float) -> None:
+        retries.append((attempt, delay))
+
+    turn = await adapter.generate(
+        model="claude-haiku-5-5", system_instruction="규칙",
+        contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="low",
+        on_retry=_on_retry,
+    )
+
+    assert turn.text == "답"
+    assert retries == [(1, 2.0), (2, 4.0)]
+    assert sleeps == [2.0, 4.0]
+
+
+@pytest.mark.asyncio
+async def test_generate_does_not_retry_client_errors() -> None:
+    import anthropic
+    import httpx2
+
+    bad = anthropic.BadRequestError(
+        "bad", response=httpx2.Response(400, request=httpx2.Request("POST", "https://x")), body=None
+    )
+
+    @dataclass
+    class _Bad:
+        calls: int = 0
+
+        async def create(self, **kwargs: Any) -> Any:
+            self.calls += 1
+            raise bad
+
+    adapter = ClaudeLlmAdapter(api_key="fake")
+    api = _Bad()
+    adapter._client.messages = api  # pyright: ignore[reportAttributeAccessIssue]
+
+    with pytest.raises(anthropic.BadRequestError):
+        await adapter.generate(
+            model="claude-haiku-5-5", system_instruction="규칙",
+            contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="low",
+        )
+
+    assert api.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_retries_timeout_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    import anthropic
+    import httpx2
+
+    async def _no_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("core.claude_retry.asyncio.sleep", _no_sleep)
+
+    @dataclass
+    class _Hang:
+        calls: int = 0
+
+        async def create(self, **kwargs: Any) -> Any:
+            self.calls += 1
+            raise anthropic.APITimeoutError(request=httpx2.Request("POST", "https://x"))
+
+    adapter = ClaudeLlmAdapter(api_key="fake")
+    api = _Hang()
+    adapter._client.messages = api  # pyright: ignore[reportAttributeAccessIssue]
+
+    with pytest.raises(anthropic.APITimeoutError):
+        await adapter.generate(
+            model="claude-haiku-5-5", system_instruction="규칙",
+            contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="low",
+        )
+
+    assert api.calls == 2  # 첫 시도 + 재시도 한 번

@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-from core.llm_pricing import estimate_cost_usd
+from core.llm_pricing import estimate_cost_usd, estimate_search_fee_usd
 
 
 @dataclass(slots=True, kw_only=True)
@@ -31,10 +31,11 @@ class UsageService:
         input_tokens: int,
         output_tokens: int,
         cached_input_tokens: int = 0,
+        search_requests: int = 0,
     ) -> float:
         cost = estimate_cost_usd(
             model, input_tokens=input_tokens, output_tokens=output_tokens, cached_input_tokens=cached_input_tokens
-        )
+        ) + estimate_search_fee_usd(search_requests)
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
             "INSERT INTO llm_usage (guild_id, player_id, model, kind, input_tokens, output_tokens, "

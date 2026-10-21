@@ -37,6 +37,7 @@ async def search(ctx: ToolContext, question: str) -> ToolResult:
         await ctx.usage.record(
             guild_id=ctx.guild_id or "dm", player_id=ctx.player_id, model=ctx.websearch.model, kind="websearch",
             input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
+            search_requests=result.usage.search_requests,
         )
 
     sources = [{"title": s.title, "url": s.url} for s in result.sources]

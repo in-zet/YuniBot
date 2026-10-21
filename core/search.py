@@ -17,6 +17,7 @@ class SearchSource:
 class SearchUsage:
     input_tokens: int
     output_tokens: int
+    search_requests: int = 0  # 제공자가 따로 요금을 매기는 검색 횟수(Claude web_search). 모르면 0.
 
 
 @dataclass(slots=True, kw_only=True)

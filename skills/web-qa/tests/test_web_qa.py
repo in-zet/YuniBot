@@ -52,12 +52,13 @@ class _FakeUsageService:
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     async def record(
-        self, *, guild_id: str, player_id: str, model: str, kind: str, input_tokens: int, output_tokens: int
+        self, *, guild_id: str, player_id: str, model: str, kind: str, input_tokens: int, output_tokens: int,
+        search_requests: int = 0,
     ) -> float:
         self.calls.append(
             {
                 "guild_id": guild_id, "player_id": player_id, "model": model, "kind": kind,
-                "input_tokens": input_tokens, "output_tokens": output_tokens,
+                "input_tokens": input_tokens, "output_tokens": output_tokens, "search_requests": search_requests,
             }
         )
         return 0.0
@@ -106,7 +107,7 @@ async def test_search_records_usage_with_websearch_model(skill: ModuleType) -> N
     assert usage.calls == [
         {
             "guild_id": "g1", "player_id": "p1", "model": "gemini-3.8-flash", "kind": "websearch",
-            "input_tokens": 100, "output_tokens": 50,
+            "input_tokens": 100, "output_tokens": 50, "search_requests": 0,
         }
     ]
 

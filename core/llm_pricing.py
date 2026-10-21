@@ -14,6 +14,11 @@ _PRICING_PER_MILLION_USD: dict[str, tuple[float, float]] = {
 }
 
 
+# Claude web_search 서버 도구는 토큰값과 별개로 검색 1,000회당 10달러다(2026-10-21 Claude API 문서 확인).
+# 호출마다 `usage.server_tool_use.web_search_requests`로 센다.
+WEB_SEARCH_FEE_USD = 10.0 / 1000
+
+
 # 캐시에서 읽힌 입력 토큰은 일반 입력의 이 비율로 계산한다. Gemini·Claude 모두 캐시 읽기를 입력 가격의
 # 10% 안팎으로 받는다고 보고 둔 가정이다(가격표에 캐시 단가를 따로 넣기 전까지 — 2026-10-21).
 CACHED_INPUT_RATIO = 0.1
@@ -36,3 +41,7 @@ def estimate_cost_usd(
     input_rate, output_rate = rates
     billable = billable_input_tokens(input_tokens, cached_input_tokens)
     return (billable / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate
+
+
+def estimate_search_fee_usd(search_requests: int) -> float:
+    return max(search_requests, 0) * WEB_SEARCH_FEE_USD

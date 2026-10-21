@@ -66,3 +66,14 @@ async def test_record_discounts_cached_input_tokens(conn: aiosqlite.Connection) 
         input_tokens=1_000_000, output_tokens=0, cached_input_tokens=1_000_000,
     )
     assert cost == pytest.approx(0.075)
+
+
+async def test_record_adds_web_search_fee_to_cost(conn: aiosqlite.Connection) -> None:
+    service = UsageService(conn)
+
+    cost = await service.record(
+        guild_id="g1", player_id="p1", model="claude-haiku-5-5", kind="websearch",
+        input_tokens=0, output_tokens=0, search_requests=3,
+    )
+
+    assert cost == pytest.approx(0.03)  # 검색 1,000회당 10달러

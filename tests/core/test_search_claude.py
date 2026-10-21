@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from anthropic.types import (
     Message,
+    ServerToolUsage,
     TextBlock,
     Usage,
     WebSearchResultBlock,
@@ -64,6 +65,7 @@ async def test_search_extracts_sources_from_web_search_tool_result_block() -> No
     assert fake_messages.captured_kwargs is not None
     tools = fake_messages.captured_kwargs["tools"]
     assert tools[0]["type"] == "web_search_20260318"
+    assert tools[0]["max_uses"] == 3  # 한 호출에서 검색 횟수에 상한을 건다
 
 
 @pytest.mark.asyncio
@@ -80,3 +82,45 @@ async def test_search_returns_no_sources_when_result_is_error() -> None:
     result = await adapter.search(model="claude-haiku-5-5", query="질문")
 
     assert result.sources == []
+
+
+@pytest.mark.asyncio
+async def test_search_reports_billed_web_search_requests() -> None:
+    adapter = ClaudeSearchAdapter(api_key="fake")
+    message = _fake_message(text="답변", result_block=None)
+    message.usage = Usage(input_tokens=20, output_tokens=8, server_tool_use=ServerToolUsage(web_search_requests=2, web_fetch_requests=0))
+    adapter._client.messages = _FakeMessagesApi(response=message)  # pyright: ignore[reportAttributeAccessIssue]
+
+    result = await adapter.search(model="claude-haiku-5-5", query="질문")
+
+    assert result.usage.search_requests == 2
+
+
+@pytest.mark.asyncio
+async def test_search_retries_once_on_overload(monkeypatch: pytest.MonkeyPatch) -> None:
+    import anthropic
+    import httpx2
+
+    async def _no_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("core.claude_retry.asyncio.sleep", _no_sleep)
+
+    @dataclass
+    class _Overloaded:
+        calls: int = 0
+
+        async def create(self, **kwargs: Any) -> Any:
+            self.calls += 1
+            raise anthropic.InternalServerError(
+                "overloaded", response=httpx2.Response(529, request=httpx2.Request("POST", "https://x")), body=None
+            )
+
+    adapter = ClaudeSearchAdapter(api_key="fake")
+    api = _Overloaded()
+    adapter._client.messages = api  # pyright: ignore[reportAttributeAccessIssue]
+
+    with pytest.raises(anthropic.InternalServerError):
+        await adapter.search(model="claude-haiku-5-5", query="질문")
+
+    assert api.calls == 2  # 검색은 재시도를 한 번만 한다

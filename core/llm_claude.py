@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import anthropic
 from anthropic.types import (
@@ -15,6 +15,7 @@ from anthropic.types import (
     ToolUseBlock,
 )
 
+from core.claude_retry import LLM_REQUEST_TIMEOUT_SECONDS, call_with_retry
 from core.llm import (
     FunctionCallRequest,
     FunctionResultPart,
@@ -56,7 +57,7 @@ def _to_tool_result_block(result: FunctionResultPart) -> ToolResultBlockParam:
     return {
         "type": "tool_result",
         "tool_use_id": result.call_id or "",
-        "content": json.dumps(result.response, ensure_ascii=False),
+        "content": json.dumps(result.response, ensure_ascii=False, default=str),
         "is_error": "error" in result.response,
     }
 
@@ -70,14 +71,19 @@ def _from_provider_response(response: Message) -> GenerationTurn:
     ]
 
     usage = response.usage
+    # Anthropic의 input_tokens는 캐시에서 읽은 몫·캐시에 쓴 몫을 뺀 값이다. UsageInfo.input_tokens는
+    # 캐시 읽기를 포함한 전체 입력이라(core/llm.py) 둘을 더해 맞춘다. 캐시 쓰기는 일반 입력 가격의
+    # 1.25배인데 따로 세지 않고 일반 입력으로 센다(차이가 작다).
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
     return GenerationTurn(
         content=LlmContent(role="model", parts=[LlmPart(text=t) for t in text_parts], raw=response),
         function_calls=function_calls,
         text="\n".join(text_parts) if text_parts else None,
         usage=UsageInfo(
-            input_tokens=usage.input_tokens or 0,
+            input_tokens=(usage.input_tokens or 0) + cache_read + cache_write,
             output_tokens=usage.output_tokens or 0,
-            cached_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+            cached_input_tokens=cache_read,
         ),
     )
 
@@ -92,12 +98,18 @@ def _to_provider_tools(tools: list[ToolDeclaration]) -> list[ToolParam]:
 class ClaudeLlmAdapter:
     """LlmAdapter 프로토콜을 Anthropic SDK로 구현한다. anthropic 패키지를 아는 유일한 모듈이다.
 
-    thinking_level은 지금 쓰지 않는다 — Claude Haiku 계열은 확장 사고(예산 토큰 방식)를
-    지원하지 않는다. 사고를 지원하는 다른 Claude 모델을 쓰게 되면 그때 thinking 설정을
-    여기에 추가한다."""
+    thinking_level은 Claude의 `output_config.effort`(low/medium/high)로 넘긴다. 확장 사고 예산
+    (`thinking.type=enabled`)은 이 모델이 받지 않고, 사고는 모델이 effort에 맞춰 알아서 켠다.
+    사고 블록은 raw 재생(to_provider_content)으로 그대로 돌려보낸다.
+
+    시스템 프롬프트(와 그 앞의 도구 목록)에 프롬프트 캐시 중단점을 둔다 — 한 멘션이 도구를 부르며
+    여러 번 왕복할 때 같은 앞부분을 다시 읽는다."""
 
     def __init__(self, *, api_key: str) -> None:
-        self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        # SDK 자체 재시도는 끈다(core/claude_retry.py가 맡는다).
+        self._client = anthropic.AsyncAnthropic(
+            api_key=api_key, timeout=LLM_REQUEST_TIMEOUT_SECONDS, max_retries=0
+        )
 
     async def generate(
         self,
@@ -109,16 +121,22 @@ class ClaudeLlmAdapter:
         thinking_level: str,
         on_retry: OnRetry | None = None,
     ) -> GenerationTurn:
-        del thinking_level  # 위 docstring 참고 — Haiku는 확장 사고를 안 쓴다.
-        del on_retry  # Claude 쪽 503 재시도는 아직 구현하지 않았다(docs/plan.md §5, Gemini만 실기로 확인됨).
         provider_messages = [to_provider_content(c) for c in contents]
-        response = await self._client.messages.create(
-            model=model,
-            max_tokens=_DEFAULT_MAX_TOKENS,
-            system=system_instruction,
-            messages=provider_messages,
-            tools=_to_provider_tools(tools) if tools else anthropic.omit,
-        )
+        system: list[TextBlockParam] = [
+            {"type": "text", "text": system_instruction, "cache_control": {"type": "ephemeral"}}
+        ]
+
+        async def _call() -> Message:
+            return await self._client.messages.create(
+                model=model,
+                max_tokens=_DEFAULT_MAX_TOKENS,
+                system=system,
+                messages=provider_messages,
+                tools=_to_provider_tools(tools) if tools else anthropic.omit,
+                output_config={"effort": cast("Any", thinking_level)},
+            )
+
+        response = await call_with_retry(_call, on_retry=on_retry)
         return _from_provider_response(response)
 
     async def aclose(self) -> None:
