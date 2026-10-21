@@ -16,8 +16,10 @@ from chuni_penguin.types import Difficulty
 
 from core.tool_types import ToolContext
 from services.chunithm.arcade_settings import (
+    FIELD_LABELS,
     ArcadeSettings,
     build_update_payload,
+    named_from_settings,
     parse_arcade_settings,
 )
 from services.common.players import PlayersService
@@ -32,6 +34,10 @@ logger = logging.getLogger(__name__)
 # fetch_for_sync가 전체 PB를 모을 때 도는 순서. CHUNITHM-NET이 쓰는 코드 그대로다
 # (Difficulty(code)가 "BAS"/"ADV"/"EXP"/"MAS"/"ULT"/"WE"를 그대로 알아듣는다).
 _PERSONAL_BEST_DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
+
+
+class ChangeNotAppliedError(Exception):
+    """CHUNITHM-NET에 바꾸라고 보냈는데 다시 읽어 보니 반영되지 않았다. 메시지는 사용자에게 그대로 보여 줄 수 있다."""
 
 
 class ChunithmNetAdapterLike(Protocol):
@@ -344,7 +350,7 @@ class ChunithmNetService:
     ) -> ArcadeSettings:
         """게임 설정 중 `changes`에 담긴 항목만 바꾸고 나머지는 지금 값 그대로 다시
         제출한다(`chunithm-settings` 전용). POST 응답을 믿지 않고 다시 읽어 실제로
-        반영된 값을 돌려준다. `changes`의 표시 텍스트가 선택지에 없으면
+        반영된 값을 돌려주며, 요청한 값과 다르면 `ChangeNotAppliedError`다. `changes`의 표시 텍스트가 선택지에 없으면
         `build_update_payload`의 ValueError가 그대로 올라간다(모델에 보여줄 한글 메시지)."""
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
@@ -359,7 +365,15 @@ class ChunithmNetService:
                 "POST", "/mobile/home/userOption/updateUserOption/update/", data=payload,
             )
             soup = await adapter._request_as_soup("GET", "/mobile/home/userOption/updateUserOption")
-            return parse_arcade_settings(soup)
+            settings = parse_arcade_settings(soup)
+            not_applied = [
+                f"{FIELD_LABELS[attr]}: 요청 {requested}, 지금 {named_from_settings(settings)[attr]}"
+                for attr, requested in changes.items()
+                if named_from_settings(settings)[attr] != requested
+            ]
+            if not_applied:
+                raise ChangeNotAppliedError("CHUNITHM-NET에 반영되지 않았어 — " + "; ".join(not_applied))
+            return settings
         except AuthenticationError:
             await self._expire_login(player_id, ctx)
             raise
@@ -392,7 +406,16 @@ class ChunithmNetService:
 
         adapter = self._adapter_factory(cookie)
         try:
+            # 요청 토큰(`_t` 쿠키)은 로그인 뒤에야 생긴다. 새 어댑터로 바로 POST하면 비어 있거나 옛 토큰이 body에
+            # 실리고, 사이트가 거절해 재로그인한 뒤에도 같은 body가 다시 나가 조용히 반영이 안 된다(2026-10-21
+            # 실기: 즐겨찾기 추가·삭제가 하나도 안 먹었다). 먼저 한 번 읽어 세션과 토큰을 만든 뒤 보낸다.
+            await adapter.get_favorite_music()
             await adapter.set_favorite_music(ids)
+            after = await adapter.get_favorite_music()
+            if set(after) != set(ids):
+                raise ChangeNotAppliedError(
+                    f"CHUNITHM-NET에 반영되지 않았어 — 보낸 곡 {len(set(ids))}개, 지금 즐겨찾기 {len(set(after))}개"
+                )
         except AuthenticationError:
             await self._expire_login(player_id, ctx)
             raise

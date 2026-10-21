@@ -14,6 +14,7 @@ from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import ToolContext
 from services.chunithm import table_columns as tc
 from services.chunithm.arcade_settings import ArcadeSettings
+from services.chunithm.chunithm_net import ChangeNotAppliedError
 from services.chunithm.songdb import SongRecord
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -330,3 +331,31 @@ async def test_add_favorites_reports_login_problems(skill: ModuleType) -> None:
 def test_add_favorites_is_a_network_bulk_mutation(skill: ModuleType) -> None:
     spec = skill.add_favorites.__yuni_tool__
     assert spec.cost == "network" and spec.mutates is True and spec.confirm == "bulk"
+
+
+async def test_change_settings_reports_not_applied_instead_of_claiming_success(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(settings=_settings(), update_error=ChangeNotAppliedError("CHUNITHM-NET에 반영되지 않았어 — 스피드"))
+
+    result = await skill.change_settings(_ctx(chunithm_net=net), speed="9.00")
+
+    assert result.error is not None and "반영되지 않았어" in result.error
+    assert result.display is None
+
+
+async def test_favorite_writes_report_not_applied(skill: ModuleType) -> None:
+    class _Ignoring(_FakeChunithmNet):
+        async def set_favorite_music(self, player_id: str, ids: list[int], *, ctx: ToolContext | None = None) -> None:
+            raise ChangeNotAppliedError("CHUNITHM-NET에 반영되지 않았어 — 보낸 곡 2개")
+
+    songdb = _FakeSongdb(songs_by_id={42: _song("Chronomia", 42)})
+    ctx = _ctx(chunithm_net=_Ignoring(favorites=[3, 42]), songdb=songdb)
+    ctx_add = _ctx(chunithm_net=_Ignoring(favorites=[3]), songdb=songdb)
+    table = _song_table("Chronomia")
+
+    added = await skill.add_favorite(ctx_add, song=_song("Chronomia", 42))
+    removed = await skill.remove_favorite(ctx, song=_song("Chronomia", 42))
+    bulk = await skill.add_favorites(ctx_add, table=table)
+
+    for result in (added, removed, bulk):
+        assert result.error is not None and "반영되지 않았어" in result.error
+        assert result.display is None

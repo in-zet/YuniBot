@@ -28,6 +28,7 @@ from core.events import EventBus
 from core.tool_types import ToolContext
 from services.chunithm.arcade_settings import parse_arcade_settings
 from services.chunithm.chunithm_net import (
+    ChangeNotAppliedError,
     ChunithmNetService,
     SyncFetch,
     _build_lwp_cookie_jar,
@@ -90,6 +91,7 @@ class _FakeAdapter:
         personal_bests: dict[str, list[PersonalBest]] | None = None,
         favorite_music: list[int] | None = None,
         token: str | None = "tok123",
+        ignores_writes: bool = False,
     ) -> None:
         self.fails = fails
         # fails=True의 기본 실패는 "쿠키 만료" — 실제 어댑터가 인증 실패에서 던지는 타입이다.
@@ -101,7 +103,11 @@ class _FakeAdapter:
         self._personal_bests = personal_bests if personal_bests is not None else {}
         self._favorite_music = favorite_music if favorite_music is not None else []
         self._token_value = token
+        # 사이트가 요청을 조용히 거절하는 경우(2026-10-21 실기 — 토큰이 어긋나면 302만 돌려주고 안 바뀐다).
+        self.ignores_writes = ignores_writes
+        self.calls: list[str] = []
         self.requests: list[tuple[str, str, dict[str, object]]] = []
+        self._settings_page = LexborHTMLParser(_ARCADE_SETTINGS_HTML)
 
     @property
     def lwp_cookie_jar(self) -> str:
@@ -112,14 +118,17 @@ class _FakeAdapter:
         return self._token_value
 
     async def get_favorite_music(self) -> list[int]:
+        self.calls.append("get_favorite_music")
         if self.fails:
             raise self.error
         return list(self._favorite_music)
 
     async def set_favorite_music(self, ids) -> None:
+        self.calls.append("set_favorite_music")
         if self.fails:
             raise self.error
-        self._favorite_music = list(ids)
+        if not self.ignores_writes:
+            self._favorite_music = list(ids)
 
     async def get_profile(self):
         if self.fails:
@@ -161,7 +170,18 @@ class _FakeAdapter:
         self.requests.append((method, url, dict(kwargs)))
         if self.fails:
             raise self.error
-        return LexborHTMLParser(_ARCADE_SETTINGS_HTML)
+        if method == "POST" and not self.ignores_writes:
+            data = cast("dict[str, str]", kwargs["data"])
+            for select in self._settings_page.css("select"):
+                name = select.attrs.get("name")
+                if name not in data:
+                    continue
+                for option in select.css("option"):
+                    if option.attrs.get("value") == data[name]:
+                        option.attrs["selected"] = ""
+                    elif "selected" in option.attrs:
+                        del option.attrs["selected"]
+        return self._settings_page
 
 
 @pytest.fixture
@@ -578,7 +598,9 @@ async def test_update_arcade_settings_posts_full_payload_with_only_requested_cha
 
     result = await service.update_arcade_settings(player.id, changes={"speed": "9.00"})
 
-    assert result == parse_arcade_settings(LexborHTMLParser(_ARCADE_SETTINGS_HTML))
+    assert result.speed == "9.00"
+    original = parse_arcade_settings(LexborHTMLParser(_ARCADE_SETTINGS_HTML))
+    assert result.guide_sound == original.guide_sound  # 말하지 않은 항목은 그대로
     methods = [r[0] for r in adapter.requests]
     assert methods == ["GET", "POST", "GET"]
     _, post_url, post_kwargs = adapter.requests[1]
@@ -789,3 +811,42 @@ async def test_recent_on_non_auth_failure_keeps_login(conn, secrets) -> None:
 
     assert received == []
     assert await players.tags_for(player.id) == {"chunithm-linked"}
+
+
+async def test_set_favorite_music_reads_first_so_the_request_token_exists_then_verifies(conn, secrets) -> None:
+    """토큰은 로그인 뒤에야 생긴다 — 새 어댑터로 바로 쓰면 빈 토큰이 실려 사이트가 조용히 거절한다."""
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    adapter = _FakeAdapter(favorite_music=[3])
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+    adapter.calls.clear()
+
+    await service.set_favorite_music(player.id, [3, 7])
+
+    assert adapter.calls == ["get_favorite_music", "set_favorite_music", "get_favorite_music"]
+
+
+async def test_set_favorite_music_raises_when_site_ignored_the_write(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    adapter = _FakeAdapter(favorite_music=[3], ignores_writes=True)
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    with pytest.raises(ChangeNotAppliedError, match="반영되지 않았어"):
+        await service.set_favorite_music(player.id, [3, 7])
+
+
+async def test_update_arcade_settings_raises_when_site_ignored_the_write(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    adapter = _FakeAdapter(ignores_writes=True)
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    with pytest.raises(ChangeNotAppliedError, match="스피드: 요청 9.00"):
+        await service.update_arcade_settings(player.id, changes={"speed": "9.00"})

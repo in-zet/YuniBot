@@ -14,6 +14,7 @@ from services.chunithm.arcade_settings import (
     named_from_settings,
     settings_line,
 )
+from services.chunithm.chunithm_net import ChangeNotAppliedError
 from services.chunithm.songdb import SongRecord
 
 _UNKNOWN_SONG = "chunithm-settings.unknown_song"
@@ -26,6 +27,22 @@ def _labeled(named: dict[str, str]) -> dict[str, str]:
     """`play_timing_offset`·`judge_timing_offset` 같은 내부 이름은 모델이 A·B에 거꾸로 짝지은 적이 있다
     (2026-10-20 실기: 판정 A 0.0·B 0.8을 A 0.8·B 0.0으로 말함). data는 화면에 보이는 이름(판정 타이밍 A)으로 낸다."""
     return {FIELD_LABELS[key]: value for key, value in named.items()}
+
+
+async def _write_favorites(ctx: ToolContext, ids: list[int]) -> ToolResult | None:
+    """즐겨찾기 전체 목록을 쓴다. 실패(점검·만료·반영 안 됨)면 에러 결과, 성공이면 None.
+    서비스가 쓴 뒤 다시 읽어 확인하므로, 여기서 None이면 실제로 반영된 것이다."""
+    try:
+        await ctx.chunithm_net.set_favorite_music(ctx.player_id, ids, ctx=ctx)
+    except ConnectionError:
+        return ToolResult(error="로그인이 안 돼 있어서 즐겨찾기를 못 바꿨어.")
+    except MaintenanceError:
+        return ToolResult(error="CHUNITHM-NET이 점검 중이라 즐겨찾기를 못 바꿨어.")
+    except AuthenticationError:
+        return ToolResult(error="로그인이 만료돼서 즐겨찾기를 못 바꿨어. 다시 연결해 줘.")
+    except (ValueError, ChangeNotAppliedError) as e:
+        return ToolResult(error=str(e))
+    return None
 
 
 @tool(slash="현재설정", cost="network")
@@ -76,7 +93,7 @@ async def change_settings(
         return ToolResult(error="CHUNITHM-NET이 점검 중이라 설정을 못 바꿨어.")
     except AuthenticationError:
         return ToolResult(error="로그인이 만료돼서 설정을 못 바꿨어. 다시 연결해 줘.")
-    except ValueError as e:
+    except (ValueError, ChangeNotAppliedError) as e:
         return ToolResult(error=str(e))
 
     named = named_from_settings(settings)
@@ -138,7 +155,9 @@ async def add_favorite(ctx: ToolContext, song: SongQuery) -> ToolResult:
     if song.id in ids:
         return ToolResult(data={"title": song.title, "added": False}, display=Display(content=f"{song.title}은(는) 이미 즐겨찾기에 있어."))
 
-    await ctx.chunithm_net.set_favorite_music(ctx.player_id, [*ids, song.id], ctx=ctx)
+    error = await _write_favorites(ctx, [*ids, song.id])
+    if error is not None:
+        return error
     return ToolResult(
         data={"title": song.title, "added": True},
         display=Display(content=f"{song.title}을(를) 즐겨찾기에 더했어."),
@@ -161,7 +180,9 @@ async def remove_favorite(ctx: ToolContext, song: SongQuery) -> ToolResult:
     if song.id not in ids:
         return ToolResult(data={"title": song.title, "removed": False}, display=Display(content=f"{song.title}은(는) 즐겨찾기에 없어."))
 
-    await ctx.chunithm_net.set_favorite_music(ctx.player_id, [i for i in ids if i != song.id], ctx=ctx)
+    error = await _write_favorites(ctx, [i for i in ids if i != song.id])
+    if error is not None:
+        return error
     return ToolResult(
         data={"title": song.title, "removed": True},
         display=Display(content=f"{song.title}을(를) 즐겨찾기에서 뺐어."),
@@ -215,12 +236,7 @@ async def add_favorites(
     if dry_run:
         return ToolResult(data=data, display=Display(content=f"즐겨찾기에 {len(new_titles)}곡을 더할게: {shown}{note_text}"))
 
-    try:
-        await ctx.chunithm_net.set_favorite_music(ctx.player_id, [*ids, *new_ids], ctx=ctx)
-    except MaintenanceError:
-        return ToolResult(error="CHUNITHM-NET이 점검 중이라 즐겨찾기를 못 바꿨어.")
-    except AuthenticationError:
-        return ToolResult(error="로그인이 만료돼서 즐겨찾기를 못 바꿨어. 다시 연결해 줘.")
-    except ValueError as e:
-        return ToolResult(error=str(e))
+    error = await _write_favorites(ctx, [*ids, *new_ids])
+    if error is not None:
+        return error
     return ToolResult(data=data, display=Display(content=f"즐겨찾기에 {len(new_titles)}곡을 더했어: {shown}{note_text}"))
