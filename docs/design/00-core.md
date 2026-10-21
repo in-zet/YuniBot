@@ -325,7 +325,7 @@ skills/chunithm-border/
 
 "레이팅 전체 보여줘"는 `chunithm-report.best(kind="both")` 한 번이다. 결과는 "베스트 30 · 평균 …"/"신곡 20 · 평균 …" 두 표지의 50행 표에 요약(닉네임·레이팅)이 붙은 형태다. 유니는 요약의 레이팅만 말한다. 11행이 넘으니 행 목록은 텍스트 파일로 나간다. "레이팅표 그림으로"면 `table_image(table="t1", layout="card")`를 한 번 더 부른다.
 
-"15 이상 마스 상수표 내 점수로 만들어줘"는 `find_songs(min_const=15.0, difficulty="MAS")` → `add_scores` → `table_query(group_by="상수", sort="점수", descending=true)` → `table_image(layout="card")`로 호출 4번이다(상한 5 안).
+"15 이상 마스 상수표 내 점수로 만들어줘"는 `chunithm-report.const_table(min_const=15.0, difficulty="MAS")` → `table_image(layout="card")`로 호출 2번이다(2026-10-21 정형화 — 전에는 `find_songs` → `add_scores` → `table_query` → `table_image` 4번이었다. `const_table`이 상수 → 난이도 → 점수 정렬과 점수 칸까지 코드로 만든다).
 
 **첫 범위.**
 - 표를 만드는 쪽: `chunithm-song`의 `find_by_const`·`find_by_version`·`find_songs`·`find_by_artist`, `chunithm-report.best`, `chunithm-folders`의 폴더 불러오기

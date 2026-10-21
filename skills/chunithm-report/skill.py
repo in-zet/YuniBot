@@ -26,6 +26,7 @@ from core.tables import (
 )
 from core.tool_types import (
     ChartRef,
+    DifficultyRef,
     Display,
     PlayerRef,
     TableRef,
@@ -40,7 +41,8 @@ from services.chunithm.records import (
     RatingDeltas,
     SyncDiff,
 )
-from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
+from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, ConstRangeHit
+from services.chunithm.terms import ResolvedDifficulty
 from services.common.players import Player
 
 # 판정 수(상세 판정)는 CHUNITHM-NET 플레이 상세 페이지를 한 곡씩 따로 열어야 붙는다.
@@ -232,6 +234,14 @@ async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind
 _SCORE_COLUMNS = (tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
 
 
+async def _owner_label(ctx: ToolContext, target: Player) -> str:
+    """점수 칸을 더한 표의 `steps`에 적는 "누구 점수"."""
+    if target.id == ctx.player_id:
+        return "내 점수"
+    other = await ctx.records.latest_sync_summary(target.id)
+    return f"{other.nickname} 점수" if other is not None and other.nickname else "상대 점수"
+
+
 @tool()
 async def add_scores(
     ctx: ToolContext,
@@ -248,11 +258,7 @@ async def add_scores(
     pbs = await ctx.records.pb_rows_for(target.id, [key_of(row) for row in table.rows])
     rank_scores = ctx.terms.rank_scores()
 
-    if target.id == ctx.player_id:
-        owner = "내 점수"
-    else:
-        other = await ctx.records.latest_sync_summary(target.id)
-        owner = f"{other.nickname} 점수" if other is not None and other.nickname else "상대 점수"
+    owner = await _owner_label(ctx, target)
     extended = extend_table(
         table,
         tc.common_columns(*_SCORE_COLUMNS),
@@ -262,6 +268,73 @@ async def add_scores(
     return ToolResult(
         data={"player_id": target.id, "with_record": len(pbs)},
         table=replace(extended, subject=target.id),
+    )
+
+
+_CONST_TABLE_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
+_DIFFICULTY_RANK = {name: index for index, name in enumerate(tc.DIFFICULTY_ORDER)}
+
+
+@tool()
+async def const_table(
+    ctx: ToolContext,
+    min_const: float,
+    max_const: float | None = None,
+    difficulty: DifficultyRef | None = None,
+    only_played: bool = False,
+    player: PlayerRef | None = None,
+) -> ToolResult:
+    """상수표: 상수 범위의 채보를 상수별로 묶고(큰 상수부터), 묶음 안은 난이도가 높은 순, 같은 난이도는 점수 높은 순으로
+    늘어놓은 표에 점수·랭크·램프·곡 레이팅을 붙여 준다. 상수를 모르는 채보는 빠진다. 위쪽 한계를 말하지 않았으면 max_const를
+    비운다("15 이상"). "15대"는 15.0~15.9다. 난이도를 말하지 않았으면 비워 모든 난이도를 보인다. 기록 없는 채보도 기본으로
+    넣고(기록 없음), 사람이 "점수 있는 것만"이라고 했을 때만 only_played를 켠다. 누구 기록인지 말하지 않았으면 player를 비운다.
+    그림("상수표 그림으로")은 이 표를 table_image에 넘긴다."""
+    target = await _target_player(ctx, player)
+    if isinstance(target, ToolResult):
+        return target
+    code = None
+    if difficulty is not None:
+        assert isinstance(difficulty, ResolvedDifficulty)
+        code = LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
+    hits = ctx.songdb.find_songs(min_const=min_const, max_const=max_const, difficulty=code)
+    pbs = await ctx.records.pb_rows_for(target.id, [(hit.song.title, hit.chart.difficulty) for hit in hits])
+    if only_played:
+        hits = [hit for hit in hits if (hit.song.title, hit.chart.difficulty) in pbs]
+    if not hits:
+        return ToolResult(
+            data={"count": 0},
+            display=Display(content="점수가 있는 채보가 없다." if only_played else "해당 범위의 채보가 없다."),
+        )
+
+    def order(hit: ConstRangeHit) -> tuple[float, int, int, str]:
+        assert hit.chart.const is not None  # min_const를 줬으니 상수를 아는 채보만 온다
+        pb = pbs.get((hit.song.title, hit.chart.difficulty))
+        long_name = tc.SHORT_TO_LONG_DIFFICULTY.get(hit.chart.difficulty, hit.chart.difficulty)
+        # 상수 → 난이도 → 점수가 모두 높은 쪽이 먼저. 기록 없는 채보는 점수 -1이라 같은 난이도 맨 뒤.
+        return (-hit.chart.const, -_DIFFICULTY_RANK.get(long_name, -1), -(pb.score if pb else -1), hit.song.title)
+
+    rank_scores = ctx.terms.rank_scores()
+    builder = TableBuilder(subject=target.id, unit="채보")
+    tc.add_columns(builder, *_CONST_TABLE_COLUMNS)
+    builder.step(" ".join(part for part in (tc.const_range_text(min_const, max_const), code) if part))
+    builder.step(await _owner_label(ctx, target))
+    if only_played:
+        builder.step("점수 있는 것만")
+    current: float | None = None
+    for hit in sorted(hits, key=order):
+        if hit.chart.const != current:
+            current = hit.chart.const
+            builder.group(f"{current:.1f}")
+        builder.row(
+            tc.chart_ref(hit.song.title, hit.chart.difficulty),
+            {
+                **tc.chart_cells(hit.song, hit.chart, (tc.SONG, tc.DIFFICULTY, tc.CONST)),
+                **tc.pb_cells(pbs.get((hit.song.title, hit.chart.difficulty)), rank_scores),
+            },
+        )
+    return ToolResult(
+        data={"player_id": target.id, "count": len(hits), "with_record": sum(1 for h in hits if (h.song.title, h.chart.difficulty) in pbs)},
+        table=builder.build(),
     )
 
 

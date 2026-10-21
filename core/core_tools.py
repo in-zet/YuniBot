@@ -98,9 +98,7 @@ async def _parse_where(ctx: ToolContext, table: WorkTable, where: list[WhereClau
             raise TableError(f"그 표에 '{clause['column']}' 칸이 없다")
         text = clause["value"]
         value: Any = text
-        if column.order and clause["op"] != "contains":
-            value = canonical_order_value(column, text)
-        elif column.value_type == "number":
+        if column.value_type == "number":
             try:
                 value = float(text.replace(",", ""))
             except ValueError:
@@ -113,6 +111,8 @@ async def _parse_where(ctx: ToolContext, table: WorkTable, where: list[WhereClau
             except ResolutionError:
                 raise TableError(f"'{column.label}' 칸 값 '{text}'을(를) 해석하지 못했다") from None
             value = _comparable(column.value_type, resolved)
+        elif column.order and clause["op"] != "contains":
+            value = canonical_order_value(column, text)
         conditions.append(Condition(column=clause["column"], op=clause["op"], value=value, text=text))
     return conditions
 

@@ -100,6 +100,7 @@ listens: [chunithm.sync.completed]
 | `analyze_slash` | `analyze`의 슬래시 입구(표 없음) | `player: PlayerRef`, 상수 범위(선택) | `/분석`(`@slash_only`) | 표 |
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count` | `/후보곡` | 표 |
 
+| `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`, `max_const`(선택), `difficulty: DifficultyRef`(선택, 없으면 모든 난이도), `only_played`(기본 꺼짐), `player: PlayerRef`(기본 나) | 없음 | 표 |
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
@@ -164,3 +165,11 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 
 표를 받는 도구는 슬래시를 가질 수 없는 계약(`check_table_args_have_no_slash`) 때문에 `/분석`은 같은 일을 하는 `analyze_slash`
 (`@slash_only`, 표 인자 없음)로 나눴다. 둘이 같은 내부 함수 `_analyze`를 부른다(Part 6-1과 같은 입구 나누기). 표 없이 부르면 둘의 결과가 같다.
+
+## 상수표 `const_table` (2026-10-21)
+
+- 정형화: "상수표"는 모양이 정해져 있다. 상수 범위를 정하고, **상수 → 난이도 → 내 점수** 순서로 정렬한다. 상수별로 묶고(표지는 "15.5 · 15채보", 큰 상수부터), 묶음 안은 난이도가 높은 순(ULTIMA → MASTER → EXPERT → ADVANCED → BASIC), 같은 난이도는 점수가 높은 순이다. 점수 없는 채보는 같은 난이도 맨 뒤. 칸은 곡·난이도·상수·점수·랭크·램프·곡 레이팅이다(그림 카드는 이 칸들을 그대로 그린다).
+- 정렬이 기준 셋이라 `table_query`(정렬 칸 하나)로는 못 만들어서 도구가 코드로 직접 정렬해 표를 만든다. `find_songs`+`add_scores`+`table_query`를 모델이 이어 붙이던 방식을 대신한다.
+- 난이도를 안 주면 모든 난이도(범위에 드는 BAS~ULT 전부)다. 상수를 모르는 채보는 범위 검색에서 빠진다(추정 상수는 "(추정)"으로 들어간다). 기록 없는 채보는 기본으로 넣고 "기록 없음"이며, `only_played`를 켜면(사용자가 "점수 있는 것만") 뺀다. `steps`는 "15.0~15.5 상수 MAS → 내 점수(→ 점수 있는 것만)".
+- 다른 플레이어의 상수표는 `add_scores`와 같은 공개 검사(`_target_player`)를 쓴다. 누구 점수인지 적는 `steps` 문구도 같은 함수(`_owner_label`)다.
+- "상수표", "15.0~15.5 상수표 그림으로"는 이 도구 → `table_image(layout="card")` 두 번이다.

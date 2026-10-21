@@ -208,6 +208,7 @@ def _ctx(
     players: list[Player] | None = None,
     net: _FakeChunithmNet | None = None,
     consts: dict[tuple[str, str], float] | None = None,
+    songdb: Any = None,
 ) -> _Fakes:
     records = records or _FakeRecords()
     net = net or _FakeChunithmNet([])
@@ -216,7 +217,7 @@ def _ctx(
         tags=frozenset({"chunithm-synced"}),
         services={
             "records": records,
-            "songdb": _FakeSongDb(consts),
+            "songdb": songdb if songdb is not None else _FakeSongDb(consts),
             "players": _FakePlayers(players or [_player("me", public=False)]),
             "chunithm_net": net,
             "terms": TermsService(),
@@ -1040,3 +1041,90 @@ async def test_sync_report_shows_pb_missing_from_recent_history_as_estimated(ski
     assert section.data["has_new_plays"] is True
     assert section.data["chart_updates"][0]["estimated_session"] is True
     assert section.data["sessions"][0]["estimated"] is True
+
+
+# ---------------------------------------------------------------- const_table
+
+
+def _real_songdb() -> Any:
+    from services.chunithm.songdb import SongDbService
+
+    return SongDbService()
+
+
+def _diff(canonical: str) -> Any:
+    from services.chunithm.terms import ResolvedDifficulty
+
+    return ResolvedDifficulty(canonical=canonical)
+
+
+def _scored(hit: Any, score: int) -> PbRow:
+    return _pb(hit.song.title, hit.chart.difficulty, score, "SS", hit.chart.const, "16.00")
+
+
+def _row_keys(table: WorkTable) -> list[tuple[str, str]]:
+    return [(str(r.cell(tc.SONG).raw), str(r.cell(tc.DIFFICULTY).text)) for r in table.rows]
+
+
+async def test_const_table_groups_by_const_desc_then_difficulty_desc_then_score_desc(skill: ModuleType) -> None:
+    songdb = _real_songdb()
+    hits = songdb.find_songs(min_const=15.0, max_const=15.0)
+    mas = [h for h in hits if h.chart.difficulty == "MAS"]
+    ult = [h for h in hits if h.chart.difficulty == "ULT"]
+    assert len(mas) >= 3 and ult
+    pbs = [_scored(mas[0], 1_000_000), _scored(mas[1], 1_005_000), _scored(mas[2], 990_000), _scored(ult[0], 980_000)]
+    f = _ctx(records=_FakeRecords(pbs={"me": pbs}), songdb=songdb)
+
+    result = await skill.const_table(f.ctx, min_const=15.0, max_const=15.0)
+
+    table = result.table
+    assert result.error is None and table is not None
+    assert [g.title for g in table.groups] == ["15.0"]
+    keys = _row_keys(table)
+    assert [d for _, d in keys] == sorted((d for _, d in keys), key=lambda d: -tc.DIFFICULTY_ORDER.index(tc.SHORT_TO_LONG_DIFFICULTY[d]))
+    ult_rows = [k for k in keys if k[1] == "ULT"]
+    assert keys[: len(ult_rows)] == ult_rows and (ult[0].song.title, "ULT") == ult_rows[0]  # ULT 안에서는 점수 있는 곡이 먼저
+    mas_keys = [k for k in keys if k[1] == "MAS"]
+    assert mas_keys[:3] == [(mas[1].song.title, "MAS"), (mas[0].song.title, "MAS"), (mas[2].song.title, "MAS")]  # 점수 내림차순, 기록 없음은 뒤
+    assert table.steps == ("15.0~15.0 상수", "내 점수")
+    assert [c.label for c in table.columns] == ["곡", "난이도", "상수", "점수", "랭크", "램프", "곡 레이팅"]
+
+
+async def test_const_table_groups_come_biggest_const_first_and_include_unplayed_by_default(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(), songdb=_real_songdb())
+
+    result = await skill.const_table(f.ctx, min_const=14.9, max_const=15.1)
+
+    table = result.table
+    assert table is not None
+    assert [g.title for g in table.groups] == ["15.1", "15.0", "14.9"]
+    assert all(r.cell(tc.SCORE).text == "기록 없음" for r in table.rows)
+    assert result.data["with_record"] == 0
+
+
+async def test_const_table_only_played_difficulty_and_open_ended_range(skill: ModuleType) -> None:
+    songdb = _real_songdb()
+    hit = next(h for h in songdb.find_songs(min_const=15.5, difficulty="MAS"))
+    f = _ctx(records=_FakeRecords(pbs={"me": [_scored(hit, 1_000_000)]}), songdb=songdb)
+
+    played = await skill.const_table(f.ctx, min_const=15.5, difficulty=_diff("MASTER"), only_played=True)
+
+    assert played.table is not None
+    assert _row_keys(played.table) == [(hit.song.title, "MAS")]
+    assert played.table.steps == ("15.5 이상 상수 MAS", "내 점수", "점수 있는 것만")
+    empty = await skill.const_table(_ctx(records=_FakeRecords(), songdb=songdb).ctx, min_const=15.5, only_played=True)
+    assert empty.table is None and "점수가 있는 채보가 없다" in _content(empty)
+    nothing = await skill.const_table(f.ctx, min_const=99.0)
+    assert nothing.table is None and "해당 범위의 채보가 없다" in _content(nothing)
+
+
+async def test_const_table_other_player_needs_public_records(skill: ModuleType) -> None:
+    other = _player("other", public=True)
+    private = _player("hidden", public=False)
+    f = _ctx(records=_records_with_pbs(), players=[_player("me", public=False), other, private], songdb=_real_songdb())
+
+    ok = await skill.const_table(f.ctx, min_const=15.5, max_const=15.5, player=other)
+    refused = await skill.const_table(f.ctx, min_const=15.5, max_const=15.5, player=private)
+
+    assert ok.table is not None and ok.table.subject == "other" and ok.table.steps[1] == "상대 점수"
+    assert refused.error == "그 사람은 기록을 비공개로 해 놨어."
