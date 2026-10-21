@@ -35,6 +35,11 @@ from core.tool_types import (
 )
 from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
+from services.chunithm.rating_format import (
+    rating_delta_text,
+    rating_text,
+    song_rating_text,
+)
 from services.chunithm.records import (
     ChartUpdate,
     PbRow,
@@ -82,14 +87,18 @@ async def _target_player(ctx: ToolContext, player: PlayerRef | None) -> Player |
     return player
 
 
-def _num(value: Decimal | None) -> str:
-    return _UNKNOWN if value is None else str(value)
+def _song_rating(value: Decimal | None) -> str:
+    return song_rating_text(value, unknown=_UNKNOWN)
+
+
+def _rating(value: Decimal | None) -> str:
+    return rating_text(value, unknown=_UNKNOWN)
 
 
 def _delta(current: Decimal | None, previous: Decimal | None) -> str:
     if current is None or previous is None:
         return _UNKNOWN
-    return f"{current - previous:+}"
+    return rating_delta_text(current, previous)
 
 
 def _score(value: int) -> str:
@@ -124,7 +133,7 @@ def _pb_data(row: PbRow) -> dict[str, Any]:
     return {
         "song_title": row.song_title, "difficulty": row.difficulty, "score": row.score, "rank": row.rank,
         "clear_lamp": row.clear_lamp, "combo_lamp": row.combo_lamp, "chain_lamp": row.chain_lamp,
-        "const": row.const, "rating": _num(row.rating),
+        "const": row.const, "rating": _song_rating(row.rating),
     }
 
 
@@ -149,16 +158,16 @@ async def profile(ctx: ToolContext, player: PlayerRef | None = None) -> ToolResu
     data: dict[str, Any] = {
         "player_id": target.id,
         "nickname": summary.nickname,
-        "computed_rating": _num(summary.computed_rating),
-        "best30_average": _num(summary.best30_average),
-        "new20_average": _num(summary.new20_average),
+        "computed_rating": _rating(summary.computed_rating),
+        "best30_average": _rating(summary.best30_average),
+        "new20_average": _rating(summary.new20_average),
         "last_synced_at": summary.last_synced_at,
     }
     lines = [
         f"{summary.nickname or '(닉네임 없음)'}",
-        f"{_METRIC_LABELS['computed_rating']}  {_num(summary.computed_rating)}",
-        f"{_METRIC_LABELS['best30_average']}  {_num(summary.best30_average)}",
-        f"{_METRIC_LABELS['new20_average']}  {_num(summary.new20_average)}",
+        f"{_METRIC_LABELS['computed_rating']}  {_rating(summary.computed_rating)}",
+        f"{_METRIC_LABELS['best30_average']}  {_rating(summary.best30_average)}",
+        f"{_METRIC_LABELS['new20_average']}  {_rating(summary.new20_average)}",
         f"마지막 동기화  {summary.last_synced_at}",
     ]
     return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
@@ -217,16 +226,16 @@ async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind
     header: dict[str, str] = {"닉네임": summary.nickname or "(닉네임 없음)"}
     if profile_row is not None and profile_row.level is not None:
         header["레벨"] = str(profile_row.level)
-    header["레이팅"] = _num(summary.computed_rating)
+    header["레이팅"] = _rating(summary.computed_rating)
     builder.summary(header)
 
     rank_scores = ctx.terms.rank_scores()
     for title, rows, average in frames:
-        builder.group(title, {"평균": _num(average)})
+        builder.group(title, {"평균": _rating(average)})
         for r in rows:
             builder.row(tc.chart_ref(r.song_title, r.difficulty), _pb_row_cells(r, rank_scores))
     return ToolResult(
-        data={"player_id": target.id, "kind": kind.value, "computed_rating": _num(summary.computed_rating)},
+        data={"player_id": target.id, "kind": kind.value, "computed_rating": _rating(summary.computed_rating)},
         table=builder.build(),
     )
 
@@ -435,7 +444,7 @@ async def record(ctx: ToolContext, chart: ChartRef, player: PlayerRef | None = N
     content = (
         f"{row.song_title} {row.difficulty}{_const_text(row.const)}\n"
         f"{_score(row.score)} {row.rank}  {row.clear_lamp} / {row.combo_lamp}\n"
-        f"곡 레이팅 {_num(row.rating)}"
+        f"곡 레이팅 {_song_rating(row.rating)}"
     )
     return ToolResult(
         data={"player_id": target.id, **_pb_data(row)},
@@ -633,14 +642,14 @@ def _metric_lines(deltas: RatingDeltas | None) -> tuple[list[str], dict[str, Any
     lines: list[str] = []
     for key, label in _METRIC_LABELS.items():
         if previous is None:
-            lines.append(f"{label}  {_num(current[key])}")
+            lines.append(f"{label}  {_rating(current[key])}")
         else:
             lines.append(
-                f"{label}  {_num(previous[key])} → {_num(current[key])}  ({_delta(current[key], previous[key])})"
+                f"{label}  {_rating(previous[key])} → {_rating(current[key])}  ({_delta(current[key], previous[key])})"
             )
-    data: dict[str, Any] = {"current": {k: _num(v) for k, v in current.items()}}
+    data: dict[str, Any] = {"current": {k: _rating(v) for k, v in current.items()}}
     if previous is not None:
-        data["previous"] = {k: _num(v) for k, v in previous.items()}
+        data["previous"] = {k: _rating(v) for k, v in previous.items()}
         data["change"] = {k: _delta(current[k], previous[k]) for k in current}
     return lines, data
 
@@ -651,11 +660,11 @@ def _update_line(ctx: ToolContext, u: ChartUpdate, *, session_estimated: bool) -
     if u.old_score is None:
         score = f"신규 {_score(u.new_score)}"
         rank = u.new_rank
-        rating = f"곡 레이팅 {_num(u.new_rating)}"
+        rating = f"곡 레이팅 {_song_rating(u.new_rating)}"
     else:
         score = f"{_score(u.old_score)} → {_score(u.new_score)}"
         rank = f"{u.new_rank} 유지" if u.old_rank == u.new_rank else f"{u.old_rank} → {u.new_rank}"
-        rating = f"곡 레이팅 {_num(u.old_rating)} → {_num(u.new_rating)}"
+        rating = f"곡 레이팅 {_song_rating(u.old_rating)} → {_song_rating(u.new_rating)}"
     line = f"{head}  {score}  {rank}  {rating}"
     if u.entered_frame:
         line += "  프레임 진입"
@@ -668,7 +677,7 @@ def _update_data(u: ChartUpdate) -> dict[str, Any]:
     return {
         "song_title": u.song_title, "difficulty": u.difficulty,
         "old_score": u.old_score, "new_score": u.new_score, "old_rank": u.old_rank, "new_rank": u.new_rank,
-        "old_rating": None if u.old_rating is None else str(u.old_rating), "new_rating": _num(u.new_rating),
+        "old_rating": None if u.old_rating is None else _song_rating(u.old_rating), "new_rating": _song_rating(u.new_rating),
         "session_id": u.session_id, "estimated_session": u.estimated_session, "entered_frame": u.entered_frame,
     }
 
@@ -707,7 +716,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         # chunithm-sync는 첫 동기화에 이 이벤트를 내지 않는다. 오면 기준점만 알린다.
         return Section(
             order=_REPORT_ORDER,
-            display=Display(content=f"기준점을 잡았어. 현재 레이팅 {_num(deltas.computed_rating if deltas else None)}"),
+            display=Display(content=f"기준점을 잡았어. 현재 레이팅 {_rating(deltas.computed_rating if deltas else None)}"),
             data={"kind": "sync_report", "is_first_sync": True},
         )
 
@@ -758,7 +767,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         blocks.append(
             "\n".join(
                 ["프레임 이탈"]
-                + [f"{e.song_title} {e.difficulty}  곡 레이팅 {_num(e.old_rating)}" for e in diff.frame_exits]
+                + [f"{e.song_title} {e.difficulty}  곡 레이팅 {_song_rating(e.old_rating)}" for e in diff.frame_exits]
             )
         )
 
@@ -787,7 +796,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
                 for p in diff.unchanged_plays
             ],
             "frame_exits": [
-                {"song_title": e.song_title, "difficulty": e.difficulty, "old_rating": _num(e.old_rating)}
+                {"song_title": e.song_title, "difficulty": e.difficulty, "old_rating": _song_rating(e.old_rating)}
                 for e in diff.frame_exits
             ],
             "stage": stage,

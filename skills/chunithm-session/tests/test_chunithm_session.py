@@ -244,7 +244,7 @@ async def test_get_session_returns_pinned_report_unchanged_by_current_records(
     assert result.error is None
     assert result.data["rendered_text"] == "세션 요약 2026-10-05"
     assert result.data["changes"]["rating_then"] == "16.50"
-    assert result.data["changes"]["rating_now"] == "17.20"
+    assert result.data["changes"]["rating_now"] == "17.2000"
 
 
 async def test_get_session_no_date_returns_latest(skill: ModuleType, db: aiosqlite.Connection) -> None:

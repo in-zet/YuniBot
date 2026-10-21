@@ -15,6 +15,7 @@ from core.events import Section
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.threads import ThreadTranscript
 from core.tool_types import ArcadeRef, Display, PlayerRef, ToolContext, ToolResult
+from services.chunithm.rating_format import rating_text, song_rating_text
 from services.common.arcades import Arcade
 from services.common.players import Player
 
@@ -123,7 +124,7 @@ async def _changes_block(
     """저장된 리포트 시점의 채보·레이팅과 지금 값을 나란히 비교한다(design "그 뒤의 변화")."""
     sync_section = _sync_section(sections_data)
     summary = await ctx.records.latest_sync_summary(player_id)
-    now_rating = str(summary.computed_rating) if summary and summary.computed_rating is not None else _UNKNOWN
+    now_rating = rating_text(summary.computed_rating if summary else None, unknown=_UNKNOWN)
     then_rating = sync_section.get("current", {}).get("computed_rating") if sync_section else None
 
     lines: list[str] = []
@@ -134,7 +135,7 @@ async def _changes_block(
         current = await ctx.records.pb_row(player_id, song_title=u["song_title"], difficulty=u["difficulty"])
         if current is None:
             continue
-        current_rating = str(current.rating) if current.rating is not None else _UNKNOWN
+        current_rating = song_rating_text(current.rating, unknown=_UNKNOWN)
         if current.rank == u["new_rank"] and current.score == u["new_score"]:
             continue
         chart_changes.append(

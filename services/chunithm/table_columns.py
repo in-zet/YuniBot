@@ -22,6 +22,7 @@ from core.tables import (
     TableError,
     cell,
 )
+from services.chunithm.rating_format import song_rating_text
 from services.chunithm.records import PbRow
 from services.chunithm.songdb import (
     LONG_TO_SHORT_DIFFICULTY,
@@ -179,10 +180,10 @@ def lamp_cell(combo_lamp: str | None) -> Cell:
 
 
 def rating_cell(rating: Decimal | None, *, has_record: bool = True) -> Cell:
-    """곡 레이팅은 소수 둘째 자리 값을 그대로 보인다(records가 이미 버림한 값)."""
+    """곡 레이팅은 항상 소수 둘째 자리까지 보인다(records가 이미 버림한 값, 0이 빠졌으면 채운다)."""
     if rating is None:
         return cell(None, _UNKNOWN if has_record else _DASH)
-    return cell(float(rating), str(rating))
+    return cell(float(rating), song_rating_text(rating))
 
 
 def _num_text(value: float) -> str:

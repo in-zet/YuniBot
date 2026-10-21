@@ -405,7 +405,7 @@ def _draw_rating_value(canvas: Image.Image, xy: tuple[int, int], text: str, font
     canvas.paste(_highlight_top(fill, box) if extreme else fill, (x - pad, y - pad), mask)
 
 
-_RATING_TAIL_SCALE = 0.7  # 소수점 아래 셋째·넷째 자리의 글자 크기(둘째 자리까지의 큰 글자에 대한 비율)
+_RATING_TAIL_SCALE = 0.5  # 소수점 아래 셋째·넷째 자리의 글자 크기(둘째 자리까지의 큰 글자에 대한 비율)
 _RATING_TAIL_COLOR = (200, 205, 218)  # 같은 자리의 밝은 회색
 
 

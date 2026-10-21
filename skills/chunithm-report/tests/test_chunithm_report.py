@@ -246,9 +246,9 @@ async def test_profile_self_ignores_privacy_setting(skill: ModuleType) -> None:
 
     assert result.error is None
     assert result.display_mode == "optional"
-    assert result.data["computed_rating"] == "16.94"
-    assert result.data["best30_average"] == "17.02"
-    assert result.data["new20_average"] == "16.83"
+    assert result.data["computed_rating"] == "16.9400"
+    assert result.data["best30_average"] == "17.0200"
+    assert result.data["new20_average"] == "16.8300"
     assert result.data["nickname"] == "펭귄"
     content = _content(result)
     assert "16.94" in content and "17.02" in content and "16.83" in content and "펭귄" in content
@@ -337,9 +337,9 @@ async def test_best_both_returns_table_with_groups_and_contribution(skill: Modul
     assert table is not None
     assert table.subject == "me" and table.unit == "채보"
     assert [g.title for g in table.groups] == ["베스트 30", "신곡 20"]
-    assert [g.summary["평균"] for g in table.groups] == ["17.02", "16.83"]
+    assert [g.summary["평균"] for g in table.groups] == ["17.0200", "16.8300"]
     assert _titles_of(table) == ["곡 A", "곡 B", "신곡 C"]
-    assert table.summary["닉네임"] == "펭귄" and table.summary["레이팅"] == "16.94"
+    assert table.summary["닉네임"] == "펭귄" and table.summary["레이팅"] == "16.9400"
     assert "레벨" not in table.summary
     first = table.rows[0]
     assert first.ref.kind == tc.CHART and tc.chart_key(first.ref) == ("곡 A", "MAS")
@@ -360,7 +360,7 @@ async def test_best_text_line_keeps_the_old_shape_and_hides_lamp(skill: ModuleTy
     text = render_text(result.table).content
     assert "1. 곡 A MAS 15.3  1,007,620 SSS  곡 레이팅 17.31  기여 0.3462" in text
     assert "FULL COMBO" not in text
-    assert "── 베스트 30 · 2채보 · 평균 17.02 ──" in text
+    assert "── 베스트 30 · 2채보 · 평균 17.0200 ──" in text
     assert "닉네임 펭귄 · 레이팅 16.94" in text
 
 
@@ -861,8 +861,8 @@ async def test_sync_report_no_change_shows_current_values_with_change(skill: Mod
     # 지표는 현재값과 변화량을 함께
     assert "+0.04" in content and "+0.02" in content and "+0.00" in content
     assert section.data["has_new_plays"] is False
-    assert section.data["current"]["computed_rating"] == "16.94"
-    assert section.data["change"]["computed_rating"] == "+0.04"
+    assert section.data["current"]["computed_rating"] == "16.9400"
+    assert section.data["change"]["computed_rating"] == "+0.0400"
 
 
 async def test_sync_report_with_updates_has_summary_list_and_great_stage(skill: ModuleType) -> None:
@@ -887,7 +887,7 @@ async def test_sync_report_with_updates_has_summary_list_and_great_stage(skill: 
     assert section.hint is not None and "SSS" in section.hint and "프레임 진입 1개" in section.hint
     content = _section_content(section)
     assert "세션 요약" in content and "10/15" in content
-    assert "16.90 → 16.94" in content and "(+0.04)" in content
+    assert "16.9000 → 16.9400" in content and "(+0.0400)" in content
     assert "갱신 3채보" in content
     assert "곡 A MAS 15.3" in content and "1,006,800 → 1,007,620" in content and "SS+ → SSS" in content
     assert "17.16 → 17.31" in content
@@ -941,7 +941,7 @@ async def test_sync_report_splits_update_list_by_date(skill: ModuleType) -> None
 
     content = _section_content(section)
     # 레이팅 숫자는 동기화 전체 기준으로 한 번만, 갱신 목록은 날짜별로 나눈다.
-    assert content.count("16.90 → 16.94") == 1
+    assert content.count("16.9000 → 16.9400") == 1
     first, second = content.index("갱신  10/15"), content.index("갱신  10/16 (추정)")
     assert first < content.index("곡 A") < second < content.index("곡 B")
     assert [s["updated_count"] for s in section.data["sessions"]] == [1, 1]
@@ -965,7 +965,7 @@ async def test_sync_report_focus_filters_update_list_but_keeps_summary(skill: Mo
     assert "Chronomia" in content
     assert "곡 A" not in content
     assert "갱신 2채보" in content  # 세션 요약은 그대로
-    assert "16.90 → 16.94" in content
+    assert "16.9000 → 16.9400" in content
     assert [u["song_title"] for u in section.data["chart_updates"]] == ["Chronomia"]
     assert section.data["chart_updates_total"] == 2
 
@@ -1004,16 +1004,16 @@ async def test_sync_report_metrics_match_rating_deltas_exactly(skill: ModuleType
     for has_new_plays in (True, False):
         section = await skill.on_sync_completed(f.ctx, _payload(has_new_plays=has_new_plays))
         assert section.data["current"] == {
-            "computed_rating": "16.94", "best30_average": "17.02", "new20_average": "16.83",
+            "computed_rating": "16.9400", "best30_average": "17.0200", "new20_average": "16.8300",
         }
         assert section.data["previous"] == {
-            "computed_rating": "16.90", "best30_average": "17.00", "new20_average": "16.79",
+            "computed_rating": "16.9000", "best30_average": "17.0000", "new20_average": "16.7900",
         }
         assert section.data["change"] == {
-            "computed_rating": "+0.04", "best30_average": "+0.02", "new20_average": "+0.04",
+            "computed_rating": "+0.0400", "best30_average": "+0.0200", "new20_average": "+0.0400",
         }
         content = _section_content(section)
-        assert "16.79 → 16.83" in content
+        assert "16.7900 → 16.8300" in content
         assert "15.20" not in content and "계산 불가" not in content
 
 
