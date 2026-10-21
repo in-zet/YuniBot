@@ -28,7 +28,7 @@ _RETRY_BASE_DELAY_SECONDS = 2.0  # 시도마다 2배로 늘린다(2초, 4초, 8�
 
 # 요청 타임아웃. 없으면 모델이 응답 없이 멈출 때 멘션 처리가 끝없이 기다린다. 서버가 10초 미만
 # 마감은 400으로 거절하고, 초과하면 504로 끊어 준다(위 재시도 경로로 들어간다).
-LLM_REQUEST_TIMEOUT_SECONDS = 30
+LLM_REQUEST_TIMEOUT_SECONDS = 20
 SEARCH_REQUEST_TIMEOUT_SECONDS = 60  # Google 검색을 거치는 호출이라 더 오래 걸린다.
 
 
