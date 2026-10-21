@@ -580,3 +580,25 @@ async def test_add_links_marks_charts_the_songdb_does_not_know() -> None:
     assert result.table is not None
     assert result.table.rows[0].cell("채보 링크").raw is None
     assert result.table.rows[0].cell("채보 링크").text == "링크 없음"
+
+
+async def test_songs_of_merges_charts_of_the_same_song_and_clears_chart_columns() -> None:
+    skill = _load_skill()
+    ctx = _ctx_with_songdb(SongDbService())
+    found = await skill.find_songs(
+        ctx, min_const=14.5,
+        difficulty=_resolved_difficulty("MASTER"), other_difficulty=_resolved_difficulty("ULTIMA"),
+    )
+    assert found.table is not None
+    charts = found.table
+    titles = [str(row.cell(tc.SONG).raw) for row in charts.rows]
+    assert len(titles) > len(set(titles))  # 한 곡에 MAS·ULT 채보가 둘인 곡이 있다(ジングルベル 등)
+
+    merged = (await skill.songs_of(ctx, table=charts)).table
+    assert merged is not None
+    songs = [str(row.cell(tc.SONG).raw) for row in merged.rows]
+    assert songs == list(dict.fromkeys(titles))  # 처음 나온 순서, 곡마다 한 번
+    assert all(row.ref == tc.song_ref(str(row.cell(tc.SONG).raw)) for row in merged.rows)
+    assert all(not row.cell(tc.DIFFICULTY).filled and not row.cell(tc.CONST).filled for row in merged.rows)
+    assert all(row.cell(tc.VERSION).filled for row in merged.rows)
+    assert merged.unit == "곡" and "곡 단위로 합침" in merged.steps

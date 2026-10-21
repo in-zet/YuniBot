@@ -996,3 +996,19 @@ def test_columns_errors() -> None:
         select_rows(table, columns=["곡", "없음"])
     with pytest.raises(TableError, match="'아이디' 칸이 없다"):
         select_rows(table, columns=["아이디"])  # 슬래시 전용 칸은 모델에게 보이지 않는다
+
+
+def test_distinct_by_keeps_the_first_row_of_the_sorted_order_across_groups() -> None:
+    table = _version_table()
+    out = select_rows(table, sort="상수", descending=True, distinct_by="작곡가")
+    assert _songs(out) == ["b", "f", "c"]  # 작곡가 Y·Z·X마다 상수 제일 높은 곡
+    assert out.steps[-1] == "작곡가마다 첫 행만"
+    grouped = select_rows(table, group_by="작곡가", distinct_by="버전")
+    assert _songs(grouped) == ["a", "c", "b", "f"]  # 버전이 겹치는 행(e: OLD, d: NEW)은 묶음을 넘어서도 빠진다
+
+
+def test_distinct_by_never_merges_rows_without_a_value_and_runs_before_limit() -> None:
+    table = _score_table()
+    assert _songs(select_rows(table, distinct_by="램프")) == ["A", "B", "C", "E"]  # B·E는 램프 값이 없어 겹치지 않는다
+    out = select_rows(table, sort="점수", descending=True, distinct_by="램프", limit=2)
+    assert _songs(out) == ["C", "A", "E"]  # C(AJ)·A(FC)가 먼저 남고 D(FC)는 A와 겹쳐 빠진 뒤에 묶음마다 2개

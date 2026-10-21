@@ -323,6 +323,35 @@ async def charts_of(
     return ToolResult(data={"count": result.row_count, "difficulty": code, "expanded": expanded}, table=result)
 
 
+# 곡 단위 행에 남기는 칸. 나머지(난이도·레벨·상수·노트 수·점수·링크 등)는 채보마다 달라서 곡 단위에서는 비운다.
+_SONG_LEVEL_COLUMNS = (tc.SONG, tc.VERSION, tc.ARTIST, tc.SONG_RAW_NAME)
+
+
+@tool()
+async def songs_of(ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG])]) -> ToolResult:
+    """표의 채보 행을 곡 단위 행으로 합친 새 표를 돌려준다(`charts_of`의 반대). 같은 곡의 채보가 여럿이면 곡 하나로
+    줄고, 난이도·레벨·상수·노트 수·점수처럼 채보마다 다른 칸은 빈다. 곡은 표에서 처음 나온 자리에 놓인다.
+    "곡 이름만 한 번씩"처럼 곡이 중복되면 안 되는 요청에 쓴다. 곡 단위 행은 점수·보더·링크에 넘기려면 `charts_of`가 필요하다."""
+    assert isinstance(table, WorkTable)
+    seen: set[str] = set()
+    merged = 0
+
+    def to_song(row: Row) -> Sequence[Row] | None:
+        nonlocal merged
+        title = str(row.cell(tc.SONG).raw)
+        if title in seen:
+            merged += 1
+            return []
+        seen.add(title)
+        cells = {name: row.cell(name) for name in _SONG_LEVEL_COLUMNS if name in row.cells}
+        return [Row(tc.song_ref(title), MappingProxyType(cells))]
+
+    result = expand_rows(table, to_song)
+    steps = ["곡 단위로 합침"] + ([f"겹친 채보 {merged}개 합침"] if merged else [])
+    result = replace(result, steps=(*result.steps, *steps), unit="곡")
+    return ToolResult(data={"count": result.row_count, "merged": merged}, table=result)
+
+
 @tool()
 async def chart_link(ctx: ToolContext, chart: ChartRef) -> ToolResult:
     """채보 뷰어 링크(sdvx.in, 없으면 유튜브 검색)를 돌려준다."""

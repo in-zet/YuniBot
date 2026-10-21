@@ -242,3 +242,10 @@ async def test_table_query_columns_shows_only_the_named_columns() -> None:
     assert result.table.steps == ("곡만 보임",)
     missing = await _query(table_query, {"table": "t1", "columns": ["없음"]})
     assert missing.error == "그 표에 '없음' 칸이 없다"
+
+
+async def test_table_query_distinct_by_is_wired() -> None:
+    result = await _query(table_query, {"table": "t1", "distinct_by": "랭크"})
+    assert result.error is None and result.table is not None
+    assert result.table.steps == ("랭크마다 첫 행만",)
+    assert [row.cell("song").raw for row in result.table.rows] == ["A", "B", "C"]  # 랭크가 전부 비어 겹치지 않는다
