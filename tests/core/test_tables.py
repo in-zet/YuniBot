@@ -1012,3 +1012,14 @@ def test_distinct_by_never_merges_rows_without_a_value_and_runs_before_limit() -
     assert _songs(select_rows(table, distinct_by="램프")) == ["A", "B", "C", "E"]  # B·E는 램프 값이 없어 겹치지 않는다
     out = select_rows(table, sort="점수", descending=True, distinct_by="램프", limit=2)
     assert _songs(out) == ["C", "A", "E"]  # C(AJ)·A(FC)가 먼저 남고 D(FC)는 A와 겹쳐 빠진 뒤에 묶음마다 2개
+
+
+def test_ordered_ref_column_sorts_and_compares_by_its_order_not_alphabetically() -> None:
+    names = ("BASIC", "ADVANCED", "EXPERT", "MASTER", "ULTIMA")
+    builder = TableBuilder().column("song", "곡", bare=True).column("diff", "난이도", "DifficultyRef", order=names)
+    for key, diff in enumerate(["MASTER", "ULTIMA", "EXPERT", "BASIC", None], start=1):
+        builder.row(RowRef("k", str(key)), {"song": cell(f"s{key}"), "diff": cell(diff)})
+    table = builder.build()
+    assert _songs(select_rows(table, sort="난이도", descending=True)) == ["s2", "s1", "s3", "s4", "s5"]  # ULTIMA, MASTER, EXPERT, BASIC, 없음
+    assert _songs(select_rows(table, where=[_where("난이도", ">=", "MASTER")])) == ["s1", "s2", "s5"]  # 값 없는 행은 통과
+    assert [g.title for g in select_rows(table, group_by="난이도").groups] == ["ULTIMA", "MASTER", "EXPERT", "BASIC", "(없음)"]

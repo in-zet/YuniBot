@@ -52,6 +52,9 @@ _DASH = "-"
 _UNKNOWN = "계산 불가"
 _NO_LAMP = "NONE"
 
+# 난이도 칸의 원래 값(정식 이름)을 쉬운 쪽부터 나열한 순서. 정렬·묶기·크기 비교(`난이도 >= MASTER`)가 이 순서를 따른다.
+DIFFICULTY_ORDER: tuple[str, ...] = tuple(LONG_TO_SHORT_DIFFICULTY)
+
 SHORT_TO_LONG_DIFFICULTY: dict[str, str] = {short: long for long, short in LONG_TO_SHORT_DIFFICULTY.items()}
 
 # 곡 단위 행(곡은 차 있고 난이도만 빈 행)을 난이도가 필요한 도구가 뺄 때 붙이는 안내.
@@ -66,7 +69,7 @@ PARTIAL_ROW_HINTS: tuple[PartialRowHint, ...] = (
 
 _COLUMNS: dict[str, Column] = {
     SONG: Column(name=SONG, label=SONG, bare=True),
-    DIFFICULTY: Column(name=DIFFICULTY, label=DIFFICULTY, value_type="DifficultyRef", bare=True),
+    DIFFICULTY: Column(name=DIFFICULTY, label=DIFFICULTY, value_type="DifficultyRef", bare=True, order=DIFFICULTY_ORDER),
     LEVEL: Column(name=LEVEL, label=LEVEL),
     CONST: Column(name=CONST, label=CONST, value_type="number"),
     NOTE_COUNT: Column(name=NOTE_COUNT, label=NOTE_COUNT, value_type="number"),

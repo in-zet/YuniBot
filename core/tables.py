@@ -235,7 +235,7 @@ def _numbers_step(numbers: Collection[int]) -> str:
 
 COMPARE_OPS: frozenset[str] = frozenset({"==", "!=", "<", "<=", ">", ">=", "contains"})
 _ORDERING_OPS: frozenset[str] = frozenset({"<", "<=", ">", ">="})
-# 크기 비교(<, <=, >, >=)를 할 수 없는 칸 종류. 이름이 같은지만 본다.
+# 크기 비교(<, <=, >, >=)를 할 수 없는 칸 종류. 이름이 같은지만 본다(순서 목록을 가진 칸은 예외).
 _UNORDERED_TYPES: frozenset[str] = frozenset({"LampRef", "DifficultyRef"})
 # 값의 크기가 뜻을 가지는 칸 종류. 이 칸으로 묶으면 묶음을 큰 값부터 늘어놓는다(그 밖의 칸은 나온 순서).
 _ORDERED_TYPES: frozenset[str] = frozenset({"number", "ScoreRef", "RankRef"})
@@ -329,7 +329,7 @@ def _passes(raw: Any, op: str, value: Any, column: Column) -> bool:
             return bool(raw == value)
         if op == "!=":
             return bool(raw != value)
-        if column.value_type in _UNORDERED_TYPES:
+        if column.value_type in _UNORDERED_TYPES and not column.order:
             raise TableError(f"'{column.label}' 칸은 크기를 비교할 수 없다")
         if op == "<":
             return bool(raw < value)
