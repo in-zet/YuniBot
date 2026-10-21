@@ -105,7 +105,7 @@ def test_split_pages_numbers_match_table_numbers() -> None:
 
 
 def test_card_page_is_8_lines_and_list_is_30_rows() -> None:
-    assert render.CARD_PAGE_ROWS == 10
+    assert render.CARD_PAGE_ROWS == 8
     assert render.LIST_PAGE_LIMIT == 30
 
 
@@ -124,16 +124,16 @@ def test_render_small_card_table_gives_one_png() -> None:
     assert height > render._JACKET
 
 
-def test_card_grid_is_at_most_five_wide_and_output_is_scaled_down() -> None:
-    table = _chart_table(50)
-    jackets = {f"곡 {i}": _png() for i in range(50)}
+def test_card_grid_is_at_most_ten_wide_and_output_is_scaled_down() -> None:
+    table = _chart_table(80)
+    jackets = {f"곡 {i}": _png() for i in range(80)}
 
     (_, data), = render.render_pages(table, layout="card", jackets=jackets)
 
     width, height = _size(data)
-    full_width = 2 * render._MARGIN + 5 * render._CARD_W + 4 * render._GAP
+    full_width = 2 * render._MARGIN + 10 * render._CARD_W + 9 * render._GAP
     assert width == round(full_width * render.CARD_OUTPUT_SCALE)
-    assert height < 2300  # 줄이기 전 3000쪽이었다
+    assert height < 1800  # 줄이기 전 2500쪽이었다
 
 
 def test_list_output_is_not_scaled() -> None:
@@ -150,14 +150,14 @@ def test_split_pages_counts_grid_lines_not_cards() -> None:
 
 
 def test_split_pages_cuts_big_group_by_lines() -> None:
-    pages = render.split_pages(_chart_table(150), 10, 5)
+    pages = render.split_pages(_chart_table(200), 8, 10)
 
-    assert [sum(len(s.rows) for s in page) for page in pages] == [50, 50, 50]
+    assert [sum(len(s.rows) for s in page) for page in pages] == [80, 80, 40]
 
 
-def test_render_card_splits_at_10_lines() -> None:
-    assert len(render.render_pages(_chart_table(50), layout="card", jackets={})) == 1
-    files = render.render_pages(_chart_table(51), layout="card", jackets={})
+def test_render_card_splits_at_8_lines() -> None:
+    assert len(render.render_pages(_chart_table(80), layout="card", jackets={})) == 1
+    files = render.render_pages(_chart_table(81), layout="card", jackets={})
 
     assert len(files) == 2
     assert [name for name, _ in files] == sorted({name for name, _ in files})
@@ -308,7 +308,7 @@ def test_card_value_texts_share_one_font_size(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_stale_and_page_notes_do_not_crash_and_multi_page_names_are_numbered() -> None:
-    files = render.render_pages(_chart_table(60), layout="card", jackets={}, stale=True)
+    files = render.render_pages(_chart_table(100), layout="card", jackets={}, stale=True)
     assert [name.rsplit("_", 1)[-1] for name, _ in files] == ["1.png", "2.png"]
 
 
