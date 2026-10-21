@@ -291,3 +291,27 @@ def test_number_badge_is_wider_when_table_number_differs() -> None:
 def test_grouped_table_renders_with_local_numbers(layout: str) -> None:
     files = render.render_pages(_chart_table(0, groups=(3, 2)), layout=layout, jackets={})
     assert len(files) == 1
+
+
+def _rgb(image: Image.Image, x: int, y: int) -> tuple[int, int, int]:
+    pixel = image.convert("RGB").getpixel((x, y))
+    assert isinstance(pixel, tuple)
+    return (pixel[0], pixel[1], pixel[2])
+
+
+def test_icon_draws_the_character_on_top_of_the_opaque_frame() -> None:
+    canvas = Image.new("RGBA", (120, 120), (0, 0, 0, 255))
+
+    render._draw_icon(canvas, (0, 0, 120, 120), _png("red"), _png("green"))  # pyright: ignore[reportPrivateUsage]
+
+    assert _rgb(canvas, 60, 60) == (255, 0, 0)  # 가운데는 캐릭터
+    assert _rgb(canvas, 3, 60) == (0, 128, 0)  # 가장자리는 틀
+
+
+def test_icon_with_frame_only_or_character_only_or_failed_character() -> None:
+    frame_only = Image.new("RGBA", (120, 120), (0, 0, 0, 255))
+    render._draw_icon(frame_only, (0, 0, 120, 120), None, _png("green"))  # pyright: ignore[reportPrivateUsage]
+    assert _rgb(frame_only, 60, 60) == (0, 128, 0)  # 캐릭터를 못 받아도 틀 위에 빈 사각형을 얹지 않는다
+    character_only = Image.new("RGBA", (120, 120), (0, 0, 0, 255))
+    render._draw_icon(character_only, (0, 0, 120, 120), _png("red"), None)  # pyright: ignore[reportPrivateUsage]
+    assert _rgb(character_only, 3, 60) == (255, 0, 0)  # 틀이 없으면 상자를 가득 채운다
