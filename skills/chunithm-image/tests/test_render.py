@@ -441,7 +441,9 @@ def test_title_gradient_reaches_higher_up_the_jacket() -> None:
     image = _card_png()
     x = round(render._MARGIN + render._CARD_PAD + render._JACKET - 6)
     top = _card_top(image) + render._CARD_PAD
-    # 곡명 한 줄(26) + 22였던 예전 범위 밖(재킷 아래서 60쯤 위)도 이미 어두워졌다
-    pixel = image.getpixel((x, top + render._JACKET - 60))
+    inside = image.getpixel((x, top + render._JACKET - 50))  # 곡명 한 줄 + 22였던 예전 범위(약 48) 밖
+    outside = image.getpixel((x, top + render._JACKET - render._TITLE_LINE - render._GRADIENT_EXTRA - 10))
 
-    assert isinstance(pixel, tuple) and sum(pixel) < 3 * 250
+    assert isinstance(inside, tuple) and isinstance(outside, tuple)
+    assert sum(inside) < 3 * 250
+    assert min(outside) >= 250  # 그라데이션 위쪽은 재킷 그대로

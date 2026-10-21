@@ -403,7 +403,7 @@ _TITLE_LINE = 26  # 재킷 안 곡명 줄 높이
 _CARD_VALUE_SIZES = (17, 16, 15, 14)  # 상수·곡 레이팅·점수·랭크가 함께 쓰는 글자 크기 후보(큰 것부터)
 _CARD_VALUE_MIN_SIZE = 13
 _GRADIENT_MAX_ALPHA = 220
-_GRADIENT_EXTRA = 80  # 곡명 줄 위로 더 깔리는 높이(2026-10-21: 22 → 80, 그라데이션 범위 확대)
+_GRADIENT_EXTRA = 40  # 곡명 줄 위로 더 깔리는 높이(2026-10-21: 22 → 80 → 40)
 _MAX_COLUMNS = 10  # 한 줄 카드 수 상한
 
 
