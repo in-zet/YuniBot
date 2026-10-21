@@ -310,7 +310,7 @@ def test_adapters_set_request_timeout() -> None:
 
     llm = GeminiLlmAdapter(api_key="fake")
     search = GeminiSearchAdapter(api_key="fake")
-    assert llm._client._api_client._http_options.timeout == 30_000  # pyright: ignore[reportPrivateUsage]
+    assert llm._client._api_client._http_options.timeout == 20_000  # pyright: ignore[reportPrivateUsage]
     assert search._client._api_client._http_options.timeout == 60_000  # pyright: ignore[reportPrivateUsage]
 
 
