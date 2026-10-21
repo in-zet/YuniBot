@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -315,6 +316,15 @@ class SongDbService:
         한 번도 안 됐으면 시드에는 신곡 표시가 없으므로 전부 False다."""
         song = self._songs.get(title)
         return song.is_new if song is not None else False
+
+    def current_version(self) -> str | None:
+        """지금 가동 중인 버전 — 신곡(`is_new`)인 국제판 곡들의 수록 버전 중 가장 많은 것(2026-10-21 결정:
+        설정값을 두지 않고 곡 DB에서 뽑는다). 신곡 표시가 없거나 버전을 모르면 None."""
+        counts = Counter(
+            song.version for title, song in self._songs.items()
+            if song.is_new and song.version and title in self._available_intl
+        )
+        return counts.most_common(1)[0][0] if counts else None
 
     def find_by_const(
         self, *, min_const: float, max_const: float | None = None, difficulty: str | None = None,

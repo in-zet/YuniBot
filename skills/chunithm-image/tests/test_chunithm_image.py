@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 from PIL import Image
@@ -42,9 +43,13 @@ def _png() -> bytes:
 @dataclass(slots=True, kw_only=True)
 class _FakeSongDb:
     jackets: dict[str, str | None] = field(default_factory=dict)
+    version: str | None = None
 
     def jacket_for(self, title: str) -> str | None:
         return self.jackets.get(title)
+
+    def current_version(self) -> str | None:
+        return self.version
 
 
 @dataclass(slots=True, kw_only=True)
@@ -168,3 +173,29 @@ def test_table_image_declares_table_needs(skill: ModuleType) -> None:
     table_arg = next(a for a in build_arg_schema(skill.table_image).args if a.name == "table")
     assert table_arg.table_needs is not None
     assert tc.SONG in table_arg.table_needs.nonempty
+
+
+def _rating_table(skill: ModuleType, *, with_rating: bool) -> WorkTable:
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, tc.SONG)
+    builder.summary({"레이팅": "16.52"} if with_rating else {"평균": "15.0"})
+    builder.row(tc.song_ref("곡 A"), {tc.SONG: tc.song_cell("곡 A")})
+    return builder.build()
+
+
+async def test_current_version_goes_to_header_only_for_rating_table(skill: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[Any] = []
+    real = skill.render.render_pages
+
+    def spy(table: WorkTable, **kwargs: object) -> list[tuple[str, bytes]]:
+        seen.append(kwargs["profile"])
+        return real(table, **kwargs)
+
+    monkeypatch.setattr(skill.render, "render_pages", spy)
+    ctx = _ctx(songdb=_FakeSongDb(version="X-VERSE-X"), cache=_FakeImageCache(), records=_FakeRecords())
+
+    await skill.table_image(ctx, _rating_table(skill, with_rating=True))
+    await skill.table_image(ctx, _rating_table(skill, with_rating=False))
+
+    assert seen[0] is not None and seen[0].version == "X-VERSE-X"
+    assert seen[1] is None

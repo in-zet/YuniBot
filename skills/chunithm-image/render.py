@@ -27,6 +27,9 @@ Layout = Literal["card", "list"]
 CARD_PAGE_LIMIT = 50
 LIST_PAGE_LIMIT = 30
 
+_MARGIN = 24
+_BAND_H = 46  # 묶음 표지 띠 높이
+
 # --- 글꼴. Docker 이미지는 fonts-noto-cjk. `YUNI_FONT_REGULAR`/`YUNI_FONT_BOLD`로 글꼴 파일을 직접 줄 수도 있다(개발 PC용).
 _NOTO_REGULAR = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 _NOTO_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
@@ -36,6 +39,7 @@ _FALLBACK_FONTS = (
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
 )
 _KOREAN_FACE = 1  # NotoSansCJK.ttc 안의 얼굴 번호: 0 JP, 1 KR, 2 SC, 3 TC, 4 HK
+FONT_SCALE = 1.5  # 글자 크기 배율(2026-10-21 실기: 너무 작아 1.5배). 이 모듈의 글자 크기 숫자는 배율 적용 전 값이다.
 
 # --- 색(우리 배치용 팔레트)
 _BG = (22, 25, 36)
@@ -72,8 +76,14 @@ def _rank_color(rank: str) -> tuple[int, int, int]:
 
 # ---------------------------------------------------------------- 글꼴·글자
 
-@lru_cache(maxsize=32)
+def _fs(size: int) -> int:
+    """배율을 적용한 글자 크기(높이 계산용)."""
+    return round(size * FONT_SCALE)
+
+
+@lru_cache(maxsize=64)
 def _font(size: int, bold: bool) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    size = _fs(size)
     override = os.environ.get("YUNI_FONT_BOLD" if bold else "YUNI_FONT_REGULAR")
     primary = _NOTO_BOLD if bold else _NOTO_REGULAR
     candidates = [(primary, (_KOREAN_FACE, 0)), *((p, (0,)) for p in _FALLBACK_FONTS)]
@@ -137,24 +147,34 @@ def _paste_fit(canvas: Image.Image, image: Image.Image | None, box: tuple[int, i
     canvas.alpha_composite(resized, (x0 + (x1 - x0 - size[0]) // 2, y0 + (y1 - y0 - size[1]) // 2))
 
 
+def _chip_width(text: str, size: int) -> int:
+    return _width(_font(size, True), text) + _fs(10)
+
+
 def _chip(
-    draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, fill: tuple[int, int, int], *, size: int = 12
+    draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, fill: tuple[int, int, int], *, size: int = 12,
+    right_aligned: bool = False,
 ) -> int:
-    """둥근 칩을 그리고 오른쪽 끝 x를 돌려준다."""
+    """둥근 칩을 그리고 오른쪽 끝 x를 돌려준다. `right_aligned`면 `xy`의 x를 오른쪽 끝으로 본다."""
     font = _font(size, True)
-    width = _width(font, text) + 10
+    width = _chip_width(text, size)
     x, y = xy
-    draw.rounded_rectangle((x, y, x + width, y + size + 6), radius=5, fill=fill)
-    draw.text((x + 5, y + 2), text, font=font, fill=(255, 255, 255))
+    if right_aligned:
+        x -= width
+    draw.rounded_rectangle((x, y, x + width, y + _fs(size) + _fs(6)), radius=_fs(5), fill=fill)
+    draw.text((x + _fs(5), y + _fs(2)), text, font=font, fill=(255, 255, 255))
     return x + width
 
 
-def _number_badge(draw: ImageDraw.ImageDraw, xy: tuple[int, int], number: int) -> None:
+def _number_badge(draw: ImageDraw.ImageDraw, xy: tuple[int, int], number: int) -> int:
+    """순서 번호 띠를 그리고 오른쪽 끝 x를 돌려준다."""
     font = _font(11, True)
     text = f"#{number}"
     x, y = xy
-    draw.rounded_rectangle((x, y, x + _width(font, text) + 8, y + 17), radius=4, fill=(0, 0, 0, 170))
-    draw.text((x + 4, y + 2), text, font=font, fill=(255, 255, 255))
+    width = _width(font, text) + _fs(8)
+    draw.rounded_rectangle((x, y, x + width, y + _fs(17)), radius=_fs(4), fill=(0, 0, 0, 170))
+    draw.text((x + _fs(4), y + _fs(2)), text, font=font, fill=(255, 255, 255))
+    return x + width
 
 
 # ---------------------------------------------------------------- 쪽 나누기
@@ -195,31 +215,54 @@ def split_pages(table: WorkTable, limit: int) -> list[list[Segment]]:
 
 @dataclass(frozen=True, slots=True)
 class HeaderProfile:
-    """머리말에 그릴 플레이어 정보. 모르는 것은 None."""
+    """머리말에 그릴 플레이어 정보. 모르는 것은 None. `version`은 표를 만든 때의 가동 버전(레이팅표에만 쓴다)."""
 
     nickname: str | None = None
     level: int | None = None
     character: bytes | None = None
     frame: bytes | None = None
+    version: str | None = None
 
 
 _NICKNAME_KEY = "닉네임"
 _LEVEL_KEY = "레벨"
-_ICON = 88
-_HEADER_PROBE_H = 400  # 머리말 높이를 재려고 그려 보는 임시 도화지
+_RATING_KEY = "레이팅"
+_ICON = 120
+_HEADER_PROBE_H = 600  # 머리말 높이를 재려고 그려 보는 임시 도화지
+
+
+def header_rating(table: WorkTable) -> str | None:
+    """표 요약의 최종 레이팅 — 레이팅표(요약에 `레이팅`이 있는 표)에서만 머리말 오른쪽 끝에 크게 그린다."""
+    return table.summary.get(_RATING_KEY)
 
 
 def _header_lines(table: WorkTable, profile: HeaderProfile | None) -> tuple[str | None, list[str], str | None]:
-    """(큰 글자 줄, 작은 글자 줄들, 과정 줄). 닉네임·레벨은 큰 글자 줄로 올리고 나머지 요약은 작은 줄로 둔다."""
+    """(큰 글자 줄, 작은 글자 줄들, 과정 줄). 닉네임·레벨은 큰 글자 줄로 올리고, 레이팅표의 최종 레이팅은
+    따로 크게 그리므로 뺀다. 레이팅표면 가동 버전을 작은 줄 맨 앞에 둔다."""
     summary = dict(table.summary)
     nickname = summary.pop(_NICKNAME_KEY, None) or (profile.nickname if profile else None)
     level = profile.level if profile is not None and profile.level is not None else None
     level_text = f"Lv.{level}" if level is not None else summary.get(_LEVEL_KEY)
     summary.pop(_LEVEL_KEY, None)
+    rating = summary.pop(_RATING_KEY, None)
     title = " ".join(part for part in (nickname, level_text) if part) or None
     details = [" · ".join(f"{key} {value}" for key, value in summary.items())] if summary else []
+    if rating is not None and profile is not None and profile.version:
+        details.insert(0, profile.version)
     steps = " → ".join(table.steps) if table.steps else None
     return title, details, steps
+
+
+def _draw_final_rating(canvas: Image.Image, width: int, rating: str, y: int) -> tuple[int, int]:
+    """머리말 오른쪽 끝에 최종 레이팅을 크게 그린다. (왼쪽 끝 x, 아래 끝 y)를 돌려준다."""
+    draw = ImageDraw.Draw(canvas)
+    label_font, font = _font(13, False), _font(40, True)
+    value_width = _width(font, rating)
+    right = width - _MARGIN
+    draw.text((right - _width(label_font, "RATING"), y), "RATING", font=label_font, fill=_MUTED)
+    value_y = y + _fs(13) + 4
+    draw.text((right - value_width, value_y), rating, font=font, fill=_TEXT)
+    return right - max(value_width, _width(label_font, "RATING")), value_y + _fs(40) + 8
 
 
 def _draw_header(
@@ -228,45 +271,55 @@ def _draw_header(
 ) -> int:
     """머리말을 그리고 그 높이를 돌려준다. 첫 쪽만 전체, 나머지 쪽은 과정 줄과 쪽 번호만."""
     draw = ImageDraw.Draw(canvas)
-    margin = 24
+    margin = _MARGIN
     title, details, steps = _header_lines(table, profile)
     y = 20
     x = margin
-    if page == 1:
-        has_icon = profile is not None and (profile.character is not None or profile.frame is not None)
-        if has_icon:
-            assert profile is not None
-            box = (margin, y, margin + _ICON, y + _ICON)
-            draw.rounded_rectangle(box, radius=8, fill=_PANEL)
-            _paste_fit(canvas, _open(profile.character), box)
-            frame = _open(profile.frame)
-            if frame is not None:
-                _paste_fit(canvas, frame, box)
-            x = margin + _ICON + 16
-        text_y = y
-        if title:
-            draw.text((x, text_y), title, font=_font(30, True), fill=_TEXT)
-            text_y += 42
-        for line in details:
-            draw.text((x, text_y), _ellipsize(_font(18, False), line, width - x - margin), font=_font(18, False), fill=_TEXT)
-            text_y += 26
-        if steps:
-            draw.text((x, text_y), _ellipsize(_font(15, False), steps, width - x - margin), font=_font(15, False), fill=_MUTED)
-            text_y += 22
-        y = max(text_y, y + (_ICON if has_icon else 0)) + 6
-    elif steps:
-        draw.text((margin, y), _ellipsize(_font(15, False), steps, width - 2 * margin - 80), font=_font(15, False), fill=_MUTED)
-        y += 26
     notes: list[str] = []
     if stale:
         notes.append("동기화 전 값")
     if pages > 1:
         notes.append(f"{page}/{pages}쪽")
+    notes_bottom = y
     if notes:
         font = _font(14, True)
         text = " · ".join(notes)
-        draw.text((width - margin - _width(font, text), 22), text, font=font, fill=_STALE if stale else _MUTED)
-        y = max(y, 52)
+        draw.text((width - margin - _width(font, text), y), text, font=font, fill=_STALE if stale else _MUTED)
+        notes_bottom = y + _fs(14) + 8
+    if page == 1:
+        rating = header_rating(table)
+        reserved = 0  # 오른쪽 끝에 크게 그린 레이팅이 차지하는 폭 — 왼쪽 글줄은 이 안으로 안 들어간다.
+        rating_bottom = y
+        if rating is not None:
+            left, rating_bottom = _draw_final_rating(canvas, width, rating, notes_bottom)
+            reserved = width - left + 16
+        has_icon = profile is not None and (profile.character is not None or profile.frame is not None)
+        if has_icon:
+            assert profile is not None
+            box = (margin, y, margin + _ICON, y + _ICON)
+            draw.rounded_rectangle(box, radius=10, fill=_PANEL)
+            _paste_fit(canvas, _open(profile.character), box)
+            frame = _open(profile.frame)
+            if frame is not None:
+                _paste_fit(canvas, frame, box)
+            x = margin + _ICON + 16
+        room = width - x - margin - reserved
+        text_y = y
+        if title:
+            draw.text((x, text_y), _ellipsize(_font(30, True), title, room), font=_font(30, True), fill=_TEXT)
+            text_y += _fs(30) + 12
+        for line in details:
+            draw.text((x, text_y), _ellipsize(_font(18, False), line, room), font=_font(18, False), fill=_TEXT)
+            text_y += _fs(18) + 10
+        if steps:
+            draw.text((x, text_y), _ellipsize(_font(15, False), steps, room), font=_font(15, False), fill=_MUTED)
+            text_y += _fs(15) + 8
+        y = max(text_y, y + (_ICON if has_icon else 0), rating_bottom) + 6
+    elif steps:
+        room = width - 2 * margin - (_width(_font(14, True), " · ".join(notes)) + 16 if notes else 0)
+        draw.text((margin, y), _ellipsize(_font(15, False), steps, room), font=_font(15, False), fill=_MUTED)
+        y += _fs(15) + 10
+    y = max(y, notes_bottom)
     return y + 8
 
 
@@ -279,32 +332,33 @@ def _draw_band(draw: ImageDraw.ImageDraw, width: int, y: int, segment: Segment, 
     parts.append(f"{segment.total}{unit}")
     parts.extend(f"{key} {value}" for key, value in segment.summary.items())
     text = " · ".join(parts)
-    draw.rounded_rectangle((24, y, width - 24, y + 36), radius=8, fill=_BAND)
-    draw.text((38, y + 7), _ellipsize(_font(18, True), text, width - 76), font=_font(18, True), fill=_TEXT)
-    return y + 36 + 12
+    draw.rounded_rectangle((_MARGIN, y, width - _MARGIN, y + _BAND_H), radius=10, fill=_BAND)
+    draw.text((_MARGIN + 16, y + 8), _ellipsize(_font(18, True), text, width - 2 * _MARGIN - 32), font=_font(18, True), fill=_TEXT)
+    return y + _BAND_H + 12
 
 
 # ---------------------------------------------------------------- 카드
 
-_CARD_W = 176
+_JACKET = 190  # 재킷 원본 크기 — 이보다 크게 늘리지 않는다
 _CARD_PAD = 8
-_JACKET = 160  # 재킷 원본이 190×190이라 이보다 크게 늘리지 않는다
+_CARD_W = _JACKET + 2 * _CARD_PAD
 _GAP = 12
-_MARGIN = 24
-_TITLE_TOP = _CARD_PAD + _JACKET + 6
-_INFO_TOP = _TITLE_TOP + 2 * 18 + 4
-_INFO_LINE = 22
+_INFO_TOP = _CARD_PAD + _JACKET + 6
+_INFO_LINE = 34
+_TITLE_LINE = 26  # 재킷 안 곡명 줄 높이
+_GRADIENT_MAX_ALPHA = 220
 
 
 @dataclass(frozen=True, slots=True)
 class _CardLines:
-    const: bool
-    score: bool
-    detail: bool
+    """재킷 아래 줄: 첫 줄은 상수(왼쪽)·곡 레이팅(오른쪽 끝), 둘째 줄은 점수(왼쪽)·랭크(오른쪽 끝)."""
+
+    const_rating: bool
+    score_rank: bool
 
     @property
     def count(self) -> int:
-        return int(self.const) + int(self.score) + int(self.detail)
+        return int(self.const_rating) + int(self.score_rank)
 
     @property
     def height(self) -> int:
@@ -314,16 +368,15 @@ class _CardLines:
 def _card_lines(table: WorkTable) -> _CardLines:
     names = {column.name for column in table.columns}
     return _CardLines(
-        const=tc.CONST in names,
-        score=tc.SCORE in names,
-        detail=bool(names & {tc.RANK, tc.LAMP, tc.RATING}),
+        const_rating=bool(names & {tc.CONST, tc.RATING}),
+        score_rank=bool(names & {tc.SCORE, tc.RANK}),
     )
 
 
-def _draw_difficulty(draw: ImageDraw.ImageDraw, xy: tuple[int, int], row: Row) -> None:
+def _draw_difficulty(draw: ImageDraw.ImageDraw, right_top: tuple[int, int], row: Row) -> None:
     code = row.cell(tc.DIFFICULTY)
     if code.filled:
-        _chip(draw, xy, code.text, _DIFFICULTY_COLORS.get(code.text, (90, 90, 110)))
+        _chip(draw, right_top, code.text, _DIFFICULTY_COLORS.get(code.text, (90, 90, 110)), right_aligned=True)
 
 
 def _draw_lamp(draw: ImageDraw.ImageDraw, xy: tuple[int, int], row: Row) -> int | None:
@@ -334,52 +387,70 @@ def _draw_lamp(draw: ImageDraw.ImageDraw, xy: tuple[int, int], row: Row) -> int 
     return _chip(draw, xy, label, _LAMP_COLORS[label], size=11)
 
 
+def _draw_title_over_jacket(canvas: Image.Image, box: tuple[int, int, int, int], title: str) -> None:
+    """재킷 아래쪽에 검은 그라데이션을 깔고 흰 글씨로 곡명을 넣는다(두 줄까지)."""
+    x0, _, x1, y1 = box
+    font = _font(14, True)
+    lines = _wrap_two(font, title, x1 - x0 - 16)
+    height = len(lines) * _TITLE_LINE + 22
+    gradient = Image.new("RGBA", (x1 - x0, height))
+    pixels = ImageDraw.Draw(gradient)
+    for row in range(height):
+        pixels.line((0, row, x1 - x0, row), fill=(0, 0, 0, round(_GRADIENT_MAX_ALPHA * row / (height - 1))))
+    canvas.alpha_composite(gradient, (x0, y1 - height))
+    draw = ImageDraw.Draw(canvas)
+    top = y1 - 8 - len(lines) * _TITLE_LINE
+    for index, line in enumerate(lines):
+        draw.text((x0 + 8, top + index * _TITLE_LINE), line, font=font, fill=(255, 255, 255))
+
+
+def _fit_score_font(score: str, rank: str | None) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """점수와 랭크가 한 줄에 같이 들어가도록 점수 글자 크기를 줄여 고른다."""
+    rank_width = _width(_font(15, True), rank) + 10 if rank else 0
+    for size in (17, 16, 15, 14):
+        font = _font(size, True)
+        if _width(font, score) + rank_width <= _JACKET:
+            return font
+    return _font(13, True)
+
+
 def _draw_card(
     canvas: Image.Image, origin: tuple[int, int], number: int, row: Row, jacket: Image.Image | None, lines: _CardLines
 ) -> None:
     draw = ImageDraw.Draw(canvas, "RGBA")
     x, y = origin
-    draw.rounded_rectangle((x, y, x + _CARD_W, y + lines.height), radius=10, fill=_PANEL)
+    draw.rounded_rectangle((x, y, x + _CARD_W, y + lines.height), radius=12, fill=_PANEL)
     jx, jy = x + _CARD_PAD, y + _CARD_PAD
-    _paste_fit(canvas, jacket, (jx, jy, jx + _JACKET, jy + _JACKET))
-    _number_badge(draw, (jx + 4, jy + 4), number)
-    _draw_difficulty(draw, (jx + 4, jy + _JACKET - 24), row)
+    box = (jx, jy, jx + _JACKET, jy + _JACKET)
+    _paste_fit(canvas, jacket, box)
+    _draw_title_over_jacket(canvas, box, row.cell(tc.SONG).text)
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    badge_end = _number_badge(draw, (jx + 4, jy + 4), number)
+    _draw_lamp(draw, (badge_end + 4, jy + 4), row)
+    _draw_difficulty(draw, (jx + _JACKET - 4, jy + 4), row)
 
-    title_font = _font(14, True)
-    for index, line in enumerate(_wrap_two(title_font, row.cell(tc.SONG).text, _JACKET)):
-        draw.text((jx, y + _TITLE_TOP + index * 18), line, font=title_font, fill=_TEXT)
-
-    cy = y + _INFO_TOP
     left, right = jx, jx + _JACKET
-    if lines.const:
+    cy = y + _INFO_TOP
+    if lines.const_rating:
         const = row.cell(tc.CONST)
         if const.text:
             draw.text((left, cy), f"상수 {const.text}", font=_font(13, False), fill=_MUTED)
-        cy += _INFO_LINE
-    if lines.score:
-        score = row.cell(tc.SCORE)
-        if score.filled:
-            draw.text((left, cy - 2), score.text, font=_font(17, True), fill=_TEXT)
-        elif score.text:
-            draw.text((left, cy), score.text, font=_font(13, False), fill=_MUTED)
-        cy += _INFO_LINE
-    if lines.detail:
-        rank = row.cell(tc.RANK)
-        cursor = left
-        if rank.filled:
-            draw.text((cursor, cy), rank.text, font=_font(15, True), fill=_rank_color(rank.text))
-            cursor += _width(_font(15, True), rank.text) + 6
-        lamp_end = _draw_lamp(draw, (cursor, cy), row)
-        cursor = lamp_end if lamp_end is not None else cursor
         rating = row.cell(tc.RATING)
         if rating.filled:
             font = _font(14, True)
-            text = rating.text
-            width = _width(font, text)
-            label_font = _font(11, False)
-            if right - width - _width(label_font, "RT ") - 6 > cursor:
-                draw.text((right - width - _width(label_font, "RT "), cy + 3), "RT", font=label_font, fill=_MUTED)
-            draw.text((right - width, cy), text, font=font, fill=_TEXT)
+            width = _width(font, rating.text)
+            draw.text((right - width, cy - 1), rating.text, font=font, fill=_TEXT)
+        cy += _INFO_LINE
+    if lines.score_rank:
+        score, rank = row.cell(tc.SCORE), row.cell(tc.RANK)
+        rank_text = rank.text if rank.filled else None
+        if score.filled:
+            draw.text((left, cy - 2), score.text, font=_fit_score_font(score.text, rank_text), fill=_TEXT)
+        elif score.text:
+            draw.text((left, cy), score.text, font=_font(13, False), fill=_MUTED)
+        if rank_text:
+            font = _font(15, True)
+            draw.text((right - _width(font, rank_text), cy), rank_text, font=font, fill=_rank_color(rank_text))
 
 
 def _draw_cards(
@@ -398,7 +469,7 @@ def _draw_cards(
     height = header_height
     for segment in segments:
         if not bare:
-            height += 36 + 12
+            height += _BAND_H + 12
         rows = -(-len(segment.rows) // columns)
         height += rows * (lines.height + _GAP) + 8
     height += _MARGIN - 8
@@ -419,53 +490,53 @@ def _draw_cards(
 
 # ---------------------------------------------------------------- 목록
 
-_LIST_W = 920
-_LIST_ROW_H = 64
-_LIST_JACKET = 56
+_LIST_W = 1240
+_LIST_ROW_H = 90
+_LIST_JACKET = 80
 
 
 def _draw_list_row(
     canvas: Image.Image, y: int, number: int, row: Row, jacket: Image.Image | None, names: set[str]
 ) -> None:
     draw = ImageDraw.Draw(canvas, "RGBA")
-    draw.rounded_rectangle((_MARGIN, y, _LIST_W - _MARGIN, y + _LIST_ROW_H - 6), radius=8, fill=_PANEL)
-    draw.text((_MARGIN + 10, y + 18), f"#{number}", font=_font(13, True), fill=_MUTED)
-    jx = _MARGIN + 54
-    _paste_fit(canvas, jacket, (jx, y + 1, jx + _LIST_JACKET, y + 1 + _LIST_JACKET - 2))
+    draw.rounded_rectangle((_MARGIN, y, _LIST_W - _MARGIN, y + _LIST_ROW_H - 6), radius=10, fill=_PANEL)
+    draw.text((_MARGIN + 14, y + 26), f"#{number}", font=_font(13, True), fill=_MUTED)
+    jx = _MARGIN + 82
+    _paste_fit(canvas, jacket, (jx, y + 2, jx + _LIST_JACKET, y + 2 + _LIST_JACKET - 4))
 
     # 오른쪽부터 채운다: 곡 레이팅 · 램프 · 랭크 · 점수.
-    right = _LIST_W - _MARGIN - 12
+    right = _LIST_W - _MARGIN - 18
     if tc.RATING in names:
         rating = row.cell(tc.RATING)
         if rating.text:
             font = _font(16, True)
-            draw.text((right - _width(font, rating.text), y + 16), rating.text, font=font, fill=_TEXT)
-        right -= 76
+            draw.text((right - _width(font, rating.text), y + 24), rating.text, font=font, fill=_TEXT)
+        right -= 114
     if tc.LAMP in names:
-        _draw_lamp(draw, (right - 40, y + 19), row)
-        right -= 54
+        _draw_lamp(draw, (right - 64, y + 26), row)
+        right -= 86
     if tc.RANK in names:
         rank = row.cell(tc.RANK)
         if rank.filled:
             font = _font(17, True)
-            draw.text((right - _width(font, rank.text), y + 15), rank.text, font=font, fill=_rank_color(rank.text))
-        right -= 62
+            draw.text((right - _width(font, rank.text), y + 22), rank.text, font=font, fill=_rank_color(rank.text))
+        right -= 100
     if tc.SCORE in names:
         score = row.cell(tc.SCORE)
         font = _font(18, True) if score.filled else _font(14, False)
         if score.text:
-            draw.text((right - _width(font, score.text), y + 15), score.text, font=font, fill=_TEXT if score.filled else _MUTED)
-        right -= 130
+            draw.text((right - _width(font, score.text), y + 22), score.text, font=font, fill=_TEXT if score.filled else _MUTED)
+        right -= 200
 
-    text_x = jx + _LIST_JACKET + 14
+    text_x = jx + _LIST_JACKET + 20
     title_font = _font(17, True)
-    draw.text((text_x, y + 8), _ellipsize(title_font, row.cell(tc.SONG).text, right - text_x), font=title_font, fill=_TEXT)
+    draw.text((text_x, y + 10), _ellipsize(title_font, row.cell(tc.SONG).text, right - text_x), font=title_font, fill=_TEXT)
     cursor = text_x
     code = row.cell(tc.DIFFICULTY)
     if code.filled:
-        cursor = _chip(draw, (cursor, y + 32), code.text, _DIFFICULTY_COLORS.get(code.text, (90, 90, 110))) + 8
+        cursor = _chip(draw, (cursor, y + 48), code.text, _DIFFICULTY_COLORS.get(code.text, (90, 90, 110))) + 10
     if tc.CONST in names and row.cell(tc.CONST).text:
-        draw.text((cursor, y + 33), f"상수 {row.cell(tc.CONST).text}", font=_font(13, False), fill=_MUTED)
+        draw.text((cursor, y + 51), f"상수 {row.cell(tc.CONST).text}", font=_font(13, False), fill=_MUTED)
 
 
 def _draw_list(
@@ -478,7 +549,7 @@ def _draw_list(
     header_height = _draw_header(probe, _LIST_W, table, profile, stale=stale, page=page, pages=pages)
     height = header_height + _MARGIN
     for segment in segments:
-        height += (0 if bare else 48) + len(segment.rows) * _LIST_ROW_H + 8
+        height += (0 if bare else _BAND_H + 12) + len(segment.rows) * _LIST_ROW_H + 8
 
     canvas = Image.new("RGBA", (_LIST_W, height), _BG)
     y = _draw_header(canvas, _LIST_W, table, profile, stale=stale, page=page, pages=pages)

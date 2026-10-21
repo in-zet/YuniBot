@@ -68,6 +68,8 @@ async def table_image(
     fetched = await ctx.image_cache.fetch_many([*jacket_urls.values(), *profile_urls])
     jackets = {title: fetched.get(url) if url else None for title, url in jacket_urls.items()}
 
+    # 가동 버전은 레이팅표(요약에 최종 레이팅이 있는 표)에만 머리말에 넣는다.
+    version = ctx.songdb.current_version() if render.header_rating(table) is not None else None
     header = None
     if extra is not None:
         nickname, profile = extra
@@ -76,7 +78,10 @@ async def table_image(
             level=profile.level if profile is not None else None,
             character=fetched.get(profile.character_image_url) if profile is not None and profile.character_image_url else None,
             frame=fetched.get(profile.character_frame_url) if profile is not None and profile.character_frame_url else None,
+            version=version,
         )
+    elif version is not None:
+        header = render.HeaderProfile(version=version)
     stale = bool(
         ctx.tables is not None and ctx.channel_id is not None
         and ctx.tables.is_stale(ctx.player_id, ctx.channel_id, table.id)

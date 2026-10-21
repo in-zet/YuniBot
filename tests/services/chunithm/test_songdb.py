@@ -587,3 +587,18 @@ def test_find_linked_verse_filters_by_gate_and_difficulty(songdb: SongDbService)
     with pytest.raises(ValueError, match="모르는 게이트"):
         songdb.find_linked_verse(gate="없는게이트")
     assert songdb.linked_verse_gates()[0] == "ORIGIN"
+
+
+async def test_current_version_is_most_common_version_among_new_songs(songdb: SongDbService) -> None:
+    assert songdb.current_version() is None  # 신곡 표시가 없다
+
+    songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
+    new_songs = [song for song in songdb._songs.values() if song.is_new and song.title in songdb._available_intl]
+    assert len(new_songs) >= 2
+    for index, song in enumerate(new_songs):
+        song.version = "VERSE" if index == 0 else "X-VERSE-X"
+    assert songdb.current_version() == "X-VERSE-X"
+
+    for song in new_songs:
+        song.version = None
+    assert songdb.current_version() is None  # 신곡이 있어도 수록 버전을 모르면 None

@@ -181,8 +181,67 @@ def test_header_lines_pull_nickname_and_level_up_and_keep_other_summary() -> Non
     title, details, steps = render._header_lines(table, render.HeaderProfile(level=87))
 
     assert title == "유니 Lv.87"  # 저장된 프로필 레벨이 표 요약의 레벨보다 앞선다
-    assert details == ["레이팅 16.52"]
+    assert details == []  # 최종 레이팅은 머리말 오른쪽 끝에 따로 크게 그린다
+    assert render.header_rating(table) == "16.52"
     assert steps == "내 베스트"
+
+
+def test_header_lines_put_current_version_first_only_for_rating_table() -> None:
+    builder = TableBuilder(subject="p1", unit="채보")
+    tc.add_columns(builder, tc.SONG)
+    builder.summary({"닉네임": "유니", "레이팅": "16.52"})
+    builder.row(tc.song_ref("곡"), {tc.SONG: tc.song_cell("곡")})
+    rating_table = builder.build()
+    other = _chart_table(2)
+    profile = render.HeaderProfile(version="X-VERSE-X")
+
+    assert render._header_lines(rating_table, profile)[1] == ["X-VERSE-X"]
+    assert render._header_lines(other, profile)[1] == []
+
+
+def test_final_rating_is_drawn_in_header_and_makes_it_taller() -> None:
+    def table(summary: dict[str, str]) -> WorkTable:
+        builder = TableBuilder(subject=None, unit="채보")
+        tc.add_columns(builder, tc.SONG)
+        builder.summary(summary)
+        builder.row(tc.song_ref("곡"), {tc.SONG: tc.song_cell("곡")})
+        return builder.build()
+
+    plain = render.render_pages(table({"닉네임": "유니"}), layout="card", jackets={})[0][1]
+    rated = render.render_pages(table({"닉네임": "유니", "레이팅": "16.52"}), layout="card", jackets={})[0][1]
+
+    assert _size(rated)[1] > _size(plain)[1]
+
+
+def test_font_scale_is_one_and_a_half() -> None:
+    assert render.FONT_SCALE == 1.5
+    assert render._fs(14) == 21
+
+
+def test_card_gives_title_gradient_over_bottom_of_jacket() -> None:
+    data = render.render_pages(_chart_table(1), layout="card", jackets={"곡 0": _png("white")})[0][1]
+
+    with Image.open(io.BytesIO(data)) as opened:
+        image = opened.convert("RGB")
+    x = render._MARGIN + render._CARD_PAD + render._JACKET - 3  # 곡명 글자가 닿지 않는 오른쪽 가장자리
+    ys = [y for y in range(image.size[1]) if image.getpixel((x, y)) == (255, 255, 255)]
+    assert ys, "흰 재킷이 보여야 한다"
+    bottom = image.getpixel((x, ys[0] + render._JACKET - 2))
+    assert isinstance(bottom, tuple) and sum(bottom) < 3 * 255 // 2  # 맨 아래는 검은 그라데이션으로 어둡다
+
+
+def test_card_has_two_info_lines_and_height_follows() -> None:
+    both = render._card_lines(_chart_table(1))
+    assert (both.const_rating, both.score_rank) == (True, True)
+    assert both.height == render._INFO_TOP + 2 * render._INFO_LINE + render._CARD_PAD
+    names_only = render._card_lines(_chart_table(1, scores=False))
+    assert (names_only.const_rating, names_only.score_rank) == (True, False)
+
+
+def test_score_font_shrinks_so_score_and_rank_fit_on_one_line() -> None:
+    font = render._fit_score_font("1,010,000", "SSS+")
+    rank_width = render._width(render._font(15, True), "SSS+") + 10
+    assert render._width(font, "1,010,000") + rank_width <= render._JACKET or font is render._font(13, True)
 
 
 def test_stale_and_page_notes_do_not_crash_and_multi_page_names_are_numbered() -> None:
