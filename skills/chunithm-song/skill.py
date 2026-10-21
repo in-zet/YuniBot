@@ -105,21 +105,6 @@ _SEARCH_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc
 _NO_ARTIST_SONGS = "해당 작곡가의 곡이 없다."
 
 
-def _num_text(value: float) -> str:
-    return f"{value:.1f}" if round(value, 1) == value else f"{value:g}"
-
-
-def _const_range_text(min_const: float | None, max_const: float | None) -> str | None:
-    if min_const is None and max_const is None:
-        return None
-    if max_const is None and min_const is not None:
-        return f"{_num_text(min_const)} 이상 상수"
-    if min_const is None and max_const is not None:
-        return f"{_num_text(max_const)} 이하 상수"
-    assert min_const is not None and max_const is not None
-    return f"{_num_text(min_const)}~{_num_text(max_const)} 상수"
-
-
 def _note_range_text(min_notes: int | None, max_notes: int | None) -> str | None:
     if min_notes is None and max_notes is None:
         return None
@@ -156,7 +141,7 @@ async def find_by_const(
     )
     if not hits:
         return ToolResult(data={"count": 0}, display=Display(content="해당 범위의 채보가 없다."))
-    conditions = [_const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
+    conditions = [tc.const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions))
 
 
@@ -237,7 +222,7 @@ async def find_songs(
     if not hits:
         return ToolResult(data={"count": 0}, display=Display(content="조건에 맞는 채보가 없다."))
     conditions = [
-        _const_range_text(min_const, max_const),
+        tc.const_range_text(min_const, max_const),
         f"레벨 {level}" if level else None,
         f"{version} 버전" if version else None,
         "·".join(dict.fromkeys(codes)) or None,

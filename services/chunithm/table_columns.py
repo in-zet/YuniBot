@@ -185,6 +185,22 @@ def rating_cell(rating: Decimal | None, *, has_record: bool = True) -> Cell:
     return cell(float(rating), str(rating))
 
 
+def _num_text(value: float) -> str:
+    return f"{value:.1f}" if round(value, 1) == value else f"{value:g}"
+
+
+def const_range_text(min_const: float | None, max_const: float | None) -> str | None:
+    """steps에 쓰는 상수 범위 문구("15.0~15.5 상수", "15.0 이상 상수"). 둘 다 없으면 None."""
+    if min_const is None and max_const is None:
+        return None
+    if max_const is None and min_const is not None:
+        return f"{_num_text(min_const)} 이상 상수"
+    if min_const is None and max_const is not None:
+        return f"{_num_text(max_const)} 이하 상수"
+    assert min_const is not None and max_const is not None
+    return f"{_num_text(min_const)}~{_num_text(max_const)} 상수"
+
+
 # ---------------------------------------------------------------- 행 하나의 칸 묶음
 
 
