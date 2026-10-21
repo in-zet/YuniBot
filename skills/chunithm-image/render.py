@@ -60,19 +60,46 @@ _DIFFICULTY_COLORS = {
     "WE": (210, 100, 170),
 }
 _LAMP_LABELS = {"AJC": "AJC", "ALL JUSTICE": "AJ", "FULL COMBO": "FC"}
-_LAMP_COLORS = {"AJC": (240, 190, 40), "AJ": (232, 160, 50), "FC": (70, 160, 220)}
+_LAMP_COLORS = {"AJC": (255, 215, 70), "AJ": (255, 140, 60), "FC": (70, 160, 220)}
+
+# 카드 배경에 섞는 난이도 색(2026-10-21). ULT는 섞지 않고 검은 바탕(`_ULT_PANEL`)을 따로 쓴다.
+_DIFFICULTY_TINTS = {
+    "BAS": (46, 160, 90),
+    "ADV": (226, 150, 40),
+    "EXP": (214, 66, 66),
+    "MAS": (150, 80, 200),
+    "WE": (210, 100, 170),
+}
+_ULT_PANEL = (24, 14, 18)  # 검은색 톤, 바탕(_BG)보다 살짝 붉어 카드 윤곽이 보인다
+_TINT_STRENGTH = 0.22
+_LAMP_BORDER = 2
+
+# 랭크마다 다른 글자색(2026-10-21): 낮은 쪽은 흐리게, B는 파랑, A는 초록, S는 은색, SS는 주황, SSS는 금색, SSS+는 백금.
+_RANK_COLORS = {
+    "D": (125, 125, 140), "C": (165, 125, 100),
+    "B": (100, 140, 220), "BB": (95, 165, 230), "BBB": (90, 195, 235),
+    "A": (100, 200, 130), "AA": (140, 210, 100), "AAA": (190, 220, 80),
+    "S": (205, 210, 225), "S+": (235, 235, 250),
+    "SS": (255, 170, 90), "SS+": (255, 135, 100),
+    "SSS": (255, 208, 60), "SSS+": (130, 235, 255),
+}
 
 
 def _rank_color(rank: str) -> tuple[int, int, int]:
-    if rank.startswith("SSS"):
-        return (255, 205, 70)
-    if rank.startswith(("SS", "S")):
-        return (214, 220, 236)
-    if rank.startswith("A"):
-        return (120, 200, 130)
-    if rank.startswith("B"):
-        return (110, 160, 230)
-    return _MUTED
+    return _RANK_COLORS.get(rank, _MUTED)
+
+
+def _tinted_panel(code: str | None) -> tuple[int, int, int]:
+    if code == "ULT":
+        return _ULT_PANEL
+    tint = _DIFFICULTY_TINTS.get(code or "")
+    if tint is None:
+        return _PANEL
+
+    def mix(base: int, color: int) -> int:
+        return round(base * (1 - _TINT_STRENGTH) + color * _TINT_STRENGTH)
+
+    return (mix(_PANEL[0], tint[0]), mix(_PANEL[1], tint[1]), mix(_PANEL[2], tint[2]))
 
 
 # ---------------------------------------------------------------- 글꼴·글자
@@ -376,6 +403,7 @@ _TITLE_LINE = 26  # 재킷 안 곡명 줄 높이
 _CARD_VALUE_SIZES = (17, 16, 15, 14)  # 상수·곡 레이팅·점수·랭크가 함께 쓰는 글자 크기 후보(큰 것부터)
 _CARD_VALUE_MIN_SIZE = 13
 _GRADIENT_MAX_ALPHA = 220
+_GRADIENT_EXTRA = 80  # 곡명 줄 위로 더 깔리는 높이(2026-10-21: 22 → 80, 그라데이션 범위 확대)
 _MAX_COLUMNS = 10  # 한 줄 카드 수 상한
 
 
@@ -422,7 +450,7 @@ def _draw_title_over_jacket(canvas: Image.Image, box: tuple[int, int, int, int],
     x0, _, x1, y1 = box
     font = _font(14, True)
     lines = _wrap_two(font, title, x1 - x0 - 16)
-    height = len(lines) * _TITLE_LINE + 22
+    height = min(len(lines) * _TITLE_LINE + _GRADIENT_EXTRA, y1 - box[1])
     gradient = Image.new("RGBA", (x1 - x0, height))
     pixels = ImageDraw.Draw(gradient)
     for row in range(height):
@@ -453,7 +481,11 @@ def _draw_card(
 ) -> None:
     draw = ImageDraw.Draw(canvas, "RGBA")
     x, y = origin
-    draw.rounded_rectangle((x, y, x + _CARD_W, y + lines.height), radius=12, fill=_PANEL)
+    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if row.cell(tc.LAMP).filled else None
+    draw.rounded_rectangle(
+        (x, y, x + _CARD_W, y + lines.height), radius=12, fill=_tinted_panel(row.cell(tc.DIFFICULTY).text),
+        outline=_LAMP_COLORS[lamp] if lamp is not None else None, width=_LAMP_BORDER,
+    )
     jx, jy = x + _CARD_PAD, y + _CARD_PAD
     box = (jx, jy, jx + _JACKET, jy + _JACKET)
     _paste_fit(canvas, jacket, box)

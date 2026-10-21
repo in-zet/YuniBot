@@ -378,3 +378,70 @@ def test_icon_with_frame_only_or_character_only_or_failed_character() -> None:
     character_only = Image.new("RGBA", (120, 120), (0, 0, 0, 255))
     render._draw_icon(character_only, (0, 0, 120, 120), _png("red"), None)  # pyright: ignore[reportPrivateUsage]
     assert _rgb(character_only, 3, 60) == (255, 0, 0)  # 틀이 없으면 상자를 가득 채운다
+
+
+def _card_png(difficulty: str = "MAS", lamp: str | None = None, rank: str = "SSS") -> Image.Image:
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
+    builder.step("테스트 표")
+    builder.row(
+        tc.chart_ref("곡 0", difficulty),
+        {
+            tc.SONG: tc.song_cell("곡 0"),
+            tc.DIFFICULTY: tc.difficulty_cell(difficulty),
+            tc.CONST: tc.const_cell(15.0),
+            tc.SCORE: tc.score_cell(1_007_500),
+            tc.RANK: tc.rank_cell(rank, {rank: 1_007_500}),
+            tc.LAMP: tc.lamp_cell(lamp),
+            tc.RATING: cell(16.0, "16.00"),
+        },
+    )
+    (_, data), = render.render_pages(builder.build(), layout="card", jackets={"곡 0": _png("white")})
+    return Image.open(io.BytesIO(data)).convert("RGB")
+
+
+def _card_top(image: Image.Image) -> int:
+    """카드 오른쪽 안쪽 여백 세로줄에서 처음으로 배경과 달라지는 y(= 카드 맨 위)."""
+    x = render._MARGIN + render._CARD_W - 4
+    return next(y for y in range(image.height) if image.getpixel((x, y)) != render._BG)
+
+
+def test_every_rank_has_its_own_text_color() -> None:
+    ranks = ["D", "C", "B", "BB", "BBB", "A", "AA", "AAA", "S", "S+", "SS", "SS+", "SSS", "SSS+"]
+    colors = [render._rank_color(rank) for rank in ranks]
+
+    assert len(set(colors)) == len(ranks)
+    assert render._rank_color("???") == render._MUTED
+
+
+def test_card_background_is_tinted_by_difficulty() -> None:
+    colors = {}
+    for code in ("BAS", "ADV", "EXP", "MAS", "ULT"):
+        image = _card_png(code)
+        colors[code] = image.getpixel((render._MARGIN + render._CARD_W - 4, _card_top(image) + 3))
+
+    assert len(set(colors.values())) == 5
+    assert all(color != render._PANEL for color in colors.values())
+    assert render._tinted_panel(None) == render._PANEL
+
+
+@pytest.mark.parametrize("lamp,label", [("FULL COMBO", "FC"), ("ALL JUSTICE", "AJ"), ("AJC", "AJC")])
+def test_lamp_adds_thin_border_with_lamp_color(lamp: str, label: str) -> None:
+    with_lamp = _card_png(lamp=lamp)
+    without = _card_png(lamp=None)
+    # 카드 왼쪽 가장자리 한가운데(재킷 패딩 바깥)
+    def edge(image: Image.Image) -> object:
+        return image.getpixel((render._MARGIN + 1, _card_top(image) + 100))
+
+    assert edge(with_lamp) == render._LAMP_COLORS[label]
+    assert edge(without) != render._LAMP_COLORS[label]
+
+
+def test_title_gradient_reaches_higher_up_the_jacket() -> None:
+    image = _card_png()
+    x = round(render._MARGIN + render._CARD_PAD + render._JACKET - 6)
+    top = _card_top(image) + render._CARD_PAD
+    # 곡명 한 줄(26) + 22였던 예전 범위 밖(재킷 아래서 60쯤 위)도 이미 어두워졌다
+    pixel = image.getpixel((x, top + render._JACKET - 60))
+
+    assert isinstance(pixel, tuple) and sum(pixel) < 3 * 250
