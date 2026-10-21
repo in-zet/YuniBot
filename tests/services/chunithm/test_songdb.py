@@ -7,7 +7,7 @@ import pytest
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
-from services.chunithm.songdb import SongDbService
+from services.chunithm.songdb import VERSION_ORDER, SongDbService
 
 _CTX = ToolContext(player_id="p1", tags=frozenset(), services={})
 _CHUNIMARU_SAMPLE = Path("docs/reference/chunimaru/songdb_sample.json")
@@ -325,6 +325,22 @@ async def test_find_songs_version_and_const_combo(songdb: SongDbService) -> None
     hits = songdb.find_songs(version="CHUNITHM", min_const=12.0, max_const=13.0)
     assert any(hit.song.title == "B.B.K.K.B.K.K." for hit in hits)
     assert all(hit.song.version == "CHUNITHM" for hit in hits)
+
+
+async def test_find_songs_accepts_several_difficulties_and_matches_either(songdb: SongDbService) -> None:
+    mas = songdb.find_songs(difficulty="MAS", min_const=12.0, max_const=13.0)
+    ult = songdb.find_songs(difficulty="ULT", min_const=12.0, max_const=13.0)
+    both = songdb.find_songs(difficulty=["MAS", "ULT", "MAS"], min_const=12.0, max_const=13.0)
+
+    assert {hit.chart.difficulty for hit in both} <= {"MAS", "ULT"}
+    assert len(both) == len(mas) + len(ult)  # 같은 난이도를 두 번 줘도 두 번 세지 않는다
+    assert mas  # B.B.K.K.B.K.K. MAS(12.5)
+
+
+def test_version_order_covers_every_version_in_the_song_db(songdb: SongDbService) -> None:
+    versions = {song.version for song in songdb._songs.values() if song.version}  # pyright: ignore[reportPrivateUsage]
+    assert versions <= set(VERSION_ORDER)
+    assert len(set(VERSION_ORDER)) == len(VERSION_ORDER)
 
 
 async def test_find_songs_returns_empty_when_nothing_matches(songdb: SongDbService) -> None:

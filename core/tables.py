@@ -31,6 +31,9 @@ class Column:
     hidden_in_text: bool = False
     # 기본 출력에서 칸 이름 없이 값만 쓰는 칸(곡·난이도).
     bare: bool = False
+    # 글 칸이 가진 순서(작은 쪽부터 나열한 값 목록, 예: 수록 버전의 출시순). 있으면 정렬·묶기·크기 비교(<, >=…)가
+    # 글자 순서가 아니라 이 목록의 위치를 따른다. 원래 값은 그대로 글이라 ==·contains도 그대로 된다.
+    order: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,8 +234,11 @@ def _numbers_step(numbers: Collection[int]) -> str:
 
 
 COMPARE_OPS: frozenset[str] = frozenset({"==", "!=", "<", "<=", ">", ">=", "contains"})
+_ORDERING_OPS: frozenset[str] = frozenset({"<", "<=", ">", ">="})
 # 크기 비교(<, <=, >, >=)를 할 수 없는 칸 종류. 이름이 같은지만 본다.
 _UNORDERED_TYPES: frozenset[str] = frozenset({"LampRef", "DifficultyRef"})
+# 값의 크기가 뜻을 가지는 칸 종류. 이 칸으로 묶으면 묶음을 큰 값부터 늘어놓는다(그 밖의 칸은 나온 순서).
+_ORDERED_TYPES: frozenset[str] = frozenset({"number", "ScoreRef", "RankRef"})
 # 한 번에 돌려주는 행 수의 상한(`table_peek`).
 PEEK_MAX_ROWS = 20
 
@@ -285,9 +291,35 @@ def _check_numbers(table: WorkTable, numbers: Iterable[int]) -> set[int]:
     return wanted
 
 
+def canonical_order_value(column: Column, text: str) -> str:
+    """순서가 있는 칸의 값 이름을 목록에 있는 철자로 바로잡는다(대소문자 무시). 목록에 없으면 에러."""
+    for name in column.order:
+        if name.casefold() == text.strip().casefold():
+            return name
+    raise TableError(f"'{column.label}' 칸 값 '{text}'을(를) 모른다(쓸 수 있는 것: {', '.join(column.order)})")
+
+
+def _order_key(column: Column, raw: Any) -> int | None:
+    """순서가 있는 칸의 값이 목록에서 몇 번째인가. 목록에 없으면 None."""
+    return column.order.index(raw) if raw in column.order else None
+
+
+def _sort_key(column: Column, raw: Any) -> Any:
+    """정렬에 쓸 값. 순서가 있는 칸은 목록 위치(목록에 없는 값은 None, 즉 값 없음 취급)고 그 밖에는 원래 값이다."""
+    return _order_key(column, raw) if column.order else raw
+
+
+def _is_ordered(column: Column) -> bool:
+    return bool(column.order) or column.value_type in _ORDERED_TYPES
+
+
 def _passes(raw: Any, op: str, value: Any, column: Column) -> bool:
     if raw is None:
         return True  # 값이 없는 행은 어떤 조건이든 통과한다(임시 결정)
+    if column.order and op in _ORDERING_OPS:
+        raw, value = _order_key(column, raw), _order_key(column, value)
+        if raw is None or value is None:
+            return False  # 순서를 모르는 값은 크기를 비교할 수 없다
     try:
         if op == "contains":
             if not isinstance(raw, str):
@@ -319,19 +351,20 @@ def _condition_step(condition: Condition) -> str:
 def _sorted_rows(
     rows: list[tuple[int, Row]], column: Column, *, descending: bool
 ) -> list[tuple[int, Row]]:
-    present = [item for item in rows if item[1].cell(column.name).raw is not None]
-    absent = [item for item in rows if item[1].cell(column.name).raw is None]
-    def raw_of(item: tuple[int, Row]) -> Any:
-        return item[1].cell(column.name).raw
-
+    keyed = [(_sort_key(column, item[1].cell(column.name).raw), item) for item in rows]
+    present = [pair for pair in keyed if pair[0] is not None]
+    absent = [item for key, item in keyed if key is None]
     try:
-        present.sort(key=raw_of, reverse=descending)
+        present.sort(key=lambda pair: pair[0], reverse=descending)
     except TypeError:
         raise TableError(f"'{column.label}' 칸은 정렬할 수 없다") from None
-    return [*present, *absent]  # 같은 값이면 원래 순서를 지킨다(안정 정렬). 값이 없는 행은 방향과 무관하게 맨 뒤
+    # 같은 값이면 원래 순서를 지킨다(안정 정렬). 값이 없는 행은 방향과 무관하게 맨 뒤
+    return [*(item for _key, item in present), *absent]
 
 
-def _regroup(groups: list[_NumberedGroup], column: Column) -> list[_NumberedGroup]:
+def _regroup(groups: list[_NumberedGroup], column: Column, *, descending: bool) -> list[_NumberedGroup]:
+    """칸 값마다 묶음을 만든다. 숫자·점수·순서가 있는 칸은 `descending`(기본은 큰 값부터)으로 늘어놓고, 글 칸은
+    그 값이 처음 나온 순서를 지킨다(앞에서 정렬해 둔 순서가 묶음 순서가 된다). 값이 없는 행의 묶음은 맨 뒤."""
     buckets: dict[Any, list[tuple[int, Row]]] = {}
     titles: dict[Any, str] = {}
     for _title, rows in groups:
@@ -340,10 +373,14 @@ def _regroup(groups: list[_NumberedGroup], column: Column) -> list[_NumberedGrou
             buckets.setdefault(cell_.raw, []).append(item)
             titles.setdefault(cell_.raw, cell_.text or "(없음)")
     keys = [key for key in buckets if key is not None]
-    try:
-        keys.sort(reverse=True)
-    except TypeError:
-        raise TableError(f"'{column.label}' 칸은 묶을 수 없다") from None
+    if column.order:
+        known = sorted((key for key in keys if key in column.order), key=column.order.index, reverse=descending)
+        keys = [*known, *(key for key in keys if key not in column.order)]  # 목록에 없는 값은 방향과 무관하게 뒤
+    elif _is_ordered(column):
+        try:
+            keys.sort(reverse=descending)
+        except TypeError:
+            raise TableError(f"'{column.label}' 칸은 묶을 수 없다") from None
     if None in buckets:
         keys.append(None)
     return [(titles[key], buckets[key]) for key in keys]
@@ -380,16 +417,26 @@ def _select_numbered(
             for t, rs in groups
         ]
         steps.append(_condition_step(condition))
+    sort_column = None if sort is None else _column_by_label(table, sort)
+    presorted = False
     if group_by is not None:
         if group_by == "":
             groups = [(None, [item for _t, rs in groups for item in rs])]
             steps.append("묶음 풀기")
         else:
-            groups = _regroup(groups, _column_by_label(table, group_by))
+            group_column = _column_by_label(table, group_by)
+            if sort_column is not None and not _is_ordered(group_column):
+                # 글 칸의 묶음은 나온 순서를 따르므로, 먼저 전체를 정렬해 그 순서가 묶음 순서가 되게 한다.
+                flat = [item for _t, rs in groups for item in rs]
+                presorted_groups: list[_NumberedGroup] = [(None, _sorted_rows(flat, sort_column, descending=descending))]
+                groups = presorted_groups
+                presorted = True
+            by_sort = sort_column is not None and sort_column.name == group_column.name
+            groups = _regroup(groups, group_column, descending=descending if by_sort else True)
             steps.append(f"{group_by}별 묶음")
-    if sort is not None:
-        column = _column_by_label(table, sort)
-        groups = [(t, _sorted_rows(rs, column, descending=descending)) for t, rs in groups]
+    if sort_column is not None:
+        if not presorted:
+            groups = [(t, _sorted_rows(rs, sort_column, descending=descending)) for t, rs in groups]
         steps.append(f"{sort} {'내림' if descending else '오름'}차순")
     if limit is not None:
         if limit < 1:
@@ -399,11 +446,32 @@ def _select_numbered(
     return [(t, rs) for t, rs in groups if rs], steps
 
 
-def select_rows(table: WorkTable, **options: Any) -> WorkTable:
+def select_rows(table: WorkTable, *, columns: Sequence[str] | None = None, **options: Any) -> WorkTable:
     """`table_query`의 엔진. 조건에 맞는 행으로 새 표를 만든다(원래 표는 그대로). 표·묶음 요약은 버리고
-    `steps`에 조건을 덧붙인다. 옵션은 `_select_numbered`와 같다."""
+    `steps`에 조건을 덧붙인다. 옵션은 `_select_numbered`와 같고, `columns`(칸 보이는 이름 목록)를 주면 그 칸만
+    글자 출력에 보인다."""
     groups, steps = _select_numbered(table, **options)
-    return derive_table(table, [Group(title, tuple(row for _n, row in rs)) for title, rs in groups], steps=steps)
+    derived = derive_table(table, [Group(title, tuple(row for _n, row in rs)) for title, rs in groups], steps=steps)
+    return derived if columns is None else _show_columns(derived, columns)
+
+
+def _show_columns(table: WorkTable, labels: Sequence[str]) -> WorkTable:
+    """`labels`의 칸만 글자 출력에 보이게 한 새 표. 나머지 칸은 지우지 않고 숨기기만 하므로(`hidden_in_text`)
+    거르기·정렬·다음 도구에 넘기는 일은 그대로 된다."""
+    if not labels:
+        raise TableError("보일 칸을 하나는 골라야 한다")
+    shown: set[str] = set()
+    for label in labels:
+        column = _column_by_label(table, label)
+        if column.slash_only:
+            raise TableError(f"그 표에 '{label}' 칸이 없다")  # 모델에게는 슬래시 전용 칸이 보이지 않는다
+        shown.add(column.name)
+    columns = tuple(
+        column if column.slash_only else replace(column, hidden_in_text=column.name not in shown)
+        for column in table.columns
+    )
+    return replace(table, columns=columns, steps=(*table.steps, "·".join(labels) + "만 보임"))
+
 
 
 def peek_rows(table: WorkTable, *, limit: int = 10, **options: Any) -> dict[str, Any]:
@@ -720,6 +788,7 @@ class TableBuilder:
         slash_only: bool = False,
         hidden_in_text: bool = False,
         bare: bool = False,
+        order: Sequence[str] = (),
     ) -> Self:
         if value_type not in VALUE_TYPES:
             raise TableError(f"칸 값 종류가 틀렸다: {value_type}")
@@ -737,6 +806,7 @@ class TableBuilder:
                 slash_only=slash_only,
                 hidden_in_text=hidden_in_text,
                 bare=bare,
+                order=tuple(order),
             )
         )
         return self

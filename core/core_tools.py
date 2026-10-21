@@ -10,6 +10,7 @@ from core.tables import (
     TableError,
     WhereClause,
     WorkTable,
+    canonical_order_value,
     peek_rows,
     select_rows,
 )
@@ -97,7 +98,9 @@ async def _parse_where(ctx: ToolContext, table: WorkTable, where: list[WhereClau
             raise TableError(f"그 표에 '{clause['column']}' 칸이 없다")
         text = clause["value"]
         value: Any = text
-        if column.value_type == "number":
+        if column.order and clause["op"] != "contains":
+            value = canonical_order_value(column, text)
+        elif column.value_type == "number":
             try:
                 value = float(text.replace(",", ""))
             except ValueError:
@@ -131,18 +134,22 @@ async def table_query(
     descending: bool = False,
     limit: int | None = None,
     group_by: str | None = None,
+    columns: list[str] | None = None,
 ) -> ToolResult:
     """작업 표를 거르거나 정렬하거나 다시 묶어 새 표를 만든다(원래 표는 그대로). 결과 표가 사용자에게 보인다.
     rows/exclude_rows는 사람이 표에서 본 번호(1부터, 묶음을 넘어 이어짐)를 그대로 넣는다("3번부터 5번"이면 [3,4,5]).
     where는 {column: 칸 이름, op: ==,!=,<,<=,>,>=,contains, value: 사용자가 말한 값 그대로}의 목록(AND)이다.
-    limit은 묶음마다 앞에서 N개다. group_by는 칸 이름이면 그 칸 값으로 다시 묶고, 빈 문자열이면 묶음을 푼다."""
+    limit은 묶음마다 앞에서 N개다. group_by는 칸 이름이면 그 칸 값으로 다시 묶고, 빈 문자열이면 묶음을 푼다.
+    묶음 순서: 숫자 칸(상수 등)과 순서가 있는 칸(버전은 출시순)으로 묶으면 큰 값(최신)부터이고, 그 칸을 sort로
+    정렬하면 descending을 따른다. 글 칸(곡·작곡가 등)으로 묶으면 sort한 순서에서 그 값이 처음 나온 순서다.
+    columns는 보일 칸 이름 목록이다("곡명만"이면 ["곡"]). 안 준 칸은 지우지 않고 숨기기만 한다."""
     assert isinstance(table, WorkTable)
     try:
         _guard_numbers(ctx, table, rows, exclude_rows)
         conditions = await _parse_where(ctx, table, where)
         result = select_rows(
             table, rows=rows, exclude_rows=exclude_rows, where=conditions, sort=sort, descending=descending,
-            limit=limit, group_by=group_by,
+            limit=limit, group_by=group_by, columns=columns,
         )
     except TableError as exc:
         return ToolResult(error=str(exc))
