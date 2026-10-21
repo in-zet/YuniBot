@@ -8,7 +8,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from core.tables import EMPTY_CELL, Cell, TableBuilder, WorkTable, cell
 from services.chunithm import table_columns as tc
@@ -26,6 +26,10 @@ def _load_render() -> ModuleType:
 
 
 render = _load_render()
+
+
+def _is_white(pixel: object) -> bool:
+    return isinstance(pixel, tuple) and min(pixel) >= 250
 
 
 def _png(color: str = "red", size: tuple[int, int] = (190, 190)) -> bytes:
@@ -101,7 +105,7 @@ def test_split_pages_numbers_match_table_numbers() -> None:
 
 
 def test_card_page_is_8_lines_and_list_is_30_rows() -> None:
-    assert render.CARD_PAGE_ROWS == 8
+    assert render.CARD_PAGE_ROWS == 10
     assert render.LIST_PAGE_LIMIT == 30
 
 
@@ -116,19 +120,26 @@ def test_render_small_card_table_gives_one_png() -> None:
     assert name.endswith(".png")
     assert data.startswith(b"\x89PNG")
     width, height = _size(data)
-    assert width >= 3 * render._CARD_W
+    assert width >= 3 * render._CARD_W * render.CARD_OUTPUT_SCALE
     assert height > render._JACKET
 
 
-def test_card_grid_is_at_most_eight_wide_and_shorter_than_five_wide() -> None:
-    table = _chart_table(40)
-    jackets = {f"곡 {i}": _png() for i in range(40)}
+def test_card_grid_is_at_most_five_wide_and_output_is_scaled_down() -> None:
+    table = _chart_table(50)
+    jackets = {f"곡 {i}": _png() for i in range(50)}
 
     (_, data), = render.render_pages(table, layout="card", jackets=jackets)
 
     width, height = _size(data)
-    assert width == 2 * render._MARGIN + 8 * render._CARD_W + 7 * render._GAP
-    assert height < 2400  # 5열이면 8줄이라 이보다 길었다
+    full_width = 2 * render._MARGIN + 5 * render._CARD_W + 4 * render._GAP
+    assert width == round(full_width * render.CARD_OUTPUT_SCALE)
+    assert height < 2300  # 줄이기 전 3000쪽이었다
+
+
+def test_list_output_is_not_scaled() -> None:
+    (_, data), = render.render_pages(_chart_table(3), layout="list", jackets={})
+
+    assert _size(data)[0] == render._LIST_W
 
 
 def test_split_pages_counts_grid_lines_not_cards() -> None:
@@ -139,14 +150,14 @@ def test_split_pages_counts_grid_lines_not_cards() -> None:
 
 
 def test_split_pages_cuts_big_group_by_lines() -> None:
-    pages = render.split_pages(_chart_table(150), 8, 8)
+    pages = render.split_pages(_chart_table(150), 10, 5)
 
-    assert [sum(len(s.rows) for s in page) for page in pages] == [64, 64, 22]
+    assert [sum(len(s.rows) for s in page) for page in pages] == [50, 50, 50]
 
 
-def test_render_card_splits_at_8_lines() -> None:
-    assert len(render.render_pages(_chart_table(64), layout="card", jackets={})) == 1
-    files = render.render_pages(_chart_table(65), layout="card", jackets={})
+def test_render_card_splits_at_10_lines() -> None:
+    assert len(render.render_pages(_chart_table(50), layout="card", jackets={})) == 1
+    files = render.render_pages(_chart_table(51), layout="card", jackets={})
 
     assert len(files) == 2
     assert [name for name, _ in files] == sorted({name for name, _ in files})
@@ -248,10 +259,11 @@ def test_card_gives_title_gradient_over_bottom_of_jacket() -> None:
 
     with Image.open(io.BytesIO(data)) as opened:
         image = opened.convert("RGB")
-    x = render._MARGIN + render._CARD_PAD + render._JACKET - 3  # 곡명 글자가 닿지 않는 오른쪽 가장자리
-    ys = [y for y in range(image.size[1]) if image.getpixel((x, y)) == (255, 255, 255)]
+    scale = render.CARD_OUTPUT_SCALE
+    x = round((render._MARGIN + render._CARD_PAD + render._JACKET - 6) * scale)  # 곡명 글자가 닿지 않는 오른쪽 가장자리
+    ys = [y for y in range(image.size[1]) if _is_white(image.getpixel((x, y)))]
     assert ys, "흰 재킷이 보여야 한다"
-    bottom = image.getpixel((x, ys[0] + render._JACKET - 2))
+    bottom = image.getpixel((x, ys[0] + round(render._JACKET * scale) - 2))
     assert isinstance(bottom, tuple) and sum(bottom) < 3 * 255 // 2  # 맨 아래는 검은 그라데이션으로 어둡다
 
 
@@ -263,14 +275,40 @@ def test_card_has_two_info_lines_and_height_follows() -> None:
     assert (names_only.const_rating, names_only.score_rank) == (True, False)
 
 
-def test_score_font_shrinks_so_score_and_rank_fit_on_one_line() -> None:
-    font = render._fit_score_font("1,010,000", "SSS+")
-    rank_width = render._width(render._font(15, True), "SSS+") + 10
-    assert render._width(font, "1,010,000") + rank_width <= render._JACKET or font is render._font(13, True)
+def test_card_value_size_is_largest_that_fits_or_the_minimum() -> None:
+    def fits(size: int) -> bool:
+        bold, plain = render._font(size, True), render._font(size, False)
+        return max(
+            render._width(bold, "1,010,000") + render._width(bold, "SSS+") + 10,
+            render._width(plain, "상수 15.5") + render._width(bold, "17.00") + 10,
+        ) <= render._JACKET
+
+    size = render._card_value_size()
+
+    assert size in (*render._CARD_VALUE_SIZES, render._CARD_VALUE_MIN_SIZE)
+    assert fits(size) or size == render._CARD_VALUE_MIN_SIZE
+    assert all(not fits(bigger) for bigger in render._CARD_VALUE_SIZES if bigger > size)
+
+
+def test_card_value_texts_share_one_font_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    drawn: dict[str, float] = {}
+    original = ImageDraw.ImageDraw.text
+
+    def spy(self: ImageDraw.ImageDraw, xy: Any, text: Any, *args: Any, **kwargs: Any) -> Any:
+        font = kwargs.get("font")
+        if isinstance(text, str) and font is not None:
+            drawn[text] = getattr(font, "size", 0)
+        return original(self, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy)
+    render.render_pages(_chart_table(1), layout="card", jackets={})
+
+    values = [drawn["상수 15.0"], drawn["1,007,500"], drawn["SSS"], drawn["16.00"]]
+    assert len(set(values)) == 1
 
 
 def test_stale_and_page_notes_do_not_crash_and_multi_page_names_are_numbered() -> None:
-    files = render.render_pages(_chart_table(70), layout="card", jackets={}, stale=True)
+    files = render.render_pages(_chart_table(60), layout="card", jackets={}, stale=True)
     assert [name.rsplit("_", 1)[-1] for name, _ in files] == ["1.png", "2.png"]
 
 

@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 Layout = Literal["card", "list"]
 
-CARD_PAGE_ROWS = 8  # 카드 그림 한 장의 최대 줄 수(개수가 아니라 줄로 센다, 2026-10-21 결정)
+CARD_PAGE_ROWS = 10  # 카드 그림 한 장의 최대 줄 수(개수가 아니라 줄로 센다, 2026-10-21 결정)
+CARD_OUTPUT_SCALE = 0.7  # 카드 그림을 저장할 때 줄이는 비율 — 크면 디스코드 미리보기가 화질을 깎는다(2026-10-21 실기)
 LIST_PAGE_LIMIT = 30
 
 _MARGIN = 24
@@ -372,9 +373,10 @@ _GAP = 12
 _INFO_TOP = _CARD_PAD + _JACKET + 6
 _INFO_LINE = 34
 _TITLE_LINE = 26  # 재킷 안 곡명 줄 높이
-_CARD_RATING_SIZE = 18  # 곡 레이팅만 다른 글자보다 크게(2026-10-21 실기)
+_CARD_VALUE_SIZES = (17, 16, 15, 14)  # 상수·곡 레이팅·점수·랭크가 함께 쓰는 글자 크기 후보(큰 것부터)
+_CARD_VALUE_MIN_SIZE = 13
 _GRADIENT_MAX_ALPHA = 220
-_MAX_COLUMNS = 8  # 한 줄 카드 수 상한 — 세로가 너무 길면 디스코드 미리보기가 화질을 깎는다(2026-10-21 실기)
+_MAX_COLUMNS = 5  # 한 줄 카드 수 상한
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,14 +434,17 @@ def _draw_title_over_jacket(canvas: Image.Image, box: tuple[int, int, int, int],
         draw.text((x0 + 8, top + index * _TITLE_LINE), line, font=font, fill=(255, 255, 255))
 
 
-def _fit_score_font(score: str, rank: str | None) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """점수와 랭크가 한 줄에 같이 들어가도록 점수 글자 크기를 줄여 고른다."""
-    rank_width = _width(_font(15, True), rank) + 10 if rank else 0
-    for size in (17, 16, 15, 14):
-        font = _font(size, True)
-        if _width(font, score) + rank_width <= _JACKET:
-            return font
-    return _font(13, True)
+@lru_cache(maxsize=1)
+def _card_value_size() -> int:
+    """상수·곡 레이팅·점수·랭크가 모두 쓰는 글자 크기(2026-10-21 결정: 점수 크기로 통일).
+    가장 긴 점수+랭크 줄과 상수+곡 레이팅 줄이 카드 폭에 들어가는 가장 큰 크기."""
+    for size in _CARD_VALUE_SIZES:
+        bold, plain = _font(size, True), _font(size, False)
+        score_line = _width(bold, "1,010,000") + _width(bold, "SSS+") + 10
+        const_line = _width(plain, "상수 15.5") + _width(bold, "17.00") + 10
+        if max(score_line, const_line) <= _JACKET:
+            return size
+    return _CARD_VALUE_MIN_SIZE
 
 
 def _draw_card(
@@ -460,25 +465,25 @@ def _draw_card(
 
     left, right = jx, jx + _JACKET
     cy = y + _INFO_TOP
+    value_size = _card_value_size()
     if lines.const_rating:
         const = row.cell(tc.CONST)
         if const.text:
-            draw.text((left, cy), f"상수 {const.text}", font=_font(13, False), fill=_MUTED)
+            draw.text((left, cy), f"상수 {const.text}", font=_font(value_size, False), fill=_MUTED)
         rating = row.cell(tc.RATING)
         if rating.filled:
-            font = _font(_CARD_RATING_SIZE, True)
-            width = _width(font, rating.text)
-            draw.text((right - width, cy - 3), rating.text, font=font, fill=_TEXT)
+            font = _font(value_size, True)
+            draw.text((right - _width(font, rating.text), cy), rating.text, font=font, fill=_TEXT)
         cy += _INFO_LINE
     if lines.score_rank:
         score, rank = row.cell(tc.SCORE), row.cell(tc.RANK)
         rank_text = rank.text if rank.filled else None
         if score.filled:
-            draw.text((left, cy - 2), score.text, font=_fit_score_font(score.text, rank_text), fill=_TEXT)
+            draw.text((left, cy), score.text, font=_font(value_size, True), fill=_TEXT)
         elif score.text:
-            draw.text((left, cy), score.text, font=_font(13, False), fill=_MUTED)
+            draw.text((left, cy), score.text, font=_font(value_size, False), fill=_MUTED)
         if rank_text:
-            font = _font(15, True)
+            font = _font(value_size, True)
             draw.text((right - _width(font, rank_text), cy), rank_text, font=font, fill=_rank_color(rank_text))
 
 
@@ -627,7 +632,12 @@ def render_pages(
     for index, segments in enumerate(pages, start=1):
         image = draw_page(segments, table, opened, profile, stale=stale, page=index, pages=len(pages))
         buffer = io.BytesIO()
-        image.convert("RGB").save(buffer, format="PNG", optimize=True)
+        final = image.convert("RGB")
+        if layout == "card":
+            final = final.resize(
+                (round(final.width * CARD_OUTPUT_SCALE), round(final.height * CARD_OUTPUT_SCALE)), Image.Resampling.LANCZOS
+            )
+        final.save(buffer, format="PNG", optimize=True)
         name = f"{stem}.png" if len(pages) == 1 else f"{stem}_{index}.png"
         files.append((name, buffer.getvalue()))
     return files
