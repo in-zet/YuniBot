@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import aiosqlite
 from chuni_penguin.types.lamp import ChainLamp, ClearLamp, ComboLamp
 
+from core.db import transaction as db_transaction
 from core.tool_types import ToolContext
 from services.chunithm.records_calc import (
     allowed_attacks,
@@ -274,7 +275,8 @@ class RecordsService:
     async def save_sync(self, player_id: str, fetch: SyncFetch, ctx: ToolContext) -> SyncResult:
         """동기화 결과를 저장한다. 같은 플레이어의 동시 호출은 직렬화된다(아래 참고)."""
         lock = self._sync_locks.setdefault(player_id, asyncio.Lock())
-        async with lock:
+        # 같은 플레이어끼리는 위 락으로, 다른 플레이어의 커밋·롤백과는 연결 잠금으로 막는다.
+        async with lock, db_transaction(self._conn):
             return await self._save_sync_locked(player_id, fetch, ctx)
 
     async def _save_sync_locked(self, player_id: str, fetch: SyncFetch, ctx: ToolContext) -> SyncResult:

@@ -239,3 +239,60 @@ async def test_mention_entry_cooldown_blocks_without_calling_llm() -> None:
 
     assert sent[0] == "호출됨"
     assert sent[1] in COOLDOWN_ACTIVE_MESSAGES
+
+
+class _PlayersByDiscordId(_FakePlayers):
+    """디스코드 계정마다 다른 플레이어(id가 디스코드 id와 같다)."""
+
+    async def player_for_discord(self, discord_id: str):
+        from services.common.players import Player
+        return Player(
+            id=discord_id, primary_discord_id=discord_id, records_public=False, memos_public=False,
+            goals_public=False, arcade_public=False, reviews_public=False, sync_report_public=True,
+            first_seen_at="2026-01-01T00:00:00+00:00",
+        )
+
+
+async def _run_two_turns(authors: tuple[str, str]) -> list[str]:
+    """두 요청을 동시에 시작하고, 각 요청 처리(_handle)의 시작·끝 순서를 돌려준다."""
+    import asyncio
+
+    entry = MentionEntry(
+        agent=_agent([]), players=_PlayersByDiscordId(), notify=NotifyService.__new__(NotifyService),
+        cooldown=CooldownTracker(), settings=_FakeSettings(), usage=_FakeUsage(), bot_discord_id="bot",
+        agent_model="gemini-3.8-flash", memory=_FakeMemory(), event_bus=EventBus(),
+        known_skill_names={"chunithm-border"}, skill_loading_mode="instructions",
+    )
+    events: list[str] = []
+
+    async def fake_handle(*, trigger: ChannelMessage, **_kwargs: object) -> None:
+        events.append(f"시작 {trigger.message_id}")
+        await asyncio.sleep(0.05)
+        events.append(f"끝 {trigger.message_id}")
+
+    entry._handle = fake_handle  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue]
+
+    class _NoopTyping:
+        async def __aenter__(self): return None
+        async def __aexit__(self, *exc): return None
+
+    async def call(message_id: str, author: str) -> None:
+        trigger = ChannelMessage(message_id=message_id, author_discord_id=author, is_bot=False, content="질문", mentions_bot=True)
+        await entry.handle(
+            trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC),
+            send=lambda t, d: _noop(), typing=_NoopTyping(),
+        )
+
+    await asyncio.gather(call("A", authors[0]), call("B", authors[1]))
+    return events
+
+
+@pytest.mark.asyncio
+async def test_same_player_requests_run_one_after_another() -> None:
+    assert await _run_two_turns(("p1", "p1")) == ["시작 A", "끝 A", "시작 B", "끝 B"]
+
+
+@pytest.mark.asyncio
+async def test_different_players_requests_do_not_wait_for_each_other() -> None:
+    events = await _run_two_turns(("p1", "p2"))
+    assert events[:2] == ["시작 A", "시작 B"]

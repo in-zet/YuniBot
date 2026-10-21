@@ -22,6 +22,7 @@ from core.config import CoreConfig, load_config
 from core.contract_checks import run_all_contract_checks
 from core.conversation_skills import ConversationSkillStore
 from core.cooldown import CooldownTracker
+from core.db import connect_guarded
 from core.decorators import ScheduleSpec
 from core.events import EventBus, handler_kind
 from core.executor import ToolExecutor
@@ -498,7 +499,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         logger.warning("skill disabled: %s (%s)", skill_dir, reason)
 
     roots = _migration_roots(registry.enabled_skills())
-    conn = await aiosqlite.connect(config.db_path)
+    conn = await connect_guarded(config.db_path)
     await run_migrations(conn, roots=roots)
 
     # executor/event_bus보다 먼저 만든다 — 둘 다 생성 시점에 scheduler를 받아야 스킬이

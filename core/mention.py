@@ -1,6 +1,7 @@
 # core/mention.py
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
@@ -192,6 +193,7 @@ class MentionEntry:
         self._skill_loading_mode = skill_loading_mode
         self._address = address
         self._conversation_skills = conversation_skills
+        self._turn_locks: dict[str, asyncio.Lock] = {}
         self._threads = threads
         self._tables = tables
 
@@ -247,6 +249,27 @@ class MentionEntry:
         return []
 
     async def handle(
+        self,
+        *,
+        trigger: ChannelMessage,
+        history: list[ChannelMessage],
+        guild_id: str | None,
+        now: datetime,
+        send: Callable[[str, list[Display]], Awaitable[str | None]],
+        typing: AbstractAsyncContextManager[None],
+        thread: ThreadSession | None = None,
+    ) -> None:
+        """같은 플레이어의 요청은 한 줄로 세운다(앞 요청이 끝나야 다음을 처리). 응답이 수십 초 걸려서 쿨다운(10초)
+        만으로는 겹치기 때문이다 — 겹치면 즐겨찾기처럼 읽고 쓰는 도구가 서로 덮고 표 번호도 엇갈린다.
+        다른 플레이어끼리는 서로 기다리지 않는다. 연결된 부계정은 같은 플레이어라 같은 줄에 선다."""
+        player = await self._players.player_for_discord(trigger.author_discord_id)
+        key = player.id if player is not None else f"discord:{trigger.author_discord_id}"
+        async with self._turn_locks.setdefault(key, asyncio.Lock()):
+            await self._handle(
+                trigger=trigger, history=history, guild_id=guild_id, now=now, send=send, typing=typing, thread=thread
+            )
+
+    async def _handle(
         self,
         *,
         trigger: ChannelMessage,
