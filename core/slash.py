@@ -232,7 +232,7 @@ def _fallback_content(data: dict[str, Any]) -> str:
     # 표시물이 없는 결과도 디스코드에 빈 응답을 보내면 안 된다("This interaction failed").
     # "_"로 시작하는 키는 코어 내부 표시라 보여주지 않는다.
     lines = [f"{key}: {value}" for key, value in data.items() if not key.startswith("_")]
-    return "\n".join(["완료했다.", *lines])
+    return "\n".join(["완료했어.", *lines])
 
 
 def render_result(result: ToolResult) -> dict[str, Any]:
@@ -377,7 +377,7 @@ def _build_modal_command(
                 guild_id=str(interaction.guild_id), skill=entry.skill_name
             )
         ):
-            await interaction.response.send_message("모르는 명령이에요", ephemeral=True)
+            await interaction.response.send_message("모르는 명령이야", ephemeral=True)
             return
 
         ctx, is_new_player = await _player_context(
@@ -395,7 +395,7 @@ def _build_modal_command(
         )
         skill_ok = check_tags(TagRequirement(tags=entry.skill_tags, tags_any=entry.skill_tags_any), player_tags)
         if not (tool_ok and skill_ok):
-            await interaction.response.send_message("모르는 명령이에요", ephemeral=True)
+            await interaction.response.send_message("모르는 명령이야", ephemeral=True)
             return
 
         modal = await entry.spec.fn(ctx)
@@ -453,7 +453,7 @@ def _build_command(
                 if outcome.preview is not None and outcome.preview.display is not None
                 else None
             )
-            content = f"{preview_text}\n확인해 주세요." if preview_text else "확인해 주세요."
+            content = f"{preview_text}\n진행할까? 아래 버튼으로 골라 줘." if preview_text else "진행할까? 아래 버튼으로 골라 줘."
             await respond(interaction, content=content, view=view, ephemeral=True)
             return
 
@@ -507,7 +507,7 @@ class ConfirmView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction, /) -> bool:
         if await self._player_id_for(interaction) == self._requester_id:
             return True
-        await interaction.response.send_message("이건 당신의 확인 요청이 아니에요.", ephemeral=True)
+        await interaction.response.send_message("이건 네 확인 요청이 아니야.", ephemeral=True)
         return False
 
     async def _finish(self, interaction: discord.Interaction, *, confirmed: bool) -> None:

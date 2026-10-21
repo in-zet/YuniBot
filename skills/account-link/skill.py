@@ -50,14 +50,14 @@ async def start_link(ctx: ToolContext) -> ToolResult:
     """일회용 연결 코드를 발급한다."""
     accounts = await ctx.players.accounts_for(ctx.player_id)
     if len(accounts) >= MAX_LINKED_ACCOUNTS:
-        return ToolResult(error=f"플레이어당 계정은 최대 {MAX_LINKED_ACCOUNTS}개까지 연결할 수 있다")
+        return ToolResult(error=f"플레이어당 계정은 최대 {MAX_LINKED_ACCOUNTS}개까지 연결할 수 있어")
 
     # 이 명령을 "실제로 실행한" 계정이 발급자다. 플레이어가 이미 계정을 여러 개 연결했다면
     # accounts_for(ctx.player_id)의 첫 번째(가장 먼저 연결한 계정)는 지금 명령을 친 계정과
     # 다를 수 있다 — ctx.discord_id(core/slash.py의 _dispatch가 interaction.user.id를 그대로
     # 실어 준다)만이 "지금 이 사람"이다.
     if ctx.discord_id is None:
-        return ToolResult(error="계정 식별에 실패했다. 다시 시도해 주세요")
+        return ToolResult(error="계정을 알아보지 못했어. 다시 시도해 줘")
 
     code = _generate_code()
     assert ctx.db is not None
@@ -68,7 +68,7 @@ async def start_link(ctx: ToolContext) -> ToolResult:
     return ToolResult(
         data={"code": code},
         display=Display(
-            content=f"연결 코드: `{code}` (10분간 유효). 연결할 계정에서 `/연결 참여`에 입력해 주세요.",
+            content=f"연결 코드: `{code}` (10분간 유효). 연결할 계정에서 `/연결 참여`에 입력해 줘.",
             ephemeral=True,  # 코드를 같은 채널의 다른 사람이 보고 먼저 참여해 버리면 안 된다.
         ),
     )
@@ -87,12 +87,12 @@ async def _proceed_to_mutual_confirm(
     if not await models.mark_joined(
         ctx.db, link_code.code, joiner_discord_id=joiner_discord_id, discard_agreed=discard_agreed
     ):
-        return ToolResult(error="이미 다른 사람이 참여한 코드다")
+        return ToolResult(error="이미 다른 사람이 참여한 코드야")
 
     issuer_view = _ConfirmButtonsView(code=link_code.code, side="issuer", ctx=ctx)
     await ctx.notify.dm(
         link_code.issuer_player_id,
-        f"<@{joiner_discord_id}>이 연결을 요청했다. 같은 사람인가요?",
+        f"<@{joiner_discord_id}>이 연결을 요청했어. 같은 사람 맞아?",
         view=issuer_view,
     )
 
@@ -100,7 +100,7 @@ async def _proceed_to_mutual_confirm(
     return ToolResult(
         data={"status": "pending_confirmation"},
         display=Display(
-            content=f"<@{link_code.issuer_discord_id}>과 연결해요. 맞나요?", view=joiner_view, ephemeral=True
+            content=f"<@{link_code.issuer_discord_id}>과 연결할 거야. 맞아?", view=joiner_view, ephemeral=True
         ),
     )
 
@@ -113,26 +113,26 @@ async def join_link(ctx: ToolContext, code: str) -> ToolResult:
     # 연결된 계정이 아니라 ctx.discord_id 그 자체를 옮긴다.
     joiner_discord_id = ctx.discord_id
     if joiner_discord_id is None:
-        return ToolResult(error="계정 식별에 실패했다. 다시 시도해 주세요")
+        return ToolResult(error="계정을 알아보지 못했어. 다시 시도해 줘")
 
     now = datetime.now(UTC)
     if await models.wrong_attempt_count(ctx.db, joiner_discord_id, now=now) >= MAX_WRONG_ATTEMPTS:
-        return ToolResult(error="너무 많이 틀렸다. 잠시 후 다시 시도해 주세요")
+        return ToolResult(error="너무 많이 틀렸어. 잠시 뒤에 다시 시도해 줘")
 
     link_code = await models.get_code(ctx.db, code)
     if link_code is None or link_code.expires_at <= now.isoformat():
         await models.record_wrong_attempt(
             ctx.db, joiner_discord_id, now=now, lock_after=MAX_WRONG_ATTEMPTS, cooldown=WRONG_ATTEMPT_COOLDOWN
         )
-        return ToolResult(error="코드가 틀렸거나 만료됐다")
+        return ToolResult(error="코드가 틀렸거나 만료됐어")
 
     if link_code.status != "pending":
         # 이미 다른 사람이 참여해 'joined' 이상으로 넘어간 코드다 — 코드가 유출돼 두 번째
         # 참여자가 끼어들어도 먼저 참여한 쪽의 진행을 덮어쓰지 않는다(중복 소비 방지).
-        return ToolResult(error="이미 다른 사람이 참여한 코드다")
+        return ToolResult(error="이미 다른 사람이 참여한 코드야")
 
     if link_code.issuer_player_id == ctx.player_id:
-        return ToolResult(error="이미 같은 플레이어다")
+        return ToolResult(error="이미 같은 플레이어야")
 
     await models.reset_wrong_attempts(ctx.db, joiner_discord_id)
 
@@ -143,7 +143,7 @@ async def join_link(ctx: ToolContext, code: str) -> ToolResult:
     joiner_accounts = await ctx.players.accounts_for(ctx.player_id)
     if len(joiner_accounts) > 1:
         return ToolResult(
-            error="이미 다른 계정과 연결된 플레이어다. 먼저 /연결 해제로 풀고 다시 시도해 달라"
+            error="이미 다른 계정과 연결된 플레이어야. 먼저 /연결 해제로 풀고 다시 시도해 줘"
         )
 
     counts = await ctx.player_data.count(ctx.player_id) if ctx.player_data is not None else {}
@@ -160,7 +160,7 @@ async def join_link(ctx: ToolContext, code: str) -> ToolResult:
         return ToolResult(
             data={"counts": counts, "has_memory": has_memory},
             display=Display(
-                content=f"이 계정에 이미 데이터가 있다:\n{lines}\n버리고 연결할까요?", view=view, ephemeral=True
+                content=f"이 계정에 이미 데이터가 있어:\n{lines}\n버리고 연결할까?", view=view, ephemeral=True
             ),
         )
 
@@ -193,19 +193,19 @@ class _DiscardConfirmView(discord.ui.View):
         # 메시지일 때 edit_original_response로는 비공개 꼬리표를 뗄 수 없다).
         await interaction.response.defer()
         if not self._is_requester(interaction):
-            await respond(interaction, content="이건 당신의 확인 요청이 아니다", ephemeral=True)
+            await respond(interaction, content="이건 네 확인 요청이 아니야", ephemeral=True)
             return
 
         assert self._ctx.db is not None
         link_code = await models.get_code(self._ctx.db, self._code)
         if link_code is None or link_code.expires_at <= datetime.now(UTC).isoformat():
-            await respond(interaction, content="코드가 만료됐다", ephemeral=True)
+            await respond(interaction, content="코드가 만료됐어", ephemeral=True)
             return
         if link_code.status != "pending":
             # 이 버튼이 뜬 뒤 — 같은 코드로 다른 사람이 먼저 참여를 끝냈을 수 있다
             # (join_link은 아직 mark_joined를 부르지 않았으므로, 이 상태가 바뀌었다면
             # 그건 다른 참여자다).
-            await respond(interaction, content="이미 다른 사람이 참여한 코드다", ephemeral=True)
+            await respond(interaction, content="이미 다른 사람이 참여한 코드야", ephemeral=True)
             return
 
         # 아직 아무것도 지우지 않는다 — "버리는 데 동의했다"는 표시는 아래 _proceed_to_mutual_confirm이
@@ -221,9 +221,9 @@ class _DiscardConfirmView(discord.ui.View):
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
         await interaction.response.defer()
         if not self._is_requester(interaction):
-            await respond(interaction, content="이건 당신의 확인 요청이 아니다", ephemeral=True)
+            await respond(interaction, content="이건 네 확인 요청이 아니야", ephemeral=True)
             return
-        await respond(interaction, content="취소했다. 아무것도 바뀌지 않았다.", ephemeral=True)
+        await respond(interaction, content="취소했어. 아무것도 바뀌지 않았어.", ephemeral=True)
 
 
 class _ConfirmButtonsView(discord.ui.View):
@@ -244,14 +244,14 @@ class _ConfirmButtonsView(discord.ui.View):
         assert self._ctx.db is not None
         link_code = await models.get_code(self._ctx.db, self._code)
         if link_code is None or link_code.expires_at <= datetime.now(UTC).isoformat():
-            await respond(interaction, content="만료된 요청이다", ephemeral=True)
+            await respond(interaction, content="만료된 요청이야", ephemeral=True)
             return
         if link_code.status in ("completed", "finalizing"):
             # 이미 끝났거나(두 번 클릭 등) 다른 클릭이 지금 막 마무리하고 있다 — 조용히
             # 안내만 한다. (이 검사는 사용자 경험을 위한 빠른 길일 뿐, 진짜 방어선은 아래
             # mark_finalizing의 원자적 UPDATE다 — 이 검사와 그 UPDATE 사이에도 다른 클릭이
             # 끼어들 수 있기 때문이다.)
-            await respond(interaction, content="이미 연결이 끝났다", ephemeral=True)
+            await respond(interaction, content="이미 연결이 끝났어", ephemeral=True)
             return
 
         # 본인 확인은 "누른 계정이 속한 플레이어"로 한다 — 설계서: "확인 버튼은 연결된 계정이면
@@ -270,7 +270,7 @@ class _ConfirmButtonsView(discord.ui.View):
             )
             expected_player_id = joiner_player.id if joiner_player is not None else None
         if presser is None or expected_player_id is None or presser.id != expected_player_id:
-            await respond(interaction, content="이건 당신의 확인 요청이 아니다", ephemeral=True)
+            await respond(interaction, content="이건 네 확인 요청이 아니야", ephemeral=True)
             return
 
         await models.set_confirmed(self._ctx.db, self._code, side=self._side)
@@ -291,7 +291,7 @@ class _ConfirmButtonsView(discord.ui.View):
             # 이 호출에서 실패(False)하면 다른 클릭이 이미 가져갔거나 끝냈다는 뜻이니 아무것도
             # 하지 않고 멈춘다.
             if not await models.mark_finalizing(self._ctx.db, self._code):
-                await respond(interaction, content="이미 처리되고 있다", ephemeral=True)
+                await respond(interaction, content="이미 처리하고 있어", ephemeral=True)
                 return
 
             # 참여자 계정은 아직 자기 자신의(옛) 플레이어에 연결되어 있다 —
@@ -317,8 +317,8 @@ class _ConfirmButtonsView(discord.ui.View):
                     if not single_account:
                         await respond(
                             interaction,
-                            content="참여자 계정 상태가 바뀌어 더 이상 안전하게 처리할 수 없다. "
-                            "처음부터 다시 시도해 달라",
+                            content="참여자 계정 상태가 바뀌어 더 이상 안전하게 처리할 수 없어. "
+                            "처음부터 다시 시도해 줘",
                             ephemeral=True,
                         )
                         return
@@ -348,8 +348,8 @@ class _ConfirmButtonsView(discord.ui.View):
                     "action": "linked",
                 },
             )
-            await self._ctx.notify.dm(refreshed.issuer_player_id, "연결이 완료됐다.")
-            await respond(interaction, content="연결이 완료됐다!", ephemeral=True)
+            await self._ctx.notify.dm(refreshed.issuer_player_id, "연결이 완료됐어!")
+            await respond(interaction, content="연결이 완료됐어!", ephemeral=True)
         else:
             # status는 여기서 건드리지 않는다 — issuer_confirmed/joiner_confirmed 두 불리언
             # 컬럼이 "누가 지금까지 확인했는가"를 이미 완전히 담고 있다. 예전에는 여기서
@@ -359,7 +359,7 @@ class _ConfirmButtonsView(discord.ui.View):
             # 되돌려 마무리를 한 번 더 돌게 만들 수 있었다(실제로 재현됐다). status의 전이는
             # pending → joined → finalizing → completed 뿐이고, 그 바깥 어떤 쓰기도 이
             # 분기에서는 하지 않는다.
-            await respond(interaction, content="확인했다. 상대의 확인을 기다리는 중이다.", ephemeral=True)
+            await respond(interaction, content="확인했어. 상대의 확인을 기다리는 중이야.", ephemeral=True)
 
 
 @slash_only("연결 목록")
@@ -369,7 +369,7 @@ async def list_links(ctx: ToolContext) -> ToolResult:
     lines = [f"<@{a.discord_id}>{' (대표)' if a.is_primary else ''} — {a.linked_at}" for a in accounts]
     return ToolResult(
         data={"accounts": [a.discord_id for a in accounts]},
-        display=Display(content="\n".join(lines) if lines else "연결된 계정이 없다.", ephemeral=True),
+        display=Display(content="\n".join(lines) if lines else "연결된 계정이 없어.", ephemeral=True),
     )
 
 
@@ -390,13 +390,13 @@ async def unlink(ctx: ToolContext, discord_id: str) -> ToolResult:
     # 주인을 확인하지 않으므로, 남의 계정 ID를 넣어 남의 연결을 끊지 못하게 여기서 먼저 막는다.
     accounts = await ctx.players.accounts_for(ctx.player_id)
     if discord_id not in {a.discord_id for a in accounts}:
-        return ToolResult(error="내 플레이어에 연결된 계정만 뗄 수 있다")
+        return ToolResult(error="내 플레이어에 연결된 계정만 뗄 수 있어")
 
     player = await ctx.players.get_player(ctx.player_id)
     if player is None:
-        return ToolResult(error="모르는 플레이어다")
+        return ToolResult(error="모르는 플레이어야")
     if player.primary_discord_id == discord_id and len(accounts) > 1:
-        return ToolResult(error="대표 계정은 먼저 다른 계정으로 대표를 넘긴 뒤에 뗄 수 있다")
+        return ToolResult(error="대표 계정은 먼저 다른 계정으로 대표를 넘긴 뒤에 뗄 수 있어")
 
     await ctx.players.unlink_account(discord_id)
     await ctx.emit("players.linked", {"player_id": ctx.player_id, "discord_id": discord_id, "action": "unlinked"})

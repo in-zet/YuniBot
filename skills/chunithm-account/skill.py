@@ -20,12 +20,14 @@ async def _attempt_login(ctx: ToolContext, username: str, password: str, interac
     except Exception:  # noqa: BLE001 - 어떤 예외든 같은 안내만 준다. 원인 예외를 그대로
         # 보여주면 비밀번호나 응답 본문의 일부가 메시지에 섞여 나갈 수 있다(CLAUDE.md 비밀 값 규칙).
         await interaction.followup.send(
-            "로그인에 실패했다. ID/비밀번호가 올바른지 확인해 달라"
-            "(OTP(2단계 인증)를 쓰는 계정은 아직 이 방법으로 로그인할 수 없다).",
+            "로그인에 실패했어. ID와 비밀번호가 맞는지 확인해 줘. "
+            "(OTP(2단계 인증)를 쓰는 계정은 아직 이 방법으로 로그인할 수 없어.)",
             ephemeral=True,
         )
         return
-    await interaction.followup.send(f"로그인 완료! ({profile.username})", ephemeral=True)
+    await interaction.followup.send(
+        f"로그인 완료! ({profile.username}) `/동기화`로 기록을 가져와 줘.", ephemeral=True
+    )
 
 
 class _OverwriteConfirmView(discord.ui.View):
@@ -47,26 +49,32 @@ class _OverwriteConfirmView(discord.ui.View):
     @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
         await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send("취소했다.", ephemeral=True)
+        await interaction.followup.send("취소했어.", ephemeral=True)
+
+
+_LOGIN_NOTICE = (
+    "**입력한 내용은 안전해?**\n"
+    "- ID와 비밀번호는 저장하지 않아. 로그인하는 데 한 번 쓰고 바로 버려.\n"
+    "- 로그인에 성공하면 받은 세션 쿠키(clal)만 암호화해서 보관하고, 암호화 키는 서버 안에만 있어.\n"
+    "- 이 창에 쓴 내용은 채널에 남지 않고 다른 사람에게 보이지 않아. 나(AI)에게도 전달되지 않아.\n"
+    "- `/로그아웃`하면 보관한 쿠키도 지워."
+)
 
 
 class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
-    username_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="SEGA ID",
-        placeholder="CHUNITHM-NET에 로그인하는 SEGA ID",
-        required=True,
-        max_length=64,
-    )
-    password_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-        label="비밀번호",
-        placeholder="OTP(2단계 인증)를 쓰는 계정은 아직 지원하지 않는다",
-        required=True,
-        max_length=128,
-    )
-
     def __init__(self, *, ctx: ToolContext) -> None:
         super().__init__()
         self._ctx = ctx
+        # 입력칸은 Label로 감싸야 안내 글(TextDisplay)과 같은 창에 둘 수 있다.
+        self.username_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
+            placeholder="CHUNITHM-NET에 로그인하는 SEGA ID", required=True, max_length=64
+        )
+        self.password_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
+            placeholder="OTP(2단계 인증)를 쓰는 계정은 아직 안 돼", required=True, max_length=128
+        )
+        self.add_item(discord.ui.TextDisplay(_LOGIN_NOTICE))
+        self.add_item(discord.ui.Label(text="SEGA ID", component=self.username_input))
+        self.add_item(discord.ui.Label(text="비밀번호", component=self.password_input))
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         # defer 뒤 followup으로만 답한다 — 입력값은 채널에 남지 않고, 여기서도 다시 보여주지 않는다.
@@ -81,7 +89,7 @@ class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
             # 부르지 않는다.
             view = _OverwriteConfirmView(ctx=self._ctx, username=username, password=password)
             await interaction.followup.send(
-                f"이미 '{status.nickname}'(으)로 로그인되어 있다. 새 계정으로 덮어쓸까?",
+                f"이미 '{status.nickname}' 계정으로 로그인돼 있어. 새 계정으로 덮어쓸까?",
                 view=view,
                 ephemeral=True,
             )
@@ -126,7 +134,7 @@ async def status(ctx: ToolContext) -> ToolResult:
 async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
     """기록(프로필, 베스트, 곡별 기록) 공개 여부를 켜거나 끈다."""
     await ctx.players.set_visibility(ctx.player_id, "records_public", public)
-    message = "이제 다른 사람도 내 기록을 볼 수 있다." if public else "내 기록은 이제 나만 볼 수 있다."
+    message = "이제 다른 사람도 이 기록을 볼 수 있어." if public else "이제 이 기록은 너만 볼 수 있어."
     return ToolResult(
         data={"records_public": public}, display=Display(content=message, ephemeral=True), display_mode="optional"
     )
@@ -136,7 +144,7 @@ async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
 async def logout(ctx: ToolContext) -> ToolResult:
     """저장된 clal 쿠키를 지운다. 동기화된 기록은 남는다."""
     await ctx.chunithm_net.logout(ctx.player_id, ctx)
-    return ToolResult(data={"logged_out": True}, display=Display(content="로그아웃했다.", ephemeral=True))
+    return ToolResult(data={"logged_out": True}, display=Display(content="로그아웃했어. 보관하던 쿠키는 지웠고, 모아 둔 기록은 그대로 남아 있어.", ephemeral=True))
 
 
 @on("chunithm.login.expired")
@@ -148,4 +156,4 @@ async def on_login_expired(ctx: ToolContext, payload: dict[str, object]) -> None
     if player_id in _notified_expiries:
         return
     _notified_expiries.add(player_id)
-    await ctx.notify.dm(player_id, "로그인이 풀렸다. `/로그인`으로 다시 넣어 달라.")
+    await ctx.notify.dm(player_id, "CHUNITHM-NET 로그인이 풀렸어. `/로그인`으로 다시 로그인해 줘.")

@@ -47,9 +47,9 @@ async def forget(ctx: ToolContext, what: str | None = None, *, dry_run: bool = F
         if state.nickname:
             current.append(f"{NICKNAME_KEYWORD}: {state.nickname}")
         if not current:
-            return ToolResult(error="지울 내용이 없다. 기억하고 있는 게 없다.")
+            return ToolResult(error="지울 내용이 없어. 기억하고 있는 게 없거든.")
         listing = " / ".join(current)
-        return ToolResult(error=f"'{what}'에 맞는 항목이 없다. 지금 기억한 줄: {listing}")
+        return ToolResult(error=f"'{what}'에 맞는 항목이 없어. 지금 기억한 줄: {listing}")
     shown = "\n".join(f"- {item}" for item in found)
     if dry_run:
         return ToolResult(

@@ -258,7 +258,7 @@ async def test_find_by_artist_no_match_shows_empty_message() -> None:
 
     assert result.error is None
     assert result.data["count"] == 0
-    assert result.display is not None and "없다" in (result.display.content or "")
+    assert result.display is not None and "없어" in (result.display.content or "")
 
 
 async def test_find_songs_combines_const_and_note_count() -> None:
@@ -294,7 +294,7 @@ async def test_find_songs_no_match_shows_empty_message() -> None:
 
     assert result.error is None
     assert result.data["count"] == 0
-    assert result.display is not None and "없다" in (result.display.content or "")
+    assert result.display is not None and "없어" in (result.display.content or "")
 
 
 async def test_find_songs_orders_by_const_then_title_with_unknown_last() -> None:

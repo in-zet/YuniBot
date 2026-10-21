@@ -306,11 +306,11 @@ async def test_stranger_clicking_discard_confirm_is_rejected(link_env) -> None:
 
     stranger_discard = _FakeInteraction("999")
     await view.discard_and_continue.callback(stranger_discard)  # pyright: ignore[reportCallIssue]
-    assert "당신" in stranger_discard.response.calls[0]["content"]
+    assert "네 확인" in stranger_discard.response.calls[0]["content"]
 
     stranger_cancel = _FakeInteraction("999")
     await view.cancel.callback(stranger_cancel)  # pyright: ignore[reportCallIssue]
-    assert "당신" in stranger_cancel.response.calls[0]["content"]
+    assert "네 확인" in stranger_cancel.response.calls[0]["content"]
 
     # 아무것도 바뀌지 않았다 — 데이터도, 연결 상태도 그대로다.
     assert await players.player_for_discord("222") == joiner
@@ -427,7 +427,7 @@ async def test_confirm_after_completion_does_not_crash(link_env) -> None:
     second_click = _FakeInteraction("222")
     await joiner_view.confirm.callback(second_click)  # pyright: ignore[reportCallIssue]
 
-    assert "끝났다" in second_click.response.calls[0]["content"]
+    assert "끝났어" in second_click.response.calls[0]["content"]
 
 
 async def test_concurrent_confirm_clicks_do_not_double_finalize_or_delete_issuer_data(link_env) -> None:
@@ -461,9 +461,9 @@ async def test_concurrent_confirm_clicks_do_not_double_finalize_or_delete_issuer
         joiner_view.confirm.callback(click_b),  # pyright: ignore[reportCallIssue]
     )
 
-    # 터지지 않았고(gather가 예외 없이 끝났다), "연결이 완료됐다!"는 정확히 한 번만 나왔다.
+    # 터지지 않았고(gather가 예외 없이 끝났다), "연결이 완료됐어!"는 정확히 한 번만 나왔다.
     responses = [c["content"] for c in click_a.response.calls] + [c["content"] for c in click_b.response.calls]
-    assert responses.count("연결이 완료됐다!") == 1
+    assert responses.count("연결이 완료됐어!") == 1
 
     moved = await players.player_for_discord("222")
     assert moved is not None
@@ -538,7 +538,7 @@ async def test_concurrent_both_sides_first_confirm_ends_with_completed_status(li
     )
 
     responses = [c["content"] for c in issuer_click.response.calls] + [c["content"] for c in joiner_click.response.calls]
-    assert responses.count("연결이 완료됐다!") == 1
+    assert responses.count("연결이 완료됐어!") == 1
 
     link_code = await skill.models.get_code(issuer_ctx.db, code)
     assert link_code is not None
@@ -690,14 +690,14 @@ async def test_issuer_started_from_non_primary_account_can_confirm_from_any_link
     # 남이나 상대(참여자)는 발급자 쪽 버튼을 못 누른다.
     stranger = _FakeInteraction("999")
     await issuer_view.confirm.callback(stranger)  # pyright: ignore[reportCallIssue]
-    assert "당신" in stranger.response.calls[0]["content"]
+    assert "네 확인" in stranger.response.calls[0]["content"]
     joiner_on_issuer_side = _FakeInteraction("222")
     await issuer_view.confirm.callback(joiner_on_issuer_side)  # pyright: ignore[reportCallIssue]
-    assert "당신" in joiner_on_issuer_side.response.calls[0]["content"]
+    assert "네 확인" in joiner_on_issuer_side.response.calls[0]["content"]
     # 발급자도 참여자 쪽 버튼을 못 누른다.
     issuer_on_joiner_side = _FakeInteraction("333")
     await joiner_view.confirm.callback(issuer_on_joiner_side)  # pyright: ignore[reportCallIssue]
-    assert "당신" in issuer_on_joiner_side.response.calls[0]["content"]
+    assert "네 확인" in issuer_on_joiner_side.response.calls[0]["content"]
 
     # DM을 받은 대표 계정 333이 확인한다(명령을 친 111이 아니다).
     primary_click = _FakeInteraction("333")
@@ -706,7 +706,7 @@ async def test_issuer_started_from_non_primary_account_can_confirm_from_any_link
 
     joiner_click = _FakeInteraction("222")
     await joiner_view.confirm.callback(joiner_click)  # pyright: ignore[reportCallIssue]
-    assert joiner_click.response.calls[0]["content"] == "연결이 완료됐다!"
+    assert joiner_click.response.calls[0]["content"] == "연결이 완료됐어!"
 
     moved = await players.player_for_discord("222")
     assert moved is not None

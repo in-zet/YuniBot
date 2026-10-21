@@ -54,6 +54,8 @@ class SettingSpec(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
 class SkillManifest(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
     name: str
     description: str
+    # `/도움말`이 플레이어에게 보여 주는 한두 문장(유니 말투). 비우면 description을 쓴다.
+    summary: str = ""
     examples: list[str]
     # 메시지에 이 낱말이 들어 있으면 코어가 이 스킬을 처음부터 펼쳐 준다(00-core.md "스킬 불러오기").
     # 모델이 open_skill을 부르는 왕복 한 번을 아끼는 용도라, 틀려도 손해는 펼친 지침 분량뿐이다.

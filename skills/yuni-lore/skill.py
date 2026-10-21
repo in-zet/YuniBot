@@ -47,7 +47,7 @@ async def read_lore(ctx: ToolContext, section: str | None = None, spoiler_ok: bo
     스포일러 여부)만 돌려준다. 스포일러 구간은 플레이어가 스포일러를 봐도 된다고 답한 뒤에만 spoiler_ok를 켜서 읽는다."""
     sections = _load()
     if sections is None:
-        return ToolResult(error="설정집 파일을 찾을 수 없다")
+        return ToolResult(error="설정집 파일을 찾을 수 없어")
 
     if section is None:
         return ToolResult(data={

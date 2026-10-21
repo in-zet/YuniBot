@@ -6,8 +6,18 @@ from typing import Any, Protocol
 import discord
 from discord import app_commands
 
-from core.capabilities import build_capabilities_text
+from core.capabilities import (
+    CATEGORY_BLURBS,
+    Capabilities,
+    build_help_category,
+    build_help_overview,
+    collect_capabilities,
+    help_categories,
+)
 from core.registry import SkillRegistry
+
+_OVERVIEW_VALUE = "__overview__"
+_MENU_TIMEOUT = 300
 
 
 class _PlayerLookup(Protocol):
@@ -19,12 +29,37 @@ class _PlayerLookup(Protocol):
     async def tags_for(self, player_id: str) -> set[str]: ...
 
 
+class HelpView(discord.ui.View):
+    """분류를 고르면 같은 메시지가 그 분류의 안내로 바뀐다(00-core.md "할 수 있는 일 안내")."""
+
+    def __init__(self, found: Capabilities) -> None:
+        super().__init__(timeout=_MENU_TIMEOUT)
+        self._found = found
+        options = [discord.SelectOption(label="처음으로", value=_OVERVIEW_VALUE)]
+        options.extend(
+            discord.SelectOption(label=cat, value=cat, description=CATEGORY_BLURBS[cat][:100])
+            for cat in help_categories(found)
+        )
+        select: discord.ui.Select[HelpView] = discord.ui.Select(placeholder="분류를 골라 줘", options=options)
+        select.callback = self._on_select  # pyright: ignore[reportAttributeAccessIssue]
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction) -> None:
+        data: Any = interaction.data
+        value = str(data["values"][0]) if data else _OVERVIEW_VALUE
+        text = (
+            build_help_overview(self._found)
+            if value == _OVERVIEW_VALUE
+            else build_help_category(self._found, value)
+        )
+        await interaction.response.edit_message(content=text, view=self)
+
+
 def build_help_command(
     *, registry: SkillRegistry, players: _PlayerLookup | None = None
 ) -> app_commands.Command[Any, Any, Any]:
-    """LLM 없이 같은 안내를 보여주는 슬래시 명령. list_capabilities(core/core_tools.py)와
-    core/capabilities.py의 같은 build_capabilities_text를 쓴다(00-core.md: "슬래시 /도움말도
-    같은 목록을 LLM 없이 보여 준다")."""
+    """LLM 없이 같은 안내를 보여주는 슬래시 명령. 카드 목록은 list_capabilities와 같은
+    collect_capabilities에서 모은다(00-core.md: "슬래시 /도움말도 같은 목록을 LLM 없이 보여 준다")."""
 
     async def callback(interaction: discord.Interaction) -> None:
         player_tags: set[str] = set()
@@ -37,9 +72,9 @@ def build_help_command(
             player = await players.player_for_discord(str(interaction.user.id))
             if player is not None:
                 player_tags = await players.tags_for(player.id)
-        text = build_capabilities_text(
-            registry=registry, player_tags=player_tags, tag_definitions=registry.tag_definitions(), category=None,
+        found = collect_capabilities(registry=registry, player_tags=player_tags, category=None)
+        await interaction.response.send_message(
+            build_help_overview(found), view=HelpView(found), ephemeral=True
         )
-        await interaction.response.send_message(text, ephemeral=True)
 
     return app_commands.Command(name="도움말", description="유니가 할 수 있는 일을 보여준다", callback=callback)

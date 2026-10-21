@@ -81,7 +81,7 @@ async def test_change_updates_player_scoped_value(settings_env) -> None:
         interaction, skill="with-settings", setting="알림", value="false"  # pyright: ignore[reportArgumentType, reportCallIssue]
     )
 
-    assert "바꿨다" in interaction.response.calls[0]["content"]
+    assert "바꿨어" in interaction.response.calls[0]["content"]
     value = await settings.get_value(
         scope="player", scope_id=player.id, skill="with-settings", name="알림", default=True
     )
@@ -108,7 +108,7 @@ async def test_change_guild_scoped_requires_admin_tag(settings_env) -> None:
     await change.callback(
         interaction2, skill="with-settings", setting="기준일", value="30"  # pyright: ignore[reportArgumentType, reportCallIssue]
     )
-    assert "바꿨다" in interaction2.response.calls[0]["content"]
+    assert "바꿨어" in interaction2.response.calls[0]["content"]
 
 
 async def test_account_link_mention_setting_is_reachable_through_settings_command() -> None:
@@ -142,7 +142,7 @@ async def test_account_link_mention_setting_is_reachable_through_settings_comman
         await change.callback(
             changed, skill="account-link", setting="알림을 받을 계정", value="all"  # pyright: ignore[reportArgumentType, reportCallIssue]
         )
-        assert "바꿨다" in changed.response.calls[0]["content"]
+        assert "바꿨어" in changed.response.calls[0]["content"]
         assert await settings.get_value(
             scope="player", scope_id=player.id, skill="account-link", name="알림을 받을 계정", default="primary"
         ) == "all"

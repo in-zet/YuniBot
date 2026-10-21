@@ -149,7 +149,7 @@ class ToolExecutor:
             and self._settings is not None
             and not await self._settings.is_skill_enabled(guild_id=ctx.guild_id, skill=skill_name)
         ):
-            return ExecutionOutcome(result=ToolResult(error="모르는 명령이에요"))
+            return ExecutionOutcome(result=ToolResult(error="모르는 명령이야"))
 
         schema = build_arg_schema(spec.fn)
 
@@ -158,7 +158,7 @@ class ToolExecutor:
         for arg in schema.args:
             if arg.name not in raw_args:
                 if arg.required:
-                    return ExecutionOutcome(result=ToolResult(error=f"필수 인자 '{arg.name}'가 없다"))
+                    return ExecutionOutcome(result=ToolResult(error=f"필수 인자 '{arg.name}'가 없어"))
                 resolved[arg.name] = arg.default
                 continue
 
@@ -221,7 +221,7 @@ class ToolExecutor:
             lock = describe_lock(missing_tags=sorted(missing), tag_definitions=self._tag_definitions)
             if lock.visible and lock.message:
                 return ExecutionOutcome(result=ToolResult(error=lock.message))
-            return ExecutionOutcome(result=ToolResult(error="모르는 명령이에요"))
+            return ExecutionOutcome(result=ToolResult(error="모르는 명령이야"))
 
         confirm_mode = getattr(spec, "confirm", "never")
         if confirm_mode == "always":
@@ -260,7 +260,7 @@ class ToolExecutor:
         토큰도 소비하지 않는다(본인은 그대로 확인/취소할 수 있다)."""
         pending = self._pending.get(confirm_token)
         if pending is None:
-            return ToolResult(error="만료되었거나 모르는 확인 요청이다")
+            return ToolResult(error="만료됐거나 모르는 확인 요청이야")
         if pending.requester_id != player_id:
             logger.warning(
                 "confirm token for '%s' pressed by another player (requester=%s, presser=%s)",
@@ -268,10 +268,10 @@ class ToolExecutor:
                 pending.requester_id,
                 player_id,
             )
-            return ToolResult(error="본인이 요청한 확인만 누를 수 있다")
+            return ToolResult(error="본인이 요청한 확인만 누를 수 있어")
         del self._pending[confirm_token]
         if not confirmed:
-            return ToolResult(error="취소했다")
+            return ToolResult(error="취소했어")
         return await self._call(pending.spec, pending.ctx, pending.resolved_args)
 
     async def _call(
@@ -284,4 +284,4 @@ class ToolExecutor:
             return ToolResult(error=str(exc))
         except Exception as exc:
             logger.exception("tool '%s' raised", spec.name)
-            return ToolResult(error=f"도구 실행 중 오류: {exc}")
+            return ToolResult(error=f"실행하다가 오류가 났어: {exc}")

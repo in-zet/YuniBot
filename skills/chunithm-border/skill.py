@@ -59,11 +59,11 @@ async def remaining(
         ctx.player_id, song_title=chart.song.title, difficulty=chart.chart.difficulty
     )
     if best_score is None:
-        return ToolResult(error="그 채보를 아직 플레이한 기록이 없다")
+        return ToolResult(error="그 채보를 아직 플레이한 기록이 없어")
 
     result = ctx.records.remaining_to_target(chart.chart.note_count, best_score, rank.min_score)
     if result is None:
-        return ToolResult(error="노트 수를 몰라 계산 불가다")
+        return ToolResult(error="노트 수를 몰라서 계산 불가야")
 
     remaining_score, attacks = result
     already_achieved = remaining_score <= 0
@@ -76,7 +76,7 @@ async def remaining(
         data["remaining_attacks"] = str(attacks)
     head = f"{chart.song.title} {chart.chart.difficulty} — "
     if already_achieved:
-        content = f"{head}이미 {rank.canonical}를 달성했다."
+        content = f"{head}이미 {rank.canonical}를 달성했어."
         slash_content = None
     else:
         content = f"{head}{rank.canonical}까지 {remaining_score}점" + (f" ({attacks}어택)." if include_attacks else ".")

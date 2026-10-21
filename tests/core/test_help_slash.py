@@ -23,8 +23,8 @@ class _FakeResponse:
     def __init__(self) -> None:
         self.sent: dict[str, Any] | None = None
 
-    async def send_message(self, text: str, *, ephemeral: bool = False) -> None:
-        self.sent = {"text": text, "ephemeral": ephemeral}
+    async def send_message(self, text: str, *, ephemeral: bool = False, view: Any = None) -> None:
+        self.sent = {"text": text, "ephemeral": ephemeral, "view": view}
 
 
 class _FakeInteraction:
@@ -90,3 +90,36 @@ async def test_help_command_falls_back_to_empty_tags_for_unknown_discord_user() 
 
     assert players.tags_for_calls == []
     assert real_interaction.response.sent is not None
+
+
+class _FakeEditResponse(_FakeResponse):
+    def __init__(self) -> None:
+        super().__init__()
+        self.edited: dict[str, Any] | None = None
+
+    async def edit_message(self, *, content: str, view: Any) -> None:
+        self.edited = {"content": content, "view": view}
+
+
+@pytest.mark.asyncio
+async def test_help_menu_switches_the_same_message_to_the_chosen_category() -> None:
+    registry = SkillRegistry([Path("skills")])
+    registry.load()
+    command = build_help_command(registry=registry, players=_FakePlayers())
+    interaction = _FakeInteraction(999)
+    interaction.response = _FakeEditResponse()
+    await command.callback(interaction)  # pyright: ignore[reportCallIssue, reportArgumentType]
+
+    assert interaction.response.sent is not None
+    assert interaction.response.sent["ephemeral"] is True
+    view = interaction.response.sent["view"]
+    assert view is not None
+
+    interaction.data = {"values": ["곡 정보"]}  # pyright: ignore[reportAttributeAccessIssue]
+    await view._on_select(interaction)  # pyright: ignore[reportPrivateUsage]
+    assert interaction.response.edited is not None
+    assert "곡 정보" in interaction.response.edited["content"]
+
+    interaction.data = {"values": ["__overview__"]}  # pyright: ignore[reportAttributeAccessIssue]
+    await view._on_select(interaction)  # pyright: ignore[reportPrivateUsage]
+    assert "유니" in interaction.response.edited["content"]

@@ -803,6 +803,6 @@ async def test_modal_command_checks_the_tool_tags_and_hides_the_modal_on_denial(
 
         [call] = interaction.calls
         assert "modal" not in call
-        assert call["content"] == "모르는 명령이에요"
+        assert call["content"] == "모르는 명령이야"
     finally:
         await conn.close()

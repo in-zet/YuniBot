@@ -147,7 +147,7 @@ async def test_toggle_skill_refuses_to_disable_protected_skills(admin_env, prote
     result = await skill.toggle_skill(make_ctx("admin1", guild_id="g1"), skill_name=protected, enabled=False)
 
     assert result.error is not None
-    assert "끌 수 없다" in result.error
+    assert "끌 수 없어" in result.error
     assert await settings.is_skill_enabled(guild_id="g1", skill=protected) is True
 
 
@@ -283,7 +283,7 @@ async def test_admin_skill_blocked_without_admin_tag() -> None:
 
     outcome = await executor.invoke(spec, ctx, {}, skill_tags=skill.manifest.tags, skill_name="admin")
     assert outcome.result is not None
-    assert outcome.result.error == "모르는 명령이에요"
+    assert outcome.result.error == "모르는 명령이야"
 
     await players.grant_tag(player.id, "admin", source="test")
     ctx2 = ToolContext(

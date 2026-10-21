@@ -6,6 +6,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+import discord
+
 from core.tool_types import ToolContext
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -317,3 +319,13 @@ async def test_logout_locked_without_chunithm_linked_shows_how_to_get_it() -> No
     assert outcome.result.error is not None
     assert outcome.result.error != "모르는 명령이에요"
     assert "로그인" in outcome.result.error
+
+
+def test_login_modal_explains_how_credentials_are_handled() -> None:
+    skill = _load_skill()
+    modal = skill._LoginModal(ctx=_ctx(chunithm_net=_FakeChunithmNet(linked=False)))
+    texts = [item.content for item in modal.children if isinstance(item, discord.ui.TextDisplay)]
+    assert len(texts) == 1
+    assert "암호화" in texts[0]
+    assert "저장하지 않아" in texts[0]
+    assert "/로그아웃" in texts[0]

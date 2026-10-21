@@ -103,7 +103,7 @@ async def chart(ctx: ToolContext, chart: ChartRef) -> ToolResult:
 
 
 _SEARCH_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION)
-_NO_ARTIST_SONGS = "해당 작곡가의 곡이 없다."
+_NO_ARTIST_SONGS = "해당 작곡가의 곡이 없어."
 
 
 def _note_range_text(min_notes: int | None, max_notes: int | None) -> str | None:
@@ -141,7 +141,7 @@ async def find_by_const(
         min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
     )
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="해당 범위의 채보가 없다."))
+        return ToolResult(data={"count": 0}, display=Display(content="해당 범위의 채보가 없어."))
     conditions = [tc.const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions))
 
@@ -156,7 +156,7 @@ async def find_by_version(
     short_code = _difficulty_code(difficulty)
     hits = ctx.songdb.find_by_version(version=version, difficulty=short_code)
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="해당 버전의 채보가 없다."))
+        return ToolResult(data={"count": 0}, display=Display(content="해당 버전의 채보가 없어."))
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code]))
 
 
@@ -172,9 +172,9 @@ async def find_linked_verse(
     try:
         hits = ctx.songdb.find_linked_verse(gate=gate, difficulty=short_code)
     except ValueError:
-        return ToolResult(error=f"그런 게이트는 없다. 게이트: {', '.join(ctx.songdb.linked_verse_gates())}")
+        return ToolResult(error=f"그런 게이트는 없어. 게이트: {', '.join(ctx.songdb.linked_verse_gates())}")
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="해당하는 해금곡 채보가 없다."))
+        return ToolResult(data={"count": 0}, display=Display(content="해당하는 해금곡 채보가 없어."))
     builder = TableBuilder(unit="채보")
     tc.add_columns(builder, *_SEARCH_COLUMNS)
     builder.step(" ".join(c for c in ["Linked VERSE", gate, short_code] if c))
@@ -212,7 +212,7 @@ async def find_songs(
         v is None
         for v in (min_const, max_const, level, version, difficulty, other_difficulty, min_note_count, max_note_count)
     ):
-        return ToolResult(error="조건을 하나는 줘야 한다(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡 중)")
+        return ToolResult(error="조건을 하나는 줘야 해(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡 중)")
 
     codes = [code for code in (_difficulty_code(difficulty), _difficulty_code(other_difficulty)) if code is not None]
     hits = ctx.songdb.find_songs(
@@ -221,7 +221,7 @@ async def find_songs(
         new_only=new_only,
     )
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="조건에 맞는 채보가 없다."))
+        return ToolResult(data={"count": 0}, display=Display(content="조건에 맞는 채보가 없어."))
     conditions = [
         tc.const_range_text(min_const, max_const),
         f"레벨 {level}" if level else None,
@@ -313,7 +313,7 @@ async def charts_of(
         steps.append(f"{code} 없는 곡 {missing}개 뺌")
     result = replace(result, steps=(*result.steps, *steps), unit="채보" if expanded else result.unit)
     if result.row_count == 0:
-        return ToolResult(error=f"{code} 채보가 있는 곡이 없다(곡 {missing}개 뺌)")
+        return ToolResult(error=f"{code} 채보가 있는 곡이 없어(곡 {missing}개 뺌)")
     return ToolResult(data={"count": result.row_count, "difficulty": code, "expanded": expanded}, table=result)
 
 
@@ -399,7 +399,7 @@ async def alias_add(ctx: ToolContext, song: SongQuery, alias: str) -> ToolResult
         return ToolResult(error=str(exc))
     return ToolResult(
         data={"alias": alias, "song": song.title},
-        display=Display(content=f"'{alias}' → {song.title}로 등록했다."),
+        display=Display(content=f"'{alias}' → {song.title}로 등록했어."),
         display_mode="optional",
     )
 
@@ -409,8 +409,8 @@ async def alias_remove(ctx: ToolContext, alias: str) -> ToolResult:
     """별칭을 지운다. 추가한 사람이나 admin만 할 수 있다."""
     row = await ctx.songdb.get_alias(alias=alias)
     if row is None:
-        return ToolResult(error="그런 별칭이 없다")
+        return ToolResult(error="그런 별칭이 없어")
     if row.added_by != ctx.player_id and "admin" not in ctx.tags:
-        return ToolResult(error="추가한 사람이나 admin만 지울 수 있다")
+        return ToolResult(error="추가한 사람이나 admin만 지울 수 있어")
     await ctx.songdb.remove_alias(alias=alias)
-    return ToolResult(data={"alias": alias}, display=Display(content=f"'{alias}' 별칭을 지웠다."), display_mode="optional")
+    return ToolResult(data={"alias": alias}, display=Display(content=f"'{alias}' 별칭을 지웠어."), display_mode="optional")

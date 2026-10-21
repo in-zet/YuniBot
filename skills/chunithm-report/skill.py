@@ -312,7 +312,7 @@ async def const_table(
     if not hits:
         return ToolResult(
             data={"count": 0},
-            display=Display(content="점수가 있는 채보가 없다." if only_played else "해당 범위의 채보가 없다."),
+            display=Display(content="점수가 있는 채보가 없어." if only_played else "해당 범위의 채보가 없어."),
         )
 
     def order(hit: ConstRangeHit) -> tuple[float, int, int, str]:

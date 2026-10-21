@@ -20,7 +20,7 @@ def _coerce(kind: str, raw: str) -> Any:
             return True
         if lowered in {"false", "0", "off", "꺼짐", "아니오"}:
             return False
-        raise ValueError(f"'{raw}'를 켜짐/꺼짐으로 읽을 수 없다")
+        raise ValueError(f"'{raw}'를 켜짐/꺼짐으로 읽을 수 없어")
     if kind == "int":
         return int(raw)
     if kind == "float":
@@ -35,8 +35,8 @@ def _find_setting(registry: SkillRegistry, skill_name: str, setting_name: str) -
         for spec in skill.manifest.settings:
             if spec.name == setting_name:
                 return spec
-        raise ValueError(f"'{skill_name}'에는 '{setting_name}' 설정이 없다")
-    raise ValueError(f"'{skill_name}' 스킬을 찾지 못했다")
+        raise ValueError(f"'{skill_name}'에는 '{setting_name}' 설정이 없어")
+    raise ValueError(f"'{skill_name}' 스킬을 찾지 못했어")
 
 
 def build_settings_group(
@@ -70,7 +70,7 @@ def build_settings_group(
                     f"[{skill.manifest.name}] {spec.name} ({spec.scope}) = {value!r} — {spec.description}"
                 )
 
-        text = "\n".join(lines) if lines else "설정할 수 있는 항목이 없다."
+        text = "\n".join(lines) if lines else "설정할 수 있는 항목이 없어."
         await interaction.response.send_message(text, ephemeral=True)
 
     @group.command(name="바꾸기", description="설정값을 바꾼다")
@@ -86,7 +86,7 @@ def build_settings_group(
         player = await players.player_for_discord(str(interaction.user.id))
         if player is None:
             await interaction.response.send_message(
-                "먼저 봇과 한 번 상호작용해야 한다.", ephemeral=True
+                "먼저 나한테 한 번 말을 걸어 줘.", ephemeral=True
             )
             return
 
@@ -95,13 +95,13 @@ def build_settings_group(
         else:
             if interaction.guild_id is None:
                 await interaction.response.send_message(
-                    "서버 설정은 서버 안에서만 바꿀 수 있다.", ephemeral=True
+                    "서버 설정은 서버 안에서만 바꿀 수 있어.", ephemeral=True
                 )
                 return
             tags = await players.tags_for(player.id)
             if not check_tags(TagRequirement(tags=["admin"]), tags):
                 await interaction.response.send_message(
-                    "서버 설정은 관리자만 바꿀 수 있다.", ephemeral=True
+                    "서버 설정은 관리자만 바꿀 수 있어.", ephemeral=True
                 )
                 return
             scope_id = str(interaction.guild_id)
@@ -110,6 +110,6 @@ def build_settings_group(
             scope=spec.scope, scope_id=scope_id, skill=skill, name=setting, value=coerced,
             updated_by=player.id,
         )
-        await interaction.response.send_message(f"{skill}의 '{setting}'을 {coerced!r}로 바꿨다.", ephemeral=True)
+        await interaction.response.send_message(f"{skill}의 '{setting}'을 {coerced!r}로 바꿨어.", ephemeral=True)
 
     return group

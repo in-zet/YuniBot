@@ -1113,9 +1113,9 @@ async def test_const_table_only_played_difficulty_and_open_ended_range(skill: Mo
     assert _row_keys(played.table) == [(hit.song.title, "MAS")]
     assert played.table.steps == ("15.5 이상 상수 MAS", "내 점수", "점수 있는 것만")
     empty = await skill.const_table(_ctx(records=_FakeRecords(), songdb=songdb).ctx, min_const=15.5, only_played=True)
-    assert empty.table is None and "점수가 있는 채보가 없다" in _content(empty)
+    assert empty.table is None and "점수가 있는 채보가 없어" in _content(empty)
     nothing = await skill.const_table(f.ctx, min_const=99.0)
-    assert nothing.table is None and "해당 범위의 채보가 없다" in _content(nothing)
+    assert nothing.table is None and "해당 범위의 채보가 없어" in _content(nothing)
 
 
 async def test_const_table_other_player_needs_public_records(skill: ModuleType) -> None:

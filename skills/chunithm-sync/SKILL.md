@@ -1,6 +1,7 @@
 ---
 name: chunithm-sync
 description: CHUNITHM-NET에서 최신 기록을 가져와 저장하고, 지난 동기화와의 차이를 리포트로 보여 준다.
+summary: CHUNITHM-NET에서 최신 기록을 가져와서 지난번과 달라진 점을 알려 줄게.
 examples:
   - 동기화해 줘
   - 오늘 친 거 갱신해서 크로노만 봐 줘

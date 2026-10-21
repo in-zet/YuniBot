@@ -1,6 +1,7 @@
 ---
 name: yuni-lore
 description: 유니와 나비가 누구인지, Linked VERSE 이야기가 어땠는지 설정집을 읽어 답한다. 유니 자신이나 이야기를 물을 때 쓴다.
+summary: 유니와 나비, Linked VERSE 이야기를 설정집을 보고 들려줄게.
 examples:
   - 유니는 어디서 왔어?
   - 나비는 누구야?

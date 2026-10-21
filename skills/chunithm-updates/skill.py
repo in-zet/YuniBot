@@ -397,7 +397,7 @@ async def configure(
     둔다. channel/role_mention을 빈 문자열로 주면 끈다(채널은 #채널 멘션이나 채널 id,
     역할은 @역할 멘션으로 준다)."""
     if ctx.guild_id is None:
-        return ToolResult(error="서버 안에서만 쓸 수 있다")
+        return ToolResult(error="서버 안에서만 쓸 수 있어")
 
     result: dict[str, Any] = {}
     if channel is not None:

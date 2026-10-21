@@ -408,7 +408,7 @@ async def history(ctx: ToolContext, song: SongQuery | None = None, kind: str | N
     song을 주면 그 곡의 기록만, kind를 주면 그 종류만 본다. 날짜와 기간은 결과의 값만 말한다."""
     assert song is None or isinstance(song, SongRecord)
     if kind is not None and kind not in _KINDS:
-        return ToolResult(error=f"kind는 {', '.join(_KINDS)} 중 하나여야 한다")
+        return ToolResult(error=f"kind는 {', '.join(_KINDS)} 중 하나여야 해")
     db = _db(ctx)
     wanted = {kind} if kind is not None else set(_KINDS)
     today = _today()
@@ -600,7 +600,7 @@ async def promise_set(ctx: ToolContext, text: str, song: SongQuery | None = None
     db = _db(ctx)
     cleaned = calc.clean_promise(text)
     if not cleaned:
-        return ToolResult(error="약속 내용이 필요하다")
+        return ToolResult(error="약속 내용이 필요해")
     cursor = await db.execute(
         "SELECT id FROM yuni_bond_promises WHERE player_id = ? AND status = 'open' AND text = ?",
         (ctx.player_id, cleaned),
@@ -696,7 +696,7 @@ async def close_promises(
     await db.commit()
     already = len(ids) - len(closed)
     if not closed:
-        return ToolResult(error="닫을 수 있는 열린 약속이 없다" + (f"({already}개는 이미 닫혔거나 없음)" if already else ""))
+        return ToolResult(error="닫을 수 있는 열린 약속이 없어" + (f"({already}개는 이미 닫혔거나 없음)" if already else ""))
     note = f" ({already}개는 이미 닫혀 있어서 뺐어.)" if already else ""
     return ToolResult(
         data={"closed_count": len(closed), "already_closed": already, "texts": closed, "kept": kept},

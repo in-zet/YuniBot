@@ -74,5 +74,5 @@ def describe_lock(
     if any(d.hidden for d in definitions) or len(definitions) != len(missing_tags):
         return LockResult(visible=False, message=None)
 
-    hints = "; ".join(f"{d.description} ({d.how_to_get})" for d in definitions)
-    return LockResult(visible=True, message=f"아직 쓸 수 없어요. {hints}")
+    hints = " ".join(d.how_to_get for d in definitions)
+    return LockResult(visible=True, message=f"아직 쓸 수 없어. {hints}")

@@ -1,6 +1,7 @@
 ---
 name: chunithm-settings
 description: 지금 계정의 인게임 설정(스피드·필드 월·판정 타이밍 A·B·가이드음)과 즐겨찾기 곡을 CHUNITHM-NET에서 바로 읽고 바꾼다.
+summary: 지금 계정의 스피드, 판정 타이밍 같은 인게임 설정과 즐겨찾기를 바로 바꿔 줄게.
 examples:
   - 내 지금 설정 좀 보여줘
   - 스피드 9.00으로 바꿔줘

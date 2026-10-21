@@ -417,7 +417,7 @@ async def test_invoke_blocks_tool_when_skill_disabled_for_guild() -> None:
     )
 
     assert outcome.result is not None
-    assert outcome.result.error == "모르는 명령이에요"
+    assert outcome.result.error == "모르는 명령이야"
 
 
 async def test_invoke_allows_tool_when_no_guild_context() -> None:

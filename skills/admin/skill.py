@@ -13,9 +13,9 @@ _UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
 async def usage(ctx: ToolContext) -> ToolResult:
     """이번 달 LLM 호출 수, 토큰, 추정 비용을 플레이어별로 보여준다."""
     if ctx.guild_id is None:
-        return ToolResult(error="서버 안에서만 쓸 수 있다")
+        return ToolResult(error="서버 안에서만 쓸 수 있어")
     if ctx.usage is None:
-        return ToolResult(error="사용량 서비스를 아직 쓸 수 없다")
+        return ToolResult(error="사용량 서비스를 아직 쓸 수 없어")
     import datetime
 
     year_month = datetime.datetime.now(datetime.UTC).strftime("%Y-%m")
@@ -36,12 +36,12 @@ async def skills(ctx: ToolContext) -> ToolResult:
     """등록된 스킬, 켜짐 여부, 등록 실패한 스킬과 이유를 보여준다."""
     snapshot = ctx.registry_snapshot
     if snapshot is None:
-        return ToolResult(error="스킬 현황을 아직 알 수 없다")
+        return ToolResult(error="스킬 현황을 아직 알 수 없어")
     lines = [f"- {s.name} ({s.game}, v{s.version})" for s in snapshot.skills]
     lines += [f"- {name} 등록 실패: {reason}" for name, reason in snapshot.failures.items()]
     return ToolResult(
         data={"enabled": [s.name for s in snapshot.skills], "failures": snapshot.failures},
-        display=Display(content="\n".join(lines) if lines else "등록된 스킬이 없다", ephemeral=True),
+        display=Display(content="\n".join(lines) if lines else "등록된 스킬이 없어", ephemeral=True),
     )
 
 
@@ -51,15 +51,15 @@ async def toggle_skill(ctx: ToolContext, skill_name: str, enabled: bool) -> Tool
     # admin을 끄면 /관리 전체가 "모르는 명령"이 되어 DB를 직접 고치기 전에는 되돌릴 길이 없다.
     # account-link은 연결·해제의 유일한 경로다. 둘 다 끌 수 없다.
     if skill_name in _UNTOGGLEABLE_SKILLS:
-        return ToolResult(error=f"'{skill_name}' 스킬은 끌 수 없다")
+        return ToolResult(error=f"'{skill_name}' 스킬은 끌 수 없어")
     snapshot = ctx.registry_snapshot
     if snapshot is None:
-        return ToolResult(error="스킬 현황을 아직 알 수 없다")
+        return ToolResult(error="스킬 현황을 아직 알 수 없어")
     if skill_name not in {s.name for s in snapshot.skills}:
         # 오타로 존재하지 않는 스킬 이름의 설정 행이 조용히 생기지 않게 한다.
-        return ToolResult(error=f"'{skill_name}'이라는 등록된 스킬이 없다")
+        return ToolResult(error=f"'{skill_name}'이라는 등록된 스킬이 없어")
     if ctx.guild_id is None:
-        return ToolResult(error="서버 안에서만 쓸 수 있다")
+        return ToolResult(error="서버 안에서만 쓸 수 있어")
     await ctx.settings.set_skill_enabled(
         guild_id=ctx.guild_id, skill=skill_name, enabled=enabled, updated_by=ctx.player_id
     )
@@ -84,7 +84,7 @@ async def revoke_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResul
     if tag == "admin":
         holders = await ctx.players.players_with_tag("admin")
         if target.id in holders and len(holders) <= 1:
-            return ToolResult(error="마지막 관리자는 뗄 수 없다")
+            return ToolResult(error="마지막 관리자는 뗄 수 없어")
     try:
         await ctx.players.revoke_tag(target.id, tag)
     except ValueError as exc:
@@ -96,7 +96,7 @@ async def revoke_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResul
 async def set_limits(ctx: ToolContext, monthly_cost_cap: float, player_cooldown_seconds: int) -> ToolResult:
     """월 비용 상한과 플레이어별 쿨다운을 저장한다. 멘션 응답에 바로 적용된다."""
     if ctx.guild_id is None:
-        return ToolResult(error="서버 안에서만 쓸 수 있다")
+        return ToolResult(error="서버 안에서만 쓸 수 있어")
     await ctx.settings.set_value(
         scope="guild", scope_id=ctx.guild_id, skill="admin", name="월 비용 상한",
         value=monthly_cost_cap, updated_by=ctx.player_id,
@@ -116,7 +116,7 @@ async def set_report_channel(ctx: ToolContext, channel: str) -> ToolResult:
     """서버 은어 자동 등록 같은, admin이 사후 검토할 일을 올릴 채널을 정한다. #채널 멘션이나
     채널 id로 준다. 빈 문자열이면 끈다(아무 데도 안 보낸다)."""
     if ctx.guild_id is None:
-        return ToolResult(error="서버 안에서만 쓸 수 있다")
+        return ToolResult(error="서버 안에서만 쓸 수 있어")
     channel_id = parse_channel_ref(channel) if channel else ""
     if channel and channel_id is None:
         return ToolResult(error="채널을 못 읽었어. #채널 멘션이나 채널 id로 줘.")
