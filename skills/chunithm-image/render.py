@@ -405,15 +405,39 @@ def _draw_rating_value(canvas: Image.Image, xy: tuple[int, int], text: str, font
     canvas.paste(_highlight_top(fill, box) if extreme else fill, (x - pad, y - pad), mask)
 
 
+_RATING_TAIL_SCALE = 0.7  # 소수점 아래 셋째·넷째 자리의 글자 크기(둘째 자리까지의 큰 글자에 대한 비율)
+_RATING_TAIL_COLOR = (200, 205, 218)  # 같은 자리의 밝은 회색
+
+
+def split_rating(rating: str) -> tuple[str, str]:
+    """"17.0024" → ("17.00", "24"). 소수점 아래 셋째 자리부터가 뒷부분이고, 그런 자리가 없으면 뒷부분은 빈 글자."""
+    whole, dot, fraction = rating.partition(".")
+    if not dot or len(fraction) <= 2 or not fraction.isdigit():
+        return rating, ""
+    return f"{whole}.{fraction[:2]}", fraction[2:]
+
+
+def _ascent(font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> int:
+    return font.getmetrics()[0] if isinstance(font, ImageFont.FreeTypeFont) else 0
+
+
 def _draw_final_rating(canvas: Image.Image, width: int, rating: str, y: int) -> tuple[int, int]:
-    """머리말 오른쪽 끝에 최종 레이팅을 크게 그린다. (왼쪽 끝 x, 아래 끝 y)를 돌려준다."""
+    """머리말 오른쪽 끝에 최종 레이팅을 크게 그린다. 소수점 아래 셋째·넷째 자리는 밝은 회색으로 작게 붙인다.
+    (왼쪽 끝 x, 아래 끝 y)를 돌려준다."""
     draw = ImageDraw.Draw(canvas)
     label_font, font = _font(13, False), _font(40, True)
-    value_width = _width(font, rating)
+    main, tail = split_rating(rating)
+    tail_font = _font(round(40 * _RATING_TAIL_SCALE), True)
+    tail_width = _width(tail_font, tail) if tail else 0
+    value_width = _width(font, main) + tail_width
     right = width - _MARGIN
     draw.text((right - _width(label_font, "RATING"), y), "RATING", font=label_font, fill=_MUTED)
     value_y = y + _fs(13) + 4
-    _draw_rating_value(canvas, (right - value_width, value_y), rating, font)
+    _draw_rating_value(canvas, (right - value_width, value_y), main, font)
+    if tail:  # 큰 글자와 바닥선을 맞춘다
+        draw.text(
+            (right - tail_width, value_y + _ascent(font) - _ascent(tail_font)), tail, font=tail_font, fill=_RATING_TAIL_COLOR
+        )
     return right - max(value_width, _width(label_font, "RATING")), value_y + _fs(40) + 8
 
 

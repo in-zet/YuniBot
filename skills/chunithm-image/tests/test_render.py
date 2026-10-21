@@ -575,3 +575,42 @@ def test_extreme_rainbow_top_is_lightened_but_has_no_glow() -> None:
     assert sum(lit.getpixel((50, 12))) > sum(base.getpixel((50, 12)))  # 윗부분은 밝아진다
     assert lit.getpixel((50, 49)) == base.getpixel((50, 49))  # 아랫부분은 그대로
     assert not hasattr(render, "ImageFilter")  # 번짐(블러) 효과는 쓰지 않는다
+
+
+@pytest.mark.parametrize(
+    "rating,expected",
+    [("17.0024", ("17.00", "24")), ("16.52", ("16.52", "")), ("16.5", ("16.5", "")), ("17.001", ("17.00", "1")),
+     ("17", ("17", "")), ("-", ("-", "")), ("1.2x34", ("1.2x34", ""))],
+)
+def test_split_rating_cuts_after_two_decimals(rating: str, expected: tuple[str, str]) -> None:
+    assert render.split_rating(rating) == expected
+
+
+def _is_bright(pixel: object) -> bool:
+    return isinstance(pixel, tuple) and max(pixel) > 150
+
+
+def test_rating_tail_is_smaller_light_gray_and_aligned_to_baseline() -> None:
+    with_tail = _rating_header("17.0024")
+    without = _rating_header("17.00")
+    area = (with_tail.width - render._MARGIN - 200, 30, with_tail.width - render._MARGIN, 100)
+
+    # 뒷부분(24)은 밝은 회색 글자가 오른쪽 끝에 있다.
+    tail_pixels = [
+        (x, y)
+        for x in range(area[2] - 70, area[2])
+        for y in range(area[1], area[3])
+        if with_tail.getpixel((x, y)) == render._RATING_TAIL_COLOR
+    ]
+    assert tail_pixels
+    big_pixels = [
+        y for x in range(area[0], area[2] - 80) for y in range(area[1], area[3])
+        if _is_bright(with_tail.getpixel((x, y)))
+    ]
+    assert max(y for _, y in tail_pixels) - min(y for _, y in tail_pixels) < max(big_pixels) - min(big_pixels)  # 더 작다
+    # 큰 글자 부분의 아래 끝(바닥선)과 뒷부분의 아래 끝이 맞는다.
+    assert abs(max(y for _, y in tail_pixels) - max(big_pixels)) <= 3
+    # 뒷부분이 없으면 회색 글자도 없다.
+    assert not any(
+        without.getpixel((x, y)) == render._RATING_TAIL_COLOR for x in range(area[0], area[2]) for y in range(area[1], area[3])
+    )
