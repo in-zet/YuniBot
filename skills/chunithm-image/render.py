@@ -147,6 +147,22 @@ def _paste_fit(canvas: Image.Image, image: Image.Image | None, box: tuple[int, i
     canvas.alpha_composite(resized, (x0 + (x1 - x0 - size[0]) // 2, y0 + (y1 - y0 - size[1]) // 2))
 
 
+_ICON_FRAME_INSET = 0.08  # 틀 테두리 안쪽에 캐릭터를 앉히는 여백(상자 한 변에 대한 비율)
+
+
+def _draw_icon(canvas: Image.Image, box: tuple[int, int, int, int], character: bytes | None, frame: bytes | None) -> None:
+    """플레이어 아이콘. CHUNITHM-NET처럼 틀 그림이 배경판(투명한 데가 없다)이고 캐릭터가 그 위에 얹힌다."""
+    ImageDraw.Draw(canvas).rounded_rectangle(box, radius=10, fill=_PANEL)
+    frame_image = _open(frame)
+    character_image = _open(character)
+    if frame_image is not None:
+        _paste_fit(canvas, frame_image, box)
+    if character_image is None and frame_image is not None:
+        return  # 틀만 있고 캐릭터를 못 받았으면 빈 사각형을 얹지 않는다
+    inset = round((box[2] - box[0]) * _ICON_FRAME_INSET) if frame_image is not None else 0
+    _paste_fit(canvas, character_image, (box[0] + inset, box[1] + inset, box[2] - inset, box[3] - inset))
+
+
 def _chip_width(text: str, size: int) -> int:
     return _width(_font(size, True), text) + _fs(10)
 
@@ -308,12 +324,7 @@ def _draw_header(
         has_icon = profile is not None and (profile.character is not None or profile.frame is not None)
         if has_icon:
             assert profile is not None
-            box = (margin, y, margin + _ICON, y + _ICON)
-            draw.rounded_rectangle(box, radius=10, fill=_PANEL)
-            _paste_fit(canvas, _open(profile.character), box)
-            frame = _open(profile.frame)
-            if frame is not None:
-                _paste_fit(canvas, frame, box)
+            _draw_icon(canvas, (margin, y, margin + _ICON, y + _ICON), profile.character, profile.frame)
             x = margin + _ICON + 16
         room = width - x - margin - reserved
         text_y = y
