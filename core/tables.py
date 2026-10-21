@@ -396,8 +396,9 @@ def _select_numbered(
     descending: bool = False,
     limit: int | None = None,
     group_by: str | None = None,
+    distinct_by: str | None = None,
 ) -> tuple[list[_NumberedGroup], list[str]]:
-    """거르기·정렬 엔진. 순서는 번호 고르기 → where → 다시 묶기 → 정렬 → 묶음마다 limit이다."""
+    """거르기·정렬 엔진. 순서는 번호 고르기 → where → 다시 묶기 → 정렬 → 칸 값이 겹치는 행 줄이기 → 묶음마다 limit이다."""
     steps: list[str] = []
     groups = _numbered_groups(table)
     if rows is not None:
@@ -438,6 +439,22 @@ def _select_numbered(
         if not presorted:
             groups = [(t, _sorted_rows(rs, sort_column, descending=descending)) for t, rs in groups]
         steps.append(f"{sort} {'내림' if descending else '오름'}차순")
+    if distinct_by is not None:
+        distinct_column = _column_by_label(table, distinct_by)
+        seen: set[Any] = set()
+        kept: list[_NumberedGroup] = []
+        for title, rs in groups:
+            fresh: list[tuple[int, Row]] = []
+            for item in rs:
+                raw = item[1].cell(distinct_column.name).raw
+                if raw is not None and raw in seen:
+                    continue  # 값이 없는 행은 서로 겹치지 않는다
+                if raw is not None:
+                    seen.add(raw)
+                fresh.append(item)
+            kept.append((title, fresh))
+        groups = kept
+        steps.append(f"{distinct_by}마다 첫 행만")
     if limit is not None:
         if limit < 1:
             raise TableError("limit은 1 이상이어야 한다")

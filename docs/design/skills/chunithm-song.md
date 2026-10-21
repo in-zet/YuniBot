@@ -94,6 +94,7 @@ emits: [chunithm.song.viewed]
 | `find_by_artist` | 작곡가로 수록곡 목록 | `artist`, `difficulty: DifficultyRef \| None`(선택) | `/작곡가` | 없음 | required | never |
 | `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `other_difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only` | `/검색` | 없음 | required | never |
 | `charts_of` | 표의 곡 단위 행을 채보 행으로 펼친 새 표 | `table: TableRef`(곡 칸 필요), `difficulty: DifficultyRef \| None`(선택, 없으면 MAS) | 없음 | 없음 | 표 | never |
+| `songs_of` | 표의 채보 행을 곡 단위 행으로 합친 새 표(`charts_of`의 반대) | `table: TableRef`(곡 칸 필요) | 없음 | 없음 | 표 | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | 없음 | optional | never |
 | `add_links` | 채보 표에 "채보 링크" 칸 더하기 | `table: TableRef`(곡·난이도 필요) | 없음 | 없음 | 표 | never |
 | `alias_add` | 별칭 추가 | `song: SongQuery`, `alias` | `/별칭 추가` | 없음 | optional | never |
@@ -209,3 +210,4 @@ emits: [chunithm.song.viewed]
 - 수록 버전 칸은 출시 순서(`VERSION_ORDER`, 곡 DB의 22개 버전 전부)를 가진 칸이다. 정렬·묶기·`버전 >= SUN` 같은 비교가 출시순이다. 곡 DB에 새 버전이 생기면 목록 끝에 더해야 하고, 시험이 곡 DB의 모든 버전이 목록에 있는지 대조한다. "Mate"(1곡)는 SKILL.md의 목록 위치(PARADISE LOST 뒤, NEW 앞)를 따랐다.
 - `find_songs`는 `other_difficulty`를 더 받아 "마스터나 울티마"처럼 두 난이도 중 어느 쪽이든 맞는 채보를 한 번에 찾는다(서비스 `difficulty`는 코드 하나 또는 여러 개). 난이도 목록 인자(`list[DifficultyRef]`)는 슬래시 옵션 타입과 스키마를 넓혀야 해서 쓰지 않았다 — 슬래시 `/검색`도 같은 두 칸을 받는다.
 - 묶음 순서·보일 칸 고르기는 `docs/design/00-core.md` "작업 표".
+- 곡 단위로 합치기(2026-10-21 요청): `songs_of`는 `charts_of`의 반대다. 같은 곡의 채보 행을 곡 행(`chunithm.song`) 하나로 줄이고, 곡·버전·작곡가·곡 이름(원문)만 남기며 난이도·레벨·상수·노트 수·점수·링크 같은 채보마다 다른 칸은 비운다. 곡은 표에서 처음 나온 자리에 놓이고 묶음 표지는 그대로다. 뒤에 점수·보더·링크가 필요하면 `charts_of`로 다시 펼친다. 같은 칸 값이 겹치는 행을 줄이는 일반 연산은 코어의 `table_query(distinct_by=…)`다(정렬한 순서에서 첫 행만 남김, 행의 종류와 가리키는 것은 그대로).
