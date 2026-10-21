@@ -74,7 +74,11 @@ def _from_provider_response(response: Message) -> GenerationTurn:
         content=LlmContent(role="model", parts=[LlmPart(text=t) for t in text_parts], raw=response),
         function_calls=function_calls,
         text="\n".join(text_parts) if text_parts else None,
-        usage=UsageInfo(input_tokens=usage.input_tokens or 0, output_tokens=usage.output_tokens or 0),
+        usage=UsageInfo(
+            input_tokens=usage.input_tokens or 0,
+            output_tokens=usage.output_tokens or 0,
+            cached_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+        ),
     )
 
 

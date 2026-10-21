@@ -883,3 +883,47 @@ async def test_a_failing_or_silent_prompt_context_does_not_stop_the_reply(tmp_pa
     system_instruction = await _prompt_context_system_instruction(tmp_path)
 
     assert "boom" not in system_instruction
+
+
+def _loop(registry: SkillRegistry, turns: list[GenerationTurn]) -> AgentLoop:
+    return AgentLoop(
+        llm=FakeLlmAdapter(turns), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sums_cached_input_tokens_and_logs_them(caplog: pytest.LogCaptureFixture) -> None:
+    registry = _registry()
+    call_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="open_skill", args={"skill_name": "chunithm-border"})],
+        usage=UsageInfo(input_tokens=50, output_tokens=5, cached_input_tokens=30),
+    )
+    answer_turn = GenerationTurn(
+        content=LlmContent(role="model", parts=[LlmPart(text="끝")]), text="끝",
+        usage=UsageInfo(input_tokens=60, output_tokens=5, cached_input_tokens=45),
+    )
+    loop = _loop(registry, [call_turn, answer_turn])
+
+    with caplog.at_level("INFO", logger="core.agent"):
+        result = await loop.run(
+            ctx=_ctx(), skill_state=_state(registry, mode="full"), user_text="질문", prompt_context_snippets=[]
+        )
+
+    assert (result.usage.input_tokens, result.usage.cached_input_tokens) == (110, 75)
+    assert "토큰 입력 50(캐시 30)" in caplog.text
+    assert "누적 토큰 입력 110(캐시 75)" in caplog.text
+
+
+def test_skills_used_picks_skills_from_tool_names_in_order_without_duplicates() -> None:
+    registry = _registry()
+    loop = _loop(registry, [])
+
+    used = loop._skills_used(
+        ["open_skill", "chunithm-song_find_songs", "table_query", "chunithm-image_table_image", "chunithm-song_info"],
+        set(),
+    )
+
+    assert used == ["chunithm-song", "chunithm-image"]

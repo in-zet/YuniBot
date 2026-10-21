@@ -130,6 +130,17 @@ class AgentLoop:
                 return skill.manifest.weight
         return "light"
 
+    def _skills_used(self, tool_names: list[str], player_tags: set[str]) -> list[str]:
+        """불린 도구 이름('<스킬>_<함수>')에서 쓰인 스킬을 순서대로 중복 없이 뽑는다(로그 전용 — 사전 펼침을
+        설계할 근거 데이터). 코어 도구(open_skill 등)는 스킬이 없어 건너뛴다."""
+        skills = [card.manifest.name for card in self._prompt.visible_skill_cards(player_tags=player_tags)]
+        used: dict[str, None] = {}
+        for name in tool_names:
+            skill = next((s for s in skills if name.startswith(f"{s}_")), None)
+            if skill is not None:
+                used[skill] = None
+        return list(used)
+
     async def _skill_prompt_snippets(self, ctx: ToolContext) -> list[str]:
         """스킬의 `@prompt_context`가 내는 짧은 맥락(예: 열린 약속)을 모은다. 스킬이 펼쳐지지 않아도 들어가고,
         스킬당 `max_chars`를 넘는 부분은 자른다. 한 스킬이 실패해도 응답은 막지 않는다."""
@@ -224,20 +235,21 @@ class AgentLoop:
                 on_retry=on_retry,
             )
             logger.info(
-                "player %s: LLM 왕복 %d회차 %.2f초 (함수 호출 %d개, 토큰 입력 %d/출력 %d)",
+                "player %s: LLM 왕복 %d회차 %.2f초 (함수 호출 %d개, 토큰 입력 %d(캐시 %d)/출력 %d)",
                 ctx.player_id, llm_turns, time.monotonic() - llm_started, len(turn.function_calls),
-                turn.usage.input_tokens, turn.usage.output_tokens,
+                turn.usage.input_tokens, turn.usage.cached_input_tokens, turn.usage.output_tokens,
             )
             result.served_model = turn.model
             result.usage = UsageInfo(
                 input_tokens=result.usage.input_tokens + turn.usage.input_tokens,
                 output_tokens=result.usage.output_tokens + turn.usage.output_tokens,
+                cached_input_tokens=result.usage.cached_input_tokens + turn.usage.cached_input_tokens,
             )
             if result.usage.input_tokens + result.usage.output_tokens > self._max_tokens:
                 logger.warning(
-                    "player %s: 토큰 상한(%d) 초과(누적 입력 %d/출력 %d) — LLM 턴 %d회, 불린 도구 %s",
+                    "player %s: 토큰 상한(%d) 초과(누적 입력 %d/출력 %d) — LLM 턴 %d회, 불린 도구 %s, 쓴 스킬 %s",
                     ctx.player_id, self._max_tokens, result.usage.input_tokens, result.usage.output_tokens,
-                    llm_turns, tool_call_log,
+                    llm_turns, tool_call_log, self._skills_used(tool_call_log, player_tags),
                 )
                 result.hit_token_cap = True
                 result.text = turn.text
@@ -245,9 +257,9 @@ class AgentLoop:
 
             if not turn.function_calls:
                 logger.info(
-                    "player %s: 멘션 응답 종료 — LLM 턴 %d회, 도구 호출 %s, 누적 토큰 입력 %d/출력 %d",
-                    ctx.player_id, llm_turns, tool_call_log,
-                    result.usage.input_tokens, result.usage.output_tokens,
+                    "player %s: 멘션 응답 종료 — LLM 턴 %d회, 도구 호출 %s, 쓴 스킬 %s, 누적 토큰 입력 %d(캐시 %d)/출력 %d",
+                    ctx.player_id, llm_turns, tool_call_log, self._skills_used(tool_call_log, player_tags),
+                    result.usage.input_tokens, result.usage.cached_input_tokens, result.usage.output_tokens,
                 )
                 result.text = turn.text
                 return result

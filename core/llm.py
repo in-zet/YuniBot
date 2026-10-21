@@ -45,6 +45,8 @@ class LlmContent:
 class UsageInfo:
     input_tokens: int
     output_tokens: int
+    # input_tokens 중 제공자 캐시에서 읽힌 몫(요금이 싸다). 모르면 0. 로그 전용 — 상한·요금 집행은 input_tokens로 한다.
+    cached_input_tokens: int = 0
 
 
 @dataclass(slots=True, kw_only=True)

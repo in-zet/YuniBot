@@ -369,3 +369,21 @@ def test_to_provider_content_builds_function_response_part() -> None:
     assert function_response is not None
     assert function_response.name == "chunithm-border_lookup"
     assert function_response.response == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_generate_reports_cached_input_tokens() -> None:
+    adapter = GeminiLlmAdapter(api_key="fake")
+    content = types.Content(role="model", parts=[types.Part(text="답")])
+    usage = types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=100, candidates_token_count=4, cached_content_token_count=60,
+    )
+    response = types.GenerateContentResponse(candidates=[types.Candidate(content=content)], usage_metadata=usage)
+    adapter._client.aio._models = _FakeModelsApi(response=response)  # pyright: ignore[reportAttributeAccessIssue]
+
+    turn = await adapter.generate(
+        model="gemini-3.8-flash", system_instruction="규칙",
+        contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="low",
+    )
+
+    assert (turn.usage.input_tokens, turn.usage.cached_input_tokens) == (100, 60)
