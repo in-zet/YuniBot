@@ -9,7 +9,7 @@ triggers: [뭐야, 뜻, 용어, 은어, 이론치, 오버파워, 트플플, 비�
 category: 질문 답변
 game: chunithm
 version: 1
-services: [terms, players, notify, settings]
+services: [terms, songdb, players, notify, settings]
 ---
 
 - 용어 뜻은 사전에 있는 내용만 말한다. 사전에 없으면 `web-qa`를 펼친다.

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from core.decorators import tool
+from core.fuzzy import similar_names
 from core.tables import RowRef, TableBuilder, cell
 from core.tool_types import Display, ToolContext, ToolResult
+from services.chunithm.terms import ALIAS_KINDS
 
 _TERM = "chunithm-terms.term"
 _T_NAME = "용어"
@@ -84,6 +86,47 @@ async def suggest(ctx: ToolContext, term: str, meaning: str, aliases: str) -> To
         data={"proposal_id": proposal_id},
         display=Display(content=f"'{term}' 은어를 등록했어. (id: {proposal_id})"),
         display_mode="optional",
+    )
+
+
+_ALIAS_KIND_NAMES = "난이도, 랭크, 램프, 작곡가"
+
+
+@tool(slash="용어 별칭 추가", mutates=True)
+async def alias_add(ctx: ToolContext, kind: str, alias: str, canonical: str) -> ToolResult:
+    """못 알아들은 말이 어떤 난이도·랭크·램프·작곡가인지 짐작해서 사용자에게 물었고, 사용자가 "맞다"고 확인한 뒤에만 부른다.
+    kind는 난이도, 랭크, 램프, 작곡가 중 하나, alias는 사용자가 쓴 말, canonical은 그 정식 이름이다(작곡가는 곡 DB의
+    표기 그대로). 별칭은 봇 전역으로 저장돼 모든 서버·플레이어에게 적용되고, 다음부터는 묻지 않고 알아듣는다."""
+    if kind not in ALIAS_KINDS:
+        return ToolResult(error=f"별칭 종류는 {_ALIAS_KIND_NAMES} 중 하나여야 한다")
+    if ALIAS_KINDS[kind] == "artist" and not ctx.songdb.find_by_artist(name=canonical):
+        similar = similar_names(canonical, ctx.songdb.all_artists(), limit=3, cutoff=0.6)
+        hint = f" 비슷한 작곡가: {', '.join(similar)}" if similar else ""
+        return ToolResult(error=f"곡 DB에 '{canonical}' 작곡가가 없다.{hint}")
+    try:
+        saved = await ctx.terms.add_alias(kind=kind, alias=alias, canonical=canonical, added_by=ctx.player_id)
+    except ValueError as exc:
+        return ToolResult(error=str(exc))
+    return ToolResult(
+        data={"kind": kind, "alias": alias.strip(), "canonical": saved},
+        display=Display(content=f"'{alias.strip()}' → {saved}로 저장했어. 다음부터는 바로 알아들을게."),
+        display_mode="optional",
+    )
+
+
+@tool(slash="용어 별칭 삭제", mutates=True)
+async def alias_remove(ctx: ToolContext, kind: str, alias: str) -> ToolResult:
+    """저장된 난이도·랭크·램프·작곡가 별칭을 지운다. 추가한 사람이나 admin만 할 수 있다."""
+    if kind not in ALIAS_KINDS:
+        return ToolResult(error=f"별칭 종류는 {_ALIAS_KIND_NAMES} 중 하나여야 한다")
+    row = await ctx.terms.get_alias(kind=kind, alias=alias)
+    if row is None:
+        return ToolResult(error="그런 별칭이 없다")
+    if row.added_by != ctx.player_id and "admin" not in ctx.tags:
+        return ToolResult(error="추가한 사람이나 admin만 지울 수 있다")
+    await ctx.terms.remove_alias(kind=kind, alias=alias)
+    return ToolResult(
+        data={"kind": kind, "alias": alias}, display=Display(content=f"'{alias}' 별칭을 지웠어."), display_mode="optional"
     )
 
 

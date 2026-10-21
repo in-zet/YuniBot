@@ -11,6 +11,7 @@ from core.tables import WorkTable
 from core.tool_types import Display, ToolContext
 from services.chunithm import table_columns as tc
 from services.chunithm.songdb import VERSION_ORDER, SongDbService
+from services.chunithm.terms import TermsService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CTX_NO_GUILD = ToolContext(player_id="p1", tags=frozenset(), services={}, event_bus=EventBus())
@@ -31,7 +32,8 @@ def _titles(table: WorkTable | None) -> list[str]:
 
 def _ctx_with_songdb(songdb: SongDbService, *, guild_id: str | None = None) -> ToolContext:
     return ToolContext(
-        player_id="p1", tags=frozenset(), services={"songdb": songdb}, event_bus=EventBus(), guild_id=guild_id
+        player_id="p1", tags=frozenset(), services={"songdb": songdb, "terms": TermsService()},
+        event_bus=EventBus(), guild_id=guild_id,
     )
 
 
@@ -362,21 +364,16 @@ async def test_chart_link_prefers_sdvxin_mapping() -> None:
     assert "sdvx.in" in result.data["url"]
 
 
-async def test_alias_add_requires_guild() -> None:
-    skill = _load_skill()
-    songdb = SongDbService()
-    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX_NO_GUILD)
-
-    result = await skill.alias_add(_ctx_with_songdb(songdb, guild_id=None), song=song, alias="크로노")
-
-    assert result.error is not None
-
-
 async def test_alias_add_then_resolve_by_alias(tmp_path) -> None:
     import aiosqlite
 
     conn = await aiosqlite.connect(":memory:")
-    await conn.executescript(Path("migrations/core/011_songdb_aliases.sql").read_text())
+    await conn.executescript(
+        "".join(
+            Path(f"migrations/core/{name}.sql").read_text()
+            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+        )
+    )
     await conn.commit()
     songdb = SongDbService(conn=conn)
     song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX_NO_GUILD)
@@ -394,17 +391,22 @@ async def test_alias_remove_rejects_non_owner_non_admin() -> None:
     import aiosqlite
 
     conn = await aiosqlite.connect(":memory:")
-    await conn.executescript(Path("migrations/core/011_songdb_aliases.sql").read_text())
+    await conn.executescript(
+        "".join(
+            Path(f"migrations/core/{name}.sql").read_text()
+            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+        )
+    )
     await conn.commit()
     songdb = SongDbService(conn=conn)
-    await songdb.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="owner")
+    await songdb.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="owner")
     skill = _load_skill()
 
     ctx = ToolContext(player_id="someone-else", tags=frozenset(), services={"songdb": songdb}, guild_id="g1")
     result = await skill.alias_remove(ctx, alias="크로노")
 
     assert result.error is not None
-    assert await songdb.get_alias(guild_id="g1", alias="크로노") is not None
+    assert await songdb.get_alias(alias="크로노") is not None
     await conn.close()
 
 
@@ -412,17 +414,22 @@ async def test_alias_remove_allows_admin() -> None:
     import aiosqlite
 
     conn = await aiosqlite.connect(":memory:")
-    await conn.executescript(Path("migrations/core/011_songdb_aliases.sql").read_text())
+    await conn.executescript(
+        "".join(
+            Path(f"migrations/core/{name}.sql").read_text()
+            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+        )
+    )
     await conn.commit()
     songdb = SongDbService(conn=conn)
-    await songdb.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="owner")
+    await songdb.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="owner")
     skill = _load_skill()
 
     ctx = ToolContext(player_id="admin1", tags=frozenset({"admin"}), services={"songdb": songdb}, guild_id="g1")
     result = await skill.alias_remove(ctx, alias="크로노")
 
     assert result.error is None
-    assert await songdb.get_alias(guild_id="g1", alias="크로노") is None
+    assert await songdb.get_alias(alias="크로노") is None
     await conn.close()
 
 
@@ -602,3 +609,20 @@ async def test_songs_of_merges_charts_of_the_same_song_and_clears_chart_columns(
     assert all(not row.cell(tc.DIFFICULTY).filled and not row.cell(tc.CONST).filled for row in merged.rows)
     assert all(row.cell(tc.VERSION).filled for row in merged.rows)
     assert merged.unit == "곡" and "곡 단위로 합침" in merged.steps
+
+
+async def test_find_by_artist_uses_a_saved_artist_alias_and_suggests_similar_names() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    artist = next(a for a in songdb.all_artists() if len(a) >= 6)
+    terms = TermsService()
+    terms._apply_alias("artist", "내작곡가", artist)
+    ctx = ToolContext(
+        player_id="p1", tags=frozenset(), services={"songdb": songdb, "terms": terms}, event_bus=EventBus()
+    )
+
+    aliased = await skill.find_by_artist(ctx, artist="내작곡가")
+    typo = await skill.find_by_artist(ctx, artist=artist[:-1] + "#")
+
+    assert aliased.data["count"] > 0
+    assert typo.data["count"] == 0 and artist in typo.data["similar_artists"]

@@ -15,7 +15,7 @@ triggers: [상수, 곡, 채보, 노트 수, 난이도, 마스터, 마스, 울티
 category: 곡 정보
 game: chunithm
 version: 1
-services: [songdb]
+services: [songdb, terms]
 emits: [chunithm.song.viewed]
 ---
 

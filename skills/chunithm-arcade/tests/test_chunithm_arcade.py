@@ -21,7 +21,10 @@ from services.common.players import PlayersService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CORE_PLAYERS_SQL = Path("migrations/core/001_players.sql").read_text()
-_CORE_ARCADES_SQL = Path("migrations/core/005_arcades.sql").read_text()
+_CORE_ARCADES_SQL = "".join(
+    Path(f"migrations/core/{name}.sql").read_text()
+    for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+)
 _ARCADE_SQL = (Path(__file__).parent.parent / "migrations" / "001_init.sql").read_text()
 
 
@@ -101,7 +104,7 @@ async def _make_player(db: aiosqlite.Connection) -> str:
 
 async def _make_arcade(ctx: ToolContext, *, name: str = "겜플"):
     arcades: ArcadesService = ctx.arcades  # type: ignore[assignment]
-    return await arcades.create(guild_id="g1", name=name, created_by=ctx.player_id)
+    return await arcades.create(name=name, created_by=ctx.player_id)
 
 
 # ---------------------------------------------------------------- record_visit
@@ -428,3 +431,44 @@ async def test_on_session_viewed_shows_settings_to_others_when_public(
     )
 
     assert section is not None
+
+
+# ---------------------------------------------------------------- register_arcade
+
+
+async def test_register_arcade_creates_a_new_arcade_and_alias(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(player_id=await _make_player(db), db=db)
+
+    result = await skill.register_arcade(ctx, name="광주 게임플라자", alias="광주 겜플")
+
+    assert result.error is None
+    assert result.data == {"arcade": "광주 게임플라자", "created": True, "alias": "광주 겜플"}
+    assert (await ctx.arcades.resolve("광주 겜플", ctx)).name == "광주 게임플라자"
+
+
+async def test_register_arcade_on_existing_arcade_only_adds_the_alias(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(player_id=await _make_player(db), db=db)
+    existing = await _make_arcade(ctx, name="광주 게임플라자")
+
+    result = await skill.register_arcade(ctx, name="광주 게임플라자", alias="광주 겜플")
+
+    assert result.data["created"] is False
+    assert (await ctx.arcades.resolve("광주 겜플", ctx)).id == existing.id
+    assert len(await ctx.arcades.list_all()) == 1
+
+
+async def test_register_arcade_skips_an_alias_equal_to_the_name(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(player_id=await _make_player(db), db=db)
+
+    result = await skill.register_arcade(ctx, name="광주 게임플라자", alias="광주게임플라자")
+
+    assert result.data["alias"] is None
+
+
+async def test_register_arcade_reports_an_alias_owned_by_another_arcade(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    ctx = _ctx(player_id=await _make_player(db), db=db)
+    await skill.register_arcade(ctx, name="광주 게임플라자", alias="겜플")
+
+    result = await skill.register_arcade(ctx, name="부산 오락실", alias="겜플")
+
+    assert result.error is not None and "이미" in result.error

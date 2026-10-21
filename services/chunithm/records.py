@@ -4,12 +4,13 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 import aiosqlite
+import msgspec
 from chuni_penguin.types.lamp import ChainLamp, ClearLamp, ComboLamp
 
 from core.db import transaction as db_transaction
@@ -120,6 +121,19 @@ class SyncDiff:
     previous_computed_rating: Decimal | None
     previous_best30_average: Decimal | None
     previous_new20_average: Decimal | None
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class SessionState:
+    """한 세션(날짜)에 지금까지 누적된 비교 데이터. 같은 날 다시 동기화하면 이 위에 더해, 리포트가
+    그날 하루치를 보여 준다. `previous_*`는 그 세션을 처음 건드리기 직전의 값이다."""
+
+    previous_computed_rating: Decimal | None
+    previous_best30_average: Decimal | None
+    previous_new20_average: Decimal | None
+    chart_updates: list[ChartUpdate]
+    unchanged_plays: list[UnchangedPlay]
+    frame_exits: list[FrameExit]
 
 
 @dataclass(slots=True, kw_only=True)
@@ -520,23 +534,81 @@ class RecordsService:
             if old_rating is not None and floor is not None and old_rating >= floor:
                 continue
             frame_exits.append(FrameExit(song_title=key[0], difficulty=key[1], old_rating=old_rating))
-        chart_updates.sort(
-            key=lambda u: (u.new_rating is None, -(u.new_rating or Decimal(0)), u.song_title, u.difficulty)
+        accumulated = await self._accumulate_session_states(
+            sessions,
+            SessionState(
+                previous_computed_rating=previous_computed_rating,
+                previous_best30_average=average_rating([r.rating for r in previous_best]),
+                previous_new20_average=average_rating([r.rating for r in previous_new]),
+                chart_updates=chart_updates,
+                unchanged_plays=unchanged_plays,
+                frame_exits=frame_exits,
+            ),
         )
         diff = SyncDiff(
             sync_id=sync_id,
             sessions=[sessions[d] for d in sorted(sessions)],
-            chart_updates=chart_updates,
-            unchanged_plays=unchanged_plays,
-            frame_exits=frame_exits,
-            previous_computed_rating=previous_computed_rating,
-            previous_best30_average=average_rating([r.rating for r in previous_best]),
-            previous_new20_average=average_rating([r.rating for r in previous_new]),
+            chart_updates=accumulated.chart_updates,
+            unchanged_plays=accumulated.unchanged_plays,
+            frame_exits=accumulated.frame_exits,
+            previous_computed_rating=accumulated.previous_computed_rating,
+            previous_best30_average=accumulated.previous_best30_average,
+            previous_new20_average=accumulated.previous_new20_average,
         )
         # "새 플레이가 있었다"의 정의는 여기 한 곳뿐이다: 직전 동기화 이후 최근 이력에 새 항목이
         # 있거나, 최근 이력엔 아직 안 보여도 PB가 실제로 올랐다(크레딧 직후 동기화하면 최근
         # 이력 반영이 늦을 수 있다 — PB가 오른 것 자체가 플레이가 있었다는 증거다).
         return diff, bool(recent_times) or bool(chart_updates)
+
+    async def _accumulate_session_states(self, sessions: dict[date, SessionInfo], this_sync: SessionState) -> SessionState:
+        """이번 동기화가 건드린 세션마다, 앞서 저장된 그날의 누적 데이터 위에 이번 것을 더해 다시 저장하고,
+        리포트가 쓸 합친 값을 돌려준다. 같은 날 두 번째 동기화부터는 하루치가 한 리포트로 나온다.
+        프레임 이탈은 세션에 매이지 않아 가장 늦은 세션에 붙인다. 건드린 세션이 없으면 이번 것 그대로다."""
+        if not sessions:
+            return this_sync
+        latest_date = max(sessions)
+        parts: list[SessionState] = []
+        first_previous: SessionState | None = None
+        for play_date in sorted(sessions):
+            session = sessions[play_date]
+            part = replace(
+                this_sync,
+                chart_updates=[u for u in this_sync.chart_updates if u.session_id == session.id],
+                unchanged_plays=[u for u in this_sync.unchanged_plays if u.session_id == session.id],
+                frame_exits=this_sync.frame_exits if play_date == latest_date else [],
+            )
+            prior = await self._load_session_state(session.id)
+            merged = merge_session_state(prior, part) if prior is not None else part
+            await self._save_session_state(session.id, merged)
+            if first_previous is None:
+                first_previous = merged
+            parts.append(merged)
+        assert first_previous is not None
+        return SessionState(
+            previous_computed_rating=first_previous.previous_computed_rating,
+            previous_best30_average=first_previous.previous_best30_average,
+            previous_new20_average=first_previous.previous_new20_average,
+            chart_updates=sorted(
+                (u for part in parts for u in part.chart_updates),
+                key=lambda u: (u.new_rating is None, -(u.new_rating or Decimal(0)), u.song_title, u.difficulty),
+            ),
+            unchanged_plays=[u for part in parts for u in part.unchanged_plays],
+            frame_exits=[x for part in parts for x in part.frame_exits],
+        )
+
+    async def _load_session_state(self, session_id: str) -> SessionState | None:
+        cursor = await self._conn.execute(
+            "SELECT state FROM records_session_state WHERE session_id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        return msgspec.json.decode(row["state"], type=SessionState) if row is not None else None
+
+    async def _save_session_state(self, session_id: str, state: SessionState) -> None:
+        await self._conn.execute(
+            "INSERT INTO records_session_state (session_id, state, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at",
+            (session_id, msgspec.json.encode(state).decode(), datetime.now(UTC).isoformat()),
+        )
 
     async def sync_diff(self, sync_id: str) -> SyncDiff | None:
         """save_sync가 만든 비교 데이터. 첫 동기화였거나 캐시에서 밀려났으면(재시작 포함) None."""
@@ -834,6 +906,44 @@ class RecordsService:
             (session_id, player_id, _GAME, play_date.isoformat(), int(estimated), datetime.now(UTC).isoformat()),
         )
         return SessionInfo(id=session_id, play_date=play_date.isoformat(), estimated=estimated)
+
+
+def merge_session_state(prior: SessionState, part: SessionState) -> SessionState:
+    """같은 세션의 앞선 누적(prior) 위에 이번 동기화의 조각(part)을 더한다. 시작 시점 값(previous_*)은
+    앞선 것을 지킨다. 같은 채보가 또 갱신되면 이전 값은 앞선 것, 새 값은 이번 것이다. 갱신된 채보는 미갱신
+    목록에서 뺀다. 미갱신 플레이는 횟수를 더하고 점수는 높은 쪽을 쓴다."""
+    updates: dict[ChartKey, ChartUpdate] = {(u.song_title, u.difficulty): u for u in prior.chart_updates}
+    for update in part.chart_updates:
+        key = (update.song_title, update.difficulty)
+        earlier = updates.get(key)
+        updates[key] = update if earlier is None else replace(
+            update,
+            old_score=earlier.old_score, old_rank=earlier.old_rank, old_rating=earlier.old_rating,
+            entered_frame=earlier.entered_frame or update.entered_frame,
+            estimated_session=earlier.estimated_session and update.estimated_session,
+        )
+
+    unchanged: dict[ChartKey, UnchangedPlay] = {}
+    for play in (*prior.unchanged_plays, *part.unchanged_plays):
+        key = (play.song_title, play.difficulty)
+        if key in updates:
+            continue
+        earlier_play = unchanged.get(key)
+        unchanged[key] = play if earlier_play is None else replace(
+            play,
+            play_count=earlier_play.play_count + play.play_count,
+            current_score=max(earlier_play.current_score, play.current_score),
+        )
+
+    exits = {(x.song_title, x.difficulty): x for x in (*prior.frame_exits, *part.frame_exits)}
+    return SessionState(
+        previous_computed_rating=prior.previous_computed_rating,
+        previous_best30_average=prior.previous_best30_average,
+        previous_new20_average=prior.previous_new20_average,
+        chart_updates=list(updates.values()),
+        unchanged_plays=list(unchanged.values()),
+        frame_exits=list(exits.values()),
+    )
 
 
 _PB_COLUMNS = (

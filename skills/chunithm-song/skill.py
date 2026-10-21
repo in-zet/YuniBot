@@ -8,6 +8,7 @@ from typing import Annotated
 
 from core.decorators import tool
 from core.events import Section
+from core.fuzzy import similar_names
 from core.tables import (
     Cell,
     Column,
@@ -238,9 +239,17 @@ async def find_by_artist(
 ) -> ToolResult:
     """작곡가(아티스트) 이름으로 국제판 수록곡을 찾는다. 사용자가 난이도를 말했을 때만 difficulty를 주고,
     말하지 않았으면 비운다(곡 단위 행으로 나온다)."""
+    artist = ctx.terms.artist_alias(artist) or artist  # 확인받아 저장된 작곡가 별칭이면 곡 DB 표기로
     songs = ctx.songdb.find_by_artist(name=artist)
     short_code = _difficulty_code(difficulty)
     condition = f"{artist} 작곡"
+    if not songs:
+        similar = similar_names(artist, ctx.songdb.all_artists(), limit=3, cutoff=0.6)
+        if similar:
+            return ToolResult(
+                data={"count": 0, "similar_artists": similar},
+                display=Display(content=f"{_NO_ARTIST_SONGS} 비슷한 작곡가: {', '.join(similar)}"),
+            )
 
     if short_code is None:
         columns = (tc.SONG, tc.DIFFICULTY, tc.ARTIST, tc.VERSION)
@@ -382,12 +391,10 @@ def _row_key(row: Row) -> tuple[str, str]:
 
 @tool(slash="별칭 추가", mutates=True)
 async def alias_add(ctx: ToolContext, song: SongQuery, alias: str) -> ToolResult:
-    """한국어 별칭을 이 서버에 등록한다."""
+    """곡 별칭을 봇 전역으로 등록한다(모든 서버·모든 플레이어에게 적용). 사용자가 그 곡이 맞다고 확인한 뒤에만 부른다."""
     assert isinstance(song, SongRecord)
-    if ctx.guild_id is None:
-        return ToolResult(error="서버 안에서만 별칭을 추가할 수 있다")
     try:
-        await ctx.songdb.add_alias(guild_id=ctx.guild_id, alias=alias, song_title=song.title, added_by=ctx.player_id)
+        await ctx.songdb.add_alias(alias=alias, song_title=song.title, added_by=ctx.player_id)
     except ValueError as exc:
         return ToolResult(error=str(exc))
     return ToolResult(
@@ -400,12 +407,10 @@ async def alias_add(ctx: ToolContext, song: SongQuery, alias: str) -> ToolResult
 @tool(slash="별칭 삭제", mutates=True)
 async def alias_remove(ctx: ToolContext, alias: str) -> ToolResult:
     """별칭을 지운다. 추가한 사람이나 admin만 할 수 있다."""
-    if ctx.guild_id is None:
-        return ToolResult(error="서버 안에서만 별칭을 지울 수 있다")
-    row = await ctx.songdb.get_alias(guild_id=ctx.guild_id, alias=alias)
+    row = await ctx.songdb.get_alias(alias=alias)
     if row is None:
         return ToolResult(error="그런 별칭이 없다")
     if row.added_by != ctx.player_id and "admin" not in ctx.tags:
         return ToolResult(error="추가한 사람이나 admin만 지울 수 있다")
-    await ctx.songdb.remove_alias(guild_id=ctx.guild_id, alias=alias)
+    await ctx.songdb.remove_alias(alias=alias)
     return ToolResult(data={"alias": alias}, display=Display(content=f"'{alias}' 별칭을 지웠다."), display_mode="optional")

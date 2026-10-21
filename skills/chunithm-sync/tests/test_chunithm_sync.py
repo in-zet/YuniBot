@@ -418,7 +418,7 @@ async def test_run_quiet_skips_yuni_line(skill: ModuleType) -> None:
 
 async def test_run_focus_and_arcade_go_into_completed_payload(skill: ModuleType) -> None:
     f = ctx_with_fake_services()
-    arcade = Arcade(id="a-1", guild_id="g1", name="동네 오락실", created_by="p1", created_at="2026-10-01")
+    arcade = Arcade(id="a-1", name="동네 오락실", created_by="p1", created_at="2026-10-01")
 
     await skill.run(f.ctx, focus=_chart(), arcade=arcade)
 

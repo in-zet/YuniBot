@@ -10,7 +10,9 @@ from services.chunithm.terms import TermsService
 
 _CTX = ToolContext(player_id="p1", tags=frozenset(), services={})
 
-_TERMS_SERVER_MIGRATION = Path("migrations/core/009_terms_server.sql").read_text()
+_TERMS_SERVER_MIGRATION = (
+    Path("migrations/core/009_terms_server.sql").read_text() + Path("migrations/core/021_terms_aliases.sql").read_text()
+)
 _PLAYERS_MIGRATION = (
     Path("migrations/core/001_players.sql").read_text()
     + Path("migrations/core/002_player_tags.sql").read_text()
@@ -268,3 +270,56 @@ def test_rank_scores_maps_canonical_rank_to_base_score(terms: TermsService) -> N
     assert scores["SSS"] == 1_007_500
     assert scores["SSS+"] == 1_009_000
     assert "AJC" not in scores  # 램프는 랭크가 아니다
+
+
+async def test_saved_alias_resolves_rank_difficulty_and_lamp(terms_with_conn: TermsService) -> None:
+    """확인받아 저장한 별칭은 다음부터 묻지 않고 해석된다 — 난이도·랭크·램프 모두."""
+    await terms_with_conn.add_alias(kind="난이도", alias="마스터", canonical="MAS", added_by="p1")
+    saved = await terms_with_conn.add_alias(kind="랭크", alias="삼에스", canonical="sss", added_by="p1")
+    await terms_with_conn.add_alias(kind="램프", alias="올저", canonical="ALL JUSTICE", added_by="p1")
+
+    assert saved == "SSS"
+    assert terms_with_conn.difficulty_token("마스터") == "MASTER"
+    assert (await terms_with_conn.resolve_rank("삼에스", _CTX)).canonical == "SSS"
+    assert (await terms_with_conn.resolve_lamp("올저", _CTX)).canonical == "ALL JUSTICE"
+
+
+async def test_saved_aliases_load_after_a_restart(terms_with_conn: TermsService) -> None:
+    await terms_with_conn.add_alias(kind="rank", alias="삼에스", canonical="SSS", added_by="p1")
+    await terms_with_conn.add_alias(kind="artist", alias="랑이", canonical="Some Artist", added_by="p1")
+
+    restarted = TermsService(conn=terms_with_conn._conn)
+    await restarted.load_aliases()
+
+    assert (await restarted.resolve_rank("삼에스", _CTX)).canonical == "SSS"
+    assert restarted.artist_alias("랑이") == "Some Artist"
+
+
+async def test_alias_rejects_unknown_canonical_and_meaning_conflicts(terms_with_conn: TermsService) -> None:
+    with pytest.raises(ValueError, match="이름이 아니다"):
+        await terms_with_conn.add_alias(kind="랭크", alias="삼에스", canonical="ZZZ", added_by="p1")
+    with pytest.raises(ValueError, match="이미"):
+        await terms_with_conn.add_alias(kind="랭크", alias="SS+", canonical="SSS", added_by="p1")  # 원래 다른 랭크 이름
+    await terms_with_conn.add_alias(kind="랭크", alias="삼에스", canonical="SSS", added_by="p1")
+    with pytest.raises(ValueError, match="이미"):
+        await terms_with_conn.add_alias(kind="랭크", alias="삼에스", canonical="SS+", added_by="p2")
+    with pytest.raises(ValueError, match="모르는 별칭 종류"):
+        await terms_with_conn.add_alias(kind="곡", alias="x", canonical="y", added_by="p1")
+
+
+async def test_resaving_the_same_alias_keeps_the_first_owner(terms_with_conn: TermsService) -> None:
+    await terms_with_conn.add_alias(kind="랭크", alias="삼에스", canonical="SSS", added_by="p1")
+    await terms_with_conn.add_alias(kind="랭크", alias="삼에스", canonical="SSS", added_by="p2")
+
+    row = await terms_with_conn.get_alias(kind="랭크", alias="삼에스")
+    assert row is not None and row.added_by == "p1"
+
+
+async def test_remove_alias_stops_resolving(terms_with_conn: TermsService) -> None:
+    await terms_with_conn.add_alias(kind="랭크", alias="삼에스", canonical="SSS", added_by="p1")
+
+    await terms_with_conn.remove_alias(kind="랭크", alias="삼에스")
+
+    with pytest.raises(ResolutionError):
+        await terms_with_conn.resolve_rank("삼에스", _CTX)
+    assert await terms_with_conn.get_alias(kind="랭크", alias="삼에스") is None

@@ -21,7 +21,12 @@ def songdb() -> SongDbService:
 @pytest.fixture
 async def songdb_with_conn() -> AsyncIterator[SongDbService]:
     conn = await aiosqlite.connect(":memory:")
-    await conn.executescript(Path("migrations/core/011_songdb_aliases.sql").read_text())
+    await conn.executescript(
+        "".join(
+            Path(f"migrations/core/{name}.sql").read_text()
+            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+        )
+    )
     await conn.commit()
     try:
         yield SongDbService(conn=conn)
@@ -414,46 +419,55 @@ async def test_resolve_without_conn_ignores_server_alias(songdb: SongDbService) 
 
 async def test_add_and_resolve_server_alias(songdb_with_conn: SongDbService) -> None:
     ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
-    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+    await songdb_with_conn.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
 
     song = await songdb_with_conn.resolve("크로노", ctx)
 
     assert song.title == "B.B.K.K.B.K.K."
 
 
-async def test_server_alias_is_scoped_to_guild(songdb_with_conn: SongDbService) -> None:
-    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
-    other_guild_ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g2")
+async def test_alias_applies_to_every_guild_and_to_dms(songdb_with_conn: SongDbService) -> None:
+    """별칭은 봇 전역이다(2026-10-21) — 다른 서버나 서버 밖(DM)에서도 같은 곡으로 풀린다."""
+    await songdb_with_conn.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+    other_guild_ctx = ToolContext(player_id="p2", tags=frozenset(), services={}, guild_id="g2")
+    dm_ctx = ToolContext(player_id="p2", tags=frozenset(), services={}, guild_id=None)
 
-    with pytest.raises(ResolutionError, match="찾지 못함"):
-        await songdb_with_conn.resolve("크로노", other_guild_ctx)
+    assert (await songdb_with_conn.resolve("크로노", other_guild_ctx)).title == "B.B.K.K.B.K.K."
+    assert (await songdb_with_conn.resolve("크로노", dm_ctx)).title == "B.B.K.K.B.K.K."
+
+
+async def test_resolve_suggests_similar_titles_when_nothing_contains_the_text(songdb: SongDbService) -> None:
+    """부분 일치가 없어도 글자가 비슷한 제목은 후보로 준다(모델이 되묻는 재료)."""
+    with pytest.raises(ResolutionError) as excinfo:
+        await songdb.resolve("B.B.K.K.B.K.K", _CTX)  # 끝의 점 하나가 빠진 오타
+    assert "B.B.K.K.B.K.K." in excinfo.value.candidates
 
 
 async def test_add_alias_already_used_for_different_song_raises(songdb_with_conn: SongDbService) -> None:
-    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+    await songdb_with_conn.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
 
     with pytest.raises(ValueError, match="이미"):
-        await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="Reach For The Stars", added_by="p2")
+        await songdb_with_conn.add_alias(alias="크로노", song_title="Reach For The Stars", added_by="p2")
 
 
 async def test_get_and_remove_alias(songdb_with_conn: SongDbService) -> None:
-    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+    await songdb_with_conn.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
 
-    row = await songdb_with_conn.get_alias(guild_id="g1", alias="크로노")
+    row = await songdb_with_conn.get_alias(alias="크로노")
     assert row is not None
     assert row.added_by == "p1"
 
-    await songdb_with_conn.remove_alias(guild_id="g1", alias="크로노")
-    assert await songdb_with_conn.get_alias(guild_id="g1", alias="크로노") is None
+    await songdb_with_conn.remove_alias(alias="크로노")
+    assert await songdb_with_conn.get_alias(alias="크로노") is None
 
 
 async def test_server_alias_lookup_is_case_insensitive(songdb_with_conn: SongDbService) -> None:
     # "RFTS" 대문자로 등록해도 소문자 "rfts"로 조회/해석/삭제돼야 한다 — 전역(시드)
     # 별칭과 같은 우선순위 묶음이므로 대소문자 무시가 일관되어야 한다.
     ctx = ToolContext(player_id="p1", tags=frozenset(), services={}, guild_id="g1")
-    await songdb_with_conn.add_alias(guild_id="g1", alias="RFTS", song_title="Reach For The Stars", added_by="p1")
+    await songdb_with_conn.add_alias(alias="RFTS", song_title="Reach For The Stars", added_by="p1")
 
-    row = await songdb_with_conn.get_alias(guild_id="g1", alias="rfts")
+    row = await songdb_with_conn.get_alias(alias="rfts")
     assert row is not None
     assert row.song_title == "Reach For The Stars"
 
@@ -462,10 +476,10 @@ async def test_server_alias_lookup_is_case_insensitive(songdb_with_conn: SongDbS
 
     # 대문자로 다시 add_alias를 호출해도 같은 별칭으로 인식해(song_title이 같으므로)
     # 충돌로 보지 않아야 한다.
-    await songdb_with_conn.add_alias(guild_id="g1", alias="rfts", song_title="Reach For The Stars", added_by="p2")
+    await songdb_with_conn.add_alias(alias="rfts", song_title="Reach For The Stars", added_by="p2")
 
-    await songdb_with_conn.remove_alias(guild_id="g1", alias="RFTS")
-    assert await songdb_with_conn.get_alias(guild_id="g1", alias="rfts") is None
+    await songdb_with_conn.remove_alias(alias="RFTS")
+    assert await songdb_with_conn.get_alias(alias="rfts") is None
 
 
 async def test_add_alias_same_song_reregister_does_not_steal_ownership(
@@ -474,16 +488,16 @@ async def test_add_alias_same_song_reregister_does_not_steal_ownership(
     # 같은 별칭을 같은 곡으로 다시 등록하는 것(멱등 재등록)은 허용되지만,
     # added_by/created_at은 원래 추가한 사람 걸로 남아야 한다. 안 그러면 누구나 재등록만
     # 으로 alias_remove의 "추가한 사람이나 admin만 지운다" 제한을 비껴갈 수 있다.
-    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="playerA")
+    await songdb_with_conn.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="playerA")
 
-    row_before = await songdb_with_conn.get_alias(guild_id="g1", alias="크로노")
+    row_before = await songdb_with_conn.get_alias(alias="크로노")
     assert row_before is not None and row_before.added_by == "playerA"
 
     # player B가 같은 별칭을, 같은 곡으로 재등록한다 — 이건 기존 충돌 검사를 통과한다
     # (song_title이 같으므로). 그래도 소유자는 바뀌면 안 된다.
-    await songdb_with_conn.add_alias(guild_id="g1", alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="playerB")
+    await songdb_with_conn.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="playerB")
 
-    row_after = await songdb_with_conn.get_alias(guild_id="g1", alias="크로노")
+    row_after = await songdb_with_conn.get_alias(alias="크로노")
     assert row_after is not None
     assert row_after.added_by == "playerA"
 
@@ -496,7 +510,7 @@ async def test_add_alias_colliding_with_other_songs_exact_title_raises(
     # "Reach For The Stars"를 "B.B.K.K.B.K.K."로 잘못 돌려주게 된다 — 막아야 한다.
     with pytest.raises(ValueError, match="이미"):
         await songdb_with_conn.add_alias(
-            guild_id="g1", alias="Reach For The Stars", song_title="B.B.K.K.B.K.K.", added_by="p1"
+            alias="Reach For The Stars", song_title="B.B.K.K.B.K.K.", added_by="p1"
         )
 
 
@@ -508,7 +522,7 @@ async def test_add_alias_colliding_with_other_songs_global_alias_raises(
     # 전역 별칭을 가리게 된다).
     with pytest.raises(ValueError, match="이미"):
         await songdb_with_conn.add_alias(
-            guild_id="g1", alias="RFTS", song_title="B.B.K.K.B.K.K.", added_by="p1"
+            alias="RFTS", song_title="B.B.K.K.B.K.K.", added_by="p1"
         )
 
 
@@ -518,9 +532,9 @@ async def test_add_alias_matching_own_songs_global_alias_is_allowed(
     # "RFTS"를 그 별칭의 원래 주인인 "Reach For The Stars" 자신에게 서버 별칭으로
     # 등록하는 것은 중복이지만 충돌이 아니다 — 허용한다("같은 곡" 예외).
     await songdb_with_conn.add_alias(
-        guild_id="g1", alias="RFTS", song_title="Reach For The Stars", added_by="p1"
+        alias="RFTS", song_title="Reach For The Stars", added_by="p1"
     )
-    row = await songdb_with_conn.get_alias(guild_id="g1", alias="RFTS")
+    row = await songdb_with_conn.get_alias(alias="RFTS")
     assert row is not None
     assert row.song_title == "Reach For The Stars"
 

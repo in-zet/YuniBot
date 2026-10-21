@@ -48,6 +48,7 @@ _RECORDS_MIGRATION = (
     + Path("migrations/core/013_records_overpower.sql").read_text()
     + Path("migrations/core/014_records_sync_log_snapshot_averages.sql").read_text()
     + Path("migrations/core/018_records_profile.sql").read_text()
+    + Path("migrations/core/019_records_session_state.sql").read_text()
 )
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -1129,3 +1130,69 @@ async def test_lamp_repair_never_downgrades(conn, monkeypatch) -> None:
 
     row = await service.pb_row(player_id, song_title=key[0], difficulty=key[1])
     assert row is not None and (row.clear_lamp, row.combo_lamp) == ("HARD", "FULL COMBO")
+
+
+_T3_UTC = datetime(2026, 10, 13, 14, 0, tzinfo=UTC)  # 같은 날 셋째 동기화(= 13일 23:00 JST)
+
+
+async def test_second_sync_same_day_accumulates_the_whole_day(conn, monkeypatch) -> None:
+    """같은 날 두 번 동기화하면 둘째 리포트의 비교 데이터가 하루치다: 첫 동기화에서 갱신한 채보가
+    그대로 남고(이전 값은 하루 시작 때 것), 레이팅 시작점도 첫 동기화 직전 값이다."""
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    odin = next(pb for pb in _fixture_fetch().best30 if pb.song.title == "Odin")
+    first = _fixture_fetch()
+    first.best30 = _replace_in(first.best30, "Odin", 1_008_000)
+    first.recent_scores = [_recent("Odin", "MAS", 1_008_000, datetime(2026, 10, 13, 20, 0, tzinfo=_JST))]
+    first_result = await service.save_sync(player_id, first, ctx)
+    first_diff = await service.sync_diff(first_result.sync_id)
+    assert first_diff is not None
+
+    _freeze_now(monkeypatch, utc=_T3_UTC, local=datetime(2026, 10, 13, 23, 0, tzinfo=UTC))
+    second = _fixture_fetch()
+    second.best30 = _replace_in(_replace_in(second.best30, "Odin", 1_008_000), "I Wanna", 1_008_500)
+    second.recent_scores = [
+        _recent("Odin", "MAS", 1_008_000, datetime(2026, 10, 13, 20, 0, tzinfo=_JST)),
+        _recent("I Wanna", "MAS", 1_008_500, datetime(2026, 10, 13, 22, 0, tzinfo=_JST)),
+    ]
+    second_result = await service.save_sync(player_id, second, ctx)
+
+    diff = await service.sync_diff(second_result.sync_id)
+    assert diff is not None
+    assert [s.play_date for s in diff.sessions] == ["2026-10-13"]
+    assert diff.sessions[0].id == first_diff.sessions[0].id
+    by_title = {u.song_title: u for u in diff.chart_updates}
+    assert set(by_title) == {"Odin", "I Wanna"}
+    assert (by_title["Odin"].old_score, by_title["Odin"].new_score) == (odin.score, 1_008_000)
+    assert by_title["I Wanna"].new_score == 1_008_500
+    # 하루 시작 값은 첫 동기화 직전(= 10일 기준점) 것이다.
+    assert diff.previous_computed_rating == first_diff.previous_computed_rating
+    assert diff.previous_best30_average == first_diff.previous_best30_average
+
+
+async def test_accumulation_merges_unchanged_plays_and_drops_ones_that_later_improved(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)
+    odin = next(pb for pb in _fixture_fetch().best30 if pb.song.title == "Odin")
+    iwanna = next(pb for pb in _fixture_fetch().best30 if pb.song.title == "I Wanna")
+    first = _fixture_fetch()
+    first.recent_scores = [
+        _recent("Odin", "MAS", odin.score - 3000, datetime(2026, 10, 13, 19, 0, tzinfo=_JST)),
+        _recent("I Wanna", "MAS", iwanna.score - 1000, datetime(2026, 10, 13, 19, 30, tzinfo=_JST)),
+    ]
+    await service.save_sync(player_id, first, ctx)
+
+    _freeze_now(monkeypatch, utc=_T3_UTC, local=datetime(2026, 10, 13, 23, 0, tzinfo=UTC))
+    second = _fixture_fetch()
+    second.best30 = _replace_in(second.best30, "I Wanna", iwanna.score + 2000)
+    second.recent_scores = [
+        _recent("Odin", "MAS", odin.score - 2000, datetime(2026, 10, 13, 22, 0, tzinfo=_JST)),
+        _recent("I Wanna", "MAS", iwanna.score + 2000, datetime(2026, 10, 13, 22, 10, tzinfo=_JST)),
+    ]
+    result = await service.save_sync(player_id, second, ctx)
+
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert [(u.song_title, u.play_count) for u in diff.unchanged_plays] == [("Odin", 2)]
+    assert [u.song_title for u in diff.chart_updates] == ["I Wanna"]
+    assert diff.chart_updates[0].old_score == iwanna.score  # 첫 동기화에서 안 올랐으니 하루 시작 값 그대로

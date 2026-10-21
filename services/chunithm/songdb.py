@@ -12,6 +12,7 @@ from typing import Any, Protocol, cast
 import aiosqlite
 import yaml
 
+from core.fuzzy import similar_names
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
 
@@ -105,7 +106,6 @@ class ChartLinkInfo:
 
 @dataclass(slots=True, kw_only=True)
 class AliasRow:
-    guild_id: str
     alias: str
     song_title: str
     added_by: str
@@ -212,8 +212,8 @@ class SongDbService:
             if song.title == text:
                 return song
 
-        if self._conn is not None and ctx.guild_id is not None:
-            server_alias = await self.get_alias(guild_id=ctx.guild_id, alias=text)
+        if self._conn is not None:
+            server_alias = await self.get_alias(alias=text)
             if server_alias is not None:
                 song = self._songs.get(server_alias.song_title)
                 if song is not None and song.title in self._available_intl:
@@ -231,12 +231,16 @@ class SongDbService:
         ]
         if candidates:
             raise ResolutionError(candidates=candidates[:_MAX_CANDIDATES])
+        # 부분 일치가 없으면 글자가 비슷한 제목을 후보로 준다(모델이 "이 곡 맞아?"하고 되묻는 재료).
+        similar = similar_names(text, (song.title for song in available_songs), limit=_MAX_CANDIDATES, cutoff=0.6)
+        if similar:
+            raise ResolutionError(candidates=similar)
         raise ResolutionError(message="찾지 못함")
 
-    async def add_alias(self, *, guild_id: str, alias: str, song_title: str, added_by: str) -> None:
+    async def add_alias(self, *, alias: str, song_title: str, added_by: str) -> None:
         assert self._conn is not None
         alias = alias.lower()
-        existing = await self.get_alias(guild_id=guild_id, alias=alias)
+        existing = await self.get_alias(alias=alias)
         if existing is not None:
             if existing.song_title != song_title:
                 raise ValueError(f"'{alias}'는 이미 '{existing.song_title}'에 쓰인 별칭이다")
@@ -246,8 +250,8 @@ class SongDbService:
             # 돌아갈 수 있다.
             return
 
-        # 다른 곡의 정식 제목이나 전역(시드) 별칭과 겹치는 이름은 서버 별칭으로 등록할 수
-        # 없다 — resolve()가 서버 별칭을 전역 별칭보다 먼저 보므로, 등록을 허락하면 그 뒤로
+        # 다른 곡의 정식 제목이나 전역(시드) 별칭과 겹치는 이름은 별칭으로 등록할 수
+        # 없다 — resolve()가 별칭을 전역 별칭보다 먼저 보므로, 등록을 허락하면 그 뒤로
         # 전역 별칭으로 찾던 곡 대신 전혀 다른 곡을 돌려주게 된다.
         conflict_title = self._find_global_name_conflict(alias, song_title)
         if conflict_title is not None:
@@ -255,9 +259,8 @@ class SongDbService:
 
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
-            "INSERT INTO songdb_aliases (guild_id, alias, song_title, added_by, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (guild_id, alias, song_title, added_by, now),
+            "INSERT INTO songdb_aliases (alias, song_title, added_by, created_at) VALUES (?, ?, ?, ?)",
+            (alias, song_title, added_by, now),
         )
         await self._conn.commit()
 
@@ -274,22 +277,22 @@ class SongDbService:
                 return title
         return None
 
-    async def get_alias(self, *, guild_id: str, alias: str) -> AliasRow | None:
+    async def get_alias(self, *, alias: str) -> AliasRow | None:
         assert self._conn is not None
         alias = alias.lower()
         cursor = await self._conn.execute(
-            "SELECT guild_id, alias, song_title, added_by FROM songdb_aliases WHERE guild_id = ? AND alias = ?",
-            (guild_id, alias),
+            "SELECT alias, song_title, added_by FROM songdb_aliases WHERE alias = ?",
+            (alias,),
         )
         row = await cursor.fetchone()
         if row is None:
             return None
-        return AliasRow(guild_id=row["guild_id"], alias=row["alias"], song_title=row["song_title"], added_by=row["added_by"])
+        return AliasRow(alias=row["alias"], song_title=row["song_title"], added_by=row["added_by"])
 
-    async def remove_alias(self, *, guild_id: str, alias: str) -> None:
+    async def remove_alias(self, *, alias: str) -> None:
         assert self._conn is not None
         alias = alias.lower()
-        await self._conn.execute("DELETE FROM songdb_aliases WHERE guild_id = ? AND alias = ?", (guild_id, alias))
+        await self._conn.execute("DELETE FROM songdb_aliases WHERE alias = ?", (alias,))
         await self._conn.commit()
 
     def song_by_title(self, title: str) -> SongRecord | None:
@@ -468,6 +471,10 @@ class SongDbService:
                     if chart is not None and chart.is_available:
                         hits.append(LinkedVerseHit(gate=gate_name, song=song, chart=chart))
         return hits
+
+    def all_artists(self) -> list[str]:
+        """지금 국제판에서 고를 수 있는 곡들의 아티스트 크레딧(중복 없이). 이름이 안 맞을 때 비슷한 후보를 찾는 데 쓴다."""
+        return sorted({song.artist for title, song in self._songs.items() if title in self._available_intl and song.artist})
 
     def find_by_artist(self, *, name: str) -> list[SongRecord]:
         """작곡가(아티스트 크레딧) 이름으로, 지금 국제판에서 고를 수 있는 곡을 제목순으로

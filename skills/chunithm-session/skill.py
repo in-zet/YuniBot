@@ -247,7 +247,7 @@ async def get_session(
     date: str | None = None,
     arcade: ArcadeRef | None = None,
 ) -> ToolResult:
-    """세션 하나를 저장된 리포트 그대로 불러오고, 그 뒤 바뀐 채보·레이팅을 지금 값과 나란히 보여준다. date(ISO 날짜, YYYY-MM-DD)를 주면 그 날짜, 안 주면 가장 최근이다. arcade를 주면 그 오락실에서의 세션만 찾는다. player를 비우면 본인이다."""
+    """"세션 보고서/리포트 써 줘·보여 줘" 요청에 쓴다(후기를 여는 게 아니다). 세션 하나를 저장된 리포트 그대로 불러오고, 그 뒤 바뀐 채보·레이팅을 지금 값과 나란히 보여준다. date(ISO 날짜, YYYY-MM-DD)를 주면 그 날짜, 안 주면 가장 최근이다. arcade를 주면 그 오락실에서의 세션만 찾는다. player를 비우면 본인이다."""
     assert arcade is None or isinstance(arcade, Arcade)
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
@@ -480,7 +480,7 @@ async def _open_review(ctx: ToolContext, *, row: aiosqlite.Row) -> bool:
 
 @tool(slash="후기")
 async def review_open(ctx: ToolContext, date: str | None = None) -> ToolResult:
-    """세션 후기 대화를 DM으로 연다. date(ISO 날짜, YYYY-MM-DD)를 주면 그 날짜의 세션, 안 주면 가장 최근 세션이다. 이미 남긴 후기가 있으면 그 뒤에 이어서 남긴다."""
+    """사용자가 직접 후기를 쓰자고 했을 때만 부른다("후기 남길게", "후기 쓰자"). "세션 보고서/리포트 써 줘·보여 줘"는 후기가 아니라 get_session이다. 세션 후기 대화를 DM으로 연다. date(ISO 날짜, YYYY-MM-DD)를 주면 그 날짜의 세션, 안 주면 가장 최근 세션이다. 이미 남긴 후기가 있으면 그 뒤에 이어서 남긴다."""
     rows = await _all_report_rows(ctx, player_id=ctx.player_id)
     if not rows:
         return ToolResult(error=_NOT_SYNCED_ERROR)
@@ -558,7 +558,7 @@ async def _ask_for_review(ctx: ToolContext, payload: dict[str, Any]) -> None:
     if not sessions:
         return
     wanted = await ctx.settings.get_value(
-        scope="player", scope_id=payload["player_id"], skill=_SKILL_NAME, name=_SETTING_ASK, default=True
+        scope="player", scope_id=payload["player_id"], skill=_SKILL_NAME, name=_SETTING_ASK, default=False
     )
     if not wanted or ctx.notify.has_open_thread(payload["player_id"], _SKILL_NAME):
         return

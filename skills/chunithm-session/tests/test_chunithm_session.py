@@ -137,7 +137,7 @@ def _ctx(
     services: dict[str, object] = {
         "records": records or _FakeRecords(), "arcades": arcades or _FakeArcades(),
         "players": players or PlayersService(db), "notify": notify or _FakeNotify(),
-        "settings": settings or _FakeSettings(), "yuni": yuni or _FakeYuni(),
+        "settings": settings or _FakeSettings(values={"후기 물어보기": True}), "yuni": yuni or _FakeYuni(),
     }
     return ToolContext(
         player_id=player_id, tags=frozenset(), services=services, db=db, event_bus=bus or EventBus(), guild_id=guild_id
@@ -313,7 +313,7 @@ async def test_get_session_arcade_filter_no_match_lists_visited_arcades(
     ctx = _ctx(db=db, player_id=me.id, players=players)
     await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id))
 
-    arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", guild_id="g1", name="겜플", created_by=me.id, created_at="x")})
+    arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", name="겜플", created_by=me.id, created_at="x")})
     ctx2 = _ctx(db=db, player_id=me.id, players=players, arcades=arcades)
     result = await skill.get_session(ctx2, arcade=arcades.arcades["ar1"])
 
@@ -325,7 +325,7 @@ async def test_get_session_filters_by_arcade(skill: ModuleType, db: aiosqlite.Co
     """방문 기록은 chunithm-arcade의 on_sync_reported가 남긴다(이 스킬은 더 이상 기록하지
     않는다) — 여기서는 이미 방문이 있다고 가정하고 arcades.record_visit()으로 직접 심는다."""
     me, players = await _me(db)
-    arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", guild_id="g1", name="겜플", created_by=me.id, created_at="x")})
+    arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", name="겜플", created_by=me.id, created_at="x")})
     ctx = _ctx(db=db, player_id=me.id, players=players, arcades=arcades)
     await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id))
     await arcades.record_visit("ar1", player_id=me.id, game="chunithm")
@@ -357,7 +357,7 @@ async def test_list_sessions_empty_when_no_match(skill: ModuleType, db: aiosqlit
 
 async def test_list_sessions_table_lines_with_and_without_arcade(skill: ModuleType, db: aiosqlite.Connection) -> None:
     me, players = await _me(db)
-    arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", guild_id="g1", name="겜플", created_by=me.id, created_at="x")})
+    arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", name="겜플", created_by=me.id, created_at="x")})
     ctx = _ctx(db=db, player_id=me.id, players=players, arcades=arcades)
     await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id, session_id="s1", play_date="2026-09-20", estimated=True))
     await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id, session_id="s2", play_date="2026-10-05"))
@@ -512,6 +512,15 @@ async def test_review_question_respects_the_player_setting(skill: ModuleType, db
     assert notify.opened == []
 
 
+async def test_review_question_is_off_by_default(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    """후기는 사용자가 쓰자고 할 때만 연다(2026-10-21) — 설정을 건드리지 않으면 먼저 묻지 않는다."""
+    ctx, notify, player_id = await _reported(skill, db, settings=_FakeSettings())
+
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))
+
+    assert notify.opened == []
+
+
 async def test_review_question_skipped_while_a_review_is_already_open(
     skill: ModuleType, db: aiosqlite.Connection
 ) -> None:
@@ -539,7 +548,7 @@ async def test_review_asks_only_about_the_latest_session(skill: ModuleType, db: 
 
 
 async def test_review_uses_the_guild_timeout_settings(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    settings = _FakeSettings(values={"후기 무응답 확인 시간": 2, "후기 종결 시간": 7})
+    settings = _FakeSettings(values={"후기 물어보기": True, "후기 무응답 확인 시간": 2, "후기 종결 시간": 7})
     ctx, notify, player_id = await _reported(skill, db, settings=settings, guild_id="g1")
 
     await skill.on_sync_reported(ctx, _reported_payload(player_id=player_id))

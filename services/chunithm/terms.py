@@ -27,6 +27,9 @@ CATEGORY_LABELS: dict[str, str] = {
 }
 _LABEL_TO_CATEGORY: dict[str, str] = {label: key for key, label in CATEGORY_LABELS.items()}
 
+# 확인받아 저장하는 별칭의 종류(말로는 한글 이름, 저장은 영문 키). 작곡가는 곡 DB의 아티스트 표기가 정식 이름이다.
+ALIAS_KINDS: dict[str, str] = {"난이도": "difficulty", "랭크": "rank", "램프": "lamp", "작곡가": "artist"}
+
 
 @dataclass(slots=True, kw_only=True)
 class ResolvedRank:
@@ -62,6 +65,14 @@ class TermListItem:
     category_label: str
     aliases: tuple[str, ...]
     value: int | None
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class TermAliasRow:
+    kind: str
+    alias: str
+    canonical: str
+    added_by: str
 
 
 @dataclass(slots=True, kw_only=True)
@@ -151,6 +162,91 @@ class TermsService:
         self._conn = conn
         if self._conn is not None:
             self._conn.row_factory = aiosqlite.Row
+        # 확인받아 저장한 전역 별칭(terms_aliases). 난이도·랭크·램프는 위 별칭 지도에 그대로 섞어 넣고
+        # (그래서 해석 경로는 따로 안 바뀐다), 작곡가는 여기서만 본다. 키는 소문자 별칭 → 정식 이름.
+        self._db_aliases: dict[str, dict[str, str]] = {kind: {} for kind in ALIAS_KINDS.values()}
+
+    def _alias_map_for(self, kind: str) -> dict[str, str] | None:
+        return {"rank": self._rank_aliases, "difficulty": self._difficulty_aliases, "lamp": self._lamp_aliases}.get(kind)
+
+    def _apply_alias(self, kind: str, alias: str, canonical: str) -> None:
+        self._db_aliases[kind][alias] = canonical
+        target = self._alias_map_for(kind)
+        if target is not None:
+            target[alias] = canonical
+
+    async def load_aliases(self) -> None:
+        """부팅 때 저장된 별칭을 메모리 지도에 넣는다(별칭을 바꿀 때마다 같이 갱신한다)."""
+        if self._conn is None:
+            return
+        cursor = await self._conn.execute("SELECT kind, alias, canonical FROM terms_aliases")
+        for row in await cursor.fetchall():
+            if row["kind"] in self._db_aliases:
+                self._apply_alias(row["kind"], row["alias"], row["canonical"])
+
+    def artist_alias(self, raw: str) -> str | None:
+        """저장된 작곡가 별칭이면 곡 DB의 표기를, 아니면 None."""
+        return self._db_aliases["artist"].get(raw.strip().lower())
+
+    async def add_alias(self, *, kind: str, alias: str, canonical: str, added_by: str) -> str:
+        """확인받은 별칭을 봇 전역으로 저장하고 정식 이름을 돌려준다. kind는 ALIAS_KINDS의 한글 이름이나 영문 키.
+        난이도·랭크·램프는 canonical이 실제 정식 이름이나 기존 별칭이어야 하고(정식 이름으로 바꿔 저장한다),
+        이미 다른 뜻으로 쓰이는 말은 ValueError. 같은 뜻으로 다시 저장하면 처음 등록한 사람을 지킨다."""
+        assert self._conn is not None
+        key = ALIAS_KINDS.get(kind, kind)
+        if key not in self._db_aliases:
+            raise ValueError(f"모르는 별칭 종류: {kind}")
+        alias = alias.strip().lower()
+        if not alias:
+            raise ValueError("별칭이 비어 있다")
+        target = self._alias_map_for(key)
+        if target is not None:
+            normalized = target.get(canonical.strip().lower())
+            if normalized is None:
+                raise ValueError(f"'{canonical}'는 {kind} 이름이 아니다")
+            canonical = normalized
+            existing = target.get(alias)
+            if existing is not None and existing != canonical:
+                raise ValueError(f"'{alias}'는 이미 '{existing}'를 뜻한다")
+            if existing is not None and alias not in self._db_aliases[key]:
+                return canonical  # 원래 있던 이름이라 저장할 게 없다
+        else:
+            canonical = canonical.strip()
+            existing_artist = self._db_aliases[key].get(alias)
+            if existing_artist is not None and existing_artist != canonical:
+                raise ValueError(f"'{alias}'는 이미 '{existing_artist}'를 뜻한다")
+        if alias in self._db_aliases[key]:
+            return canonical  # 같은 뜻으로 다시 저장 — 처음 등록한 사람·시각을 지킨다
+        await self._conn.execute(
+            "INSERT INTO terms_aliases (kind, alias, canonical, added_by, created_at) VALUES (?, ?, ?, ?, ?)",
+            (key, alias, canonical, added_by, datetime.now(UTC).isoformat()),
+        )
+        await self._conn.commit()
+        self._apply_alias(key, alias, canonical)
+        return canonical
+
+    async def get_alias(self, *, kind: str, alias: str) -> TermAliasRow | None:
+        assert self._conn is not None
+        key = ALIAS_KINDS.get(kind, kind)
+        cursor = await self._conn.execute(
+            "SELECT kind, alias, canonical, added_by FROM terms_aliases WHERE kind = ? AND alias = ?",
+            (key, alias.strip().lower()),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return TermAliasRow(kind=row["kind"], alias=row["alias"], canonical=row["canonical"], added_by=row["added_by"])
+
+    async def remove_alias(self, *, kind: str, alias: str) -> None:
+        assert self._conn is not None
+        key = ALIAS_KINDS.get(kind, kind)
+        alias = alias.strip().lower()
+        await self._conn.execute("DELETE FROM terms_aliases WHERE kind = ? AND alias = ?", (key, alias))
+        await self._conn.commit()
+        self._db_aliases.get(key, {}).pop(alias, None)
+        target = self._alias_map_for(key)
+        if target is not None:
+            target.pop(alias, None)
 
     def rank_scores(self) -> dict[str, int]:
         """랭크 정식 이름 -> 기준 점수. 작업 표의 랭크 칸 원래 값을 만들 때 쓴다."""

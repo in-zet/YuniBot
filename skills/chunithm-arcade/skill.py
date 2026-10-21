@@ -10,6 +10,8 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.decorators import on, tool
 from core.events import Section
+from core.fuzzy import normalize_name
+from core.resolvers import ResolutionError
 from core.tables import RowRef, TableBuilder, cell
 from core.tool_types import ArcadeRef, Display, ToolContext, ToolResult
 from services.chunithm.arcade_settings import (
@@ -171,7 +173,7 @@ async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
 
 @tool(slash="오락실 방문", tags=["chunithm-linked"], cost="network", mutates=True)
 async def record_visit(ctx: ToolContext, arcade: ArcadeRef, date: str | None = None) -> ToolResult:
-    """오락실 방문을 남긴다. date(ISO 날짜)를 안 주면 가장 최근 세션으로 본다 — 그때만
+    """오락실 방문을 남긴다("오늘 겜플에서 했어"처럼 어디서 쳤는지 말했을 때). 이름이 등록돼 있지 않으면 비슷한 이름을 짐작해 맞는지 사용자에게 먼저 묻고, 확인받으면 register_arcade로 등록한 뒤 다시 부른다. date(ISO 날짜)를 안 주면 가장 최근 세션으로 본다 — 그때만
     CHUNITHM-NET의 지금 설정을 같이 읽어 저장한다. 지난 날짜는 그날 설정을 알 수 없어
     방문만 남는다."""
     assert isinstance(arcade, Arcade)
@@ -190,6 +192,40 @@ async def record_visit(ctx: ToolContext, arcade: ArcadeRef, date: str | None = N
 
     return ToolResult(
         data={"arcade": arcade.name, **outcome},
+        display=Display(content="\n".join(lines)),
+        display_mode="optional",
+    )
+
+
+@tool(slash="오락실 등록", mutates=True)
+async def register_arcade(ctx: ToolContext, name: str, alias: str | None = None) -> ToolResult:
+    """오락실 이름이나 별칭이 등록돼 있지 않을 때, 사용자가 "그 오락실이 맞다"(또는 "새 오락실이다")고 확인한 뒤에만 부른다.
+    name은 정식 이름(이미 등록된 오락실이면 그 이름 그대로), alias는 사용자가 말한 줄임말이다(정식 이름과 같으면 비운다).
+    없는 오락실이면 새로 등록하고, 있으면 그 오락실에 별칭만 더한다. 오락실 목록과 별칭은 봇 전역이라 모두에게 적용된다."""
+    assert ctx.db is not None
+    created = False
+    try:
+        arcade = await ctx.arcades.resolve(name, ctx)
+    except ResolutionError:
+        try:
+            arcade = await ctx.arcades.create(name=name.strip(), created_by=ctx.player_id)
+        except ValueError as exc:
+            return ToolResult(error=str(exc))
+        created = True
+
+    saved_alias: str | None = None
+    if alias is not None and normalize_name(alias) not in ("", normalize_name(arcade.name)):
+        try:
+            await ctx.arcades.add_alias(arcade.id, player_id=ctx.player_id, alias=alias)
+        except ValueError as exc:
+            return ToolResult(error=str(exc))
+        saved_alias = alias.strip()
+
+    lines = [f"{arcade.name}를 오락실로 등록했어." if created else f"{arcade.name}는 이미 등록된 오락실이야."]
+    if saved_alias is not None:
+        lines.append(f"'{saved_alias}'라고 해도 알아들을게.")
+    return ToolResult(
+        data={"arcade": arcade.name, "created": created, "alias": saved_alias},
         display=Display(content="\n".join(lines)),
         display_mode="optional",
     )

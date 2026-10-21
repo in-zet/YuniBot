@@ -36,6 +36,7 @@ from core.tool_types import (
 from services.chunithm.table_columns import PARTIAL_ROW_HINTS
 from services.common.notify import NotifyService
 from services.common.players import PlayersService
+from services.common.settings import SettingsService
 from services.common.websearch import WebsearchService
 from tests.core.skill_factory import slash_tool, write_skill
 
@@ -880,6 +881,12 @@ async def test_session_review_flow_runs_through_the_real_bus_notify_and_thread_m
         # (records.save_sync가 첫 동기화 때 이 태그를 붙인다) — chunithm-session이
         # chunithm-synced를 요구하므로 여기서도 그 전제를 맞춰 준다.
         await players.set_status_tag(player.id, "chunithm-synced", source="records:first_sync")
+        # 후기 질문은 기본이 꺼짐이다(2026-10-21) — 이 흐름은 플레이어가 켜 둔 경우다.
+        settings = cast("SettingsService", client._services["settings"])  # pyright: ignore[reportPrivateUsage]
+        await settings.set_value(
+            scope="player", scope_id=player.id, skill="chunithm-session", name="후기 물어보기",
+            value=True, updated_by=player.id,
+        )
         await executor.event_bus.emit_notify(
             "chunithm.sync.reported",
             {

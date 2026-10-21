@@ -520,6 +520,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
 
     songdb_service = SongDbService(conn=conn)
     terms_service = TermsService(conn=conn)
+    await terms_service.load_aliases()
     chunithm_net_service = (
         ChunithmNetService(conn=conn, secrets=secrets_service, players=players)
         if secrets_service is not None

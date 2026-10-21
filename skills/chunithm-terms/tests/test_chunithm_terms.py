@@ -20,7 +20,9 @@ _PLAYERS_MIGRATION = (
     Path("migrations/core/001_players.sql").read_text()
     + Path("migrations/core/002_player_tags.sql").read_text()
 )
-_TERMS_SERVER_MIGRATION = Path("migrations/core/009_terms_server.sql").read_text()
+_TERMS_SERVER_MIGRATION = (
+    Path("migrations/core/009_terms_server.sql").read_text() + Path("migrations/core/021_terms_aliases.sql").read_text()
+)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -50,6 +52,11 @@ def _load_skill() -> ModuleType:
 
 
 @pytest.fixture
+def skill() -> ModuleType:
+    return _load_skill()
+
+
+@pytest.fixture
 async def terms() -> AsyncIterator[TermsService]:
     conn = await aiosqlite.connect(":memory:")
     await conn.executescript(_PLAYERS_MIGRATION + _TERMS_SERVER_MIGRATION)
@@ -63,10 +70,14 @@ async def terms() -> AsyncIterator[TermsService]:
 def _ctx(
     terms_service: TermsService, *, player_id: str = "p1", tags: frozenset[str] = frozenset(),
     guild_id: str | None = "g1", settings: _FakeSettings | None = None, notify: _FakeNotify | None = None,
+    songdb: object | None = None,
 ) -> ToolContext:
     return ToolContext(
         player_id=player_id, tags=tags,
-        services={"terms": terms_service, "settings": settings or _FakeSettings(), "notify": notify or _FakeNotify()},
+        services={
+            "terms": terms_service, "settings": settings or _FakeSettings(), "notify": notify or _FakeNotify(),
+            **({"songdb": songdb} if songdb is not None else {}),
+        },
         guild_id=guild_id,
     )
 
@@ -185,3 +196,50 @@ async def test_review_can_revoke_and_restore(terms: TermsService) -> None:
     assert restored.error is None
     proposal = await terms.get_proposal(proposal_id)
     assert proposal is not None and proposal.status == "approved"
+
+
+class _FakeSongDb:
+    def __init__(self, artists: list[str]) -> None:
+        self._artists = artists
+
+    def find_by_artist(self, *, name: str) -> list[str]:
+        return [a for a in self._artists if name.lower() in a.lower()]
+
+    def all_artists(self) -> list[str]:
+        return self._artists
+
+
+async def test_alias_add_saves_a_confirmed_rank_alias(skill: ModuleType, terms: TermsService) -> None:
+    ctx = _ctx(terms)
+
+    result = await skill.alias_add(ctx, kind="랭크", alias="삼에스", canonical="SSS")
+
+    assert result.error is None
+    assert result.data == {"kind": "랭크", "alias": "삼에스", "canonical": "SSS"}
+    assert (await terms.resolve_rank("삼에스", ctx)).canonical == "SSS"
+
+
+async def test_alias_add_checks_the_artist_exists_and_suggests_similar(skill: ModuleType, terms: TermsService) -> None:
+    ctx = _ctx(terms, songdb=_FakeSongDb(["Camellia", "Kobaryo"]))
+
+    missing = await skill.alias_add(ctx, kind="작곡가", alias="카멜", canonical="Camelia")
+    saved = await skill.alias_add(ctx, kind="작곡가", alias="카멜", canonical="Camellia")
+
+    assert missing.error is not None and "Camellia" in missing.error
+    assert saved.error is None and terms.artist_alias("카멜") == "Camellia"
+
+
+async def test_alias_add_rejects_unknown_kind(skill: ModuleType, terms: TermsService) -> None:
+    result = await skill.alias_add(_ctx(terms), kind="곡", alias="x", canonical="y")
+
+    assert result.error is not None and "작곡가" in result.error
+
+
+async def test_alias_remove_only_by_adder_or_admin(skill: ModuleType, terms: TermsService) -> None:
+    await skill.alias_add(_ctx(terms, player_id="p1"), kind="랭크", alias="삼에스", canonical="SSS")
+
+    stranger = await skill.alias_remove(_ctx(terms, player_id="p2"), kind="랭크", alias="삼에스")
+    admin = await skill.alias_remove(_ctx(terms, player_id="p3", tags=frozenset({"admin"})), kind="랭크", alias="삼에스")
+
+    assert stranger.error is not None
+    assert admin.error is None

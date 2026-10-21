@@ -553,7 +553,7 @@ def _plan_sections() -> list[Section]:
 
 async def test_plan_collects_candidates_with_notes_and_chart_links(skill: ModuleType, db: aiosqlite.Connection) -> None:
     bus = _GatherBus(_plan_sections())
-    arcade = Arcade(id="a1", guild_id="g1", name="게임플라자", created_by="p1", created_at="2026-01-01")
+    arcade = Arcade(id="a1", name="게임플라자", created_by="p1", created_at="2026-01-01")
 
     result = await skill.plan(_ctx(db, bus=bus), count=5, arcade=arcade)
 

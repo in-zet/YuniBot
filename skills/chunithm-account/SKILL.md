@@ -1,10 +1,10 @@
 ---
 name: chunithm-account
-description: CHUNITHM-NET 로그인 상태 확인, 로그인 방법 안내, 기록 공개 설정을 다룬다.
+description: 세가(오락실) 계정 = CHUNITHM-NET 계정의 로그인 상태 확인, 로그인 방법 안내, 기록 공개 설정을 다룬다. "디코"라고 안 붙인 "계정"은 이쪽이다.
 examples:
   - 나 로그인 돼 있어?
   - 내 기록 다른 사람도 볼 수 있게 해 줘
-triggers: [로그인, 로그아웃, 공개, 비공개, 내 기록 다른]
+triggers: [계정, 세가, 로그인, 로그아웃, 공개, 비공개, 내 기록 다른]
 category: 계정 연결
 game: chunithm
 version: 1

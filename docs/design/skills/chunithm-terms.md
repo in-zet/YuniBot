@@ -72,7 +72,7 @@ services: [terms, players, notify, settings]
 ## 서버 은어
 
 - 플레이어는 `/용어 제안`이나 유니에게 말로 개념 용어를 제안할 수 있다. 신고제라 승인을 기다리지 않고 바로 반영되고, admin의 "보고 채널"(`admin` 스킬 설정)이 있으면 거기로 알린다. `admin`은 나중에 부적절한 등록을 끄거나 되돌릴 수 있다(구현 결정 참고).
-- 값 용어의 별칭은 서버에서 추가할 수 없다.
+- 난이도·랭크·램프·작곡가의 말을 못 알아들으면, 모델이 비슷한 것을 짐작해 맞는지 되묻고 확인받은 뒤 `alias_add`로 별칭을 저장한다(2026-10-21 사용자 결정). 별칭은 봇 전역이고(서버별이 아니다), 저장하면 `RankRef`·`DifficultyRef`·`LampRef`·작곡가 검색이 다음부터 묻지 않고 알아듣는다. 정식 이름(`terms.yaml`)과 값은 그대로이고, 이미 다른 뜻으로 쓰이는 말은 저장하지 않는다(전에는 "서버에서 값 용어의 별칭을 추가할 수 없다"였다).
 - 서버 은어는 그 서버에서만 쓴다. 전역 용어와 충돌하면 전역 용어가 이긴다.
 
 ## 다른 스킬과의 관계
@@ -88,6 +88,8 @@ services: [terms, players, notify, settings]
 | `list` | 분류별 용어 목록 (표 반환) | `category`(선택) | `/용어 목록` | 없음 | 표 | never |
 | `suggest` | 서버 은어 등록(즉시 반영) | `term`, `meaning`, `aliases` | `/용어 제안` | 없음 | optional | never |
 | `review` | 등록 끄기·되돌리기 | 제안 id, 켤지 | `/용어 반영여부` | `admin` | optional | always |
+| `alias_add` | 확인받은 난이도·랭크·램프·작곡가 별칭 저장(전역) | `kind`(난이도·랭크·램프·작곡가), `alias`, `canonical` | `/용어 별칭 추가` | 없음 | optional | never |
+| `alias_remove` | 저장된 별칭 삭제(추가한 사람과 admin만) | `kind`, `alias` | `/용어 별칭 삭제` | 없음 | optional | never |
 
 ## 이벤트
 
@@ -98,6 +100,7 @@ services: [terms, players, notify, settings]
 | 위치 | 내용 |
 | --- | --- |
 | `services/chunithm/data/terms.yaml` | 전역 용어(값 용어와 개념 용어). 저장소에서 검토해 고친다 |
+| `terms_aliases` 테이블 (`migrations/core/021_terms_aliases.sql`) | 종류(difficulty·rank·lamp·artist), 별칭, 정식 이름, 등록한 플레이어, 시각. 전역. 부팅 때 `load_aliases()`가 난이도·랭크·램프 별칭 지도에 섞어 넣어 해석 경로는 그대로다 |
 | `terms_server` 테이블 (`terms` 서비스 소유, `migrations/core/`에서 만든다) | 서버, 용어, 뜻, 별칭, 등록한 플레이어, 상태(approved·rejected, 기본 approved), 반영여부를 바꾼 플레이어 |
 
 ## 유니 지침 (SKILL.md 본문 초안)
@@ -111,7 +114,7 @@ services: [terms, players, notify, settings]
 
 - 별칭이 같은 정식 값으로 풀리는지(`RankRef`, `LampRef` 등).
 - 점수 표현 여러 형식의 해석.
-- 값 용어의 별칭을 서버에서 추가할 수 없는지.
+- 저장한 별칭이 다음 해석에 쓰이는지, 이미 다른 뜻인 말은 거절하는지.
 - 등록이 바로 해석과 설명에 쓰이는지, admin이 끄면 안 쓰이는지.
 - 서버 용어가 다른 서버에서 보이지 않는지.
 
