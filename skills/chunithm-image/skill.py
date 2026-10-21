@@ -59,7 +59,7 @@ async def table_image(
     table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG])],
     layout: Layout = Layout.CARD,
 ) -> ToolResult:
-    """표를 재킷이 들어간 그림으로 그려 보낸다. 그림을 달라고 했을 때만 쓴다. layout: card(재킷 카드 격자, 기본) 또는 list(한 줄씩)."""
+    """표를 재킷이 들어간 그림으로 그려 보낸다. 그림을 달라고 했을 때만 쓴다. layout은 안 주면 card(재킷 카드 격자)다. 사용자가 "목록", "리스트", "한 줄씩"이라고 말했을 때만 list를 준다 — 정렬 순서나 곡 수가 많은 것만으로 list를 고르지 않는다."""
     assert isinstance(table, WorkTable)
     titles = list(dict.fromkeys(row.cell(tc.SONG).text for row in table.rows))
     jacket_urls = {title: jacket_url(ctx.songdb.jacket_for(title)) for title in titles}

@@ -614,3 +614,55 @@ def test_rating_tail_is_smaller_light_gray_and_aligned_to_baseline() -> None:
     assert not any(
         without.getpixel((x, y)) == render._RATING_TAIL_COLOR for x in range(area[0], area[2]) for y in range(area[1], area[3])
     )
+
+
+@pytest.mark.parametrize(("count", "columns"), [(1, 3), (3, 3), (5, 5), (17, 5), (40, 5), (41, 10), (80, 10)])
+def test_card_columns_is_5_up_to_40_cards_and_10_above(count: int, columns: int) -> None:
+    assert render.card_columns(_chart_table(count)) == columns
+
+
+def test_40_cards_fit_one_page_of_5_columns() -> None:
+    files = render.render_pages(_chart_table(40), layout="card", jackets={})
+
+    assert len(files) == 1
+    width = render._MARGIN * 2 + 5 * render._CARD_W + 4 * render._GAP
+    assert _size(files[0][1])[0] == round(width * render.CARD_OUTPUT_SCALE)
+
+
+def _list_png(difficulty: str = "MAS", lamp: str | None = None) -> Image.Image:
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
+    builder.step("테스트 표")
+    builder.row(
+        tc.chart_ref("곡 0", difficulty),
+        {
+            tc.SONG: tc.song_cell("곡 0"),
+            tc.DIFFICULTY: tc.difficulty_cell(difficulty),
+            tc.CONST: tc.const_cell(15.0),
+            tc.SCORE: tc.score_cell(1_007_500),
+            tc.RANK: tc.rank_cell("SSS", {"SSS": 1_007_500}),
+            tc.LAMP: tc.lamp_cell(lamp),
+            tc.RATING: cell(16.0, "16.00"),
+        },
+    )
+    (_, data), = render.render_pages(builder.build(), layout="list", jackets={"곡 0": _png("white")})
+    return Image.open(io.BytesIO(data)).convert("RGB")
+
+
+def _list_top(image: Image.Image) -> int:
+    x = render._LIST_W // 2
+    return next(y for y in range(image.height) if image.getpixel((x, y)) != render._BG)
+
+
+def test_list_row_outline_follows_the_lamp_like_a_card() -> None:
+    for lamp, expected in (("FULL COMBO", render._LAMP_COLORS["FC"]), (None, render._CARD_OUTLINE)):
+        image = _list_png(lamp=lamp)
+        assert image.getpixel((render._LIST_W // 2, _list_top(image) + 1)) == expected
+
+
+def test_list_row_background_is_tinted_by_difficulty_like_a_card() -> None:
+    master, ultima = _list_png("MAS"), _list_png("ULT")
+    probe = (render._MARGIN + 30, _list_top(master) + render._LIST_ROW_H // 2)  # 번호 칸 안쪽 빈 바탕
+
+    assert master.getpixel(probe) != ultima.getpixel(probe)
+    assert master.getpixel(probe) != render._PANEL

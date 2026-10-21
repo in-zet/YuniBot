@@ -525,6 +525,8 @@ _CARD_VALUE_MIN_SIZE = 13
 _GRADIENT_MAX_ALPHA = 220
 _GRADIENT_EXTRA = 80  # 곡명 줄 위로 더 깔리는 높이(2026-10-21: 22 → 80 → 40)
 _MAX_COLUMNS = 10  # 한 줄 카드 수 상한
+_FIVE_COLUMNS = 5  # 카드가 적을 때의 한 줄 장수
+_FIVE_COLUMN_MAX_ROWS = 40  # 이 수 이하면 _FIVE_COLUMNS로 그린다
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,18 +595,20 @@ _PATTERN_EDGE = 0.10  # 사선 위의 밝은 선
 
 
 @lru_cache(maxsize=16)
-def _card_background(panel: tuple[int, int, int], height: int) -> Image.Image:
-    """바탕색 위에 사선 하나를 긋고 그 오른쪽을 살짝 밝게 한다(츄니즘 카드의 사선 무늬)."""
-    base = Image.new("RGBA", (_CARD_W, height), (*panel, 255))
+def _pattern_background(
+    panel: tuple[int, int, int], width: int, height: int, line_x: float, line_y: float
+) -> Image.Image:
+    """바탕색 위에 사선 하나를 긋고 그 오른쪽을 살짝 밝게 한다(츄니즘 카드의 사선 무늬). 사선은 (line_x, line_y)를
+    지나 아래로 갈수록 45도로 왼쪽으로 기운다. 카드와 목록 줄이 같이 쓴다."""
+    base = Image.new("RGBA", (width, height), (*panel, 255))
     k = _PATTERN_SCALE
-    # 사선: 재킷 아랫줄(y=_JACKET)에서 카드 폭의 78% 지점, 아래로 갈수록 45도로 왼쪽으로 기운다.
-    top_x, slope = _CARD_W * 0.78, 1.0
+    slope = 1.0
     y_top, y_bottom = 0, height
-    left_top = top_x - slope * (y_top - _JACKET)
-    left_bottom = top_x - slope * (y_bottom - _JACKET)
-    face = Image.new("L", (_CARD_W * k, height * k), 0)
+    left_top = line_x - slope * (y_top - line_y)
+    left_bottom = line_x - slope * (y_bottom - line_y)
+    face = Image.new("L", (width * k, height * k), 0)
     ImageDraw.Draw(face).polygon(
-        [(left_top * k, y_top * k), (_CARD_W * k, y_top * k), (_CARD_W * k, y_bottom * k), (left_bottom * k, y_bottom * k)],
+        [(left_top * k, y_top * k), (width * k, y_top * k), (width * k, y_bottom * k), (left_bottom * k, y_bottom * k)],
         fill=round(255 * _PATTERN_LIGHTEN),
     )
     edge = Image.new("L", face.size, 0)
@@ -614,6 +618,11 @@ def _card_background(panel: tuple[int, int, int], height: int) -> Image.Image:
     for layer in (face, edge):
         base = Image.alpha_composite(base, _white_layer(layer.resize(base.size, Image.Resampling.LANCZOS)))
     return base
+
+
+def _card_background(panel: tuple[int, int, int], height: int) -> Image.Image:
+    # 사선: 재킷 아랫줄(y=_JACKET)에서 카드 폭의 78% 지점.
+    return _pattern_background(panel, _CARD_W, height, _CARD_W * 0.78, _JACKET)
 
 
 def _white_layer(alpha: Image.Image) -> Image.Image:
@@ -689,7 +698,9 @@ def _draw_card(
 
 
 def card_columns(table: WorkTable) -> int:
-    """카드 한 줄의 장수. 표 전체 크기로 정해서 쪽마다 폭이 같다."""
+    """카드 한 줄의 장수. 표 전체 크기로 정해서 쪽마다 폭이 같다. 40장 이하면 한 줄에 5장(2026-10-21 결정)."""
+    if table.row_count <= _FIVE_COLUMN_MAX_ROWS:
+        return min(_FIVE_COLUMNS, max(3, table.row_count))
     return min(_MAX_COLUMNS, max(3, table.row_count))
 
 
@@ -734,22 +745,35 @@ def _draw_cards(
 
 _LIST_W = 1240
 _LIST_ROW_H = 90
-_LIST_JACKET = 80
+_LIST_JACKET = 72  # 외곽선(4px) 안쪽에 들어가게 카드 쪽보다 조금 작다
+_LIST_RADIUS = _CARD_RADIUS
 
 
 def _draw_list_row(
     canvas: Image.Image, y: int, number: int, table_number: int, row: Row, jacket: Image.Image | None,
     names: set[str],
 ) -> None:
+    # 카드와 같은 바탕(난이도 색 + 사선 무늬)을 둥근 모서리로 오려 붙이고, 램프 색(없으면 회색) 외곽선을 두른다.
+    row_w, row_h = _LIST_W - 2 * _MARGIN, _LIST_ROW_H - 6
+    panel = _tinted_panel(row.cell(tc.DIFFICULTY).text)
+    background = _pattern_background(panel, row_w, row_h, row_w * 0.80, row_h / 2).copy()
+    mask = Image.new("L", background.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, row_w - 1, row_h - 1), radius=_LIST_RADIUS, fill=255)
+    background.putalpha(ImageChops.multiply(background.getchannel("A"), mask))
+    canvas.alpha_composite(background, (_MARGIN, y))
     draw = ImageDraw.Draw(canvas, "RGBA")
-    draw.rounded_rectangle((_MARGIN, y, _LIST_W - _MARGIN, y + _LIST_ROW_H - 6), radius=10, fill=_PANEL)
+    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if row.cell(tc.LAMP).filled else None
+    draw.rounded_rectangle(
+        (_MARGIN, y, _MARGIN + row_w - 1, y + row_h - 1), radius=_LIST_RADIUS,
+        outline=_LAMP_COLORS[lamp] if lamp is not None else _CARD_OUTLINE, width=_LAMP_BORDER,
+    )
     if table_number == number:
         draw.text((_MARGIN + 14, y + 26), f"#{number}", font=_font(13, True), fill=_MUTED)
     else:  # 묶음 안 번호가 크게, 표 번호는 그 아래 작게(행을 가리킬 때 쓰는 번호)
         draw.text((_MARGIN + 14, y + 14), f"#{number}", font=_font(13, True), fill=_MUTED)
         draw.text((_MARGIN + 14, y + 46), f"({table_number})", font=_font(10, False), fill=_MUTED)
-    jx = _MARGIN + 82
-    _paste_fit(canvas, jacket, (jx, y + 2, jx + _LIST_JACKET, y + 2 + _LIST_JACKET - 4))
+    jx = _MARGIN + 80
+    _paste_fit(canvas, jacket, (jx, y + 6, jx + _LIST_JACKET, y + 6 + _LIST_JACKET))
 
     # 오른쪽부터 채운다: 곡 레이팅 · 램프 · 랭크 · 점수.
     right = _LIST_W - _MARGIN - 18
