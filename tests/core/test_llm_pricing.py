@@ -1,4 +1,6 @@
-from core.llm_pricing import estimate_cost_usd
+import pytest
+
+from core.llm_pricing import billable_input_tokens, estimate_cost_usd
 
 
 def test_estimate_cost_usd_matches_published_rate() -> None:
@@ -21,3 +23,17 @@ def test_estimate_cost_usd_claude_haiku() -> None:
     # 100만 입력 + 100만 출력 기준, 100K 이하 프롬프트 표준가(2026-10-17 확인).
     cost = estimate_cost_usd("claude-haiku-5-5", input_tokens=1_000_000, output_tokens=1_000_000)
     assert cost == 0.10 + 0.50
+
+
+def test_billable_input_tokens_counts_cached_part_at_ten_percent() -> None:
+    assert billable_input_tokens(1000) == 1000
+    assert billable_input_tokens(1000, 900) == 100 + 90
+    # 캐시가 입력보다 크게 보고돼도 입력 전체를 넘지 않는다.
+    assert billable_input_tokens(100, 500) == 10
+
+
+def test_estimate_cost_usd_discounts_cached_input() -> None:
+    plain = estimate_cost_usd("gemini-3.8-flash", input_tokens=1_000_000, output_tokens=0)
+    cached = estimate_cost_usd("gemini-3.8-flash", input_tokens=1_000_000, output_tokens=0, cached_input_tokens=800_000)
+    assert plain == 0.75
+    assert cached == pytest.approx(0.75 * (0.2 + 0.8 * 0.1))

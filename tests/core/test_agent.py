@@ -42,8 +42,8 @@ def _executor(registry: SkillRegistry) -> ToolExecutor:
     )
 
 
-def _ctx() -> ToolContext:
-    return ToolContext(player_id="p1", tags=frozenset(), services={})
+def _ctx(tags: frozenset[str] = frozenset()) -> ToolContext:
+    return ToolContext(player_id="p1", tags=tags, services={})
 
 
 def _state(registry: SkillRegistry, mode: Mode = "instructions") -> SkillLoadState:
@@ -927,3 +927,73 @@ def test_skills_used_picks_skills_from_tool_names_in_order_without_duplicates() 
     )
 
     assert used == ["chunithm-song", "chunithm-image"]
+
+
+def _loop(registry: SkillRegistry, script: list[GenerationTurn], *, max_tokens: int = 50000) -> AgentLoop:
+    return AgentLoop(
+        llm=FakeLlmAdapter(script), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=10, max_tokens=max_tokens,
+    )
+
+
+def _noop_call_turn(usage: UsageInfo, model: str | None = None) -> GenerationTurn:
+    return GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="remember", args={"text": "x"})],
+        usage=usage, model=model,
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_splits_usage_by_model_when_fallback_answers_mid_turn() -> None:
+    registry = _registry()
+    script = [
+        _noop_call_turn(UsageInfo(input_tokens=100, output_tokens=5, cached_input_tokens=40)),
+        GenerationTurn(
+            content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답",
+            usage=UsageInfo(input_tokens=200, output_tokens=7), model="gemini-3.5-flash-lite",
+        ),
+    ]
+    result = await _loop(registry, script).run(
+        ctx=_ctx(), skill_state=_state(registry), user_text="안녕", prompt_context_snippets=[]
+    )
+    assert result.usage_by_model["gemini-3.8-flash"] == UsageInfo(input_tokens=100, output_tokens=5, cached_input_tokens=40)
+    assert result.usage_by_model["gemini-3.5-flash-lite"] == UsageInfo(input_tokens=200, output_tokens=7)
+    assert result.usage.input_tokens == 300
+
+
+@pytest.mark.asyncio
+async def test_token_cap_counts_cached_input_at_ten_percent() -> None:
+    registry = _registry()
+
+    def turns(cached: int) -> list[GenerationTurn]:
+        usage = UsageInfo(input_tokens=30000, output_tokens=10, cached_input_tokens=cached)
+        return [
+            _noop_call_turn(usage), _noop_call_turn(usage),
+            GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="끝")]), text="끝", usage=usage),
+        ]
+
+    # 입력 9만 토큰. 캐시가 없으면 상한(5만)에 걸리고, 27K씩 캐시되면 환산 입력 약 2.4만이라 끝까지 간다.
+    uncached = await _loop(registry, turns(0), max_tokens=50000).run(
+        ctx=_ctx(), skill_state=_state(registry), user_text="안녕", prompt_context_snippets=[]
+    )
+    cached = await _loop(registry, turns(27000), max_tokens=50000).run(
+        ctx=_ctx(), skill_state=_state(registry), user_text="안녕", prompt_context_snippets=[]
+    )
+    assert uncached.hit_token_cap is True
+    assert cached.hit_token_cap is False
+    assert cached.text == "끝"
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_pre_opens_skills_whose_triggers_match_the_message() -> None:
+    registry = _registry()
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+    state = _state(registry, mode="full")
+    await _loop(registry, script).run(
+        ctx=_ctx(frozenset({"chunithm-linked"})), skill_state=state, user_text="내 즐겨찾기 보여줘",
+        prompt_context_snippets=[],
+    )
+    assert state.level_for("chunithm-settings") == "full"
+    assert state.level_for("chunithm-border") == "card"

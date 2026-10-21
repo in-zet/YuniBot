@@ -20,6 +20,7 @@ from core.llm import (
     OnRetry,
     UsageInfo,
 )
+from core.llm_pricing import billable_input_tokens
 from core.prompt import PromptAssembler
 from core.registry import LoadedSkill
 from core.registry_snapshot import RegistrySnapshot
@@ -50,6 +51,8 @@ class AgentTurnResult:
     used_admin_tool: bool = False
     # 마지막 LLM 왕복에서 실제로 답한 모델. 보조 모델로 넘어간 턴이면 그 이름이고, 아니면 None.
     served_model: str | None = None
+    # 모델별 사용량. 한 턴 안에서 메인 모델과 보조 모델이 섞여 답하면 모델마다 따로 기록하려고 나눠 둔다.
+    usage_by_model: dict[str, UsageInfo] = field(default_factory=dict)
     # 이번 턴에 만든 표 전부(보관소 id). 번호(`rows`·`"t3:2"`)는 사람이 본 표에만 쓰므로 이 표들에는 거절한다.
     turn_table_ids: list[str] = field(default_factory=list)
     # 이번 턴의 마지막 표. 턴 끝에 이 표 하나만 글자로 그린다.
@@ -206,6 +209,9 @@ class AgentLoop:
         )
 
         prompt_context_snippets = [*prompt_context_snippets, *await self._skill_prompt_snippets(ctx)]
+        # 메시지에 스킬의 `triggers` 낱말이 있으면 모델이 open_skill을 부르기 전에 미리 펼친다(왕복 절약).
+        for name in self._prompt.triggered_skills(user_text, player_tags=set(ctx.tags)):
+            skill_state.open(name)
         contents: list[LlmContent] = [LlmContent(role="user", parts=[LlmPart(text=user_text)])]
         tool_calls_made = 0
         tool_call_log: list[str] = []
@@ -240,15 +246,25 @@ class AgentLoop:
                 turn.usage.input_tokens, turn.usage.cached_input_tokens, turn.usage.output_tokens,
             )
             result.served_model = turn.model
+            served = turn.model or self._model
+            previous = result.usage_by_model.get(served, UsageInfo(input_tokens=0, output_tokens=0))
+            result.usage_by_model[served] = UsageInfo(
+                input_tokens=previous.input_tokens + turn.usage.input_tokens,
+                output_tokens=previous.output_tokens + turn.usage.output_tokens,
+                cached_input_tokens=previous.cached_input_tokens + turn.usage.cached_input_tokens,
+            )
             result.usage = UsageInfo(
                 input_tokens=result.usage.input_tokens + turn.usage.input_tokens,
                 output_tokens=result.usage.output_tokens + turn.usage.output_tokens,
                 cached_input_tokens=result.usage.cached_input_tokens + turn.usage.cached_input_tokens,
             )
-            if result.usage.input_tokens + result.usage.output_tokens > self._max_tokens:
+            # 상한은 캐시에서 읽힌 입력을 10%만 쳐서 센다 — 비용을 막는 장치라 실제 비용과 같은 기준을 쓴다.
+            billable = billable_input_tokens(result.usage.input_tokens, result.usage.cached_input_tokens)
+            if billable + result.usage.output_tokens > self._max_tokens:
                 logger.warning(
-                    "player %s: 토큰 상한(%d) 초과(누적 입력 %d/출력 %d) — LLM 턴 %d회, 불린 도구 %s, 쓴 스킬 %s",
-                    ctx.player_id, self._max_tokens, result.usage.input_tokens, result.usage.output_tokens,
+                    "player %s: 토큰 상한(%d) 초과(환산 입력 %d, 누적 입력 %d(캐시 %d)/출력 %d) — LLM 턴 %d회, 불린 도구 %s, 쓴 스킬 %s",
+                    ctx.player_id, self._max_tokens, billable, result.usage.input_tokens,
+                    result.usage.cached_input_tokens, result.usage.output_tokens,
                     llm_turns, tool_call_log, self._skills_used(tool_call_log, player_tags),
                 )
                 result.hit_token_cap = True

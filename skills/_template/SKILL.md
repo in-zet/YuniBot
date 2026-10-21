@@ -4,6 +4,7 @@ description: 무엇을 하고 언제 쓰는지 200자 이내로.
 examples:
   - 이 스킬을 골라야 하는 질문 예시 1
   - 질문 예시 2
+triggers: [메시지에 있으면 이 스킬을 미리 펼칠 낱말]
 category: 메모
 game: common
 version: 1

@@ -4,6 +4,7 @@ description: 츄니즘 국제판·일본판 업데이트 일정과 신곡을 알
 examples:
   - 다음 업데이트 언제야?
   - 이번에 들어온 신곡 보여 줘
+triggers: [업데이트, 알림, 일정, 신곡]
 category: 알림
 game: chunithm
 version: 1

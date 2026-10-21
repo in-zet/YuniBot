@@ -4,6 +4,7 @@ description: 오락실별로 츄니즘 게임 설정(스피드, 필드 월, 판�
 examples:
   - 겜플 세팅 알려 줘
   - 게임플라자 설정 바뀐 거 보여 줘
+triggers: [오락실, 겜플, 게임플라자, 방문, 세팅]
 category: 오락실
 game: chunithm
 version: 1

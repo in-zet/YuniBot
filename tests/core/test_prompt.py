@@ -68,3 +68,25 @@ def test_build_tool_declarations_hides_tagged_skill_tools() -> None:
     state = SkillLoadState(mode="instructions", known_skills=known)
     names = {d.name for d in assembler.build_tool_declarations(player_tags=set(), skill_state=state)}
     assert not any(name.startswith("admin_") for name in names)
+
+
+def test_triggered_skills_matches_lowercased_trigger_words_in_message() -> None:
+    assembler = PromptAssembler(rules_text="규칙", persona_text="말투", registry=_registry())
+    names = assembler.triggered_skills(
+        "즐겨찾기에 HERA 넣고 Linked VERSE 스토리도 알려줘", player_tags={"chunithm-linked"}
+    )
+    assert "chunithm-settings" in names
+    assert "yuni-lore" in names
+    assert "chunithm-border" not in names
+
+
+def test_triggered_skills_skips_skills_hidden_by_tags() -> None:
+    assembler = PromptAssembler(rules_text="규칙", persona_text="말투", registry=_registry())
+    assert "admin" not in assembler.triggered_skills("이번 달 비용 얼마야", player_tags=set())
+    assert "admin" in assembler.triggered_skills("이번 달 비용 얼마야", player_tags={"admin"})
+
+
+def test_every_shipped_skill_declares_triggers() -> None:
+    registry = _registry()
+    missing = [s.manifest.name for s in registry.enabled_skills() if not s.manifest.triggers]
+    assert missing == []

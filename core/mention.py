@@ -397,10 +397,13 @@ class MentionEntry:
 
         # 사용량 기록도 guild/DM을 가리지 않는다 — DM 멘션은 guild_id가 없어 쿨다운
         # 스코프와 같은 고정값을 쓴다.
-        await self._usage.record(
-            guild_id=cooldown_scope, player_id=player.id, model=result.served_model or self._agent_model, kind="agent",
-            input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
-        )
+        # 한 턴에 메인 모델과 보조 모델이 섞여 답했으면 모델마다 따로 남긴다(가격이 다르다).
+        for model, used in result.usage_by_model.items():
+            await self._usage.record(
+                guild_id=cooldown_scope, player_id=player.id, model=model, kind="agent",
+                input_tokens=used.input_tokens, output_tokens=used.output_tokens,
+                cached_input_tokens=used.cached_input_tokens,
+            )
 
         # 스레드 대화는 닫힐 때 전문으로 한 번에 요약 대기 목록에 들어간다(core/threads.py).
         # 관리 도구를 쓴 턴은 메모리에 남기지 않는다.

@@ -5,6 +5,7 @@ examples:
   - 레이팅표 그림으로 보여 줘
   - 15.0 마스 곡 상수표로 만들어 줘
   - 방금 그 표 그림으로
+triggers: [그림, 이미지, 레이팅표, 상수표, 사진]
 category: 기록과 리포트
 game: chunithm
 version: 1

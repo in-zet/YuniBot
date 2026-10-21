@@ -22,7 +22,7 @@ from core.resolvers import ResolutionError, ResolverRegistry
 from core.scheduler import Scheduler
 from core.schema import build_arg_schema
 from core.tables import PartialRowHint, TableError, TableStore, resolve_table_arg
-from core.tool_types import TableRef, ToolContext, ToolResult
+from core.tool_types import TableRef, ToolContext, ToolResult, UserFacingError
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +279,9 @@ class ToolExecutor:
     ) -> ToolResult:
         try:
             return await spec.fn(ctx, **resolved_args)
+        except UserFacingError as exc:
+            logger.warning("tool '%s' failed: %s", spec.name, exc)
+            return ToolResult(error=str(exc))
         except Exception as exc:
             logger.exception("tool '%s' raised", spec.name)
             return ToolResult(error=f"도구 실행 중 오류: {exc}")

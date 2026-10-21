@@ -6,6 +6,7 @@ examples:
   - 가장 최근 겜플 세션 불러와 줘
   - 10월 5일 세션 보여줘
   - 10월 5일 후기 남길게
+triggers: [세션, 후기]
 category: 세션과 후기
 game: chunithm
 version: 1

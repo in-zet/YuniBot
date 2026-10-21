@@ -6,6 +6,7 @@ from typing import cast
 
 import aiosqlite
 import pytest
+from chuni_penguin.adapters.chunithm_net.errors import ChuniNetError
 from chuni_penguin.adapters.chunithm_net.parser import (
     parse_music_for_rating,
     parse_player_data,
@@ -29,11 +30,13 @@ from core.tool_types import ToolContext
 from services.chunithm.arcade_settings import parse_arcade_settings
 from services.chunithm.chunithm_net import (
     ChangeNotAppliedError,
+    ChunithmNetBlockedError,
     ChunithmNetService,
     SyncFetch,
     _build_lwp_cookie_jar,
     _default_adapter_factory,
     _default_credential_adapter_factory,
+    _ErrorTranslatingAdapter,
     _extract_clal,
 )
 from services.common.players import PlayersService
@@ -850,3 +853,39 @@ async def test_update_arcade_settings_raises_when_site_ignored_the_write(conn, s
 
     with pytest.raises(ChangeNotAppliedError, match="스피드: 요청 9.00"):
         await service.update_arcade_settings(player.id, changes={"speed": "9.00"})
+
+
+class _RaisingAdapter:
+    marker = "그대로"
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    async def get_favorite_music(self) -> list[int]:
+        raise self._error
+
+    def sync_value(self) -> int:
+        return 7
+
+
+@pytest.mark.asyncio
+async def test_error_translating_adapter_turns_play_not_finished_into_korean_message() -> None:
+    """2026-10-21 실기: 200010(마지막 플레이가 정상 종료되지 않음)이 영어 원문 그대로 도구 오류로 새어 나갔다."""
+    adapter = _ErrorTranslatingAdapter(_RaisingAdapter(ChuniNetError(200010, "Unable to view the data")))  # pyright: ignore[reportArgumentType]
+
+    with pytest.raises(ChunithmNetBlockedError, match="마지막 플레이가 정상적으로 끝나지 않았다는 뜻"):
+        await adapter.get_favorite_music()
+
+
+@pytest.mark.asyncio
+async def test_error_translating_adapter_names_unknown_codes_and_passes_other_errors_through() -> None:
+    unknown = _ErrorTranslatingAdapter(_RaisingAdapter(ChuniNetError(123456, "x")))  # pyright: ignore[reportArgumentType]
+    with pytest.raises(ChunithmNetBlockedError, match="123456"):
+        await unknown.get_favorite_music()
+
+    other = _ErrorTranslatingAdapter(_RaisingAdapter(MaintenanceError()))  # pyright: ignore[reportArgumentType]
+    with pytest.raises(MaintenanceError):
+        await other.get_favorite_music()
+
+    assert other.marker == "그대로"  # pyright: ignore[reportAttributeAccessIssue]
+    assert other.sync_value() == 7  # pyright: ignore[reportAttributeAccessIssue]

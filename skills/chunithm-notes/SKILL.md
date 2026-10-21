@@ -4,6 +4,7 @@ description: 곡이나 채보에 메모를 남기고 본다. 공개한 메모는
 examples:
   - 크로노 마스에 "후반 어지러운 패턴 왼손 주의" 메모해 줘
   - 크로노 마스 내 메모 보여 줘
+triggers: [메모]
 category: 메모
 game: chunithm
 version: 1

@@ -25,6 +25,15 @@ class PromptAssembler:
             if check_tags(_skill_tag_requirement(skill), player_tags)
         ]
 
+    def triggered_skills(self, text: str, *, player_tags: set[str]) -> list[str]:
+        """메시지에 `triggers` 낱말이 하나라도 들어 있는 보이는 스킬의 이름(스킬 등록 순서)."""
+        lowered = text.lower()
+        return [
+            skill.manifest.name
+            for skill in self.visible_skill_cards(player_tags=player_tags)
+            if any(word.lower() in lowered for word in skill.manifest.triggers)
+        ]
+
     def _card_text(self, skill: LoadedSkill) -> str:
         manifest = skill.manifest
         examples = "; ".join(manifest.examples)

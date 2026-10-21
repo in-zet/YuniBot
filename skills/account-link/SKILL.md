@@ -4,6 +4,7 @@ description: 디스코드 부계정을 한 플레이어로 연결하는 방법�
 examples:
   - 디코 부계정도 연결하고 싶어
   - 연결된 계정 보여 줘
+triggers: [부계정, 계정 연결, 연결된 계정, 연결 해제, 연결해]
 category: 계정 연결
 game: common
 version: 1

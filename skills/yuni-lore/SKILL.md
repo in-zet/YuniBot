@@ -5,6 +5,7 @@ examples:
   - 유니는 어디서 왔어?
   - 나비는 누구야?
   - Linked VERSE 스토리 알려줘
+triggers: [유니는, 유니가 누구, 나비, 설정집, 스토리, linked verse, 링크드 버스]
 category: 유니 설정
 game: common
 version: 1

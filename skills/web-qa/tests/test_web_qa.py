@@ -1,6 +1,7 @@
 # skills/web-qa/tests/test_web_qa.py
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -147,3 +148,30 @@ async def test_search_no_sources_error_becomes_korean_message(skill: ModuleType)
 
     assert result.error is not None
     assert result.data == {}
+
+
+@pytest.mark.asyncio
+async def test_search_unexpected_failure_becomes_error_telling_not_to_retry(skill: ModuleType) -> None:
+    """2026-10-21: Google 503·시간 초과가 도구 예외로 새면 모델이 같은 검색을 되풀이했다."""
+    websearch = _FakeWebsearch(error=RuntimeError("503 UNAVAILABLE"))
+
+    result = await skill.search(_ctx(websearch=websearch, usage=None), question="질문")
+
+    assert result.error is not None
+    assert "다시 하지 말고" in result.error
+    assert len(websearch.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_gives_up_when_total_time_runs_out(skill: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Slow(_FakeWebsearch):
+        async def search(self, *, query: str, player_id: str, now: datetime) -> SearchResult:
+            await asyncio.sleep(10)
+            return await super().search(query=query, player_id=player_id, now=now)
+
+    monkeypatch.setattr(skill, "_SEARCH_TOTAL_SECONDS", 0.01)
+
+    result = await skill.search(_ctx(websearch=_Slow(result=_result()), usage=None), question="질문")
+
+    assert result.error is not None
+    assert "다시 하지 말고" in result.error

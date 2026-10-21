@@ -4,6 +4,7 @@ description: CHUNITHM-NET 로그인 상태 확인, 로그인 방법 안내, 기�
 examples:
   - 나 로그인 돼 있어?
   - 내 기록 다른 사람도 볼 수 있게 해 줘
+triggers: [로그인, 로그아웃, 공개, 비공개, 내 기록 다른]
 category: 계정 연결
 game: chunithm
 version: 1

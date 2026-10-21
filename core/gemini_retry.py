@@ -29,7 +29,9 @@ _RETRY_BASE_DELAY_SECONDS = 2.0  # 시도마다 2배로 늘린다(2초, 4초, 8�
 # 요청 타임아웃. 없으면 모델이 응답 없이 멈출 때 멘션 처리가 끝없이 기다린다. 서버가 10초 미만
 # 마감은 400으로 거절하고, 초과하면 504로 끊어 준다(위 재시도 경로로 들어간다).
 LLM_REQUEST_TIMEOUT_SECONDS = 20
-SEARCH_REQUEST_TIMEOUT_SECONDS = 60  # Google 검색을 거치는 호출이라 더 오래 걸린다.
+SEARCH_REQUEST_TIMEOUT_SECONDS = 45  # Google 검색을 거치는 호출이라 더 오래 걸린다.
+# 검색은 한 번 기다림이 길어서 재시도를 한 번만 한다(2026-10-21 실기: 503이 겹쳐 4번 시도하며 106초를 썼다).
+SEARCH_MAX_RETRIES = 1
 
 
 def http_options(timeout_seconds: int) -> types.HttpOptions:
@@ -58,9 +60,11 @@ async def call_with_retry[T](
     *,
     on_retry: OnRetry | None = None,
     skip_retry_codes: frozenset[int] = frozenset(),
+    max_retries: int | None = None,
 ) -> T:
     """`skip_retry_codes`에 든 오류 코드는 재시도 없이 바로 올린다 — 보조 모델이 있을 때 504를 같은
-    모델로 또 기다리지 않고 바로 넘기려고 쓴다."""
+    모델로 또 기다리지 않고 바로 넘기려고 쓴다. `max_retries`는 오류 코드별 상한보다 더 줄이고 싶을 때
+    쓰는 재시도 횟수 상한이다(웹 검색처럼 한 번 기다림이 긴 호출)."""
     attempt = 0
     while True:
         try:
@@ -70,7 +74,7 @@ async def call_with_retry[T](
             if (
                 exc.code not in _RETRYABLE_CODES
                 or exc.code in skip_retry_codes
-                or attempt > _MAX_RETRIES_BY_CODE.get(exc.code, _MAX_RETRIES)
+                or attempt > min(_MAX_RETRIES_BY_CODE.get(exc.code, _MAX_RETRIES), max_retries if max_retries is not None else _MAX_RETRIES)
             ):
                 raise
             delay = _RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))

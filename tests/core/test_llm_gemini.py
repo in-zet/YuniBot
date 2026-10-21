@@ -331,7 +331,7 @@ def test_adapters_set_request_timeout() -> None:
     llm = GeminiLlmAdapter(api_key="fake")
     search = GeminiSearchAdapter(api_key="fake")
     assert llm._client._api_client._http_options.timeout == 20_000  # pyright: ignore[reportPrivateUsage]
-    assert search._client._api_client._http_options.timeout == 60_000  # pyright: ignore[reportPrivateUsage]
+    assert search._client._api_client._http_options.timeout == 45_000  # pyright: ignore[reportPrivateUsage]
 
 
 @pytest.mark.asyncio
@@ -347,6 +347,24 @@ async def test_generate_does_not_retry_non_retryable_client_error() -> None:
             contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="low",
         )
     assert fake_models.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_call_with_retry_max_retries_caps_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """웹 검색은 한 번 기다림이 길어서 503도 한 번만 재시도한다(2026-10-21: 4번 시도하며 106초)."""
+    from core.gemini_retry import call_with_retry
+
+    monkeypatch.setattr("core.gemini_retry.asyncio.sleep", lambda _delay: _NoopAwaitable())
+    calls = 0
+
+    async def always_503() -> None:
+        nonlocal calls
+        calls += 1
+        raise _server_error(503)
+
+    with pytest.raises(genai_errors.ServerError):
+        await call_with_retry(always_503, max_retries=1)
+    assert calls == 2
 
 
 class _NoopAwaitable:

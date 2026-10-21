@@ -4,6 +4,7 @@ description: CHUNITHM-NET에서 최신 기록을 가져와 저장하고, 지난 
 examples:
   - 동기화해 줘
   - 오늘 친 거 갱신해서 크로노만 봐 줘
+triggers: [동기화, 싱크, 갱신]
 category: 기록과 리포트
 game: chunithm
 version: 1

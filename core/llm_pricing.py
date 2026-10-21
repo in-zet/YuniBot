@@ -14,10 +14,25 @@ _PRICING_PER_MILLION_USD: dict[str, tuple[float, float]] = {
 }
 
 
-def estimate_cost_usd(model: str, *, input_tokens: int, output_tokens: int) -> float:
-    """요금표에 없는 모델이면 0.0을 돌려준다 — 추정 비용 계산 실패가 사용량 기록 자체를 막으면 안 된다."""
+# 캐시에서 읽힌 입력 토큰은 일반 입력의 이 비율로 계산한다. Gemini·Claude 모두 캐시 읽기를 입력 가격의
+# 10% 안팎으로 받는다고 보고 둔 가정이다(가격표에 캐시 단가를 따로 넣기 전까지 — 2026-10-21).
+CACHED_INPUT_RATIO = 0.1
+
+
+def billable_input_tokens(input_tokens: int, cached_input_tokens: int = 0) -> int:
+    """입력 토큰 중 캐시에서 읽힌 몫을 `CACHED_INPUT_RATIO`만 치고 센 값. 토큰 상한과 비용 추정이 같이 쓴다."""
+    cached = min(max(cached_input_tokens, 0), input_tokens)
+    return input_tokens - cached + round(cached * CACHED_INPUT_RATIO)
+
+
+def estimate_cost_usd(
+    model: str, *, input_tokens: int, output_tokens: int, cached_input_tokens: int = 0
+) -> float:
+    """요금표에 없는 모델이면 0.0을 돌려준다 — 추정 비용 계산 실패가 사용량 기록 자체를 막으면 안 된다.
+    `input_tokens`는 캐시에서 읽힌 몫(`cached_input_tokens`)을 포함한 전체 입력이다."""
     rates = _PRICING_PER_MILLION_USD.get(model)
     if rates is None:
         return 0.0
     input_rate, output_rate = rates
-    return (input_tokens / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate
+    billable = billable_input_tokens(input_tokens, cached_input_tokens)
+    return (billable / 1_000_000) * input_rate + (output_tokens / 1_000_000) * output_rate

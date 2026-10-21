@@ -4,6 +4,7 @@ description: 츄니즘 시스템, 용어, 공략, 이벤트 같은 일반 질문
 examples:
   - 월드 엔드 곡은 어떻게 해금해?
   - 크로노 마스 공략 있어?
+triggers: [공략, 해금, 이벤트, 검색, 출처]
 category: 질문 답변
 game: chunithm
 version: 1

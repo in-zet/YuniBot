@@ -1,20 +1,23 @@
 # services/chunithm/chunithm_net.py
 from __future__ import annotations
 
+import functools
 import http.cookiejar
+import inspect
 import io
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import aiosqlite
+from chuni_penguin.adapters.chunithm_net.errors import ChuniNetError
 from chuni_penguin.adapters.chunithm_net.utils import is_valid_clal
 from chuni_penguin.adapters.errors import AuthenticationError
 from chuni_penguin.types import Difficulty
 
-from core.tool_types import ToolContext
+from core.tool_types import ToolContext, UserFacingError
 from services.chunithm.arcade_settings import (
     FIELD_LABELS,
     ArcadeSettings,
@@ -38,6 +41,49 @@ _PERSONAL_BEST_DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", 
 
 class ChangeNotAppliedError(Exception):
     """CHUNITHM-NET에 바꾸라고 보냈는데 다시 읽어 보니 반영되지 않았다. 메시지는 사용자에게 그대로 보여 줄 수 있다."""
+
+
+class ChunithmNetBlockedError(UserFacingError):
+    """CHUNITHM-NET이 오류 코드로 요청을 막았다(로그인 만료·점검이 아닌 경우). 메시지는 사용자에게 그대로 보여 줄 수 있다."""
+
+
+# CHUNITHM-NET 오류 코드별 안내. 모르는 코드는 코드 번호와 함께 일반 문장으로 안내한다.
+_NET_ERROR_MESSAGES: dict[int, str] = {
+    200010: (
+        "CHUNITHM-NET이 지금은 데이터를 못 보게 막았어. 마지막 플레이가 정상적으로 끝나지 않았다는 뜻이라, "
+        "게임을 결과 화면까지 끝내고 조금 뒤에 다시 해 줘."
+    ),
+    ChuniNetError.RATE_LIMIT_EXCEEDED: "CHUNITHM-NET이 요청이 너무 잦다고 막았어. 잠시 뒤에 다시 해 줘.",
+    ChuniNetError.PROFILE_BANNED: "이 계정은 CHUNITHM-NET에서 이용이 제한돼 있어서 못 가져와.",
+}
+
+
+def _blocked_error(exc: ChuniNetError) -> ChunithmNetBlockedError:
+    message = _NET_ERROR_MESSAGES.get(exc.code) or f"CHUNITHM-NET이 오류 코드 {exc.code}로 요청을 막았어. 잠시 뒤에 다시 해 줘."
+    return ChunithmNetBlockedError(message)
+
+
+class _ErrorTranslatingAdapter:
+    """어댑터의 비동기 메서드가 올리는 `ChuniNetError`(사이트의 오류 페이지)를 사용자에게 보여 줄 수 있는
+    `ChunithmNetBlockedError`로 바꿔 던진다. 그 밖의 속성은 그대로 넘긴다. 로그인 만료(200002·200004)는
+    어댑터가 다시 로그인해 처리하므로 여기까지 오지 않는다."""
+
+    def __init__(self, inner: ChunithmNetAdapterLike) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._inner, name)
+        if not inspect.iscoroutinefunction(attr):
+            return attr
+
+        @functools.wraps(attr)
+        async def call(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await attr(*args, **kwargs)
+            except ChuniNetError as exc:
+                raise _blocked_error(exc) from exc
+
+        return call
 
 
 class ChunithmNetAdapterLike(Protocol):
@@ -110,10 +156,11 @@ def _default_adapter_factory(lwp_cookie_jar: str) -> ChunithmNetAdapterLike:
     from chuni_penguin.adapters.chunithm_net import ChunithmNetAdapter
 
     try:
-        return ChunithmNetAdapter(database=None, discord_id=0, lwp_cookie_jar=lwp_cookie_jar)
+        adapter = ChunithmNetAdapter(database=None, discord_id=0, lwp_cookie_jar=lwp_cookie_jar)
     except Exception:  # noqa: BLE001 - 어떤 예외든 쿠키가 담긴 원 예외를 숨기고 바꿔 던진다
         # from None: 원래 예외(메시지에 쿠키 줄이 들어 있을 수 있다)를 체인에 남기지 않는다.
         raise ConnectionError("CHUNITHM-NET 어댑터를 만들 수 없다") from None
+    return _ErrorTranslatingAdapter(adapter)  # pyright: ignore[reportReturnType]
 
 
 # 쿠키가 하나도 없는 빈 jar. ID/비번으로 처음 로그인할 때 이 jar로 어댑터를 만들면,
@@ -126,11 +173,12 @@ def _default_credential_adapter_factory(username: str, password: str) -> Chunith
     from chuni_penguin.adapters.chunithm_net import ChunithmNetAdapter
 
     try:
-        return ChunithmNetAdapter(
+        adapter = ChunithmNetAdapter(
             database=None, discord_id=0, lwp_cookie_jar=_EMPTY_LWP_JAR, username=username, password=password
         )
     except Exception:  # noqa: BLE001 - username/password가 예외 메시지에 섞여 나가지 않게 한다
         raise ConnectionError("CHUNITHM-NET 어댑터를 만들 수 없다") from None
+    return _ErrorTranslatingAdapter(adapter)  # pyright: ignore[reportReturnType]
 
 
 def _extract_clal(lwp_cookie_jar: str) -> str | None:

@@ -6,6 +6,7 @@ examples:
   - 스피드 9.00으로 바꿔줘
   - 즐겨찾기에 크로노마기아 추가해줘
   - 즐겨찾기 목록 보여줘
+triggers: [설정, 스피드, 즐겨찾기, 가이드음, 필드 월, 필드월, 타이밍]
 category: 오락실
 game: chunithm
 version: 1

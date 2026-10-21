@@ -5,6 +5,7 @@ examples:
   - 12월 31일까지 17.00 목표로 잡아 줘
   - 15.0에서 15.3 마스 중 SSS 안 된 거 전부 투두에 넣어 줘
   - 내 목표 어디까지 왔어?
+triggers: [목표, 투두, todo, to-do, 기한, 순회]
 category: 목표
 game: chunithm
 version: 1

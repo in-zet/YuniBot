@@ -5,6 +5,7 @@ examples:
   - 오늘 겜플 갈 거야, 뭐 치면 좋을까?
   - 나 이 곡 언제 처음 SSS 떴었지?
   - 다음엔 크로노 연습할게, 기억해 줘
+triggers: [처음 만난, 처음 sss, 마일스톤, 약속, 뭐 치면, 오늘 갈]
 category: 함께한 기록
 game: common
 version: 1

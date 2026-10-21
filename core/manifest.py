@@ -55,6 +55,9 @@ class SkillManifest(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
     name: str
     description: str
     examples: list[str]
+    # 메시지에 이 낱말이 들어 있으면 코어가 이 스킬을 처음부터 펼쳐 준다(00-core.md "스킬 불러오기").
+    # 모델이 open_skill을 부르는 왕복 한 번을 아끼는 용도라, 틀려도 손해는 펼친 지침 분량뿐이다.
+    triggers: list[str] = []
     category: str
     game: str
     version: int

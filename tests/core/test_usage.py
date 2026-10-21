@@ -57,3 +57,12 @@ async def test_month_summary_groups_by_player(conn: aiosqlite.Connection) -> Non
     assert summary.by_player["p2"] == pytest.approx(0.75)
     assert summary.total_usd == pytest.approx(1.5)
     assert summary.total_input_tokens == 2_000_000
+
+
+async def test_record_discounts_cached_input_tokens(conn: aiosqlite.Connection) -> None:
+    service = UsageService(conn)
+    cost = await service.record(
+        guild_id="g1", player_id="p1", model="gemini-3.8-flash", kind="agent",
+        input_tokens=1_000_000, output_tokens=0, cached_input_tokens=1_000_000,
+    )
+    assert cost == pytest.approx(0.075)

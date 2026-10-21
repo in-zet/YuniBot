@@ -10,7 +10,14 @@ from core.manifest import DefinedTag
 from core.permissions import InMemoryTagProvider
 from core.resolvers import ResolutionError, ResolverRegistry
 from core.tables import RowRef, TableBuilder, TableNeeds, TableStore, WorkTable, cell
-from core.tool_types import ArcadeRef, ChartRef, TableRef, ToolContext, ToolResult
+from core.tool_types import (
+    ArcadeRef,
+    ChartRef,
+    TableRef,
+    ToolContext,
+    ToolResult,
+    UserFacingError,
+)
 
 
 @tool(slash="보더")
@@ -665,3 +672,21 @@ async def test_table_arg_without_store_is_a_plain_error() -> None:
 
     assert outcome.result is not None and outcome.result.error is not None
     assert "그 표 없음" in outcome.result.error
+
+
+@tool(slash="사용자실패")
+async def fails_for_user(ctx: ToolContext) -> ToolResult:
+    """사용자에게 보일 실패."""
+    raise UserFacingError("지금은 못 해. 조금 뒤에 다시 해 줘.")
+
+
+@pytest.mark.asyncio
+async def test_user_facing_error_becomes_error_result_without_traceback(caplog: pytest.LogCaptureFixture) -> None:
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+    with caplog.at_level(logging.WARNING):
+        outcome = await executor.invoke(fails_for_user.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
+    assert outcome.result is not None
+    assert outcome.result.error == "지금은 못 해. 조금 뒤에 다시 해 줘."
+    assert "raised" not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)

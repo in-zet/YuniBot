@@ -5,6 +5,7 @@ examples:
   - 크로노 마스 SSS+ 보더 알려줘
   - 크로노 마스에서 내 최고점 기준 트플플까지 얼마나 남았어?
   - 크로노 마스에서 트플플까지 몇 어택 남았어?
+triggers: [보더, 어택, 허용, 까지 얼마, 남았]
 category: 곡 정보
 game: chunithm
 version: 1

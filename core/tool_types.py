@@ -15,6 +15,11 @@ from core.tables import TableStore, WorkTable, render_text
 from core.usage import UsageService
 
 
+class UserFacingError(Exception):
+    """도구가 일부러 올리는 실패. 메시지는 모델과 사용자에게 그대로 전해도 되는 한국어 문장이다.
+    실행기는 이 예외를 오류 로그(스택)로 남기지 않고 `ToolResult(error=메시지)`로 바꾼다."""
+
+
 class UndeclaredServiceError(AttributeError):
     def __init__(self, service_name: str) -> None:
         super().__init__(

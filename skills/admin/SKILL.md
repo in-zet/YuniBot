@@ -4,6 +4,7 @@ description: 봇 관리. LLM 사용량과 비용, 서버별 스킬 켜기·끄�
 examples:
   - 이번 달 LLM 비용 얼마야?
   - 이 서버에서 web-qa 꺼 줘
+triggers: [비용, 사용량, 태그, 스킬 꺼, 스킬 켜, 스킬 등록]
 category: 관리
 game: common
 version: 1

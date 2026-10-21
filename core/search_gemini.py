@@ -5,6 +5,7 @@ from google import genai
 from google.genai import types
 
 from core.gemini_retry import (
+    SEARCH_MAX_RETRIES,
     SEARCH_REQUEST_TIMEOUT_SECONDS,
     call_with_retry,
     http_options,
@@ -61,7 +62,7 @@ class GeminiSearchAdapter:
         async def _call() -> types.GenerateContentResponse:
             return await self._client.aio.models.generate_content(model=model, contents=query, config=config)
 
-        response = await call_with_retry(_call, on_retry=on_retry)
+        response = await call_with_retry(_call, on_retry=on_retry, max_retries=SEARCH_MAX_RETRIES)
         return _from_provider_response(response)
 
     async def aclose(self) -> None:

@@ -4,6 +4,7 @@ description: 유니가 나에 대해 기억하는 내용을 보여 주고, 지�
 examples:
   - 나에 대해 뭐 기억해?
   - 내가 왼손 약하다는 거 잊어 줘
+triggers: [기억, 잊어, 메모리]
 category: 메모리
 game: common
 version: 1
