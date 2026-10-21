@@ -15,7 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from core.tables import Row, WorkTable, table_file_name
 from services.chunithm import table_columns as tc
@@ -31,7 +31,9 @@ LIST_PAGE_LIMIT = 30
 _MARGIN = 24
 _BAND_H = 46  # 묶음 표지 띠 높이
 
-# --- 글꼴. Docker 이미지는 fonts-noto-cjk. `YUNI_FONT_REGULAR`/`YUNI_FONT_BOLD`로 글꼴 파일을 직접 줄 수도 있다(개발 PC용).
+# --- 글꼴. 기본은 이 스킬에 넣은 Pretendard JP Bold(한글·영문·숫자·가나·한자를 한 파일이 다 가졌다, 2026-10-21 결정).
+# 못 찾으면 Docker 이미지의 fonts-noto-cjk. `YUNI_FONT_REGULAR`/`YUNI_FONT_BOLD`로 글꼴 파일을 직접 줄 수도 있다(개발 PC용).
+_BUNDLED_FONT = Path(__file__).parent / "fonts" / "PretendardJP-Bold.otf"
 _NOTO_REGULAR = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 _NOTO_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
 _FALLBACK_FONTS = (
@@ -60,19 +62,21 @@ _DIFFICULTY_COLORS = {
     "WE": (210, 100, 170),
 }
 _LAMP_LABELS = {"AJC": "AJC", "ALL JUSTICE": "AJ", "FULL COMBO": "FC"}
-_LAMP_COLORS = {"AJC": (255, 215, 70), "AJ": (255, 140, 60), "FC": (70, 160, 220)}
+_LAMP_COLORS = {"AJC": (255, 215, 70), "AJ": (255, 140, 60), "FC": (70, 200, 110)}
 
-# 카드 배경에 섞는 난이도 색(2026-10-21). ULT는 섞지 않고 검은 바탕(`_ULT_PANEL`)을 따로 쓴다.
-_DIFFICULTY_TINTS = {
-    "BAS": (46, 160, 90),
-    "ADV": (226, 150, 40),
-    "EXP": (214, 66, 66),
-    "MAS": (150, 80, 200),
-    "WE": (210, 100, 170),
+# 난이도별 카드 바탕색(2026-10-21): 섞지 않고 채도 있는 짙은 색을 그대로 쓴다. ULT는 검붉은색.
+_DIFFICULTY_PANELS = {
+    "BAS": (14, 66, 44),
+    "ADV": (104, 64, 12),
+    "EXP": (104, 26, 34),
+    "MAS": (66, 34, 108),
+    "ULT": (40, 10, 14),
+    "WE": (104, 42, 86),
 }
-_ULT_PANEL = (44, 12, 14)  # 어두운 붉은색 톤(보라로 보이지 않게 파랑을 거의 뺀다)
-_TINT_STRENGTH = 0.22
-_LAMP_BORDER = 2
+_CARD_SUBTEXT = (225, 229, 242)  # 카드 위 보조 글자(상수·점수 없음)
+_CARD_DIVIDER = (255, 255, 255, 80)  # 재킷이 끝나는 곳에 긋는 얇은 선(양쪽을 글자 여백만큼 비운다)
+_CARD_OUTLINE = (112, 118, 142)  # 램프가 없는 카드의 기본 외곽선(회색)
+_LAMP_BORDER = 4
 
 # 랭크마다 다른 글자색(2026-10-21): 낮은 쪽은 흐리게, B는 파랑, A는 초록, S는 은색, SS는 주황, SSS는 금색, SSS+는 백금.
 _RANK_COLORS = {
@@ -90,16 +94,7 @@ def _rank_color(rank: str) -> tuple[int, int, int]:
 
 
 def _tinted_panel(code: str | None) -> tuple[int, int, int]:
-    if code == "ULT":
-        return _ULT_PANEL
-    tint = _DIFFICULTY_TINTS.get(code or "")
-    if tint is None:
-        return _PANEL
-
-    def mix(base: int, color: int) -> int:
-        return round(base * (1 - _TINT_STRENGTH) + color * _TINT_STRENGTH)
-
-    return (mix(_PANEL[0], tint[0]), mix(_PANEL[1], tint[1]), mix(_PANEL[2], tint[2]))
+    return _DIFFICULTY_PANELS.get(code or "", _PANEL)
 
 
 # ---------------------------------------------------------------- 글꼴·글자
@@ -114,7 +109,7 @@ def _font(size: int, bold: bool) -> ImageFont.FreeTypeFont | ImageFont.ImageFont
     size = _fs(size)
     override = os.environ.get("YUNI_FONT_BOLD" if bold else "YUNI_FONT_REGULAR")
     primary = _NOTO_BOLD if bold else _NOTO_REGULAR
-    candidates = [(primary, (_KOREAN_FACE, 0)), *((p, (0,)) for p in _FALLBACK_FONTS)]
+    candidates = [(str(_BUNDLED_FONT), (0,)), (primary, (_KOREAN_FACE, 0)), *((p, (0,)) for p in _FALLBACK_FONTS)]
     if override:
         candidates.insert(0, (override, (0,)))
     for path, faces in candidates:
@@ -142,11 +137,16 @@ def _ellipsize(font: ImageFont.FreeTypeFont | ImageFont.ImageFont, text: str, ma
 
 
 def _wrap_two(font: ImageFont.FreeTypeFont | ImageFont.ImageFont, text: str, max_width: int) -> list[str]:
-    """글자 단위로 두 줄까지 나눈다(한글·일본어는 띄어쓰기가 없다). 넘치면 둘째 줄 끝을 줄인다."""
+    """두 줄까지 나눈다. 한글·일본어는 띄어쓰기가 없어 글자 단위로 끊고, 영문 단어 가운데서 넘치면
+    앞 공백에서 끊는다(공백이 없으면 글자 단위). 넘치면 둘째 줄 끝을 줄인다."""
     first = ""
     for index, char in enumerate(text):
         if _width(font, first + char) > max_width:
-            return [first, _ellipsize(font, text[index:], max_width)]
+            if char != " " and first and first[-1].isascii() and not first[-1].isspace() and char.isascii():
+                space = first.rfind(" ")
+                if space > 0:
+                    index, first = space + 1, first[:space]
+            return [first.rstrip(), _ellipsize(font, text[index:].lstrip(), max_width)]
         first += char
     return [first]
 
@@ -393,17 +393,20 @@ def _draw_band(draw: ImageDraw.ImageDraw, width: int, y: int, segment: Segment, 
 
 # ---------------------------------------------------------------- 카드
 
-_JACKET = 190  # 재킷 원본 크기 — 이보다 크게 늘리지 않는다
-_CARD_PAD = 8
-_CARD_W = _JACKET + 2 * _CARD_PAD
+_CARD_W = 206
+_JACKET = _CARD_W  # 재킷은 카드 윗부분을 여백 없이 가득 채운다(재킷 원본은 190이라 조금 키운다)
+_CARD_PAD = 14  # 카드 가장자리에서 글자까지의 여백
+_CHIP_INSET = 8  # 카드 가장자리에서 재킷 위 칩까지의 여백
+_CARD_RADIUS = 12
 _GAP = 12
-_INFO_TOP = _CARD_PAD + _JACKET + 6
+_INFO_TOP = _JACKET + 8
+_CARD_BOTTOM_PAD = 6
 _INFO_LINE = 34
 _TITLE_LINE = 26  # 재킷 안 곡명 줄 높이
 _CARD_VALUE_SIZES = (17, 16, 15, 14)  # 상수·곡 레이팅·점수·랭크가 함께 쓰는 글자 크기 후보(큰 것부터)
 _CARD_VALUE_MIN_SIZE = 13
 _GRADIENT_MAX_ALPHA = 220
-_GRADIENT_EXTRA = 40  # 곡명 줄 위로 더 깔리는 높이(2026-10-21: 22 → 80 → 40)
+_GRADIENT_EXTRA = 80  # 곡명 줄 위로 더 깔리는 높이(2026-10-21: 22 → 80 → 40)
 _MAX_COLUMNS = 10  # 한 줄 카드 수 상한
 
 
@@ -420,7 +423,7 @@ class _CardLines:
 
     @property
     def height(self) -> int:
-        return _INFO_TOP + self.count * _INFO_LINE + _CARD_PAD
+        return _INFO_TOP + self.count * _INFO_LINE + _CARD_BOTTOM_PAD
 
 
 def _card_lines(table: WorkTable) -> _CardLines:
@@ -445,21 +448,62 @@ def _draw_lamp(draw: ImageDraw.ImageDraw, xy: tuple[int, int], row: Row) -> int 
     return _chip(draw, xy, label, _LAMP_COLORS[label], size=11)
 
 
-def _draw_title_over_jacket(canvas: Image.Image, box: tuple[int, int, int, int], title: str) -> None:
-    """재킷 아래쪽에 검은 그라데이션을 깔고 흰 글씨로 곡명을 넣는다(두 줄까지)."""
-    x0, _, x1, y1 = box
+def _draw_title_over_jacket(
+    canvas: Image.Image, box: tuple[int, int, int, int], title: str, background: Image.Image
+) -> None:
+    """재킷 아래쪽에 카드 바탕(무늬 포함)으로 사라지는 그라데이션을 깔고 흰 글씨로 곡명을 넣는다(두 줄까지).
+    `background`는 카드 전체 크기의 바탕 그림이다."""
+    x0, y0, x1, y1 = box
     font = _font(14, True)
-    lines = _wrap_two(font, title, x1 - x0 - 16)
-    height = min(len(lines) * _TITLE_LINE + _GRADIENT_EXTRA, y1 - box[1])
-    gradient = Image.new("RGBA", (x1 - x0, height))
-    pixels = ImageDraw.Draw(gradient)
+    lines = _wrap_two(font, title, x1 - x0 - 2 * _CARD_PAD)
+    height = min(len(lines) * _TITLE_LINE + _GRADIENT_EXTRA, y1 - y0)
+    gradient = background.crop((x0, y1 - height, x1, y1))
+    ramp = Image.new("L", gradient.size, 0)
+    pixels = ImageDraw.Draw(ramp)
     for row in range(height):
-        pixels.line((0, row, x1 - x0, row), fill=(0, 0, 0, round(_GRADIENT_MAX_ALPHA * row / (height - 1))))
+        pixels.line((0, row, x1 - x0, row), fill=round(255 * row / (height - 1)))
+    gradient.putalpha(ramp)
     canvas.alpha_composite(gradient, (x0, y1 - height))
     draw = ImageDraw.Draw(canvas)
     top = y1 - 8 - len(lines) * _TITLE_LINE
     for index, line in enumerate(lines):
-        draw.text((x0 + 8, top + index * _TITLE_LINE), line, font=font, fill=(255, 255, 255))
+        draw.text((x0 + _CARD_PAD, top + index * _TITLE_LINE), line, font=font, fill=(255, 255, 255))
+
+
+_PATTERN_SCALE = 4  # 사선을 매끈하게 그리려고 크게 그려 줄인다
+_PATTERN_LIGHTEN = 0.05  # 사선 오른쪽 면이 밝아지는 정도
+_PATTERN_EDGE = 0.10  # 사선 위의 밝은 선
+
+
+@lru_cache(maxsize=16)
+def _card_background(panel: tuple[int, int, int], height: int) -> Image.Image:
+    """바탕색 위에 사선 하나를 긋고 그 오른쪽을 살짝 밝게 한다(츄니즘 카드의 사선 무늬)."""
+    base = Image.new("RGBA", (_CARD_W, height), (*panel, 255))
+    k = _PATTERN_SCALE
+    # 사선: 재킷 아랫줄(y=_JACKET)에서 카드 폭의 78% 지점, 아래로 갈수록 45도로 왼쪽으로 기운다.
+    top_x, slope = _CARD_W * 0.78, 1.0
+    y_top, y_bottom = 0, height
+    left_top = top_x - slope * (y_top - _JACKET)
+    left_bottom = top_x - slope * (y_bottom - _JACKET)
+    face = Image.new("L", (_CARD_W * k, height * k), 0)
+    ImageDraw.Draw(face).polygon(
+        [(left_top * k, y_top * k), (_CARD_W * k, y_top * k), (_CARD_W * k, y_bottom * k), (left_bottom * k, y_bottom * k)],
+        fill=round(255 * _PATTERN_LIGHTEN),
+    )
+    edge = Image.new("L", face.size, 0)
+    ImageDraw.Draw(edge).line(
+        [(left_top * k, y_top * k), (left_bottom * k, y_bottom * k)], fill=round(255 * _PATTERN_EDGE), width=2 * k
+    )
+    for layer in (face, edge):
+        base = Image.alpha_composite(base, _white_layer(layer.resize(base.size, Image.Resampling.LANCZOS)))
+    return base
+
+
+def _white_layer(alpha: Image.Image) -> Image.Image:
+    """`alpha`만큼 불투명한 흰색 층."""
+    layer = Image.new("RGBA", alpha.size, (255, 255, 255, 0))
+    layer.putalpha(alpha)
+    return layer
 
 
 @lru_cache(maxsize=1)
@@ -470,7 +514,7 @@ def _card_value_size() -> int:
         bold, plain = _font(size, True), _font(size, False)
         score_line = _width(bold, "1,010,000") + _width(bold, "SSS+") + 10
         const_line = _width(plain, "상수 15.5") + _width(bold, "17.00") + 10
-        if max(score_line, const_line) <= _JACKET:
+        if max(score_line, const_line) <= _CARD_W - 2 * _CARD_PAD:
             return size
     return _CARD_VALUE_MIN_SIZE
 
@@ -479,29 +523,37 @@ def _draw_card(
     canvas: Image.Image, origin: tuple[int, int], number: int, table_number: int, row: Row,
     jacket: Image.Image | None, lines: _CardLines,
 ) -> None:
-    draw = ImageDraw.Draw(canvas, "RGBA")
     x, y = origin
+    panel = _tinted_panel(row.cell(tc.DIFFICULTY).text)
+    # 카드를 따로 그려 둥근 모서리로 오려 붙인다 — 재킷이 윗모서리까지 닿는다.
+    background = _card_background(panel, lines.height)
+    card = background.copy()
+    box = (0, 0, _CARD_W, _JACKET)
+    _paste_fit(card, jacket, box)
+    _draw_title_over_jacket(card, box, row.cell(tc.SONG).text, background)
+    ImageDraw.Draw(card, "RGBA").line((_CARD_PAD, _JACKET, _CARD_W - 1 - _CARD_PAD, _JACKET), fill=_CARD_DIVIDER, width=2)
+    mask = Image.new("L", card.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, card.width - 1, card.height - 1), radius=_CARD_RADIUS, fill=255)
+    card.putalpha(ImageChops.multiply(card.getchannel("A"), mask))
+    canvas.alpha_composite(card, (x, y))
+
+    draw = ImageDraw.Draw(canvas, "RGBA")
     lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if row.cell(tc.LAMP).filled else None
     draw.rounded_rectangle(
-        (x, y, x + _CARD_W, y + lines.height), radius=12, fill=_tinted_panel(row.cell(tc.DIFFICULTY).text),
-        outline=_LAMP_COLORS[lamp] if lamp is not None else None, width=_LAMP_BORDER,
+        (x, y, x + _CARD_W - 1, y + lines.height - 1), radius=_CARD_RADIUS,
+        outline=_LAMP_COLORS[lamp] if lamp is not None else _CARD_OUTLINE, width=_LAMP_BORDER,
     )
-    jx, jy = x + _CARD_PAD, y + _CARD_PAD
-    box = (jx, jy, jx + _JACKET, jy + _JACKET)
-    _paste_fit(canvas, jacket, box)
-    _draw_title_over_jacket(canvas, box, row.cell(tc.SONG).text)
-    draw = ImageDraw.Draw(canvas, "RGBA")
-    badge_end = _number_badge(draw, (jx + 4, jy + 4), number, table_number)
-    _draw_lamp(draw, (badge_end + 4, jy + 4), row)
-    _draw_difficulty(draw, (jx + _JACKET - 4, jy + 4), row)
+    badge_end = _number_badge(draw, (x + _CHIP_INSET, y + _CHIP_INSET), number, table_number)
+    _draw_lamp(draw, (badge_end + 4, y + _CHIP_INSET), row)
+    _draw_difficulty(draw, (x + _CARD_W - _CHIP_INSET, y + _CHIP_INSET), row)
 
-    left, right = jx, jx + _JACKET
+    left, right = x + _CARD_PAD, x + _CARD_W - _CARD_PAD
     cy = y + _INFO_TOP
     value_size = _card_value_size()
     if lines.const_rating:
         const = row.cell(tc.CONST)
         if const.text:
-            draw.text((left, cy), f"상수 {const.text}", font=_font(value_size, False), fill=_MUTED)
+            draw.text((left, cy), f"상수 {const.text}", font=_font(value_size, False), fill=_CARD_SUBTEXT)
         rating = row.cell(tc.RATING)
         if rating.filled:
             font = _font(value_size, True)
@@ -513,7 +565,7 @@ def _draw_card(
         if score.filled:
             draw.text((left, cy), score.text, font=_font(value_size, True), fill=_TEXT)
         elif score.text:
-            draw.text((left, cy), score.text, font=_font(value_size, False), fill=_MUTED)
+            draw.text((left, cy), score.text, font=_font(value_size, False), fill=_CARD_SUBTEXT)
         if rank_text:
             font = _font(value_size, True)
             draw.text((right - _width(font, rank_text), cy), rank_text, font=font, fill=_rank_color(rank_text))

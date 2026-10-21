@@ -169,8 +169,8 @@ def test_render_list_splits_at_30() -> None:
     assert len(render.render_pages(_chart_table(31), layout="list", jackets={})) == 2
 
 
-def test_card_jacket_is_not_enlarged_beyond_original() -> None:
-    assert render._JACKET <= 190
+def test_card_jacket_fills_the_card_width() -> None:
+    assert render._JACKET == render._CARD_W
 
 
 def test_missing_and_broken_jackets_draw_placeholders() -> None:
@@ -254,23 +254,20 @@ def test_font_scale_is_one_and_a_half() -> None:
     assert render._fs(14) == 21
 
 
-def test_card_gives_title_gradient_over_bottom_of_jacket() -> None:
-    data = render.render_pages(_chart_table(1), layout="card", jackets={"곡 0": _png("white")})[0][1]
-
-    with Image.open(io.BytesIO(data)) as opened:
-        image = opened.convert("RGB")
-    scale = render.CARD_OUTPUT_SCALE
-    x = round((render._MARGIN + render._CARD_PAD + render._JACKET - 6) * scale)  # 곡명 글자가 닿지 않는 오른쪽 가장자리
-    ys = [y for y in range(image.size[1]) if _is_white(image.getpixel((x, y)))]
-    assert ys, "흰 재킷이 보여야 한다"
-    bottom = image.getpixel((x, ys[0] + round(render._JACKET * scale) - 2))
-    assert isinstance(bottom, tuple) and sum(bottom) < 3 * 255 // 2  # 맨 아래는 검은 그라데이션으로 어둡다
+def test_card_gives_title_gradient_that_fades_into_card_background() -> None:
+    image = _card_png(difficulty="MAS")
+    top = _card_top(image)
+    x = render._MARGIN + render._CARD_W - 20  # 곡명 글자가 닿지 않는 오른쪽 가장자리
+    assert _is_white(image.getpixel((x, top + 40))), "흰 재킷이 보여야 한다"
+    bottom = image.getpixel((x, top + render._JACKET - 2))
+    panel = render._tinted_panel("MAS")
+    assert isinstance(bottom, tuple) and all(abs(c - p) <= 24 for c, p in zip(bottom, panel, strict=True))
 
 
 def test_card_has_two_info_lines_and_height_follows() -> None:
     both = render._card_lines(_chart_table(1))
     assert (both.const_rating, both.score_rank) == (True, True)
-    assert both.height == render._INFO_TOP + 2 * render._INFO_LINE + render._CARD_PAD
+    assert both.height == render._INFO_TOP + 2 * render._INFO_LINE + render._CARD_BOTTOM_PAD
     names_only = render._card_lines(_chart_table(1, scores=False))
     assert (names_only.const_rating, names_only.score_rank) == (True, False)
 
@@ -281,7 +278,7 @@ def test_card_value_size_is_largest_that_fits_or_the_minimum() -> None:
         return max(
             render._width(bold, "1,010,000") + render._width(bold, "SSS+") + 10,
             render._width(plain, "상수 15.5") + render._width(bold, "17.00") + 10,
-        ) <= render._JACKET
+        ) <= render._CARD_W - 2 * render._CARD_PAD
 
     size = render._card_value_size()
 
@@ -401,8 +398,8 @@ def _card_png(difficulty: str = "MAS", lamp: str | None = None, rank: str = "SSS
 
 
 def _card_top(image: Image.Image) -> int:
-    """카드 오른쪽 안쪽 여백 세로줄에서 처음으로 배경과 달라지는 y(= 카드 맨 위)."""
-    x = render._MARGIN + render._CARD_W - 4
+    """카드 위쪽 가장자리 세로줄에서 처음으로 배경과 달라지는 y(= 카드 맨 위, 외곽선)."""
+    x = render._MARGIN + render._CARD_W - 20
     return next(y for y in range(image.height) if image.getpixel((x, y)) != render._BG)
 
 
@@ -414,15 +411,26 @@ def test_every_rank_has_its_own_text_color() -> None:
     assert render._rank_color("???") == render._MUTED
 
 
-def test_card_background_is_tinted_by_difficulty() -> None:
+def test_card_background_is_colored_by_difficulty() -> None:
     colors = {}
     for code in ("BAS", "ADV", "EXP", "MAS", "ULT"):
         image = _card_png(code)
-        colors[code] = image.getpixel((render._MARGIN + render._CARD_W - 4, _card_top(image) + 3))
+        # 사선 왼쪽의 빈 바탕: 외곽선 안쪽, 글자 여백 바깥
+        colors[code] = image.getpixel((render._MARGIN + 7, _card_top(image) + render._JACKET + 40))
+        assert colors[code] == render._tinted_panel(code)
 
     assert len(set(colors.values())) == 5
-    assert all(color != render._PANEL for color in colors.values())
     assert render._tinted_panel(None) == render._PANEL
+
+
+def test_card_has_diagonal_pattern_lighter_on_right_of_the_line() -> None:
+    image = _card_png()
+    y = _card_top(image) + render._JACKET + 40
+    left = image.getpixel((render._MARGIN + 7, y))
+    right = image.getpixel((render._MARGIN + render._CARD_W - 8, y))
+
+    assert isinstance(left, tuple) and isinstance(right, tuple)
+    assert sum(right) > sum(left)
 
 
 @pytest.mark.parametrize("lamp,label", [("FULL COMBO", "FC"), ("ALL JUSTICE", "AJ"), ("AJC", "AJC")])
@@ -439,11 +447,30 @@ def test_lamp_adds_thin_border_with_lamp_color(lamp: str, label: str) -> None:
 
 def test_title_gradient_reaches_higher_up_the_jacket() -> None:
     image = _card_png()
-    x = round(render._MARGIN + render._CARD_PAD + render._JACKET - 6)
-    top = _card_top(image) + render._CARD_PAD
+    x = render._MARGIN + render._CARD_W - 20
+    top = _card_top(image)
     inside = image.getpixel((x, top + render._JACKET - 50))  # 곡명 한 줄 + 22였던 예전 범위(약 48) 밖
     outside = image.getpixel((x, top + render._JACKET - render._TITLE_LINE - render._GRADIENT_EXTRA - 10))
 
     assert isinstance(inside, tuple) and isinstance(outside, tuple)
-    assert sum(inside) < 3 * 250
+    assert min(inside) < 250
     assert min(outside) >= 250  # 그라데이션 위쪽은 재킷 그대로
+
+
+def test_english_titles_wrap_at_spaces() -> None:
+    font = render._font(14, True)
+    width = render._width(font, "Ultra Sonic H")  # "Hearts" 중간에서 넘친다
+
+    assert render._wrap_two(font, "Ultra Sonic Hearts", width) == ["Ultra Sonic", "Hearts"]
+    assert render._wrap_two(font, "ガチャガチャきゅ〜と・ふぃぎゅ@メイト", render._width(font, "ガチャガチャ"))[0] == "ガチャガチャ"
+    assert render._wrap_two(font, "Supercalifragilistic", render._width(font, "Supercal"))[0] == "Supercal"
+
+
+def test_bundled_font_is_used_and_covers_korean_and_japanese() -> None:
+    assert render._BUNDLED_FONT.is_file()
+    font = render._font(14, True)
+    path = getattr(font, "path", "")
+
+    assert str(path).endswith("PretendardJP-Bold.otf")
+    for text in ("상수", "極楽浄土", "ガチャ"):
+        assert render._width(font, text) > 0
