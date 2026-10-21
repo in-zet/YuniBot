@@ -10,6 +10,7 @@ from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 import aiosqlite
+from chuni_penguin.types.lamp import ChainLamp, ClearLamp, ComboLamp
 
 from core.tool_types import ToolContext
 from services.chunithm.records_calc import (
@@ -223,17 +224,32 @@ def _known_min(ratings: list[Decimal | None]) -> Decimal | None:
 
 def _merge_personal_bests(fetch: SyncFetch) -> dict[ChartKey, PersonalBest]:
     """베스트30·신곡20·전체 PB를 (제목, 난이도)로 합친다. 같은 채보가 여러 목록에 있으면
-    점수가 높은 쪽을 쓴다(정상이라면 같은 값이다)."""
+    점수가 높은 쪽을 쓴다. 점수가 같으면 전체 PB 쪽을 쓴다 — 베스트30·신곡20(ratingDetail) 페이지에는
+    램프 이미지가 아예 없어 파서가 FAILED/NONE을 기본값으로 채우므로, 램프는 전체 PB 페이지 것이 맞다
+    (2026-10-21: 이걸 몰라 베스트·신곡 50곡의 램프가 전부 틀렸다)."""
     merged: dict[ChartKey, PersonalBest] = {}
-    sources: list[PersonalBest] = [*fetch.best30, *fetch.new20]
-    for code in _DIFFICULTY_CODES:
-        sources.extend(fetch.all_personal_bests.get(code, []))
-    for pb in sources:
+    for pb in (*fetch.best30, *fetch.new20):
         key = (pb.song.title, _difficulty_code(pb.chart.difficulty))
         existing = merged.get(key)
         if existing is None or pb.score > existing.score:
             merged[key] = pb
+    for code in _DIFFICULTY_CODES:
+        for pb in fetch.all_personal_bests.get(code, []):
+            key = (pb.song.title, _difficulty_code(pb.chart.difficulty))
+            existing = merged.get(key)
+            if existing is None or pb.score >= existing.score:
+                merged[key] = pb
     return merged
+
+
+# 램프 우열(값이 클수록 좋다). 저장 문자열 → 순위. 모르는 문자열은 0.
+_CLEAR_ORDER = {str(lamp): lamp.value for lamp in ClearLamp}
+_COMBO_ORDER = {str(lamp): lamp.value for lamp in ComboLamp}
+_CHAIN_ORDER = {str(lamp): lamp.value for lamp in ChainLamp}
+
+
+def _better_lamp(old: str, new: str, order: dict[str, int]) -> str:
+    return new if order.get(new, 0) > order.get(old, 0) else old
 
 
 def _as_aware(value: datetime) -> datetime:
@@ -432,6 +448,8 @@ class RecordsService:
         for key, pb in merged.items():
             existing = previous_by_key.get(key)
             if existing is not None and pb.score <= existing.score:
+                if pb.score == existing.score:
+                    await self._raise_lamps(player_id, existing, pb)
                 continue
             improved_keys.add(key)
             # 처음 보는 채보(old_score=None)도 이미 있던 채보의 갱신과 똑같이 다룬다 — 최근 이력에서
@@ -783,6 +801,20 @@ class RecordsService:
             ),
         )
         return const, rating
+
+    async def _raise_lamps(self, player_id: str, existing: PbRow, pb: PersonalBest) -> None:
+        """점수가 같은 채보의 램프를 더 좋은 쪽으로만 고친다(내리지 않는다). 점수·세션·시각은 그대로다.
+        예전에 램프 없이 저장된 행(위 `_merge_personal_bests`의 옛 버그)을 다음 동기화가 고친다."""
+        clear = _better_lamp(existing.clear_lamp, str(pb.clear_lamp), _CLEAR_ORDER)
+        combo = _better_lamp(existing.combo_lamp, str(pb.combo_lamp), _COMBO_ORDER)
+        chain = _better_lamp(existing.chain_lamp, str(pb.chain_lamp), _CHAIN_ORDER)
+        if (clear, combo, chain) == (existing.clear_lamp, existing.combo_lamp, existing.chain_lamp):
+            return
+        await self._conn.execute(
+            "UPDATE records_pb SET clear_lamp = ?, combo_lamp = ?, chain_lamp = ? "
+            "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
+            (clear, combo, chain, player_id, _GAME, existing.song_title, existing.difficulty),
+        )
 
     async def _get_or_create_session(self, player_id: str, play_date: date, *, estimated: bool) -> SessionInfo:
         cursor = await self._conn.execute(

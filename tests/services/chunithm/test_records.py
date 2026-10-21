@@ -1040,3 +1040,92 @@ async def test_snapshot_averages_store_unknown_as_not_computable(conn, monkeypat
     assert (row[0], row[1]) == ("17.0216", "계산 불가")
     deltas = await service.rating_deltas(player_id)
     assert deltas is not None and deltas.new20_average is None
+
+
+# ---------------------------------------------------------------------------
+# 램프: ratingDetail(베스트30·신곡20) 페이지에는 램프 이미지가 없다 — 전체 PB 쪽 램프를 써야 한다
+# ---------------------------------------------------------------------------
+
+def test_rating_detail_pages_carry_no_lamps_so_parser_defaults_to_failed_none() -> None:
+    """이 사실이 병합 규칙의 근거다(2026-10-21). 저장본 HTML에서 확인한다."""
+    best30 = _fixture_fetch().best30
+    assert {str(pb.clear_lamp) for pb in best30} == {"FAILED"}
+    assert {str(pb.combo_lamp) for pb in best30} == {"NONE"}
+
+
+def _lamped(pb: PersonalBest, *, clear: ClearLamp, combo: ComboLamp) -> PersonalBest:
+    return dataclasses.replace(pb, clear_lamp=clear, combo_lamp=combo)
+
+
+def test_merge_prefers_all_pb_lamps_on_equal_score() -> None:
+    fetch = _fixture_fetch()
+    frame_pb = fetch.best30[0]
+    full = _lamped(frame_pb, clear=ClearLamp.hard, combo=ComboLamp.full_combo)
+    fetch.all_personal_bests = {"MAS": [full]}
+
+    merged = records_module._merge_personal_bests(fetch)
+
+    key = (frame_pb.song.title, records_module._difficulty_code(frame_pb.chart.difficulty))
+    assert str(merged[key].combo_lamp) == "FULL COMBO"
+    assert str(merged[key].clear_lamp) == "HARD"
+
+
+def test_merge_still_prefers_higher_score_over_lamps() -> None:
+    fetch = _fixture_fetch()
+    frame_pb = fetch.best30[0]
+    older = _lamped(_with_score(frame_pb, frame_pb.score - 100), clear=ClearLamp.hard, combo=ComboLamp.full_combo)
+    fetch.all_personal_bests = {"MAS": [older]}
+
+    merged = records_module._merge_personal_bests(fetch)
+
+    key = (frame_pb.song.title, records_module._difficulty_code(frame_pb.chart.difficulty))
+    assert merged[key].score == frame_pb.score
+
+
+async def test_first_sync_saves_lamps_from_all_personal_bests(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    fetch = _fixture_fetch()
+    frame_pb = fetch.best30[0]
+    fetch.all_personal_bests = {"MAS": [_lamped(frame_pb, clear=ClearLamp.hard, combo=ComboLamp.full_combo)]}
+    _freeze_now(monkeypatch, utc=_T1_UTC, local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+
+    await service.save_sync(player_id, fetch, ctx)
+
+    row = await service.pb_row(player_id, song_title=frame_pb.song.title,
+                               difficulty=records_module._difficulty_code(frame_pb.chart.difficulty))
+    assert row is not None and (row.clear_lamp, row.combo_lamp) == ("HARD", "FULL COMBO")
+
+
+async def test_next_sync_repairs_lamps_of_unchanged_score_without_touching_session_or_time(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    await _baseline(service, player_id, ctx, monkeypatch)  # 램프 없는 옛 저장 상태(프레임만)
+    fetch = _fixture_fetch()
+    frame_pb = fetch.best30[0]
+    key = (frame_pb.song.title, records_module._difficulty_code(frame_pb.chart.difficulty))
+    before = await service.pb_row(player_id, song_title=key[0], difficulty=key[1])
+    assert before is not None and before.combo_lamp == "NONE"
+    fetch.all_personal_bests = {"MAS": [_lamped(frame_pb, clear=ClearLamp.hard, combo=ComboLamp.all_justice)]}
+
+    result = await service.save_sync(player_id, fetch, ctx)
+
+    after = await service.pb_row(player_id, song_title=key[0], difficulty=key[1])
+    assert after is not None
+    assert (after.clear_lamp, after.combo_lamp) == ("HARD", "ALL JUSTICE")
+    assert (after.score, after.session_id, after.updated_at) == (before.score, before.session_id, before.updated_at)
+    assert result.has_new_plays is False
+
+
+async def test_lamp_repair_never_downgrades(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn)
+    fetch = _fixture_fetch()
+    frame_pb = fetch.best30[0]
+    key = (frame_pb.song.title, records_module._difficulty_code(frame_pb.chart.difficulty))
+    fetch.all_personal_bests = {"MAS": [_lamped(frame_pb, clear=ClearLamp.hard, combo=ComboLamp.full_combo)]}
+    _freeze_now(monkeypatch, utc=_T1_UTC, local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+    await service.save_sync(player_id, fetch, ctx)
+    _freeze_now(monkeypatch, utc=_T2_UTC, local=datetime(2026, 10, 13, 21, 0, tzinfo=UTC))
+
+    await service.save_sync(player_id, _fixture_fetch(), ctx)  # 이번엔 램프 없는 프레임만
+
+    row = await service.pb_row(player_id, song_title=key[0], difficulty=key[1])
+    assert row is not None and (row.clear_lamp, row.combo_lamp) == ("HARD", "FULL COMBO")
