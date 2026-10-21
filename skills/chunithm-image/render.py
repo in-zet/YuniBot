@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from core.tables import Row, WorkTable, table_file_name
 from services.chunithm import table_columns as tc
@@ -74,19 +74,18 @@ _DIFFICULTY_PANELS = {
     "ULT": (40, 10, 14),
     "WE": (104, 42, 86),
 }
-_CARD_SUBTEXT = (225, 229, 242)  # 카드 위 보조 글자(상수·점수 없음)
+_CARD_SUBTEXT = (177, 183, 196)  # 카드 위 보조 글자(상수·점수 없음)
 _CARD_DIVIDER = (255, 255, 255, 80)  # 재킷이 끝나는 곳에 긋는 얇은 선(양쪽을 글자 여백만큼 비운다)
 _CARD_OUTLINE = (112, 118, 142)  # 램프가 없는 카드의 기본 외곽선(회색)
 _LAMP_BORDER = 4
 
-# 랭크마다 다른 글자색(2026-10-21): 낮은 쪽은 흐리게, B는 파랑, A는 초록, S는 은색, SS는 주황, SSS는 금색, SSS+는 백금.
+# 랭크 글자색(2026-10-21 결정): 기본은 흰색. 트리플(SSS)은 하늘색, 트플플(SSS+)은 거기에 초록을 반 섞은 민트색,
+# AAA 이하(S 미만)는 회색. 모든 값은 시제품을 보며 사용자가 고른 것이다.
+_RANK_WHITE = _TEXT
 _RANK_COLORS = {
-    "D": (125, 125, 140), "C": (165, 125, 100),
-    "B": (100, 140, 220), "BB": (95, 165, 230), "BBB": (90, 195, 235),
-    "A": (100, 200, 130), "AA": (140, 210, 100), "AAA": (190, 220, 80),
-    "S": (205, 210, 225), "S+": (235, 235, 250),
-    "SS": (255, 170, 90), "SS+": (255, 135, 100),
-    "SSS": (255, 208, 60), "SSS+": (130, 235, 255),
+    "SSS+": (138, 242, 202), "SSS": (176, 230, 255),
+    "SS+": _RANK_WHITE, "SS": _RANK_WHITE, "S+": _RANK_WHITE, "S": _RANK_WHITE,
+    **dict.fromkeys(("AAA", "AA", "A", "BBB", "BB", "B", "C", "D"), (156, 164, 184)),
 }
 
 
@@ -341,24 +340,49 @@ def rating_tier(rating: str) -> tuple[str, tuple[int, int, int] | None] | None:
     return None
 
 
-def _rainbow(size: tuple[int, int], *, saturation: float, shift: float = 0.0) -> Image.Image:
-    """왼쪽 위에서 오른쪽 아래로 빨강 → 보라로 이어지는 사선 무지개."""
+_RAINBOW_PASTEL = (0.38, 1.0)  # 무지개(16.xx): 채도, 밝기 — 파스텔
+_RAINBOW_EXTREME = (0.72, 0.9)  # 무지개·극(17.xx): 채도, 밝기 — 원색보다 한 단계 눅인 짙은 무지개
+_EXTREME_HIGHLIGHT = 95  # 극무지개 글자 윗부분에 섞는 흰색의 최대 세기(0~255), 가독성용
+_EXTREME_HIGHLIGHT_SPAN = 0.55  # 흰색이 사라지는 지점(글자 높이에 대한 비율)
+
+
+def _rainbow(
+    size: tuple[int, int], box: tuple[int, int, int, int], *, saturation: float, value: float, vertical: bool
+) -> Image.Image:
+    """`box`(글자 영역) 안에서 빨강 → 보라로 이어지는 무지개. 무지개는 사선, 극은 수직."""
     width, height = size
+    x0, y0, x1, y1 = box
+    box_width, box_height = max(x1 - x0, 1), max(y1 - y0, 1)
     image = Image.new("RGB", size)
     pixels = image.load()
     assert pixels is not None
-    span = width + height * 0.6
     for x in range(width):
         for y in range(height):
-            hue = (0.92 * ((x + y * 0.6) / span) + shift) % 1.0
-            red, green, blue = colorsys.hsv_to_rgb(hue, saturation, 1.0)
+            if vertical:
+                fraction = (y - y0) / box_height
+            else:
+                fraction = ((x - x0) + (y - y0) * 0.6) / (box_width + box_height * 0.6)
+            hue = 0.92 * min(max(fraction, 0.0), 1.0)
+            red, green, blue = colorsys.hsv_to_rgb(hue, saturation, value)
             pixels[x, y] = (round(red * 255), round(green * 255), round(blue * 255))
     return image
 
 
+def _highlight_top(fill: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
+    """글자 윗부분에 흰색을 살짝 섞는다(위로 갈수록 세게)."""
+    _, y0, _, y1 = box
+    span = max((y1 - y0) * _EXTREME_HIGHLIGHT_SPAN, 1)
+    ramp = Image.new("L", fill.size, 0)
+    drawing = ImageDraw.Draw(ramp)
+    for y in range(fill.height):
+        strength = _EXTREME_HIGHLIGHT if y < y0 else round(_EXTREME_HIGHLIGHT * max(0.0, 1 - (y - y0) / span))
+        drawing.line((0, y, fill.width, y), fill=strength)
+    return Image.composite(Image.new("RGB", fill.size, (255, 255, 255)), fill, ramp)
+
+
 def _draw_rating_value(canvas: Image.Image, xy: tuple[int, int], text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> None:
-    """레이팅 숫자를 단계 색으로 그린다. 모든 단계에 어두운 테두리, 무지개는 무지개 그라데이션 글자,
-    극은 거기에 번짐을 더한다."""
+    """레이팅 숫자를 단계 색으로 그린다. 모든 단계에 어두운 테두리, 무지개는 파스텔 사선 그라데이션 글자,
+    극무지개는 짙은 수직 그라데이션에 윗부분을 살짝 밝힌 글자(번짐 없음)."""
     tier = rating_tier(text)
     x, y = xy
     if tier is None:
@@ -372,13 +396,13 @@ def _draw_rating_value(canvas: Image.Image, xy: tuple[int, int], text: str, font
     size = (_width(font, text) + 2 * pad, _fs(40) + 12 + 2 * pad)
     mask = Image.new("L", size, 0)
     ImageDraw.Draw(mask).text((pad, pad), text, font=font, fill=255)
-    if extreme:
-        glow = mask.filter(ImageFilter.GaussianBlur(7)).point([min(255, value * 2) * 6 // 10 for value in range(256)])
-        canvas.paste(_rainbow(size, saturation=0.9, shift=0.15), (x - pad, y - pad), glow)
+    box = mask.getbbox() or (0, 0, *size)
     outline = Image.new("L", size, 0)
     ImageDraw.Draw(outline).text((pad, pad), text, font=font, fill=255, stroke_width=2, stroke_fill=255)
     canvas.paste(Image.new("RGB", size, _RATING_OUTLINE), (x - pad, y - pad), outline)
-    canvas.paste(_rainbow(size, saturation=0.85 if extreme else 0.7), (x - pad, y - pad), mask)
+    saturation, value = _RAINBOW_EXTREME if extreme else _RAINBOW_PASTEL
+    fill = _rainbow(size, box, saturation=saturation, value=value, vertical=extreme)
+    canvas.paste(_highlight_top(fill, box) if extreme else fill, (x - pad, y - pad), mask)
 
 
 def _draw_final_rating(canvas: Image.Image, width: int, rating: str, y: int) -> tuple[int, int]:

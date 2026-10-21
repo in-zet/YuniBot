@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 import importlib.util
 import io
 import sys
@@ -403,12 +404,22 @@ def _card_top(image: Image.Image) -> int:
     return next(y for y in range(image.height) if image.getpixel((x, y)) != render._BG)
 
 
-def test_every_rank_has_its_own_text_color() -> None:
-    ranks = ["D", "C", "B", "BB", "BBB", "A", "AA", "AAA", "S", "S+", "SS", "SS+", "SSS", "SSS+"]
-    colors = [render._rank_color(rank) for rank in ranks]
+def test_rank_text_colors_follow_the_chosen_scheme() -> None:
+    white = render._TEXT
+    gray = render._rank_color("AAA")
 
-    assert len(set(colors)) == len(ranks)
+    assert render._rank_color("SSS+") != render._rank_color("SSS")
+    assert render._rank_color("SSS+")[1] > render._rank_color("SSS+")[0]  # 하늘색에 초록을 섞은 민트: G가 R보다 크다
+    assert render._rank_color("SSS")[2] == 255 and render._rank_color("SSS") != white  # 하늘색
+    assert all(render._rank_color(rank) == white for rank in ("SS+", "SS", "S+", "S"))
+    assert all(render._rank_color(rank) == gray for rank in ("AAA", "AA", "A", "BBB", "BB", "B", "C", "D"))
+    assert sum(gray) < sum(white)
     assert render._rank_color("???") == render._MUTED
+
+
+def test_const_and_missing_score_share_the_card_subtext_color() -> None:
+    assert sum(render._CARD_SUBTEXT) < sum(render._TEXT)
+    assert render._CARD_SUBTEXT != render._rank_color("AAA")  # 상수는 AAA 이하 랭크보다 밝은 회색
 
 
 def test_card_background_is_colored_by_difficulty() -> None:
@@ -520,8 +531,47 @@ def test_solid_tier_uses_one_hue_but_rainbow_uses_many() -> None:
     rainbow = _colors_in_rating_area(_rating_header("16.50"))
 
     assert len(rainbow) > 3 * len(gold)
-    assert any(pixel[0] > 200 for pixel in rainbow) and any(pixel[2] > 200 for pixel in rainbow)
 
 
-def test_extreme_rainbow_differs_from_plain_rainbow() -> None:
-    assert _colors_in_rating_area(_rating_header("17.00")) != _colors_in_rating_area(_rating_header("16.99"))
+def _hsv_samples(image: Image.Image) -> list[tuple[float, float, float]]:
+    area = image.crop((image.width - render._MARGIN - 200, 30, image.width - render._MARGIN, 100))
+    samples: list[tuple[float, float, float]] = []
+    for x in range(area.width):
+        for y in range(area.height):
+            pixel = area.getpixel((x, y))
+            if isinstance(pixel, tuple) and len(pixel) == 3 and max(pixel) > 150:
+                samples.append(colorsys.rgb_to_hsv(pixel[0] / 255, pixel[1] / 255, pixel[2] / 255))
+    return samples
+
+
+def _mean_saturation(image: Image.Image) -> float:
+    samples = _hsv_samples(image)
+    return sum(saturation for _, saturation, _ in samples) / len(samples)
+
+
+def test_extreme_rainbow_is_more_saturated_than_pastel_rainbow() -> None:
+    pastel = _rating_header("16.99")
+    extreme = _rating_header("17.00")
+
+    assert _mean_saturation(extreme) > _mean_saturation(pastel) + 0.15
+    assert len({round(hue, 1) for hue, _, _ in _hsv_samples(extreme)}) >= 6  # 빨강~보라가 다 나온다
+
+
+def test_rainbow_gradient_directions_differ() -> None:
+    size, box = (100, 60), (0, 0, 100, 60)
+    diagonal = render._rainbow(size, box, saturation=1.0, value=1.0, vertical=False)
+    vertical = render._rainbow(size, box, saturation=1.0, value=1.0, vertical=True)
+
+    assert vertical.getpixel((0, 30)) == vertical.getpixel((99, 30))  # 수직은 가로로 같은 색
+    assert diagonal.getpixel((0, 30)) != diagonal.getpixel((99, 30))  # 사선은 가로로 색이 바뀐다
+    assert vertical.getpixel((50, 2)) != vertical.getpixel((50, 57))
+
+
+def test_extreme_rainbow_top_is_lightened_but_has_no_glow() -> None:
+    size, box = (100, 60), (0, 10, 100, 50)
+    base = render._rainbow(size, box, saturation=0.72, value=0.9, vertical=True)
+    lit = render._highlight_top(base, box)
+
+    assert sum(lit.getpixel((50, 12))) > sum(base.getpixel((50, 12)))  # 윗부분은 밝아진다
+    assert lit.getpixel((50, 49)) == base.getpixel((50, 49))  # 아랫부분은 그대로
+    assert not hasattr(render, "ImageFilter")  # 번짐(블러) 효과는 쓰지 않는다
