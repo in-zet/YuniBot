@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import colorsys
 import io
 import logging
 import os
@@ -15,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, ImageChops, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from core.tables import Row, WorkTable, table_file_name
 from services.chunithm import table_columns as tc
@@ -312,6 +313,74 @@ def _header_lines(table: WorkTable, profile: HeaderProfile | None) -> tuple[str 
     return title, details, steps
 
 
+# 플레이어 레이팅 색 단계(게임 안내표 기준, 2026-10-21 사용자 제공 그림). 아래 값부터 그 색. 색값은 그림을 눈으로 옮긴 것.
+_RATING_TIERS: tuple[tuple[float, str, tuple[int, int, int] | None], ...] = (
+    (17.0, "무지개·극", None),
+    (16.0, "무지개", None),
+    (15.25, "백금", (250, 240, 200)),
+    (14.5, "금", (250, 206, 58)),
+    (13.25, "은", (190, 226, 242)),
+    (12.0, "동", (226, 132, 42)),
+    (10.0, "자주", (234, 92, 204)),
+    (7.0, "빨강", (238, 86, 96)),
+    (4.0, "주황", (250, 184, 36)),
+    (0.0, "초록", (112, 232, 52)),
+)
+_RATING_OUTLINE = (28, 22, 20)  # 게임 숫자처럼 모든 단계의 글자에 두르는 어두운 테두리
+
+
+def rating_tier(rating: str) -> tuple[str, tuple[int, int, int] | None] | None:
+    """레이팅 글자("17.0024")의 색 단계 이름과 단색(무지개 계열은 None). 숫자가 아니면 None."""
+    try:
+        value = float(rating)
+    except ValueError:
+        return None
+    for floor, name, color in _RATING_TIERS:
+        if value >= floor:
+            return name, color
+    return None
+
+
+def _rainbow(size: tuple[int, int], *, saturation: float, shift: float = 0.0) -> Image.Image:
+    """왼쪽 위에서 오른쪽 아래로 빨강 → 보라로 이어지는 사선 무지개."""
+    width, height = size
+    image = Image.new("RGB", size)
+    pixels = image.load()
+    assert pixels is not None
+    span = width + height * 0.6
+    for x in range(width):
+        for y in range(height):
+            hue = (0.92 * ((x + y * 0.6) / span) + shift) % 1.0
+            red, green, blue = colorsys.hsv_to_rgb(hue, saturation, 1.0)
+            pixels[x, y] = (round(red * 255), round(green * 255), round(blue * 255))
+    return image
+
+
+def _draw_rating_value(canvas: Image.Image, xy: tuple[int, int], text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> None:
+    """레이팅 숫자를 단계 색으로 그린다. 모든 단계에 어두운 테두리, 무지개는 무지개 그라데이션 글자,
+    극은 거기에 번짐을 더한다."""
+    tier = rating_tier(text)
+    x, y = xy
+    if tier is None:
+        ImageDraw.Draw(canvas).text(xy, text, font=font, fill=_TEXT)
+        return
+    if tier[1] is not None:
+        ImageDraw.Draw(canvas).text(xy, text, font=font, fill=tier[1], stroke_width=2, stroke_fill=_RATING_OUTLINE)
+        return
+    extreme = tier[0] == "무지개·극"
+    pad = 14
+    size = (_width(font, text) + 2 * pad, _fs(40) + 12 + 2 * pad)
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).text((pad, pad), text, font=font, fill=255)
+    if extreme:
+        glow = mask.filter(ImageFilter.GaussianBlur(7)).point([min(255, value * 2) * 6 // 10 for value in range(256)])
+        canvas.paste(_rainbow(size, saturation=0.9, shift=0.15), (x - pad, y - pad), glow)
+    outline = Image.new("L", size, 0)
+    ImageDraw.Draw(outline).text((pad, pad), text, font=font, fill=255, stroke_width=2, stroke_fill=255)
+    canvas.paste(Image.new("RGB", size, _RATING_OUTLINE), (x - pad, y - pad), outline)
+    canvas.paste(_rainbow(size, saturation=0.85 if extreme else 0.7), (x - pad, y - pad), mask)
+
+
 def _draw_final_rating(canvas: Image.Image, width: int, rating: str, y: int) -> tuple[int, int]:
     """머리말 오른쪽 끝에 최종 레이팅을 크게 그린다. (왼쪽 끝 x, 아래 끝 y)를 돌려준다."""
     draw = ImageDraw.Draw(canvas)
@@ -320,7 +389,7 @@ def _draw_final_rating(canvas: Image.Image, width: int, rating: str, y: int) -> 
     right = width - _MARGIN
     draw.text((right - _width(label_font, "RATING"), y), "RATING", font=label_font, fill=_MUTED)
     value_y = y + _fs(13) + 4
-    draw.text((right - value_width, value_y), rating, font=font, fill=_TEXT)
+    _draw_rating_value(canvas, (right - value_width, value_y), rating, font)
     return right - max(value_width, _width(label_font, "RATING")), value_y + _fs(40) + 8
 
 

@@ -474,3 +474,54 @@ def test_bundled_font_is_used_and_covers_korean_and_japanese() -> None:
     assert str(path).endswith("PretendardJP-Bold.otf")
     for text in ("상수", "極楽浄土", "ガチャ"):
         assert render._width(font, text) > 0
+
+
+@pytest.mark.parametrize(
+    "rating,name",
+    [("0.00", "초록"), ("3.99", "초록"), ("4.00", "주황"), ("6.99", "주황"), ("7.00", "빨강"), ("10.00", "자주"),
+     ("11.99", "자주"), ("12.00", "동"), ("13.24", "동"), ("13.25", "은"), ("14.49", "은"), ("14.50", "금"),
+     ("15.24", "금"), ("15.25", "백금"), ("15.99", "백금"), ("16.00", "무지개"), ("16.99", "무지개"),
+     ("17.00", "무지개·극"), ("17.0024", "무지개·극")],
+)
+def test_rating_tier_names_follow_chunithm_table(rating: str, name: str) -> None:
+    tier = render.rating_tier(rating)
+
+    assert tier is not None and tier[0] == name
+    assert (tier[1] is None) == name.startswith("무지개")
+
+
+def test_rating_tier_is_none_for_non_numbers() -> None:
+    assert render.rating_tier("-") is None
+    assert render.rating_tier("") is None
+
+
+def _rating_header(rating: str) -> Image.Image:
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, tc.SONG)
+    builder.summary({"레이팅": rating})
+    builder.row(tc.chart_ref("곡 0", "MAS"), {tc.SONG: tc.song_cell("곡 0")})
+    (_, data), = render.render_pages(builder.build(), layout="list", jackets={})
+    return Image.open(io.BytesIO(data)).convert("RGB")
+
+
+def _colors_in_rating_area(image: Image.Image) -> set[tuple[int, int, int]]:
+    area = image.crop((image.width - render._MARGIN - 200, 30, image.width - render._MARGIN, 100))
+    colors: set[tuple[int, int, int]] = set()
+    for x in range(area.width):
+        for y in range(area.height):
+            pixel = area.getpixel((x, y))
+            if isinstance(pixel, tuple) and len(pixel) == 3 and max(pixel) > 150:
+                colors.add((pixel[0], pixel[1], pixel[2]))
+    return colors
+
+
+def test_solid_tier_uses_one_hue_but_rainbow_uses_many() -> None:
+    gold = _colors_in_rating_area(_rating_header("14.60"))
+    rainbow = _colors_in_rating_area(_rating_header("16.50"))
+
+    assert len(rainbow) > 3 * len(gold)
+    assert any(pixel[0] > 200 for pixel in rainbow) and any(pixel[2] > 200 for pixel in rainbow)
+
+
+def test_extreme_rainbow_differs_from_plain_rainbow() -> None:
+    assert _colors_in_rating_area(_rating_header("17.00")) != _colors_in_rating_area(_rating_header("16.99"))
