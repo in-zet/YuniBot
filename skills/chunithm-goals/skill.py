@@ -35,6 +35,7 @@ from core.tool_types import (
 )
 from services.chunithm import table_columns as tc
 from services.chunithm.chart_ref import ResolvedChart
+from services.chunithm.rating_format import rating_delta_text, rating_text
 from services.chunithm.records import PbRow, RatingDeltas
 from services.chunithm.records_calc import chart_rating
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
@@ -1109,7 +1110,7 @@ async def _goal_progress(ctx: ToolContext, goal_id: str) -> ToolResult:
 
     if goal.kind == GoalKind.RATING.value and show_progress:
         projected = await _project_rating_for(ctx, goal.player_id)
-        data["projected_rating"] = str(projected) if projected is not None else None
+        data["projected_rating"] = rating_text(projected) if projected is not None else None
         if projected is not None:
             lines.append(f"곡별 목표를 모두 달성하면 예상 레이팅 {calc.truncate4(projected)}")
 
@@ -1401,8 +1402,8 @@ async def _rating_goal_block(
     ratio, label = await _record_progress_and_maybe_complete(ctx, goal, sync_id, current)
     target = _dec(goal.target_value)
     remaining = calc.truncate4(calc.rating_remaining(current, target))
-    change = calc.value_change(current, _previous_metric_value(deltas, metric))
-    change_text = _NO_PREVIOUS if change is None else f"이번 동기화 {change:+}"
+    previous = _previous_metric_value(deltas, metric)
+    change_text = _NO_PREVIOUS if previous is None else f"이번 동기화 {rating_delta_text(current, previous)}"
     lines = [
         f"최종 목표 {calc.truncate4(target)}",
         (
@@ -1414,8 +1415,8 @@ async def _rating_goal_block(
         completed.append(label)
         lines.append(f"달성  {label}")
     data = {
-        "goal_id": goal.id, "target": str(target), "current": str(current), "remaining": str(remaining),
-        "change": str(change) if change is not None else None, "achievement_ratio": str(ratio),
+        "goal_id": goal.id, "target": rating_text(target), "current": rating_text(current), "remaining": rating_text(remaining),
+        "change": rating_delta_text(current, previous) if previous is not None else None, "achievement_ratio": str(ratio),
     }
     return lines, data
 

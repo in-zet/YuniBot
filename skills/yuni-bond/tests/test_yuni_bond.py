@@ -240,9 +240,9 @@ async def test_rating_milestone_gives_the_remaining_amount_computed_in_code(
     section = await skill.on_sync_completed(_ctx(db, records=records), _payload())
 
     assert section is not None
-    assert section.data["rating_milestone"] == "16.25"
-    assert section.data["next_milestone"] == "16.50"
-    assert section.data["remaining_to_next"] == "0.24"
+    assert section.data["rating_milestone"] == "16.2500"
+    assert section.data["next_milestone"] == "16.5000"
+    assert section.data["remaining_to_next"] == "0.2400"
     assert "16.25" in (section.hint or "")
 
 
@@ -268,7 +268,7 @@ async def test_a_higher_milestone_reports_the_days_since_the_previous_one(
     section = await skill.on_sync_completed(_ctx(db, records=records), _payload())
 
     assert section is not None
-    assert section.data["rating_milestone"] == "16.50"
+    assert section.data["rating_milestone"] == "16.5000"
     assert section.data["days_since_previous_milestone"] == 10
 
 

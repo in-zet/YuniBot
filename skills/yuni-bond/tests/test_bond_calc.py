@@ -41,9 +41,10 @@ def test_milestone_is_unknown_when_a_rating_is_unknown() -> None:
 def test_next_milestone_and_remaining_round_the_remaining_up() -> None:
     assert calc.next_milestone(Decimal("16.26")) == Decimal("16.50")
     assert calc.next_milestone(Decimal("16.25")) == Decimal("16.50")
-    assert calc.remaining_to(Decimal("16.50"), Decimal("16.26")) == Decimal("0.24")
-    # 모자라게 말하지 않도록 올린다: 0.2401이 남았으면 0.25.
-    assert calc.remaining_to(Decimal("16.50"), Decimal("16.2599")) == Decimal("0.25")
+    assert calc.remaining_to(Decimal("16.50"), Decimal("16.26")) == Decimal("0.2400")
+    # 모자라게 말하지 않도록 넷째 자리에서 올린다: 0.24009가 남았으면 0.2401.
+    assert calc.remaining_to(Decimal("16.50"), Decimal("16.25991")) == Decimal("0.2401")
+    assert str(calc.remaining_to(Decimal("16.50"), Decimal("16.26"))) == "0.2400"
 
 
 @pytest.mark.parametrize(

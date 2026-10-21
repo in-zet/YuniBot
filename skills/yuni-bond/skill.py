@@ -26,6 +26,7 @@ from core.tool_types import (
     ToolResult,
 )
 from services.chunithm import table_columns as tc
+from services.chunithm.rating_format import rating_text
 from services.chunithm.songdb import SongRecord
 from services.common.arcades import Arcade
 
@@ -249,16 +250,16 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         recorded = await _rating_milestones(db, player_id)
         is_new_high = boundary is not None and (not recorded or boundary > recorded[0][0])
         if boundary is not None and is_new_high and await _record_event(
-            db, player_id=player_id, kind=_RATING, occurred_on=today_iso, value=str(boundary)
+            db, player_id=player_id, kind=_RATING, occurred_on=today_iso, value=rating_text(boundary)
         ):
             following = calc.next_milestone(deltas.computed_rating)
             data.update(
-                rating_milestone=str(boundary), next_milestone=str(following),
-                remaining_to_next=str(calc.remaining_to(following, deltas.computed_rating)),
+                rating_milestone=rating_text(boundary), next_milestone=rating_text(following),
+                remaining_to_next=rating_text(calc.remaining_to(following, deltas.computed_rating)),
             )
             if recorded:
                 data["days_since_previous_milestone"] = calc.days_between(recorded[0][1], today_iso)
-            hints.append(f"레이팅 {boundary} 돌파, 다음 {following}까지 {data['remaining_to_next']} 남음")
+            hints.append(f"레이팅 {rating_text(boundary)} 돌파, 다음 {rating_text(following)}까지 {data['remaining_to_next']} 남음")
 
     kept = await _expire_and_close_promises(db, player_id, updated_titles=updated_titles, today=today_iso)
     if kept:
@@ -391,7 +392,7 @@ def _event_line(item: dict[str, Any]) -> str:
     if kind == _RANK_FIRST:
         return f"{chart}  {item['rank']} 첫 달성  {item['date_label']}{taken}"
     if kind == _RATING:
-        return f"레이팅 {item['rating']} 돌파  {item['date_label']}"
+        return f"레이팅 {rating_text(item['rating'])} 돌파  {item['date_label']}"
     if kind == _GOAL_DONE:
         return f"To-Do 달성  {item['goal']}  {item['date_label']}{taken}"
     return (
@@ -471,7 +472,7 @@ def _event_detail_cell(item: dict[str, Any]) -> Any:
     elif kind == _RANK_FIRST:
         text = f"{item['rank']}{taken}"
     elif kind == _RATING:
-        text = f"{item['rating']}"
+        text = rating_text(item["rating"])
     elif kind == _GOAL_DONE:
         text = f"{item['goal']}{taken}"
     else:

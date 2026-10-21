@@ -1179,9 +1179,9 @@ async def test_on_sync_completed_shows_rating_goal_remaining_and_change(skill: M
     assert section is not None
     content = section.display.content or ""
     assert "최종 목표 17.00" in content
-    assert "현재 16.9000 · 남은 레이팅 0.1000 · 이번 동기화 +0.10 · 달성률 50.00%" in content
+    assert "현재 16.9000 · 남은 레이팅 0.1000 · 이번 동기화 +0.1000 · 달성률 50.00%" in content
     assert section.data["rating_goal"]["remaining"] == "0.1000"
-    assert section.data["rating_goal"]["change"] == "0.10"
+    assert section.data["rating_goal"]["change"] == "+0.1000"
 
 
 # ---------------------------------------------------------------- Step 6: on_song_viewed
@@ -1294,7 +1294,7 @@ async def test_progress_projects_rating_with_todos(skill: ModuleType, db: aiosql
 
     result = await skill.progress(ctx, rating_goal.data["goal_id"])
     assert result.error is None
-    assert result.data["projected_rating"] == "7.85"
+    assert result.data["projected_rating"] == "7.8500"
     assert result.display is not None and "예상 레이팅 7.85" in (result.display.content or "")
 
 

@@ -33,8 +33,8 @@ def next_milestone(current: Decimal) -> Decimal:
 
 
 def remaining_to(boundary: Decimal, current: Decimal) -> Decimal:
-    """경계까지 남은 레이팅. 모자라게 말하지 않도록 둘째 자리에서 올린다."""
-    return (boundary - current).quantize(Decimal("0.01"), rounding=ROUND_CEILING)
+    """경계까지 남은 레이팅. 모자라게 말하지 않도록 넷째 자리에서 올린다."""
+    return (boundary - current).quantize(Decimal("0.0001"), rounding=ROUND_CEILING)
 
 
 def rank_tiers_reached(old_rank: str | None, new_rank: str) -> list[str]:
