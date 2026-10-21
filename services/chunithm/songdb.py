@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,14 @@ _SEED_PATH = (
 _LINKED_VERSE_PATH = Path(__file__).parent / "data" / "linked_verse.yaml"
 _MAX_CANDIDATES = 8
 _CHART_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
+
+# 수록 버전 이름을 출시 순서(오래된 것부터)로 나열한 것. 곡 DB의 `version` 값과 철자가 같다. 작업 표의 버전 칸이
+# 이 순서로 정렬·묶기·비교한다. 목록에 없는 새 버전은 정렬에서 값 없음으로 취급되므로 새 버전이 나오면 끝에 더한다.
+VERSION_ORDER: tuple[str, ...] = (
+    "CHUNITHM", "CHUNITHM PLUS", "AIR", "AIR PLUS", "STAR", "STAR PLUS", "AMAZON", "AMAZON PLUS",
+    "CRYSTAL", "CRYSTAL PLUS", "PARADISE", "PARADISE LOST", "Mate", "NEW", "NEW PLUS", "SUN", "SUN PLUS",
+    "LUMINOUS", "LUMINOUS PLUS", "VERSE", "X-VERSE", "X-VERSE-X",
+)
 
 # terms.resolve_difficulty()가 돌려주는 정식 긴 이름("MASTER")을 이 서비스가 쓰는
 # 짧은 코드("MAS")로 바꾼다. chart_ref.py도 이 매핑을 그대로 쓴다(중복 정의하지 않는다).
@@ -392,12 +401,13 @@ class SongDbService:
         max_const: float | None = None,
         level: str | None = None,
         version: str | None = None,
-        difficulty: str | None = None,
+        difficulty: str | Collection[str] | None = None,
         min_note_count: int | None = None,
         max_note_count: int | None = None,
         new_only: bool = False,
     ) -> list[ConstRangeHit]:
-        """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 AND로 겹쳐 찾는다.
+        """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 AND로 겹쳐 찾는다. difficulty는
+        짧은 코드 하나거나 여러 개("MAS"와 "ULT")이고, 여러 개면 그중 어느 난이도든 맞는 채보를 찾는다.
         find_by_const/find_by_level/find_by_version은 각각 조건 하나(+난이도)만 받아서
         "15.0~15.2 상수 중 노트 수 1000개 이상"처럼 조건을 두 개 이상 동시에 거는 질문을
         못 받는다 — 그걸 위한 것이다. 준 조건만 보고 안 준 건 거르지 않는다. 조건을 하나도
@@ -407,13 +417,14 @@ class SongDbService:
 
         순서는 상수 오름차순, 상수를 모르는 채보는 뒤, 같으면 제목순으로 고정이다. 다른 순서는
         표를 받은 `table_query`가 맡는다(2026-10-20 작업 표)."""
+        wanted = [difficulty] if isinstance(difficulty, str) else None if difficulty is None else list(dict.fromkeys(difficulty))
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():
             if title not in self._available_intl or (new_only and not song.is_new):
                 continue
             if version is not None and song.version != version:
                 continue
-            codes = [difficulty] if difficulty is not None else list(song.charts)
+            codes = wanted if wanted is not None else list(song.charts)
             for code in codes:
                 chart = song.charts.get(code)
                 if chart is None or not chart.is_available:

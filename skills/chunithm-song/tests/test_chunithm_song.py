@@ -10,7 +10,7 @@ from core.events import EventBus, Section
 from core.tables import WorkTable
 from core.tool_types import Display, ToolContext
 from services.chunithm import table_columns as tc
-from services.chunithm.songdb import SongDbService
+from services.chunithm.songdb import VERSION_ORDER, SongDbService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CTX_NO_GUILD = ToolContext(player_id="p1", tags=frozenset(), services={}, event_bus=EventBus())
@@ -305,6 +305,39 @@ async def test_find_songs_orders_by_const_then_title_with_unknown_last() -> None
     assert table is not None
     keys = [(row.cell(tc.CONST).raw, row.cell(tc.SONG).raw) for row in table.rows]
     assert keys == sorted(keys)
+
+
+async def test_find_songs_two_difficulties_gives_both_and_shows_them_in_steps() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    ctx = _ctx_with_songdb(songdb)
+
+    result = await skill.find_songs(
+        ctx, min_const=14.0, difficulty=_resolved_difficulty("MASTER"), other_difficulty=_resolved_difficulty("ULTIMA"),
+    )
+
+    table = result.table
+    assert table is not None
+    assert {row.cell(tc.DIFFICULTY).text for row in table.rows} == {"MAS", "ULT"}
+    assert "MAS·ULT" in table.steps[0]
+    only_other = await skill.find_songs(ctx, min_const=14.0, other_difficulty=_resolved_difficulty("ULTIMA"))
+    assert only_other.table is not None
+    assert {row.cell(tc.DIFFICULTY).text for row in only_other.table.rows} == {"ULT"}
+
+
+async def test_version_column_sorts_in_release_order() -> None:
+    from core.tables import select_rows
+
+    skill = _load_skill()
+    result = await skill.find_songs(
+        _ctx_with_songdb(SongDbService()), min_const=15.0, difficulty=_resolved_difficulty("MASTER"),
+    )
+    assert result.table is not None
+    newest_first = select_rows(result.table, sort=tc.VERSION, descending=True)
+    versions = [row.cell(tc.VERSION).raw for row in newest_first.rows]
+    positions = [VERSION_ORDER.index(v) for v in versions if v in VERSION_ORDER]
+    assert positions == sorted(positions, reverse=True)
+    assert positions[0] > VERSION_ORDER.index("CHUNITHM")
 
 
 def test_find_songs_has_no_sort_arguments() -> None:

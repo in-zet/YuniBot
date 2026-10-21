@@ -21,6 +21,7 @@ from core.tables import (
     TableNeeds,
     TableStore,
     WorkTable,
+    canonical_order_value,
     cell,
     describe_table,
     expand_rows,
@@ -895,3 +896,103 @@ def test_extend_table_overwrites_existing_column_cells_and_rejects_label_clash()
 
     with pytest.raises(TableError):
         extend_table(source, [Column(name="other", label="상수")], lambda _row: {})
+
+
+# ---- 순서가 있는 칸 · 묶음 순서 · 보일 칸 고르기 ----
+
+_VERSIONS = ("OLD", "MID", "NEW")
+
+
+def _version_table() -> WorkTable:
+    """글 칸 버전(OLD<MID<NEW)과 작곡가·곡. 버전 순서는 일부러 알파벳순과 다르다(MID, NEW, OLD가 알파벳순)."""
+    builder = TableBuilder(unit="채보")
+    builder.column("song", "곡", bare=True).column("artist", "작곡가").column("const", "상수", "number")
+    builder.column("version", "버전", order=_VERSIONS)
+    rows = [
+        ("a", "X", 15.0, "OLD"),
+        ("b", "Y", 15.5, "NEW"),
+        ("c", "X", 15.2, "MID"),
+        ("d", "Z", 14.8, "NEW"),
+        ("e", "Y", 15.1, "OLD"),
+        ("f", "Z", 15.3, "ZZZ"),  # 순서 목록에 없는 새 버전
+    ]
+    for key, (song, artist, const, version) in enumerate(rows, start=1):
+        builder.row(
+            RowRef("chunithm.chart", str(key)),
+            {"song": cell(song), "artist": cell(artist), "const": cell(const, f"{const}"), "version": cell(version)},
+        )
+    return builder.build()
+
+
+def test_ordered_text_column_sorts_by_its_order_not_alphabetically() -> None:
+    table = _version_table()
+    newest_first = select_rows(table, sort="버전", descending=True)
+    assert _songs(newest_first) == ["b", "d", "c", "a", "e", "f"]  # NEW, NEW, MID, OLD, OLD, 목록에 없는 값은 뒤
+    oldest_first = select_rows(table, sort="버전")
+    assert _songs(oldest_first) == ["a", "e", "c", "b", "d", "f"]
+
+
+def test_ordered_text_column_compares_by_order_and_unknown_values_never_match_a_size_compare() -> None:
+    table = _version_table()
+    assert _songs(select_rows(table, where=[_where("버전", ">=", "MID")])) == ["b", "c", "d"]
+    assert _songs(select_rows(table, where=[_where("버전", "<", "MID")])) == ["a", "e"]
+    assert _songs(select_rows(table, where=[_where("버전", "==", "NEW")])) == ["b", "d"]
+    assert _songs(select_rows(table, where=[_where("버전", "contains", "ew")])) == ["b", "d"]
+
+
+def test_canonical_order_value_fixes_case_and_rejects_unknown_names() -> None:
+    column = _version_table().columns[3]
+    assert canonical_order_value(column, " mid ") == "MID"
+    with pytest.raises(TableError, match="모른다"):
+        canonical_order_value(column, "MIDDLE")
+
+
+def test_group_by_ordered_column_puts_the_newest_group_first_and_sort_on_it_follows_descending() -> None:
+    table = _version_table()
+    by_version = select_rows(table, group_by="버전")
+    assert [g.title for g in by_version.groups] == ["NEW", "MID", "OLD", "ZZZ"]  # 목록에 없는 값은 맨 뒤
+    ascending = select_rows(table, group_by="버전", sort="버전")
+    assert [g.title for g in ascending.groups] == ["OLD", "MID", "NEW", "ZZZ"]
+    descending = select_rows(table, group_by="버전", sort="버전", descending=True)
+    assert [g.title for g in descending.groups] == ["NEW", "MID", "OLD", "ZZZ"]
+
+
+def test_group_by_text_column_keeps_the_sorted_order_of_first_appearance() -> None:
+    table = _version_table()
+    # 작곡가(글 칸)로 묶으면서 상수 내림차순: 상수 높은 곡을 쓴 작곡가 묶음이 위로, 묶음 안 행도 같은 순서다.
+    out = select_rows(table, group_by="작곡가", sort="상수", descending=True)
+    assert [g.title for g in out.groups] == ["Y", "Z", "X"]
+    assert _songs(out) == ["b", "e", "f", "d", "c", "a"]
+    # 정렬이 없으면 표에 나온 순서(알파벳 역순이 아니다).
+    assert [g.title for g in select_rows(table, group_by="작곡가").groups] == ["X", "Y", "Z"]
+
+
+def test_group_by_after_a_separate_sort_keeps_that_order() -> None:
+    table = _version_table()
+    flat = select_rows(table, sort="버전", descending=True, group_by="")
+    by_song_artist = select_rows(flat, group_by="작곡가")
+    assert [g.title for g in by_song_artist.groups] == ["Y", "Z", "X"]  # 버전 내림차순에서 먼저 나온 순서
+
+
+def test_columns_hides_the_other_columns_without_dropping_them() -> None:
+    table = _version_table()
+    out = select_rows(table, sort="버전", descending=True, columns=["곡"])
+    assert out.steps[-1] == "곡만 보임"
+    assert [column.name for column in out.columns] == [column.name for column in table.columns]
+    assert [column.name for column in out.columns if not column.hidden_in_text] == ["song"]
+    assert render_text(out).content.splitlines()[-1] == "6. f"
+    # 숨긴 칸은 이어서 거르거나 정렬하는 데 그대로 쓰인다.
+    assert _songs(select_rows(out, where=[_where("상수", ">", 15.1)])) == ["b", "c", "f"]
+    # 다시 고르면 숨김이 바뀐다.
+    again = select_rows(out, columns=["곡", "상수"])
+    assert [column.name for column in again.columns if not column.hidden_in_text] == ["song", "const"]
+
+
+def test_columns_errors() -> None:
+    table = _score_table()
+    with pytest.raises(TableError, match="하나는 골라야"):
+        select_rows(table, columns=[])
+    with pytest.raises(TableError, match="'없음' 칸이 없다"):
+        select_rows(table, columns=["곡", "없음"])
+    with pytest.raises(TableError, match="'아이디' 칸이 없다"):
+        select_rows(table, columns=["아이디"])  # 슬래시 전용 칸은 모델에게 보이지 않는다

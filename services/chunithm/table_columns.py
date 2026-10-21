@@ -23,7 +23,12 @@ from core.tables import (
     cell,
 )
 from services.chunithm.records import PbRow
-from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, ChartRecord, SongRecord
+from services.chunithm.songdb import (
+    LONG_TO_SHORT_DIFFICULTY,
+    VERSION_ORDER,
+    ChartRecord,
+    SongRecord,
+)
 
 SONG = "곡"
 DIFFICULTY = "난이도"
@@ -65,7 +70,7 @@ _COLUMNS: dict[str, Column] = {
     LEVEL: Column(name=LEVEL, label=LEVEL),
     CONST: Column(name=CONST, label=CONST, value_type="number"),
     NOTE_COUNT: Column(name=NOTE_COUNT, label=NOTE_COUNT, value_type="number"),
-    VERSION: Column(name=VERSION, label=VERSION),
+    VERSION: Column(name=VERSION, label=VERSION, order=VERSION_ORDER),
     ARTIST: Column(name=ARTIST, label=ARTIST),
     SCORE: Column(name=SCORE, label=SCORE, value_type="ScoreRef"),
     RANK: Column(name=RANK, label=RANK, value_type="RankRef"),
@@ -93,7 +98,7 @@ def add_columns(
     for column in common_columns(*names, hidden_in_text=hidden_in_text):
         builder.column(
             column.name, column.label, column.value_type, slash_only=column.slash_only,
-            hidden_in_text=column.hidden_in_text, bare=column.bare,
+            hidden_in_text=column.hidden_in_text, bare=column.bare, order=column.order,
         )
     return builder
 

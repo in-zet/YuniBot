@@ -212,24 +212,26 @@ async def find_songs(
     level: str | None = None,
     version: str | None = None,
     difficulty: DifficultyRef | None = None,
+    other_difficulty: DifficultyRef | None = None,
     min_note_count: int | None = None,
     max_note_count: int | None = None,
     new_only: bool = False,
 ) -> ToolResult:
     """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 조합해 채보를 찾는다.
     `/상수`·`/버전`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
+    "마스터나 울티마"처럼 난이도를 둘 말했으면 difficulty와 other_difficulty에 하나씩 준다(둘 중 어느 쪽이든 맞는 채보).
     조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다.
     결과는 상수 오름차순 표다. 다른 순서가 필요하면 표에 `table_query`를 쓴다."""
     if not new_only and all(
         v is None
-        for v in (min_const, max_const, level, version, difficulty, min_note_count, max_note_count)
+        for v in (min_const, max_const, level, version, difficulty, other_difficulty, min_note_count, max_note_count)
     ):
         return ToolResult(error="조건을 하나는 줘야 한다(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡 중)")
 
-    short_code = _difficulty_code(difficulty)
+    codes = [code for code in (_difficulty_code(difficulty), _difficulty_code(other_difficulty)) if code is not None]
     hits = ctx.songdb.find_songs(
         min_const=min_const, max_const=max_const, level=level, version=version,
-        difficulty=short_code, min_note_count=min_note_count, max_note_count=max_note_count,
+        difficulty=codes or None, min_note_count=min_note_count, max_note_count=max_note_count,
         new_only=new_only,
     )
     if not hits:
@@ -238,7 +240,7 @@ async def find_songs(
         _const_range_text(min_const, max_const),
         f"레벨 {level}" if level else None,
         f"{version} 버전" if version else None,
-        short_code,
+        "·".join(dict.fromkeys(codes)) or None,
         _note_range_text(min_note_count, max_note_count),
         "신곡만" if new_only else None,
     ]

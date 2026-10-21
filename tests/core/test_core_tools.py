@@ -214,3 +214,31 @@ def test_table_tools_declare_array_parameters_for_the_model() -> None:
     }
     assert properties["descending"] == {"type": "boolean"}
     assert declaration.parameters_json_schema["required"] == ["table"]
+
+
+async def test_table_query_ordered_column_value_is_matched_to_the_listed_name() -> None:
+    executor, ctx = _env()
+    builder = TableBuilder().column("song", "곡").column("version", "버전", order=("OLD", "MID", "NEW"))
+    for key, (song, version) in enumerate([("a", "OLD"), ("b", "NEW"), ("c", "MID")], start=1):
+        builder.row(RowRef("k", str(key)), {"song": cell(song), "version": cell(version)})
+    assert executor.tables is not None
+    _ = executor.tables.put("p1", "c1", builder.build(), now=0)
+
+    ok = await executor.invoke(
+        _tool(table_query), ctx, {"table": "t2", "where": [{"column": "버전", "op": ">=", "value": "mid"}]}
+    )
+    assert ok.result is not None and ok.result.table is not None
+    assert [row.cell("song").raw for row in ok.result.table.rows] == ["b", "c"]
+    bad = await executor.invoke(
+        _tool(table_query), ctx, {"table": "t2", "where": [{"column": "버전", "op": ">=", "value": "VERSE"}]}
+    )
+    assert bad.result is not None and bad.result.error is not None and "쓸 수 있는 것: OLD, MID, NEW" in bad.result.error
+
+
+async def test_table_query_columns_shows_only_the_named_columns() -> None:
+    result = await _query(table_query, {"table": "t1", "columns": ["곡"]})
+    assert result.error is None and result.table is not None
+    assert [column.label for column in result.table.columns if not column.hidden_in_text] == ["곡"]
+    assert result.table.steps == ("곡만 보임",)
+    missing = await _query(table_query, {"table": "t1", "columns": ["없음"]})
+    assert missing.error == "그 표에 '없음' 칸이 없다"
