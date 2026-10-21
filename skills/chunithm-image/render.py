@@ -147,7 +147,7 @@ def _paste_fit(canvas: Image.Image, image: Image.Image | None, box: tuple[int, i
     canvas.alpha_composite(resized, (x0 + (x1 - x0 - size[0]) // 2, y0 + (y1 - y0 - size[1]) // 2))
 
 
-_ICON_FRAME_INSET = 0.08  # 틀 테두리 안쪽에 캐릭터를 앉히는 여백(상자 한 변에 대한 비율)
+_ICON_FRAME_INSET = 0.05  # 틀 테두리 안쪽에 캐릭터를 앉히는 여백(상자 한 변에 대한 비율)
 
 
 def _draw_icon(canvas: Image.Image, box: tuple[int, int, int, int], character: bytes | None, frame: bytes | None) -> None:
