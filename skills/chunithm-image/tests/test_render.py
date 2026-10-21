@@ -133,7 +133,7 @@ def test_card_grid_is_at_most_ten_wide_and_output_is_scaled_down() -> None:
     width, height = _size(data)
     full_width = 2 * render._MARGIN + 10 * render._CARD_W + 9 * render._GAP
     assert width == round(full_width * render.CARD_OUTPUT_SCALE)
-    assert height < 1800  # 줄이기 전 2500쪽이었다
+    assert height < 2600
 
 
 def test_list_output_is_not_scaled() -> None:

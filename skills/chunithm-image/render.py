@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 Layout = Literal["card", "list"]
 
 CARD_PAGE_ROWS = 8  # 카드 그림 한 장의 최대 줄 수(개수가 아니라 줄로 센다, 2026-10-21 결정)
-CARD_OUTPUT_SCALE = 0.7  # 카드 그림을 저장할 때 줄이는 비율 — 크면 디스코드 미리보기가 화질을 깎는다(2026-10-21 실기)
+CARD_OUTPUT_SCALE = 1.0  # 카드 그림을 저장할 때 줄이는 비율 — 크면 디스코드 미리보기가 화질을 깎는다(2026-10-21 실기)
 LIST_PAGE_LIMIT = 30
 
 _MARGIN = 24
@@ -633,7 +633,7 @@ def render_pages(
         image = draw_page(segments, table, opened, profile, stale=stale, page=index, pages=len(pages))
         buffer = io.BytesIO()
         final = image.convert("RGB")
-        if layout == "card":
+        if layout == "card" and CARD_OUTPUT_SCALE != 1:
             final = final.resize(
                 (round(final.width * CARD_OUTPUT_SCALE), round(final.height * CARD_OUTPUT_SCALE)), Image.Resampling.LANCZOS
             )
