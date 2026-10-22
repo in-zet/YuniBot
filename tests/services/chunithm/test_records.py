@@ -1,7 +1,7 @@
 # tests/services/chunithm/test_records.py
 import dataclasses
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -905,6 +905,70 @@ async def test_latest_sync_summary(conn, monkeypatch) -> None:
     assert summary.best30_average == Decimal("17.0216")
     assert summary.new20_average == Decimal("16.8375")
     assert summary.last_synced_at == _T1_UTC.isoformat()
+
+
+async def test_stored_const_and_rating_follow_the_current_songdb_const(conn, monkeypatch) -> None:
+    """곡 DB 상수가 동기화 뒤에 바뀌면(Chunimaru 갱신) 저장된 PB의 상수·곡 레이팅이 아니라 지금 상수 기준으로
+    읽힌다 — 상수 15.1·곡 레이팅 17.09처럼 한 답에서 어긋나지 않게(2026-10-22). 다음 동기화는 저장값도 맞춘다."""
+    songdb = _songdb_with_fixture_new20(monkeypatch)
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+    _freeze_now(monkeypatch, utc=_T1_UTC, local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+    fetch = _fixture_fetch()
+    await service.save_sync(player_id, fetch, ctx)
+    target = fetch.best30[0]
+    title, difficulty = target.song.title, records_module._difficulty_code(target.chart.difficulty)
+    stored = await service.pb_row(player_id, song_title=title, difficulty=difficulty)
+    assert stored is not None and stored.const is not None
+    raised = round(stored.const + 0.1, 1)
+    real_const_for = songdb.const_for
+    monkeypatch.setattr(
+        songdb, "const_for",
+        lambda t, d: raised if (t, d) == (title, difficulty) else real_const_for(t, d),
+    )
+
+    row = await service.pb_row(player_id, song_title=title, difficulty=difficulty)
+    assert row is not None
+    assert row.const == raised
+    assert row.rating == chart_rating(row.score, raised)
+    assert row.rating != stored.rating
+    assert (await service.all_pb_rows(player_id))[0].const is not None  # 모든 읽기 길이 같은 계산을 쓴다
+    cursor = await conn.execute(
+        "SELECT const FROM records_pb WHERE player_id = ? AND song_title = ? AND difficulty = ?",
+        (player_id, title, difficulty),
+    )
+    saved = await cursor.fetchone()
+    assert saved is not None and saved[0] == stored.const  # 저장값은 아직 옛것이다
+
+    _freeze_now(monkeypatch, utc=_T1_UTC + timedelta(hours=1), local=datetime(2026, 10, 10, 22, 0, tzinfo=UTC))
+    await service.save_sync(player_id, fetch, ctx)  # 점수는 그대로 — 그래도 저장값이 맞춰진다
+    cursor = await conn.execute(
+        "SELECT const, rating FROM records_pb WHERE player_id = ? AND song_title = ? AND difficulty = ?",
+        (player_id, title, difficulty),
+    )
+    saved = await cursor.fetchone()
+    assert saved is not None and saved[0] == raised and saved[1] == str(chart_rating(row.score, raised))
+
+
+async def test_latest_sync_summary_rating_drops_when_the_new_frame_empties(conn, monkeypatch) -> None:
+    """버전이 바뀌어 신곡 표시가 사라지면(신곡20이 빔) 전체 레이팅은 동기화 로그의 얼어 있던 값이 아니라
+    지금 프레임으로 다시 계산해 떨어진다(2026-10-22: 17.00이 그대로 나와 있었다)."""
+    songdb = _songdb_with_fixture_new20(monkeypatch)
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+    _freeze_now(monkeypatch, utc=_T1_UTC, local=datetime(2026, 10, 10, 21, 0, tzinfo=UTC))
+    await service.save_sync(player_id, _fixture_fetch(), ctx)
+    before = await service.latest_sync_summary(player_id)
+    assert before is not None and before.computed_rating == Decimal("16.9480")
+
+    monkeypatch.setattr(songdb, "is_new_for", lambda title: False)
+    after = await service.latest_sync_summary(player_id)
+
+    assert after is not None
+    best, new = await service.current_frames(player_id)
+    assert new == []
+    expected = sum((r.rating for r in best if r.rating is not None), Decimal(0)) / 50
+    assert after.computed_rating == expected.quantize(Decimal("0.0001"), rounding="ROUND_DOWN")
+    assert after.computed_rating is not None and after.computed_rating < Decimal(11)
+    assert after.new20_average == Decimal("0.0000")
 
 
 async def test_candidates_stay_in_rank_3_to_8_band_exclude_frame_and_sort_by_upside(conn) -> None:

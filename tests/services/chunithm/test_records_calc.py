@@ -9,6 +9,7 @@ from services.chunithm.records_calc import (
     chart_rating,
     frame_changes,
     match_session_for_chart,
+    overall_rating,
     remaining_to_target,
 )
 
@@ -51,6 +52,17 @@ def test_average_rating_places_4_is_default_for_all_three_metrics():
     ratings = [Decimal("16.95")] * 49 + [Decimal("16.82")]  # 합=847.37, 평균=16.9474(정확히 끝남)
     assert average_rating(ratings) == Decimal("16.9474")
     assert average_rating(ratings, places=2) == Decimal("16.94")  # places를 명시하면 여전히 쓸 수 있다
+
+
+def test_overall_rating_counts_empty_frame_slots_as_zero():
+    """신곡20이 비면(버전이 바뀐 직후) 베스트30 합을 50으로 나눈다 — 평균이 그대로 남지 않는다."""
+    best = [Decimal("17.00")] * 30
+    assert overall_rating(best, []) == Decimal("10.2000")
+    assert overall_rating(best, [Decimal("17.00")] * 20) == Decimal("17.0000")
+
+
+def test_overall_rating_with_any_unknown_is_none():
+    assert overall_rating([Decimal("17.00"), None], [Decimal("16.00")]) is None
 
 
 def test_allowed_attacks_matches_border_doc_examples():

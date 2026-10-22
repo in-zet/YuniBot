@@ -51,6 +51,19 @@ def average_rating(ratings: Sequence[Decimal | None], *, places: int = 4) -> Dec
     return (total / len(ratings)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_DOWN)
 
 
+def overall_rating(
+    best30: Sequence[Decimal | None], new20: Sequence[Decimal | None], *, best_size: int = 30, new_size: int = 20
+) -> Decimal | None:
+    """전체 레이팅 — 베스트30·신곡20의 곡 레이팅 합을 50으로 나눈다. 프레임이 덜 찼으면(버전이 바뀌어
+    신곡이 아직 없을 때 등) 빈 칸은 0으로 센다. 그래서 신곡20이 비면 레이팅이 크게 떨어진다. 하나라도
+    "계산 불가"(None)면 None이다."""
+    padded = [
+        *best30, *[Decimal(0)] * max(0, best_size - len(best30)),
+        *new20, *[Decimal(0)] * max(0, new_size - len(new20)),
+    ]
+    return average_rating(padded)
+
+
 def allowed_attacks(note_count: int | None, target_score: int) -> Decimal | None:
     """저스티스 0, 미스 0 기준의 허용 어택 개수. 노트 수가 없으면(계산 불가) None."""
     if not note_count:

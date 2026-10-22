@@ -23,6 +23,7 @@ from services.chunithm.records_calc import (
     chart_rating,
     frame_changes,
     match_session_for_chart,
+    overall_rating,
     remaining_to_target,
 )
 from services.chunithm.songdb import SongDbService
@@ -338,7 +339,7 @@ class RecordsService:
         # 사용자 확인 2026-10-18 — records_calc.average_rating 참고).
         best30_average = average_rating(best30_ratings)
         new20_average = average_rating(new20_ratings)
-        computed_rating = average_rating(best30_ratings + new20_ratings)
+        computed_rating = overall_rating(best30_ratings, new20_ratings)
 
         displayed_rating = None
         if fetch.profile.rating_systems:
@@ -368,6 +369,8 @@ class RecordsService:
                     previous_synced_at=datetime.fromisoformat(previous_log["synced_at"]),
                     previous_computed_rating=_rating_from_str(previous_log["computed_rating"]),
                 )
+
+            await self._refresh_stored_ratings(player_id)
 
             await self._conn.execute(
                 "INSERT INTO records_sync_log (id, player_id, game, synced_at, nickname, "
@@ -658,9 +661,9 @@ class RecordsService:
         return row["overpower_value"], row["overpower_percentage"]
 
     async def latest_sync_summary(self, player_id: str) -> SyncLogSummary | None:
-        """최신 동기화 로그의 닉네임·계산 레이팅·시각과, 베스트30/신곡20 평균.
+        """최신 동기화 로그의 닉네임·시각과, 전체 레이팅·베스트30/신곡20 평균.
 
-        두 평균은 로그에 열을 늘리지 않고 **지금 시점** records_pb를 레이팅 내림차순으로
+        세 값은 로그에 열을 늘리지 않고 **지금 시점** records_pb를 레이팅 내림차순으로
         다시 훑어 계산한다 — 그래서 "그 동기화 시점"이 아니라 "지금" 값이다(동기화 사이에
         records_pb가 바뀌는 길은 save_sync뿐이라 보통은 같다)."""
         cursor = await self._conn.execute(
@@ -672,9 +675,11 @@ class RecordsService:
         if row is None:
             return None
         best, new = self._frames(await self.all_pb_rows(player_id))
+        # 전체 레이팅도 두 평균처럼 지금 시점이다 — 로그의 값은 동기화 때 얼어 있어, 곡 DB 상수가 바뀌거나
+        # 버전이 바뀌어 신곡 프레임이 비어도 그대로이기 때문이다(2026-10-22).
         return SyncLogSummary(
             nickname=row["nickname"],
-            computed_rating=_rating_from_str(row["computed_rating"]),
+            computed_rating=overall_rating([r.rating for r in best], [r.rating for r in new]),
             best30_average=average_rating([r.rating for r in best]),
             new20_average=average_rating([r.rating for r in new]),
             last_synced_at=row["synced_at"],
@@ -711,7 +716,7 @@ class RecordsService:
             (player_id, _GAME, song_title, difficulty),
         )
         row = await cursor.fetchone()
-        return _pb_row_from(row) if row is not None else None
+        return self._current(_pb_row_from(row)) if row is not None else None
 
     async def pb_rows_for(self, player_id: str, keys: Sequence[ChartKey]) -> dict[ChartKey, PbRow]:
         """주어진 채보들의 PB를 한 번에 가져온다(기록 없는 채보는 결과에 없다). 변수 개수 상한을
@@ -727,7 +732,7 @@ class RecordsService:
                 (player_id, _GAME, *(value for key in chunk for value in key)),
             )
             for row in await cursor.fetchall():
-                pb = _pb_row_from(row)
+                pb = self._current(_pb_row_from(row))
                 found[(pb.song_title, pb.difficulty)] = pb
         return found
 
@@ -738,7 +743,7 @@ class RecordsService:
             "WHERE player_id = ? AND game = ? ORDER BY song_title, difficulty",
             (player_id, _GAME),
         )
-        return [_pb_row_from(row) for row in await cursor.fetchall()]
+        return [self._current(_pb_row_from(row)) for row in await cursor.fetchall()]
 
     async def current_frames(self, player_id: str) -> tuple[list[PbRow], list[PbRow]]:
         """지금 시점 (베스트30, 신곡20). 제목 순이 아니라 프레임 순(레이팅 내림차순)이다 —
@@ -864,6 +869,36 @@ class RecordsService:
 
     def _rating_of(self, pb: PersonalBest) -> Decimal | None:
         return chart_rating(pb.score, self._songdb.const_for(pb.song.title, _difficulty_code(pb.chart.difficulty)))
+
+    def _current(self, row: PbRow) -> PbRow:
+        """저장된 PB 행의 상수·곡 레이팅을 지금 곡 DB 상수로 다시 계산한 행. 저장값은 동기화 때의 상수라서,
+        Chunimaru 갱신으로 상수가 바뀌면 곡 DB와 어긋난다(2026-10-22 HERA 15.0→15.1). 점수는 저장된 그대로다.
+        곡 DB가 상수를 모르면 저장값을 쓴다."""
+        const = self._songdb.const_for(row.song_title, row.difficulty)
+        if const is None:
+            return row
+        return replace(row, const=const, rating=chart_rating(row.score, const))
+
+    async def _refresh_stored_ratings(self, player_id: str) -> None:
+        """저장된 상수·곡 레이팅을 지금 곡 DB 기준으로 맞춘다. `_upsert_pb`는 점수가 오른 채보만 쓰므로,
+        점수가 그대로인 채보의 상수가 바뀌어도 저장값은 옛것으로 남는다. 읽을 때 `_current`가 다시 계산하니
+        숫자는 어긋나지 않고, 이 갱신은 저장값을 정직하게 두려는 것이다. 커밋은 부르는 쪽이 한다."""
+        cursor = await self._conn.execute(
+            "SELECT song_title, difficulty, score, const, rating FROM records_pb WHERE player_id = ? AND game = ?",
+            (player_id, _GAME),
+        )
+        for row in await cursor.fetchall():
+            const = self._songdb.const_for(row["song_title"], row["difficulty"])
+            if const is None:
+                continue
+            rating = _rating_str(chart_rating(row["score"], const))
+            if row["const"] == const and row["rating"] == rating:
+                continue
+            await self._conn.execute(
+                "UPDATE records_pb SET const = ?, rating = ? "
+                "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
+                (const, rating, player_id, _GAME, row["song_title"], row["difficulty"]),
+            )
 
     def _frames(self, rows: list[PbRow]) -> tuple[list[PbRow], list[PbRow]]:
         """records_pb 행들로 (베스트30, 신곡20) 프레임을 다시 계산한다. 신곡 여부는
