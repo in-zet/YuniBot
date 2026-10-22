@@ -811,3 +811,12 @@ def test_hidden_const_and_score_columns_take_no_info_line() -> None:
     without = _height(_extras_table((), hidden=(tc.CONST,)), "card")
 
     assert with_const - without == render._INFO_LINE
+
+
+def test_artist_label_is_shortened_only_in_the_picture() -> None:
+    table = _extras_table((_ARTIST,))
+    (column,) = render.shown_columns(table).extras
+
+    assert render._short_label(column) == "作"
+    assert column.label == "작곡가"
+    assert render.drawn_labels(table)[-1] == "작곡가"  # 도구 결과·글자 출력의 이름은 그대로

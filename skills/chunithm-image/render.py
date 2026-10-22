@@ -522,6 +522,8 @@ def _draw_band(draw: ImageDraw.ImageDraw, width: int, y: int, segment: Segment, 
 _SLOT_COLUMNS = frozenset({tc.SONG, tc.DIFFICULTY, tc.LAMP, tc.CONST, tc.RATING, tc.SCORE, tc.RANK})
 CARD_EXTRA_MAX = 4  # 카드 한 장에 더할 수 있는 범용 칸 줄 수(2026-10-22 결정)
 LIST_EXTRA_MAX = 4  # 목록 한 줄에 더할 수 있는 범용 칸 수. 정해진 칸이 자리를 차지하면 이보다 적다
+# 그림에서만 줄여 쓰는 범용 칸 라벨(2026-10-22). 글자 출력과 `table_query columns`의 칸 이름은 그대로다.
+_SHORT_LABELS = {tc.ARTIST: "作"}
 _EXTRA_EMPTY = "-"  # 범용 칸의 값이 없을 때 — 빈칸이면 "없는 건지 안 그린 건지" 헷갈린다
 
 
@@ -705,6 +707,10 @@ def _card_value_size() -> int:
     return _CARD_VALUE_MIN_SIZE
 
 
+def _short_label(column: Column) -> str:
+    return _SHORT_LABELS.get(column.name, column.label)
+
+
 def _draw_card_extra(draw: ImageDraw.ImageDraw, span: tuple[int, int, int], label: str, value: str, size: int) -> None:
     """범용 칸 한 줄: 왼쪽에 `라벨`(회색), 이어서 `값`(흰색 굵게). 넘치면 값 끝을 `…`로 줄인다(라벨은 폭 절반까지)."""
     left, right, y = span
@@ -770,7 +776,7 @@ def _draw_card(
             draw.text((right - _width(font, rank_text), cy), rank_text, font=font, fill=_rank_color(rank_text))
         cy += _INFO_LINE
     for column in lines.shown.extras:
-        _draw_card_extra(draw, (left, right, cy), column.label, row.cell(column.name).text, value_size)
+        _draw_card_extra(draw, (left, right, cy), _short_label(column), row.cell(column.name).text, value_size)
         cy += _INFO_LINE
 
 
@@ -846,7 +852,7 @@ def _draw_list_extras(draw: ImageDraw.ImageDraw, x: int, y: int, extras: Sequenc
     inner = _LIST_EXTRA_W - 14
     for index, column in enumerate(extras):
         left = x + index * _LIST_EXTRA_W
-        draw.text((left, y + 16), _ellipsize(label_font, column.label, inner), font=label_font, fill=_MUTED)
+        draw.text((left, y + 16), _ellipsize(label_font, _short_label(column), inner), font=label_font, fill=_MUTED)
         value = row.cell(column.name).text or _EXTRA_EMPTY
         draw.text((left, y + 38), _ellipsize(value_font, value, inner), font=value_font, fill=_TEXT)
 
