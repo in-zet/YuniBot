@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import anthropic
 from anthropic.types import (
+    CitationsWebSearchResultLocation,
     Message,
     TextBlock,
     WebSearchResultBlock,
@@ -26,16 +27,20 @@ _MAX_SEARCHES_PER_CALL = 5
 
 
 def _extract_sources(message: Message) -> list[SearchSource]:
-    sources: list[SearchSource] = []
+    """답 문장에 실제로 인용된 출처(같은 주소는 한 번)를 먼저 쓴다. 인용이 하나도 없으면 검색 결과로 받은 페이지 전부다.
+    검색 결과 전부는 수십 건이 될 수 있어(2026-10-21 실측 130건) 인용된 것만 보이는 쪽이 짧고 근거에 맞는다."""
+    cited: dict[str, SearchSource] = {}
+    found: dict[str, SearchSource] = {}
     for block in message.content:
-        if not isinstance(block, WebSearchToolResultBlock):
-            continue
-        if not isinstance(block.content, list):
-            continue  # WebSearchToolResultError — 출처 없음으로 취급한다.
-        for item in block.content:
-            if isinstance(item, WebSearchResultBlock):
-                sources.append(SearchSource(title=item.title, url=item.url))
-    return sources
+        if isinstance(block, TextBlock):
+            for citation in block.citations or ():
+                if isinstance(citation, CitationsWebSearchResultLocation):
+                    cited.setdefault(citation.url, SearchSource(title=citation.title or citation.url, url=citation.url))
+        elif isinstance(block, WebSearchToolResultBlock) and isinstance(block.content, list):
+            for item in block.content:  # WebSearchToolResultError는 목록이 아니라 출처 없음으로 취급한다.
+                if isinstance(item, WebSearchResultBlock):
+                    found.setdefault(item.url, SearchSource(title=item.title, url=item.url))
+    return list(cited.values()) or list(found.values())
 
 
 def _from_provider_response(message: Message) -> SearchResult:

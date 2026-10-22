@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 from anthropic.types import (
+    CitationsWebSearchResultLocation,
     Message,
     ServerToolUsage,
     TextBlock,
@@ -124,3 +125,37 @@ async def test_search_retries_once_on_overload(monkeypatch: pytest.MonkeyPatch) 
         await adapter.search(model="claude-haiku-5-5", query="질문")
 
     assert api.calls == 2  # 검색은 재시도를 한 번만 한다
+
+
+@pytest.mark.asyncio
+async def test_search_prefers_sources_cited_in_the_answer_over_all_results() -> None:
+    """검색 결과로 받은 페이지가 많아도 답에 인용된 출처만 쓴다(같은 주소는 한 번)."""
+    adapter = ClaudeSearchAdapter(api_key="fake")
+    results = [
+        WebSearchResultBlock(type="web_search_result", title=f"결과 {i}", url=f"https://e/{i}", encrypted_content="e")
+        for i in range(6)
+    ]
+    cited: list[Any] = [
+        CitationsWebSearchResultLocation(
+            type="web_search_result_location", cited_text="t", encrypted_index="i", title="결과 2", url="https://e/2",
+        ),
+        CitationsWebSearchResultLocation(
+            type="web_search_result_location", cited_text="t", encrypted_index="i", title="결과 2", url="https://e/2",
+        ),
+        CitationsWebSearchResultLocation(
+            type="web_search_result_location", cited_text="t", encrypted_index="i", title="결과 4", url="https://e/4",
+        ),
+    ]
+    blocks: list[Any] = [
+        WebSearchToolResultBlock(type="web_search_tool_result", tool_use_id="c1", content=results),
+        TextBlock(type="text", text="답변", citations=cited),
+    ]
+    message = Message(
+        id="msg_1", type="message", role="assistant", model="claude-haiku-5-5", content=blocks,
+        stop_reason="end_turn", stop_sequence=None, usage=Usage(input_tokens=20, output_tokens=8),
+    )
+    adapter._client.messages = _FakeMessagesApi(response=message)  # pyright: ignore[reportAttributeAccessIssue]
+
+    result = await adapter.search(model="claude-haiku-5-5", query="질문")
+
+    assert result.sources == [SearchSource(title="결과 2", url="https://e/2"), SearchSource(title="결과 4", url="https://e/4")]

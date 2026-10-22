@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime
 
 from core.decorators import tool
+from core.search import SearchSource
 from core.tool_types import Display, ToolContext, ToolResult
 from services.common.websearch import NoSourcesError, SearchCooldownError
 
@@ -12,10 +13,30 @@ logger = logging.getLogger(__name__)
 
 # 검색 한 번에 기다리는 총 시간. 재시도까지 합쳐 이 시간을 넘기면 포기하고 모델에게 실패를 알린다.
 _SEARCH_TOTAL_SECONDS = 60
+# 보여 주는 출처는 최대 이만큼, 제목은 이 글자 수까지(2026-10-22 사용자 지시: 출처가 너무 길었다).
+_MAX_SOURCES = 3
+_MAX_TITLE_CHARS = 40
 
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _shown_sources(found: list[SearchSource]) -> list[dict[str, str]]:
+    """같은 주소는 한 번, 앞에서부터 최대 `_MAX_SOURCES`개, 제목은 짧게."""
+    shown: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for source in found:
+        if source.url in seen:
+            continue
+        seen.add(source.url)
+        title = source.title.strip() or source.url
+        if len(title) > _MAX_TITLE_CHARS:
+            title = title[: _MAX_TITLE_CHARS - 1] + "…"
+        shown.append({"title": title, "url": source.url})
+        if len(shown) == _MAX_SOURCES:
+            break
+    return shown
 
 
 @tool(cost="llm", max_calls_per_turn=5)
@@ -40,7 +61,7 @@ async def search(ctx: ToolContext, question: str) -> ToolResult:
             search_requests=result.usage.search_requests,
         )
 
-    sources = [{"title": s.title, "url": s.url} for s in result.sources]
+    sources = _shown_sources(result.sources)
     source_lines = "\n".join(f"- {s['title']}: {s['url']}" for s in sources)
     return ToolResult(
         data={"answer": result.text, "sources": sources},

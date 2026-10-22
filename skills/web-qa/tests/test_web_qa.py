@@ -142,6 +142,21 @@ async def test_search_cooldown_error_becomes_korean_message(skill: ModuleType) -
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_search_shows_at_most_three_unique_sources_with_short_titles(skill: ModuleType) -> None:
+    """출처가 수십 건이어도 중복 주소는 한 번, 최대 3개, 긴 제목은 잘라 보여 준다(2026-10-22)."""
+    many = [SearchSource(title="위키", url="https://example/a"), SearchSource(title="위키 또 ", url="https://example/a")]
+    many += [SearchSource(title="아주 긴 제목" * 10, url=f"https://example/{i}") for i in range(10)]
+    ctx = _ctx(websearch=_FakeWebsearch(result=_result(sources=many)), usage=None)
+
+    result = await skill.search(ctx, question="질문")
+
+    sources = result.data["sources"]
+    assert [s["url"] for s in sources] == ["https://example/a", "https://example/0", "https://example/1"]
+    assert len(sources[1]["title"]) == 40 and sources[1]["title"].endswith("…")
+    assert result.display is not None and result.display.content.count("\n- ") == 3  # 머리말 뒤 3줄
+
+
 async def test_search_no_sources_error_becomes_korean_message(skill: ModuleType) -> None:
     websearch = _FakeWebsearch(error=NoSourcesError())
 
