@@ -22,7 +22,7 @@ from core.search import SearchResult, SearchSource, SearchUsage
 _DEFAULT_MAX_TOKENS = 4096
 # 한 호출에서 모델이 검색할 수 있는 최대 횟수. 상한이 없으면 검색을 여러 번 해 입력이 7만 토큰 넘게 불고
 # 검색마다 요금이 붙는다(2026-10-21 실측: 출처 130건).
-_MAX_SEARCHES_PER_CALL = 3
+_MAX_SEARCHES_PER_CALL = 5
 
 
 def _extract_sources(message: Message) -> list[SearchSource]:

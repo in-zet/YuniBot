@@ -727,7 +727,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | Gemini 3.1 Flash-Lite | 0.25 | 1.50 | 더 싼 대안 |
 
 - **추천 구성**: 에이전트는 3.8 Flash, 요약류는 3.5 Flash-Lite. 도구 고르기, 규칙 준수, 한국어 캐릭터 말투를 동시에 요구하는 쪽이 에이전트이기 때문이다.
-- **Claude 선택지**: `LLM_PROVIDER=claude`면 `AGENT_MODEL`에 Claude 모델(예: `claude-haiku-5-5`)을 넣는다. 가격은 `core/llm_pricing.py`에 있고, 요금표에 없는 모델이면 월 상한 계산이 멈춘다. Claude 어댑터는 시스템 프롬프트(와 앞의 도구 목록)에 프롬프트 캐시 중단점을 두고, `THINKING_LEVEL`을 `output_config.effort`로 넘기며, SDK 재시도를 끄고 `core/claude_retry.py`에서 재시도한다(429·5xx·연결 오류 3회, 타임아웃 1회; 요청 타임아웃 30초, 검색 60초·재시도 1회). 웹 검색은 호출당 `max_uses` 3회로 막고, 검색 1,000회당 10달러를 `UsageService.record(search_requests=)`가 비용에 더한다. 보조 모델(`FALLBACK_MODEL`)은 Gemini 전용이라 Claude에는 없다.
+- **Claude 선택지**: `LLM_PROVIDER=claude`면 `AGENT_MODEL`에 Claude 모델(예: `claude-haiku-5-5`)을 넣는다. 가격은 `core/llm_pricing.py`에 있고, 요금표에 없는 모델이면 월 상한 계산이 멈춘다. Claude 어댑터는 시스템 프롬프트(와 앞의 도구 목록)에 프롬프트 캐시 중단점을 두고, `THINKING_LEVEL`을 `output_config.effort`로 넘기며, SDK 재시도를 끄고 `core/claude_retry.py`에서 재시도한다(429·5xx·연결 오류 3회, 타임아웃 1회; 요청 타임아웃 30초, 검색 60초·재시도 1회). 웹 검색은 호출당 `max_uses` 5회로 막고(2026-10-22 사용자 결정, 처음엔 3), 검색 1,000회당 10달러를 `UsageService.record(search_requests=)`가 비용에 더한다. 보조 모델(`FALLBACK_MODEL`)은 Gemini 전용이라 Claude에는 없다.
 - **검증 방법**: 이 조합을 잰 공개 벤치마크는 찾지 못했다. 스킬들의 `examples`를 모아 두 모델에 똑같이 돌리고, 도구 선택 오류와 숫자 규칙 위반을 센다. Flash-Lite가 통과하면 에이전트도 Flash-Lite로 내린다.
 - **Google 검색**: 유료 등급에서만 쓸 수 있다. 월 5,000회까지 무료(Gemini 3 계열 공용)이고 이후 1,000회당 14달러다. 이 규모에서는 무료 한도 안에 든다. 함수 호출과 검색을 한 요청에 함께 쓰는 기능은 Gemini 3 계열에서 지원된다([문서](https://ai.google.dev/gemini-api/docs/tool-combination)).
 - **무료 등급을 쓰지 않는 이유**: 검색을 못 쓰고, 입력 내용이 구글 제품 개선에 쓰인다. 친구들의 대화와 메모리가 들어가므로 유료 등급을 쓴다.

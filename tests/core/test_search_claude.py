@@ -65,7 +65,7 @@ async def test_search_extracts_sources_from_web_search_tool_result_block() -> No
     assert fake_messages.captured_kwargs is not None
     tools = fake_messages.captured_kwargs["tools"]
     assert tools[0]["type"] == "web_search_20260318"
-    assert tools[0]["max_uses"] == 3  # 한 호출에서 검색 횟수에 상한을 건다
+    assert tools[0]["max_uses"] == 5  # 한 호출에서 검색 횟수에 상한을 건다
 
 
 @pytest.mark.asyncio
