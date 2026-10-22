@@ -52,8 +52,10 @@ emits: [chunithm.song.viewed]
   `group_by="곡"`이 아니다. 묶으면 곡마다 표지 줄이 붙어 줄이 두 배가 된다. 곡 이름만 한 번씩(같은 곡의 채보가 둘이어도
   한 줄) 보여 달라면 `songs_of`로 곡 단위로 합친 뒤 `columns=["곡"]`을 쓴다. 칸 값이 같은 행을 하나만 남기는 일반 연산은
   `table_query`의 `distinct_by`다("작곡가마다 상수 제일 높은 곡 하나").
-- 난이도를 둘 말했으면("마스터나 울티마") `find_songs`의 `difficulty`와 `other_difficulty`에 하나씩 준다. 난이도를 비워
-  다시 찾으면 EXP 같은 다른 난이도가 섞인다.
+- 난이도를 둘 말했으면("마스터나 울티마") `find_songs`의 `difficulty`와 `other_difficulty`에 하나씩 준다. 난이도가 셋
+  이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 `min_difficulty`/`max_difficulty`를 한 번에 준다(익스퍼트·마스터·울티마면
+  `min_difficulty=EXPERT` 하나). 난이도를 따로따로 찾아 표를 둘로 나누지 않는다 — 마지막 표만 그려져 한쪽이 빠진다.
+  난이도를 비워 다시 찾으면 EXP 같은 다른 난이도가 섞인다.
 - `find_by_artist`는 플레이어가 난이도를 말했을 때만 `difficulty`를 준다. 말하지 않았으면 비우고,
   곡 단위 표로 나온다.
 - 곡 단위 표(난이도 없음)를 점수·보더·채보 링크에 넘기려면 먼저 `charts_of`로 채보 행으로 펼친다. 난이도를

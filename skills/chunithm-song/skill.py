@@ -37,6 +37,15 @@ from services.chunithm.terms import ResolvedDifficulty
 _DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 
 
+def _difficulty_range_text(low: str | None, high: str | None) -> str | None:
+    """표의 조건 줄에 적는 난이도 범위. 범위를 안 걸었으면 None."""
+    if low is None and high is None:
+        return None
+    if low is not None and high is not None:
+        return f"{low}~{high}"
+    return f"{low} 이상" if low is not None else f"{high} 이하"
+
+
 def _difficulty_code(difficulty: DifficultyRef | None) -> str | None:
     """난이도 인자를 songdb 조회용 짧은 코드로 바꾼다. 비어 있으면 난이도를 가리지 않는다는
     뜻으로 None을 그대로 돌려준다(find_by_version의 "비우면 버전 전체" 규칙과 같다)."""
@@ -202,6 +211,8 @@ async def find_songs(
     version: str | None = None,
     difficulty: DifficultyRef | None = None,
     other_difficulty: DifficultyRef | None = None,
+    min_difficulty: DifficultyRef | None = None,
+    max_difficulty: DifficultyRef | None = None,
     min_note_count: int | None = None,
     max_note_count: int | None = None,
     new_only: bool = False,
@@ -209,20 +220,28 @@ async def find_songs(
     """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 조합해 채보를 찾는다.
     `/상수`·`/버전`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
     "마스터나 울티마"처럼 난이도를 둘 말했으면 difficulty와 other_difficulty에 하나씩 준다(둘 중 어느 쪽이든 맞는 채보).
+    난이도가 셋 이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 min_difficulty/max_difficulty를 준다(BASIC<ADVANCED<EXPERT<MASTER<ULTIMA).
     조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다.
     결과는 상수 오름차순 표다. 다른 순서가 필요하면 표에 `table_query`를 쓴다."""
     if not new_only and all(
         v is None
-        for v in (min_const, max_const, level, version, difficulty, other_difficulty, min_note_count, max_note_count)
+        for v in (
+            min_const, max_const, level, version, difficulty, other_difficulty, min_difficulty, max_difficulty,
+            min_note_count, max_note_count,
+        )
     ):
         return ToolResult(error="조건을 하나는 줘야 해(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡 중)")
 
     codes = [code for code in (_difficulty_code(difficulty), _difficulty_code(other_difficulty)) if code is not None]
-    hits = ctx.songdb.find_songs(
-        min_const=min_const, max_const=max_const, level=level, version=version,
-        difficulty=codes or None, min_note_count=min_note_count, max_note_count=max_note_count,
-        new_only=new_only,
-    )
+    low, high = _difficulty_code(min_difficulty), _difficulty_code(max_difficulty)
+    try:
+        hits = ctx.songdb.find_songs(
+            min_const=min_const, max_const=max_const, level=level, version=version,
+            difficulty=codes or None, min_difficulty=low, max_difficulty=high,
+            min_note_count=min_note_count, max_note_count=max_note_count, new_only=new_only,
+        )
+    except ValueError as exc:
+        return ToolResult(error=str(exc))
     if not hits:
         return ToolResult(data={"count": 0}, display=Display(content="조건에 맞는 채보가 없어."))
     conditions = [
@@ -230,6 +249,7 @@ async def find_songs(
         f"레벨 {level}" if level else None,
         f"{version} 버전" if version else None,
         "·".join(dict.fromkeys(codes)) or None,
+        _difficulty_range_text(low, high),
         _note_range_text(min_note_count, max_note_count),
         "신곡만" if new_only else None,
     ]

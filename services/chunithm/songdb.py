@@ -25,6 +25,8 @@ _SEED_PATH = (
 _LINKED_VERSE_PATH = Path(__file__).parent / "data" / "linked_verse.yaml"
 _MAX_CANDIDATES = 8
 _CHART_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
+# 난이도 범위("익스퍼트 이상")가 훑는 순서. WORLD'S END는 쉬움·어려움 축에 없어 범위에 넣지 않는다.
+_DIFFICULTY_RANGE_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT")
 
 # 수록 버전 이름을 출시 순서(오래된 것부터)로 나열한 것. 곡 DB의 `version` 값과 철자가 같다. 작업 표의 버전 칸이
 # 이 순서로 정렬·묶기·비교한다. 목록에 없는 새 버전은 정렬에서 값 없음으로 취급되므로 새 버전이 나오면 끝에 더한다.
@@ -40,6 +42,19 @@ LONG_TO_SHORT_DIFFICULTY: dict[str, str] = {
     "BASIC": "BAS", "ADVANCED": "ADV", "EXPERT": "EXP",
     "MASTER": "MAS", "ULTIMA": "ULT", "WORLD'S END": "WE",
 }
+
+
+def _difficulty_range(low: str | None, high: str | None) -> frozenset[str] | None:
+    """난이도 범위가 걸린 코드들. 범위를 안 걸었으면 None(가리지 않는다). 낮은 쪽이 높은 쪽보다 높으면 빈 집합이다."""
+    if low is None and high is None:
+        return None
+    order = _DIFFICULTY_RANGE_ORDER
+    for code in (low, high):
+        if code is not None and code not in order:
+            raise ValueError(f"난이도 범위는 {order[0]}~{order[-1]} 안에서만 줄 수 있다: {code}")
+    start = order.index(low) if low is not None else 0
+    end = order.index(high) if high is not None else len(order) - 1
+    return frozenset(order[start : end + 1])
 
 
 class _HttpGetJson(Protocol):
@@ -412,12 +427,16 @@ class SongDbService:
         level: str | None = None,
         version: str | None = None,
         difficulty: str | Collection[str] | None = None,
+        min_difficulty: str | None = None,
+        max_difficulty: str | None = None,
         min_note_count: int | None = None,
         max_note_count: int | None = None,
         new_only: bool = False,
     ) -> list[ConstRangeHit]:
         """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 AND로 겹쳐 찾는다. difficulty는
         짧은 코드 하나거나 여러 개("MAS"와 "ULT")이고, 여러 개면 그중 어느 난이도든 맞는 채보를 찾는다.
+        min_difficulty/max_difficulty는 BAS<ADV<EXP<MAS<ULT 순서의 범위("익스퍼트 이상")다. WORLD'S END는
+        범위에 들지 않고, 범위 밖 코드를 주면 ValueError다. difficulty와 같이 주면 둘 다 맞아야 한다.
         find_by_const/find_by_level/find_by_version은 각각 조건 하나(+난이도)만 받아서
         "15.0~15.2 상수 중 노트 수 1000개 이상"처럼 조건을 두 개 이상 동시에 거는 질문을
         못 받는다 — 그걸 위한 것이다. 준 조건만 보고 안 준 건 거르지 않는다. 조건을 하나도
@@ -428,6 +447,7 @@ class SongDbService:
         순서는 상수 오름차순, 상수를 모르는 채보는 뒤, 같으면 제목순으로 고정이다. 다른 순서는
         표를 받은 `table_query`가 맡는다(2026-10-20 작업 표)."""
         wanted = [difficulty] if isinstance(difficulty, str) else None if difficulty is None else list(dict.fromkeys(difficulty))
+        in_range = _difficulty_range(min_difficulty, max_difficulty)
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():
             if title not in self._available_intl or (new_only and not song.is_new):
@@ -438,6 +458,8 @@ class SongDbService:
             for code in codes:
                 chart = song.charts.get(code)
                 if chart is None or not chart.is_available:
+                    continue
+                if in_range is not None and code not in in_range:
                     continue
                 if min_const is not None and (chart.const is None or chart.const < min_const):
                     continue

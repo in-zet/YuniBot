@@ -327,6 +327,28 @@ async def test_find_songs_two_difficulties_gives_both_and_shows_them_in_steps() 
     assert {row.cell(tc.DIFFICULTY).text for row in only_other.table.rows} == {"ULT"}
 
 
+async def test_find_songs_difficulty_range_gives_every_difficulty_in_between() -> None:
+    """"익스퍼트 이상"처럼 난이도 셋 이상은 범위로 준다(2026-10-22: 둘만 받아 울티마가 빠졌다)."""
+    skill = _load_skill()
+    ctx = _ctx_with_songdb(SongDbService())
+
+    upper = await skill.find_songs(ctx, min_const=13.0, min_difficulty=_resolved_difficulty("EXPERT"))
+    assert upper.table is not None
+    assert {row.cell(tc.DIFFICULTY).text for row in upper.table.rows} <= {"EXP", "MAS", "ULT"}
+    assert "EXP 이상" in upper.table.steps[0]
+    between = await skill.find_songs(
+        ctx, min_const=13.0, min_difficulty=_resolved_difficulty("EXPERT"), max_difficulty=_resolved_difficulty("MASTER"),
+    )
+    assert between.table is not None
+    assert {row.cell(tc.DIFFICULTY).text for row in between.table.rows} == {"EXP", "MAS"}
+    assert "EXP~MAS" in between.table.steps[0]
+    only_range = await skill.find_songs(ctx, max_difficulty=_resolved_difficulty("ADVANCED"))
+    assert only_range.table is not None  # 난이도 범위만으로도 조건이 된다
+    assert {row.cell(tc.DIFFICULTY).text for row in only_range.table.rows} <= {"BAS", "ADV"}
+    worlds_end = await skill.find_songs(ctx, min_const=13.0, min_difficulty=_resolved_difficulty("WORLD'S END"))
+    assert worlds_end.error is not None  # WORLD'S END는 범위에 넣을 수 없다
+
+
 async def test_version_column_sorts_in_release_order() -> None:
     from core.tables import select_rows
 

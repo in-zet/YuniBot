@@ -348,6 +348,21 @@ def test_version_order_covers_every_version_in_the_song_db(songdb: SongDbService
     assert len(set(VERSION_ORDER)) == len(VERSION_ORDER)
 
 
+async def test_find_songs_difficulty_range_is_inclusive_excludes_worlds_end_and_ands_with_difficulty(
+    songdb: SongDbService,
+) -> None:
+    hits = songdb.find_songs(min_const=13.0, min_difficulty="EXP", max_difficulty="MAS")
+    assert hits and {hit.chart.difficulty for hit in hits} == {"EXP", "MAS"}
+    open_ended = songdb.find_songs(min_const=14.0, min_difficulty="EXP")
+    assert {hit.chart.difficulty for hit in open_ended} <= {"EXP", "MAS", "ULT"}
+    assert {hit.chart.difficulty for hit in songdb.find_songs(max_difficulty="ADV", level="5")} <= {"BAS", "ADV"}
+    both = songdb.find_songs(min_const=13.0, difficulty=["MAS", "ULT"], max_difficulty="MAS")
+    assert {hit.chart.difficulty for hit in both} == {"MAS"}  # 둘 다 맞아야 한다
+    assert songdb.find_songs(min_difficulty="ULT", max_difficulty="BAS") == []
+    with pytest.raises(ValueError, match="BAS~ULT"):
+        songdb.find_songs(min_const=13.0, min_difficulty="WE")
+
+
 async def test_find_songs_returns_empty_when_nothing_matches(songdb: SongDbService) -> None:
     assert songdb.find_songs(min_const=99.0, max_const=99.0) == []
 
