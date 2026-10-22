@@ -586,7 +586,7 @@ def test_numbers_rows_and_exclude_rows_run_before_where() -> None:
 
 def test_sort_is_within_groups_stable_and_missing_values_go_last_both_ways() -> None:
     table = _score_table()
-    asc = select_rows(table, sort="점수")
+    asc = select_rows(table, sort="점수", descending=False)
     assert _songs(asc) == ["B", "A", "C", "D", "E"]  # 묶음 안에서만 정렬, E(값 없음)는 D 뒤
     desc = select_rows(table, sort="점수", descending=True)
     assert _songs(desc) == ["C", "A", "B", "D", "E"]
@@ -928,7 +928,7 @@ def test_ordered_text_column_sorts_by_its_order_not_alphabetically() -> None:
     table = _version_table()
     newest_first = select_rows(table, sort="버전", descending=True)
     assert _songs(newest_first) == ["b", "d", "c", "a", "e", "f"]  # NEW, NEW, MID, OLD, OLD, 목록에 없는 값은 뒤
-    oldest_first = select_rows(table, sort="버전")
+    oldest_first = select_rows(table, sort="버전", descending=False)
     assert _songs(oldest_first) == ["a", "e", "c", "b", "d", "f"]
 
 
@@ -938,6 +938,39 @@ def test_ordered_text_column_compares_by_order_and_unknown_values_never_match_a_
     assert _songs(select_rows(table, where=[_where("버전", "<", "MID")])) == ["a", "e"]
     assert _songs(select_rows(table, where=[_where("버전", "==", "NEW")])) == ["b", "d"]
     assert _songs(select_rows(table, where=[_where("버전", "contains", "ew")])) == ["b", "d"]
+
+
+def test_sort_direction_defaults_to_biggest_first_for_number_and_ordered_columns_and_alphabetical_for_text() -> None:
+    """방향을 안 정하면(2026-10-22 사용자 결정) 숫자·순서가 있는 칸은 큰 쪽부터, 글 칸은 가나다순이다."""
+    table = _version_table()
+    assert _songs(select_rows(table, sort="상수")) == ["b", "f", "c", "e", "a", "d"]
+    assert select_rows(table, sort="상수").steps[-1] == "상수 내림차순"
+    assert _songs(select_rows(table, sort="버전")) == ["b", "d", "c", "a", "e", "f"]
+    assert _songs(select_rows(table, sort="곡")) == ["a", "b", "c", "d", "e", "f"]
+    assert select_rows(table, sort="곡").steps[-1] == "곡 오름차순"
+    assert _songs(select_rows(table, sort="상수", descending=False)) == ["d", "a", "e", "c", "f", "b"]  # 말하면 그대로
+    assert _songs(select_rows(table, sort="곡", descending=True)) == ["f", "e", "d", "c", "b", "a"]
+    assert [r["values"]["곡"] for r in peek_rows(table, sort="상수", limit=2)["rows"]] == ["b", "f"]
+
+
+def test_sorting_the_sorted_result_again_stacks_and_keeps_the_earlier_order_among_ties() -> None:
+    """정렬 기준이 둘이면 덜 중요한 기준으로 먼저 정렬하고, 그 결과 표를 더 중요한 기준으로 다시 정렬한다."""
+    builder = TableBuilder(unit="채보")
+    builder.column("song", "곡", bare=True).column("const", "상수", "number").column("version", "버전", order=_VERSIONS)
+    for key, (song, const, version) in enumerate(
+        [("a", 15.0, "OLD"), ("b", 15.0, "NEW"), ("c", 15.5, "MID"), ("d", 15.0, "MID")], start=1
+    ):
+        builder.row(
+            RowRef("chunithm.chart", str(key)),
+            {"song": cell(song), "const": cell(const, f"{const}"), "version": cell(version)},
+        )
+    table = builder.build()
+
+    stacked = select_rows(select_rows(table, sort="버전"), sort="상수")
+
+    assert _songs(stacked) == ["c", "b", "d", "a"]  # 상수 큰 순, 같은 상수 안에서는 버전 큰 순
+    separate = select_rows(table, sort="상수")  # 같은 원래 표에 따로 걸면 앞 정렬이 쌓이지 않는다
+    assert _songs(separate) == ["c", "a", "b", "d"]
 
 
 def test_canonical_order_value_fixes_case_and_rejects_unknown_names() -> None:
@@ -951,7 +984,7 @@ def test_group_by_ordered_column_puts_the_newest_group_first_and_sort_on_it_foll
     table = _version_table()
     by_version = select_rows(table, group_by="버전")
     assert [g.title for g in by_version.groups] == ["NEW", "MID", "OLD", "ZZZ"]  # 목록에 없는 값은 맨 뒤
-    ascending = select_rows(table, group_by="버전", sort="버전")
+    ascending = select_rows(table, group_by="버전", sort="버전", descending=False)
     assert [g.title for g in ascending.groups] == ["OLD", "MID", "NEW", "ZZZ"]
     descending = select_rows(table, group_by="버전", sort="버전", descending=True)
     assert [g.title for g in descending.groups] == ["NEW", "MID", "OLD", "ZZZ"]

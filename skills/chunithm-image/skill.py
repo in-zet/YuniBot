@@ -71,6 +71,15 @@ async def table_image(
 
     fetched = await ctx.image_cache.fetch_many([*jacket_urls.values(), *profile_urls])
     jackets = {title: fetched.get(url) if url else None for title, url in jacket_urls.items()}
+    # CHUNITHM-NET에서 못 받은 재킷(사이트 장애·시드에 없는 신곡)은 Chunimaru 주소로 한 번 더 받는다.
+    fallback_urls = {
+        title: url for title, data in jackets.items()
+        if data is None and (url := ctx.songdb.jacket_fallback_for(title)) is not None
+    }
+    if fallback_urls:
+        fallback_fetched = await ctx.image_cache.fetch_many(fallback_urls.values())
+        for title, url in fallback_urls.items():
+            jackets[title] = fallback_fetched.get(url)
 
     # 가동 버전은 레이팅표(요약에 최종 레이팅이 있는 표)에만 머리말에 넣는다.
     version = ctx.songdb.current_version() if render.header_rating(table) is not None else None

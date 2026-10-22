@@ -183,6 +183,17 @@ def test_missing_and_broken_jackets_draw_placeholders() -> None:
         assert len(files) == 1
 
 
+def test_missing_jacket_draws_the_default_jacket_with_a_note() -> None:
+    """재킷을 못 찾았을 때(2026-10-22 사용자 지시) 빈 사각형이 아니라 음표가 있는 기본 재킷을 그린다."""
+    canvas = Image.new("RGBA", (120, 120), (0, 0, 0, 255))
+    render._paste_jacket(canvas, None, (10, 10, 110, 110))  # pyright: ignore[reportPrivateUsage]
+
+    colors = {canvas.getpixel((x, y)) for x in range(10, 110) for y in range(10, 110)}
+    assert (*render._PLACEHOLDER, 255) in colors  # pyright: ignore[reportPrivateUsage]
+    assert (*render._DEFAULT_JACKET_NOTE, 255) in colors  # pyright: ignore[reportPrivateUsage]
+    assert canvas.getpixel((2, 2)) == (0, 0, 0, 255)  # 상자 밖은 건드리지 않는다
+
+
 def test_song_level_rows_draw_title_only() -> None:
     builder = TableBuilder(subject=None, unit="곡")
     tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.ARTIST, tc.VERSION)

@@ -63,6 +63,7 @@ _TEXT = (240, 242, 250)
 _MUTED = (150, 158, 184)
 _STALE = (255, 170, 80)
 _PLACEHOLDER = (58, 63, 88)
+_DEFAULT_JACKET_NOTE = (104, 112, 146)  # 기본 재킷에 그리는 음표(바탕보다 한 단계 밝은 회청색)
 
 _DIFFICULTY_COLORS = {
     "BAS": (46, 160, 90),
@@ -183,6 +184,34 @@ def _paste_fit(canvas: Image.Image, image: Image.Image | None, box: tuple[int, i
     size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
     resized = image.resize(size, Image.Resampling.LANCZOS)
     canvas.alpha_composite(resized, (x0 + (x1 - x0 - size[0]) // 2, y0 + (y1 - y0 - size[1]) // 2))
+
+
+def _paste_jacket(canvas: Image.Image, image: Image.Image | None, box: tuple[int, int, int, int]) -> None:
+    """재킷을 `box`에 붙인다. 재킷이 없거나 받지 못했으면 기본 재킷(바탕에 음표 하나)을 그린다."""
+    if image is not None:
+        _paste_fit(canvas, image, box)
+        return
+    x0, y0, x1, y1 = box
+    draw = ImageDraw.Draw(canvas)
+    draw.rounded_rectangle(box, radius=6, fill=_PLACEHOLDER)
+    w, h = x1 - x0, y1 - y0
+    head_w, head_h = w * 0.17, h * 0.12
+    stem_w = max(2.0, w * 0.035)
+    heads = ((x0 + w * 0.26, y0 + h * 0.66), (x0 + w * 0.60, y0 + h * 0.58))  # 음표 머리 왼쪽 위 모서리
+    for hx, hy in heads:
+        draw.ellipse((hx, hy, hx + head_w, hy + head_h), fill=_DEFAULT_JACKET_NOTE)
+    stems = [(hx + head_w - stem_w, hy + head_h * 0.5) for hx, hy in heads]
+    top = y0 + h * 0.26
+    for sx, sy in stems:
+        draw.rectangle((sx, top, sx + stem_w, sy), fill=_DEFAULT_JACKET_NOTE)
+    beam_h = h * 0.07
+    draw.polygon(
+        [
+            (stems[0][0], top), (stems[1][0] + stem_w, top - h * 0.04),
+            (stems[1][0] + stem_w, top - h * 0.04 + beam_h), (stems[0][0], top + beam_h),
+        ],
+        fill=_DEFAULT_JACKET_NOTE,
+    )
 
 
 _ICON_FRAME_INSET = 0.05  # 틀 테두리 안쪽에 캐릭터를 앉히는 여백(상자 한 변에 대한 비율)
@@ -732,7 +761,7 @@ def _draw_card(
     background = _card_background(panel, lines.height)
     card = background.copy()
     box = (0, 0, _CARD_W, _JACKET)
-    _paste_fit(card, jacket, box)
+    _paste_jacket(card, jacket, box)
     _draw_title_over_jacket(card, box, row.cell(tc.SONG).text, background)
     ImageDraw.Draw(card, "RGBA").line((_CARD_PAD, _JACKET, _CARD_W - 1 - _CARD_PAD, _JACKET), fill=_CARD_DIVIDER, width=2)
     mask = Image.new("L", card.size, 0)
@@ -882,7 +911,7 @@ def _draw_list_row(
         draw.text((_MARGIN + 14, y + 14), f"#{number}", font=_font(13, True), fill=_MUTED)
         draw.text((_MARGIN + 14, y + 46), f"({table_number})", font=_font(10, False), fill=_MUTED)
     jx = _MARGIN + 80
-    _paste_fit(canvas, jacket, (jx, y + 6, jx + _LIST_JACKET, y + 6 + _LIST_JACKET))
+    _paste_jacket(canvas, jacket, (jx, y + 6, jx + _LIST_JACKET, y + 6 + _LIST_JACKET))
 
     # 오른쪽부터 채운다: 곡 레이팅 · 램프 · 랭크 · 점수.
     right = _LIST_W - _MARGIN - 18

@@ -582,6 +582,22 @@ async def test_chunimaru_only_song_gets_chunimaru_jacket_url(songdb: SongDbServi
     assert song.jacket == "https://chunimaru.example/jackets/zzz.webp"
 
 
+async def test_chunimaru_jacket_url_is_kept_as_fallback_for_seed_songs(songdb: SongDbService) -> None:
+    song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX)
+    before = song.jacket
+    songdb._apply_chunimaru({
+        "songs": [{
+            "idx": song.id, "title": song.title, "artist": song.artist, "isNew": False,
+            "jacket": "https://chunimaru.example/jackets/bbkk.webp",
+            "charts": {"MAS": {"const": 14.0, "isConstUnknown": False}},
+        }]
+    })
+
+    assert songdb.jacket_for(song.title) == before  # 시드 재킷이 먼저다
+    assert songdb.jacket_fallback_for(song.title) == "https://chunimaru.example/jackets/bbkk.webp"
+    assert songdb.jacket_fallback_for("없는 곡") is None
+
+
 async def test_chunimaru_overlay_keeps_seed_jacket(songdb: SongDbService) -> None:
     before = (await songdb.resolve("B.B.K.K.B.K.K.", _CTX)).jacket
     songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))

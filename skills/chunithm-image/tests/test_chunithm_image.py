@@ -43,10 +43,14 @@ def _png() -> bytes:
 @dataclass(slots=True, kw_only=True)
 class _FakeSongDb:
     jackets: dict[str, str | None] = field(default_factory=dict)
+    fallbacks: dict[str, str] = field(default_factory=dict)
     version: str | None = None
 
     def jacket_for(self, title: str) -> str | None:
         return self.jackets.get(title)
+
+    def jacket_fallback_for(self, title: str) -> str | None:
+        return self.fallbacks.get(title)
 
     def current_version(self) -> str | None:
         return self.version
@@ -116,6 +120,22 @@ async def test_table_image_returns_png_files_and_marks_table_drawn(skill: Module
     assert result.data["images"] == 1
     assert result.data["rows"] == 2
     assert result.data["missing_jackets"] == 1  # b.jpg는 받지 못했다
+
+
+async def test_table_image_falls_back_to_chunimaru_jacket_when_chunithm_net_fails(skill: ModuleType) -> None:
+    """CHUNITHM-NET 재킷을 못 받으면(사이트 장애, 2026-10-22) Chunimaru 주소로 한 번 더 받는다."""
+    songdb = _FakeSongDb(
+        jackets={"곡 A": "a.jpg", "곡 B": "b.jpg"}, fallbacks={"곡 A": "https://chunimaru.example/a.webp", "곡 B": "https://chunimaru.example/b.webp"},
+    )
+    cache = _FakeImageCache(
+        available={"https://chunithm-net-eng.com/mobile/img/a.jpg": _png(), "https://chunimaru.example/b.webp": _png()},
+    )
+    ctx = _ctx(songdb=songdb, cache=cache, records=_FakeRecords())
+
+    result = await skill.table_image(ctx, _table(subject=None))
+
+    assert result.data["missing_jackets"] == 0
+    assert cache.requested == ["https://chunimaru.example/b.webp"]  # 받은 곡 A는 대체 주소를 받지 않는다
 
 
 async def test_table_image_without_subject_does_not_touch_profile(skill: ModuleType) -> None:

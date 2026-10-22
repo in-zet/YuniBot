@@ -131,7 +131,7 @@ async def table_query(
     exclude_rows: list[int] | None = None,
     where: list[WhereClause] | None = None,
     sort: str | None = None,
-    descending: bool = False,
+    descending: bool | None = None,
     limit: int | None = None,
     group_by: str | None = None,
     group_step: str | None = None,
@@ -140,6 +140,8 @@ async def table_query(
 ) -> ToolResult:
     """작업 표를 거르거나 정렬하거나 다시 묶어 새 표를 만든다(원래 표는 그대로). 결과 표가 사용자에게 보인다.
     rows/exclude_rows는 사람이 표에서 본 번호(1부터, 묶음을 넘어 이어짐)를 그대로 넣는다("3번부터 5번"이면 [3,4,5]).
+    sort는 칸 하나다. 기준이 둘 이상이면 덜 중요한 기준부터 차례로 부르되 매번 직전 결과 표에 건다(같은 값은 앞 순서를 지킨다).
+    descending은 사용자가 방향을 말했을 때만 준다(안 주면 숫자·순서 칸은 큰 쪽부터, 글 칸은 가나다순).
     where는 {column: 칸 이름, op: ==,!=,<,<=,>,>=,contains, value: 사용자가 말한 값 그대로}의 목록(AND)이다.
     limit은 묶음마다 앞에서 N개다. group_by는 칸 이름이면 그 칸 값으로 다시 묶고, 빈 문자열이면 묶음을 푼다.
     묶음 순서: 숫자 칸(상수 등)과 순서가 있는 칸(버전은 출시순)으로 묶으면 큰 값(최신)부터이고, 그 칸을 sort로
@@ -170,7 +172,7 @@ async def table_peek(
     rows: list[int] | None = None,
     where: list[WhereClause] | None = None,
     sort: str | None = None,
-    descending: bool = False,
+    descending: bool | None = None,
     limit: int = 10,
 ) -> ToolResult:
     """작업 표에서 고른 행의 원래 값을 읽는다(표를 만들거나 출력하지 않는다). 행 값을 말해야 할 때만 부른다.

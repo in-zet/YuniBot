@@ -439,7 +439,7 @@ def _select_numbered(
     exclude_rows: Sequence[int] | None = None,
     where: Sequence[Condition] = (),
     sort: str | None = None,
-    descending: bool = False,
+    descending: bool | None = None,
     limit: int | None = None,
     group_by: str | None = None,
     group_step: str | None = None,
@@ -468,6 +468,9 @@ def _select_numbered(
     if group_step is not None and group_by is None:
         raise TableError("group_step은 group_by에 칸 이름을 줄 때만 쓴다")
     sort_column = None if sort is None else _column_by_label(table, sort)
+    if descending is None:
+        # 방향을 안 정했으면 숫자·점수·순서가 있는 칸(상수·난이도·레이팅 등)은 큰 쪽부터, 글 칸은 가나다순이다.
+        descending = sort_column is not None and _is_ordered(sort_column)
     presorted = False
     if group_by is not None:
         if group_by == "":

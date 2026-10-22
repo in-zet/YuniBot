@@ -81,6 +81,8 @@ class SongRecord:
     # 재킷 그림. 시드의 재킷 파일 이름이거나, 시드에 없던 곡이면 Chunimaru가 준 전체 주소.
     # 주소로 바꾸는 일은 `image_cache.jacket_url`이 한다.
     jacket: str | None = None
+    # Chunimaru가 준 재킷 전체 주소. CHUNITHM-NET에서 못 받을 때(사이트 장애 등) 대신 받는다.
+    jacket_fallback: str | None = None
 
 
 @dataclass(slots=True, kw_only=True)
@@ -316,6 +318,11 @@ class SongDbService:
         song = self._songs.get(title)
         return song.jacket if song is not None else None
 
+    def jacket_fallback_for(self, title: str) -> str | None:
+        """재킷을 CHUNITHM-NET에서 못 받았을 때 대신 쓸 Chunimaru 재킷 주소. 없으면 None."""
+        song = self._songs.get(title)
+        return song.jacket_fallback if song is not None else None
+
     def note_count_for(self, title: str, difficulty: str) -> int | None:
         song = self._songs.get(title)
         if song is None:
@@ -528,6 +535,7 @@ class SongDbService:
         new_songs: dict[str, SongRecord] = {}
         # 시드에 재킷이 없던 곡만 Chunimaru 주소로 채운다(시드 값이 있으면 그대로 둔다).
         new_jackets: dict[str, str] = {}
+        new_fallbacks: dict[str, str] = {}
         chart_updates: list[tuple[str, str, ChartRecord]] = []
         for entry in cast("list[dict[str, Any]]", entries):
             title: str = entry["title"]
@@ -561,6 +569,8 @@ class SongDbService:
                 continue
             if song.jacket is None and entry.get("jacket"):
                 new_jackets[title] = entry["jacket"]
+            if entry.get("jacket"):
+                new_fallbacks[title] = entry["jacket"]
             for code, chart_data in charts_data.items():
                 existing = song.charts.get(code)
                 const = chart_data.get("const")
@@ -585,6 +595,8 @@ class SongDbService:
                 existing_song.is_new = is_new
         for title, jacket in new_jackets.items():
             self._songs[title].jacket = jacket
+        for title, fallback in new_fallbacks.items():
+            self._songs[title].jacket_fallback = fallback
         self._songs.update(new_songs)
         self._by_id.update({song.id: song for song in new_songs.values()})
         self._available_intl = new_available
