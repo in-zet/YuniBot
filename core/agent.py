@@ -31,6 +31,10 @@ from core.tool_types import Display, ToolContext, ToolResult
 
 logger = logging.getLogger(__name__)
 
+# 왕복 한 번의 입력이 이만큼을 넘으면 경고한다. 일부 모델(Haiku 등)은 호출 한 번의 프롬프트가 10만 토큰을 넘으면
+# 단가가 크게 오르는데, 비용 기록은 낮은 단가로만 계산하므로 넘기 전에 로그로 알아채려는 것이다(2026-10-22).
+_LARGE_PROMPT_TOKENS = 80_000
+
 _CORE_TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in [*CORE_TOOL_SPECS, *THREAD_TOOL_SPECS]}
 
 # 이번 턴에서 heavy 스킬(manifest.weight == "heavy")의 도구를 처음 부르기 직전에 한 번
@@ -245,6 +249,11 @@ class AgentLoop:
                 ctx.player_id, llm_turns, time.monotonic() - llm_started, len(turn.function_calls),
                 turn.usage.input_tokens, turn.usage.cached_input_tokens, turn.usage.output_tokens,
             )
+            if turn.usage.input_tokens > _LARGE_PROMPT_TOKENS:
+                logger.warning(
+                    "player %s: LLM 왕복 %d회차 입력 %d토큰 — 호출 한 번이 %d를 넘었다(10만 초과 시 단가 상승 구간)",
+                    ctx.player_id, llm_turns, turn.usage.input_tokens, _LARGE_PROMPT_TOKENS,
+                )
             result.served_model = turn.model
             served = turn.model or self._model
             previous = result.usage_by_model.get(served, UsageInfo(input_tokens=0, output_tokens=0))

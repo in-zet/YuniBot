@@ -997,3 +997,26 @@ async def test_agent_loop_pre_opens_skills_whose_triggers_match_the_message() ->
     )
     assert state.level_for("chunithm-settings") == "full"
     assert state.level_for("chunithm-border") == "card"
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_warns_when_one_round_prompt_is_large(caplog: pytest.LogCaptureFixture) -> None:
+    """왕복 한 번의 입력이 8만 토큰을 넘으면 경고한다(10만 초과 시 단가가 오르는 모델이 있다)."""
+    registry = _registry()
+    small = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="open_skill", args={"skill_name": "chunithm-border"})],
+        usage=UsageInfo(input_tokens=79_000, output_tokens=5),
+    )
+    large = GenerationTurn(
+        content=LlmContent(role="model", parts=[LlmPart(text="끝")]), text="끝",
+        usage=UsageInfo(input_tokens=81_000, output_tokens=5),
+    )
+    loop = _loop(registry, [small, large], max_tokens=1_000_000)
+
+    with caplog.at_level("INFO", logger="core.agent"):
+        await loop.run(ctx=_ctx(), skill_state=_state(registry, mode="full"), user_text="질문", prompt_context_snippets=[])
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING" and "단가 상승" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "2회차 입력 81000토큰" in warnings[0]
