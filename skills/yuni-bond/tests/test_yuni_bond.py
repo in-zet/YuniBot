@@ -17,7 +17,14 @@ import pytest
 from core.events import EventBus, Section
 from core.tables import RowRef, TableBuilder, WorkTable, cell, render_text
 from core.tool_types import Display, ToolContext
-from services.chunithm.records import ChartUpdate, RatingDeltas, SessionInfo, SyncDiff
+from services.chunithm.records import (
+    ChartUpdate,
+    LampChange,
+    PbRow,
+    RatingDeltas,
+    SessionInfo,
+    SyncDiff,
+)
 from services.chunithm.songdb import SongDbService
 from services.common.arcades import Arcade
 
@@ -73,9 +80,15 @@ class _FakePlayers:
 
 
 class _FakeRecords:
-    def __init__(self, *, diff: SyncDiff | None = None, deltas: RatingDeltas | None = None) -> None:
+    def __init__(
+        self, *, diff: SyncDiff | None = None, deltas: RatingDeltas | None = None, pb_rows: list[PbRow] | None = None
+    ) -> None:
         self.diff = diff
         self.deltas = deltas
+        self.pb_rows = pb_rows or []
+
+    async def all_pb_rows(self, player_id: str) -> list[PbRow]:
+        return self.pb_rows
 
     async def sync_diff(self, sync_id: str) -> SyncDiff | None:
         return self.diff
@@ -112,19 +125,33 @@ def _ctx(
 def _update(
     title: str = "B.B.K.K.B.K.K.", difficulty: str = "MAS", *, old_rank: str | None, new_rank: str,
     old_score: int | None = 1_000_000, new_score: int = 1_007_500, session_id: str = "s1",
+    old_lamp: str | None = None, new_lamp: str = "",
 ) -> ChartUpdate:
     return ChartUpdate(
         song_title=title, difficulty=difficulty, old_score=old_score, new_score=new_score, old_rank=old_rank,
         new_rank=new_rank, old_rating=None, new_rating=None, session_id=session_id, estimated_session=False,
-        entered_frame=False,
+        entered_frame=False, old_combo_lamp=old_lamp, new_combo_lamp=new_lamp,
     )
 
 
-def _diff(updates: list[ChartUpdate], *, play_date: str = "2026-10-18") -> SyncDiff:
+def _diff(
+    updates: list[ChartUpdate], *, play_date: str = "2026-10-18", lamp_changes: list[LampChange] | None = None
+) -> SyncDiff:
     return SyncDiff(
         sync_id="sync1", sessions=[SessionInfo(id="s1", play_date=play_date, estimated=False)], chart_updates=updates,
         unchanged_plays=[], frame_exits=[], previous_computed_rating=None, previous_best30_average=None,
-        previous_new20_average=None,
+        previous_new20_average=None, lamp_changes=lamp_changes or [],
+    )
+
+
+def _pb(
+    title: str = "B.B.K.K.B.K.K.", difficulty: str = "MAS", *, const: float | None = 15.4, rank: str = "S",
+    lamp: str = "NONE",
+) -> PbRow:
+    """동기화 뒤(지금)의 PB 행. 이번에 바뀐 채보는 옛 값이 `ChartUpdate`·`LampChange`에 있다."""
+    return PbRow(
+        song_title=title, difficulty=difficulty, score=1_000_000, rank=rank, clear_lamp="CLEAR", combo_lamp=lamp,
+        chain_lamp="NONE", const=const, rating=None, session_id=None, updated_at="2026-10-18T00:00:00+00:00",
     )
 
 
@@ -180,7 +207,7 @@ async def test_goal_completed_keeps_the_registered_date(skill: ModuleType, db: a
     [event] = result.data["events"]
     assert (event["goal"], event["days_taken"], event["date_label"]) == ("크로노 MAS SSS", 10, "10월 11일")
     table = result.table
-    assert table is not None and table.subject == "p1" and table.unit == "기록"
+    assert table is not None and table.subject == "p1" and table.unit == "이정표"
     [row] = table.rows
     assert row.ref.kind == "yuni-bond.event" and row.ref.key == '["goal_done", "2026-10-11", "", ""]'
     assert (row.cell("날짜").raw, row.cell("날짜").text) == ("2026-10-11", "10월 11일")
@@ -192,47 +219,174 @@ async def test_goal_completed_keeps_the_registered_date(skill: ModuleType, db: a
 # ---------------------------------------------------------------- 동기화
 
 
-async def test_first_sss_is_recorded_with_the_time_it_took(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    first = _FakeRecords(diff=_diff([_update(old_rank="SS+", new_rank="SS+", new_score=1_005_000)], play_date="2026-10-01"))
+async def _const_firsts(db: aiosqlite.Connection) -> list[tuple[str, str, str]]:
+    rows = await _rows(
+        db, "SELECT label, value, song_title FROM yuni_bond_milestones WHERE kind = 'const_first' ORDER BY id"
+    )
+    return [(r["label"], r["value"], r["song_title"]) for r in rows]
+
+
+async def test_const_first_is_recorded_with_the_time_it_took(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    first = _FakeRecords(
+        diff=_diff([_update(old_rank="SS+", new_rank="SS+", new_score=1_005_000)], play_date="2026-10-01"),
+        pb_rows=[_pb(rank="SS+")],
+    )
     await skill.on_sync_completed(_ctx(db, records=first), _payload())
 
-    later = _FakeRecords(diff=_diff([_update(old_rank="SS+", new_rank="SSS")], play_date="2026-10-18"))
+    later = _FakeRecords(
+        diff=_diff([_update(old_rank="SS+", new_rank="SSS")], play_date="2026-10-18"), pb_rows=[_pb(rank="SSS")]
+    )
     section = await skill.on_sync_completed(_ctx(db, records=later), _payload())
 
     assert section is not None
     assert section.display is None
     assert section.data["first_achievements"] == [
-        {"song_title": "B.B.K.K.B.K.K.", "difficulty": "MAS", "rank": "SSS", "days_on_chart": 17}
+        {"song_title": "B.B.K.K.B.K.K.", "difficulty": "MAS", "const": "15.4", "tier": "트리플", "days_on_chart": 17}
     ]
-    assert "SSS" in (section.hint or "")
+    assert "15.4 트리플 1호" in (section.hint or "")
+    assert await _const_firsts(db) == [("15.4", "SSS", "B.B.K.K.B.K.K.")]
 
 
 async def test_a_rank_already_held_is_not_a_first(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    records = _FakeRecords(diff=_diff([_update(old_rank="SSS", new_rank="SSS", new_score=1_008_000)]))
+    records = _FakeRecords(
+        diff=_diff([_update(old_rank="SSS", new_rank="SSS", new_score=1_008_000)]), pb_rows=[_pb(rank="SSS")]
+    )
 
     section = await skill.on_sync_completed(_ctx(db, records=records), _payload())
 
     assert section is None
-    assert await _rows(db, "SELECT 1 FROM yuni_bond_milestones WHERE kind = 'rank_first'") == []
+    assert await _const_firsts(db) == []
 
 
 async def test_reaching_sss_plus_in_one_go_records_both_tiers(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    records = _FakeRecords(diff=_diff([_update(old_rank="SS+", new_rank="SSS+", new_score=1_009_000)]))
+    records = _FakeRecords(
+        diff=_diff([_update(old_rank="SS+", new_rank="SSS+", new_score=1_009_000)]), pb_rows=[_pb(rank="SSS+")]
+    )
     await skill.on_sync_completed(_ctx(db, records=records), _payload())
 
-    rows = await _rows(db, "SELECT value FROM yuni_bond_milestones WHERE kind = 'rank_first' ORDER BY value")
-    assert [r["value"] for r in rows] == ["SSS", "SSS+"]
+    assert sorted(await _const_firsts(db)) == [("15.4", "SSS", "B.B.K.K.B.K.K."), ("15.4", "SSS+", "B.B.K.K.B.K.K.")]
+
+
+async def test_another_chart_of_the_same_const_that_already_had_it_means_no_first(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """같은 상수의 다른 채보가 동기화 전에 이미 트리플이었다 — 첫 동기화 이전부터 있던 달성도 센다."""
+    records = _FakeRecords(
+        diff=_diff([_update(old_rank="SS+", new_rank="SSS")]),
+        pb_rows=[_pb(rank="SSS"), _pb("Other", "EXP", rank="SSS")],
+    )
+
+    assert await skill.on_sync_completed(_ctx(db, records=records), _payload()) is None
+    assert await _const_firsts(db) == []
+
+
+async def test_each_const_has_its_own_first(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    records = _FakeRecords(
+        diff=_diff([_update(old_rank="SS+", new_rank="SSS"), _update("Other", "EXP", old_rank="SS+", new_rank="SSS")]),
+        pb_rows=[_pb(rank="SSS", const=15.4), _pb("Other", "EXP", rank="SSS", const=15.2)],
+    )
+    await skill.on_sync_completed(_ctx(db, records=records), _payload())
+
+    assert sorted(await _const_firsts(db)) == [("15.2", "SSS", "Other"), ("15.4", "SSS", "B.B.K.K.B.K.K.")]
+
+
+async def test_two_charts_of_one_const_in_one_sync_only_the_earlier_is_the_first(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    diff = SyncDiff(
+        sync_id="sync1",
+        sessions=[SessionInfo(id="s1", play_date="2026-10-17", estimated=False), SessionInfo(id="s2", play_date="2026-10-18", estimated=False)],
+        chart_updates=[
+            _update("Later", "MAS", old_rank="SS+", new_rank="SSS", session_id="s2"),
+            _update("Earlier", "MAS", old_rank="SS+", new_rank="SSS", session_id="s1"),
+        ],
+        unchanged_plays=[], frame_exits=[], previous_computed_rating=None, previous_best30_average=None,
+        previous_new20_average=None,
+    )
+    records = _FakeRecords(diff=diff, pb_rows=[_pb("Later", rank="SSS"), _pb("Earlier", rank="SSS")])
+
+    await skill.on_sync_completed(_ctx(db, records=records), _payload())
+
+    assert await _const_firsts(db) == [("15.4", "SSS", "Earlier")]
+
+
+async def test_charts_with_an_unknown_const_are_not_counted(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    records = _FakeRecords(
+        diff=_diff([_update(old_rank="SS+", new_rank="SSS")]), pb_rows=[_pb(rank="SSS", const=None)]
+    )
+
+    assert await skill.on_sync_completed(_ctx(db, records=records), _payload()) is None
+    assert await _const_firsts(db) == []
+
+
+async def test_full_combo_and_all_justice_firsts_come_from_lamp_changes(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    records = _FakeRecords(
+        diff=_diff(
+            [],
+            lamp_changes=[
+                LampChange(
+                    song_title="B.B.K.K.B.K.K.", difficulty="MAS", old_combo_lamp="NONE", new_combo_lamp="ALL JUSTICE",
+                    session_id=None,
+                )
+            ],
+        ),
+        pb_rows=[_pb(rank="S", lamp="ALL JUSTICE")],
+    )
+
+    section = await skill.on_sync_completed(_ctx(db, records=records), _payload())
+
+    assert sorted(await _const_firsts(db)) == [("15.4", "AJ", "B.B.K.K.B.K.K."), ("15.4", "FC", "B.B.K.K.B.K.K.")]
+    assert section is not None and "풀콤" in (section.hint or "") and "올저" in (section.hint or "")
+    [row] = await _rows(db, "SELECT occurred_on FROM yuni_bond_milestones WHERE kind = 'const_first' AND value = 'AJ'")
+    assert row["occurred_on"] == "2026-10-19"  # 세션을 못 찾은 램프 변화는 오늘 날짜
+
+
+async def test_a_score_update_that_also_raised_the_lamp_counts_the_lamp(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    records = _FakeRecords(
+        diff=_diff([_update(old_rank="S", new_rank="SS", new_score=995_000, old_lamp="NONE", new_lamp="FULL COMBO")]),
+        pb_rows=[_pb(rank="SS", lamp="FULL COMBO")],
+    )
+    await skill.on_sync_completed(_ctx(db, records=records), _payload())
+
+    assert await _const_firsts(db) == [("15.4", "FC", "B.B.K.K.B.K.K.")]
+
+
+async def test_a_full_combo_held_by_another_chart_of_the_const_blocks_the_first(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    records = _FakeRecords(
+        diff=_diff(
+            [], lamp_changes=[LampChange(
+                song_title="B.B.K.K.B.K.K.", difficulty="MAS", old_combo_lamp="NONE", new_combo_lamp="FULL COMBO",
+                session_id=None,
+            )],
+        ),
+        pb_rows=[_pb(lamp="FULL COMBO"), _pb("Other", "EXP", lamp="ALL JUSTICE")],  # Other는 이미 올저(=풀콤)였다
+    )
+
+    assert await skill.on_sync_completed(_ctx(db, records=records), _payload()) is None
+    assert await _const_firsts(db) == []
 
 
 async def test_the_same_sync_twice_records_nothing_new(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    records = _FakeRecords(diff=_diff([_update(old_rank="SS+", new_rank="SSS")]))
+    records = _FakeRecords(diff=_diff([_update(old_rank="SS+", new_rank="SSS")]), pb_rows=[_pb(rank="SSS")])
     await skill.on_sync_completed(_ctx(db, records=records), _payload())
     again = await skill.on_sync_completed(_ctx(db, records=records), _payload())
 
     assert again is None
+    assert len(await _const_firsts(db)) == 1
 
 
-async def test_rating_milestone_gives_the_remaining_amount_computed_in_code(
+async def _stars(db: aiosqlite.Connection, kind: str = "rating_star") -> list[tuple[str, str]]:
+    rows = await _rows(db, "SELECT label, value FROM yuni_bond_milestones WHERE kind = ? ORDER BY id", kind)
+    return [(r["label"], r["value"]) for r in rows]
+
+
+async def test_rating_star_gives_the_next_star_and_remaining_amount_computed_in_code(
     skill: ModuleType, db: aiosqlite.Connection
 ) -> None:
     records = _FakeRecords(diff=_diff([]), deltas=_deltas("16.20", "16.26"))
@@ -240,35 +394,92 @@ async def test_rating_milestone_gives_the_remaining_amount_computed_in_code(
     section = await skill.on_sync_completed(_ctx(db, records=records), _payload())
 
     assert section is not None
-    assert section.data["rating_milestone"] == "16.2500"
-    assert section.data["next_milestone"] == "16.5000"
+    assert section.data["rating_milestones"] == ["무지개 2성"]
+    assert section.data["next_milestone"] == "무지개 3성"
     assert section.data["remaining_to_next"] == "0.2400"
-    assert "16.25" in (section.hint or "")
+    assert "무지개 2성" in (section.hint or "")
+    assert await _stars(db) == [("무지개 2성", "16.25")]
+    assert await _stars(db, "rating_floor") == []  # 16.2는 직전 레이팅에 이미 닿았다
 
 
-async def test_a_milestone_is_not_repeated_after_the_rating_dips_and_returns(
+async def test_a_sync_can_record_a_star_and_a_floor_together(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    records = _FakeRecords(diff=_diff([]), deltas=_deltas("16.60", "16.80"))
+
+    section = await skill.on_sync_completed(_ctx(db, records=records), _payload())
+
+    assert section is not None and section.data["rating_milestones"] == ["무지개 4성", "무지개 8층"]
+    assert await _stars(db) == [("무지개 4성", "16.75")]
+    assert await _stars(db, "rating_floor") == [("무지개 8층", "16.80")]
+
+
+async def test_below_platinum_only_the_tier_name_is_recorded(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    records = _FakeRecords(diff=_diff([]), deltas=_deltas("14.40", "14.60"))
+
+    await skill.on_sync_completed(_ctx(db, records=records), _payload())
+
+    assert await _stars(db) == [("금", "14.50")]
+    assert await _stars(db, "rating_floor") == []
+
+
+async def test_nothing_is_recorded_again_after_the_rating_drops_and_returns(
     skill: ModuleType, db: aiosqlite.Connection
 ) -> None:
-    up = _FakeRecords(diff=_diff([]), deltas=_deltas("16.20", "16.26"))
+    up = _FakeRecords(diff=_diff([]), deltas=_deltas("16.90", "17.05"))
     await skill.on_sync_completed(_ctx(db, records=up), _payload())
-    again = _FakeRecords(diff=_diff([]), deltas=_deltas("16.20", "16.27"))
+    dropped = _FakeRecords(diff=_diff([]), deltas=_deltas("17.05", "16.40"))
+    await skill.on_sync_completed(_ctx(db, records=dropped), _payload())
+    again = _FakeRecords(diff=_diff([]), deltas=_deltas("16.40", "17.00"))
 
     assert await skill.on_sync_completed(_ctx(db, records=again), _payload()) is None
+    assert [label for label, _ in await _stars(db)] == ["극무지개 1성"]
 
 
-async def test_a_higher_milestone_reports_the_days_since_the_previous_one(
+async def test_a_new_high_after_a_drop_records_only_what_is_above_the_old_peak(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    await skill.on_sync_completed(
+        _ctx(db, records=_FakeRecords(diff=_diff([]), deltas=_deltas("16.90", "17.05"))), _payload()
+    )
+    await skill.on_sync_completed(
+        _ctx(db, records=_FakeRecords(diff=_diff([]), deltas=_deltas("17.05", "16.40"))), _payload()
+    )
+
+    section = await skill.on_sync_completed(
+        _ctx(db, records=_FakeRecords(diff=_diff([]), deltas=_deltas("16.40", "17.30"))), _payload()
+    )
+
+    assert section is not None and section.data["rating_milestones"] == ["극무지개 2성", "극무지개 3층"]
+
+
+async def test_the_peak_is_kept_even_when_a_sync_has_no_new_plays(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    """새 버전에서 레이팅이 내려간 동기화에 플레이가 없어도 최고치는 남는다 — 나중에 올라와도 다시 기록하지 않는다."""
+    await skill.on_sync_completed(
+        _ctx(db, records=_FakeRecords(diff=_diff([]), deltas=_deltas("17.00", "17.10"))), _payload(has_new_plays=False)
+    )
+    await skill.on_sync_completed(
+        _ctx(db, records=_FakeRecords(diff=_diff([]), deltas=_deltas("17.10", "16.20"))), _payload(has_new_plays=False)
+    )
+
+    back = _FakeRecords(diff=_diff([]), deltas=_deltas("16.20", "17.05"))
+    assert await skill.on_sync_completed(_ctx(db, records=back), _payload()) is None
+    assert await _stars(db) == []
+    [peak] = await _rows(db, "SELECT value FROM yuni_bond_milestones WHERE kind = 'rating_peak'")
+    assert peak["value"] == "17.1000"
+
+
+async def test_a_higher_star_reports_the_days_since_the_previous_one(
     skill: ModuleType, db: aiosqlite.Connection
 ) -> None:
     await db.execute(
-        "INSERT INTO yuni_bond_milestones (player_id, kind, value, occurred_on) VALUES "
-        "('p1', 'rating_milestone', '16.25', '2026-10-09')"
+        "INSERT INTO yuni_bond_milestones (player_id, kind, value, label, occurred_on) VALUES "
+        "('p1', 'rating_star', '16.25', '무지개 2성', '2026-10-09')"
     )
     records = _FakeRecords(diff=_diff([]), deltas=_deltas("16.45", "16.52"))
 
     section = await skill.on_sync_completed(_ctx(db, records=records), _payload())
 
     assert section is not None
-    assert section.data["rating_milestone"] == "16.5000"
+    assert section.data["rating_milestones"][0] == "무지개 3성"
     assert section.data["days_since_previous_milestone"] == 10
 
 
@@ -276,13 +487,23 @@ async def test_no_hint_when_nothing_changed(skill: ModuleType, db: aiosqlite.Con
     records = _FakeRecords(diff=_diff([]), deltas=_deltas("16.20", "16.26"))
 
     assert await skill.on_sync_completed(_ctx(db, records=records), _payload(has_new_plays=False)) is None
-    assert await _rows(db, "SELECT 1 FROM yuni_bond_milestones") == []
+    assert await _rows(db, "SELECT 1 FROM yuni_bond_milestones WHERE kind != 'rating_peak'") == []
 
 
 async def test_no_hint_when_the_sync_has_nothing_to_say(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    records = _FakeRecords(diff=_diff([_update(old_rank="S", new_rank="SS", new_score=990_000)]), deltas=_deltas("16.21", "16.22"))
+    records = _FakeRecords(
+        diff=_diff([_update(old_rank="S", new_rank="SS", new_score=990_000)]), deltas=_deltas("16.21", "16.22"),
+        pb_rows=[_pb(rank="SS")],
+    )
 
     assert await skill.on_sync_completed(_ctx(db, records=records), _payload()) is None
+
+
+async def test_an_unknown_rating_records_no_rating_milestone(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    records = _FakeRecords(diff=_diff([]), deltas=_deltas("16.20", None))
+
+    assert await skill.on_sync_completed(_ctx(db, records=records), _payload()) is None
+    assert await _rows(db, "SELECT 1 FROM yuni_bond_milestones WHERE kind LIKE 'rating%'") == []
 
 
 async def test_the_hint_setting_off_still_records_but_gives_no_hint(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -292,7 +513,7 @@ async def test_the_hint_setting_off_still_records_but_gives_no_hint(skill: Modul
     section = await skill.on_sync_completed(_ctx(db, records=records, settings=settings), _payload())
 
     assert section is None
-    assert len(await _rows(db, "SELECT 1 FROM yuni_bond_milestones WHERE kind = 'rating_milestone'")) == 1
+    assert len(await _rows(db, "SELECT 1 FROM yuni_bond_milestones WHERE kind = 'rating_star'")) == 1
 
 
 async def test_welcome_back_after_the_configured_number_of_days(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -346,7 +567,8 @@ async def test_four_updates_are_not_yet_a_long_haul(skill: ModuleType, db: aiosq
 
 async def test_song_viewed_returns_only_events_of_that_song(skill: ModuleType, db: aiosqlite.Connection) -> None:
     records = _FakeRecords(
-        diff=_diff([_update(old_rank="SS+", new_rank="SSS"), _update("Other", "EXP", old_rank="S", new_rank="SSS")])
+        diff=_diff([_update(old_rank="SS+", new_rank="SSS"), _update("Other", "EXP", old_rank="S", new_rank="SSS")]),
+        pb_rows=[_pb(rank="SSS", const=15.4), _pb("Other", "EXP", rank="SSS", const=15.2)],
     )
     await skill.on_sync_completed(_ctx(db, records=records), _payload())
 
@@ -355,12 +577,12 @@ async def test_song_viewed_returns_only_events_of_that_song(skill: ModuleType, d
 
     assert section is not None
     assert [e["song_title"] for e in section.data["events"]] == ["B.B.K.K.B.K.K."]
-    assert "SSS 첫 달성" in section.display.content
+    assert "15.4 트리플 1호" in section.display.content
     assert none is None
 
 
 async def test_history_with_no_records_says_so(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    result = await skill.history(_ctx(db), kind="rank_first")
+    result = await skill.history(_ctx(db), kind="const_first")
 
     assert result.data == {"events": []}
     assert result.error is None
@@ -376,10 +598,10 @@ async def test_history_rejects_an_unknown_kind(skill: ModuleType, db: aiosqlite.
 async def test_history_only_shows_the_players_own_records(skill: ModuleType, db: aiosqlite.Connection) -> None:
     await db.execute(
         "INSERT INTO yuni_bond_milestones (player_id, kind, value, occurred_on) VALUES "
-        "('p2', 'rating_milestone', '17.00', '2026-10-09')"
+        "('p2', 'rating_star', '17.00', '2026-10-09')"
     )
 
-    result = await skill.history(_ctx(db), kind="rating_milestone")
+    result = await skill.history(_ctx(db), kind="rating_star")
 
     assert result.data["events"] == []
 
@@ -606,3 +828,28 @@ async def test_plan_with_no_candidates_says_so_without_failing(skill: ModuleType
     assert result.error is None
     assert result.data["candidates"] == []
     assert "후보가 아직 없어" in result.display.content
+
+
+# ---------------------------------------------------------------- 이정표 보기
+
+
+async def test_history_lists_const_firsts_and_ratings_with_the_words_of_the_player(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    await skill.on_sync_completed(
+        _ctx(db, records=_FakeRecords(diff=_diff([_update(old_rank="SS+", new_rank="SS+", new_score=1_005_000)], play_date="2026-10-01"), pb_rows=[_pb(rank="SS+")])),
+        _payload(),
+    )
+    records = _FakeRecords(
+        diff=_diff([_update(old_rank="SS+", new_rank="SSS")]), deltas=_deltas("16.60", "16.80"), pb_rows=[_pb(rank="SSS")]
+    )
+    await skill.on_sync_completed(_ctx(db, records=records), _payload())
+
+    result = await skill.history(_ctx(db))
+
+    table = result.table
+    assert table is not None and table.unit == "이정표"
+    details = {row.cell("종류").raw: row.cell("내용").text for row in table.rows}
+    assert details["const_first"] == "15.4 트리플 1호 · 17일 걸림"
+    assert {row.cell("내용").text for row in table.rows if row.cell("종류").text == "레이팅 달성"} == {"무지개 4성", "무지개 8층"}
+    assert "peak" not in str(result.data)  # 최고치는 바탕 자료라 보이지 않는다

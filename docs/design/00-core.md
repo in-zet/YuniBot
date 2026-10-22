@@ -121,7 +121,7 @@ skills/chunithm-border/
 | `summary` | 아니오 | `/도움말`이 플레이어에게 보여 주는 한두 문장. 유니 말투로 쓴다("~해 줄게"). `description`은 모델에게 주는 선택 기준이라 플레이어용 글이 아니다. 비우면 `description`을 쓴다(2026-10-21). |
 | `examples` | 예 | 이 스킬을 골라야 하는 질문 예시 2\~3개. 선택 정확도 시험에도 쓴다. |
 | `triggers` | 아니오 | 메시지에 들어 있으면 코어가 이 스킬을 미리 펼치는 낱말 목록("스킬 불러오기"). 소문자 부분 문자열로 비교한다. 넓게 잡아도 손해는 펼친 지침 분량뿐이다. 계약 테스트가 들어 있는 스킬에 `triggers`가 있는지 확인한다. |
-| `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 함께한 기록, 관리, 폴더, 유니 설정 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
+| `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 이정표, 관리, 폴더, 유니 설정 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
 | `game` | 예 | `chunithm` 또는 `common`. 다른 게임을 붙일 때 묶는 단위다. |
 | `version` | 예 | 스킬 버전. 바꾼 것을 추적한다. |
 | `services` | 예 | 쓰는 서비스 목록. 예: `songdb`, `chunithm_net`, `players`. 선언하지 않은 서비스는 못 쓴다. 코어 전용 맥락(`db` 원시 DB 연결, `player_data` 스킬 테이블 전체의 플레이어 데이터 집계·삭제, `registry_snapshot` 스킬 등록 현황, `usage` LLM 사용량, `tables` 작업 표 보관소 — 동기화 저장 뒤 `mark_stale`을 부르는 스킬만)도 같은 방식으로 여기 적어야 받는다(account-link, admin처럼 꼭 필요한 공통 스킬만). |
@@ -688,7 +688,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [account-link](skills/account-link.md) | 공통 | 디스코드 계정 연결·해제·확인. 슬래시와 버튼만 | 없음 |
 | [admin](skills/admin.md) | 공통 | 사용량, 서버별 스킬 켜기·끄기, 부여 태그, 비용 상한 | `admin` |
 | [memory](skills/memory.md) | 공통 | 기억한 내용 보기, 지우기, 자동 저장 끄기 | 없음 |
-| [yuni-bond](skills/yuni-bond.md) | 공통 | 함께한 기록, 동기화 때 덧붙이는 귀띔, 플레이 계획과 약속 | 없음 |
+| [yuni-bond](skills/yuni-bond.md) | 공통 | 이정표, 동기화 때 덧붙이는 귀띔, 플레이 계획과 약속 | 없음 |
 | [chunithm-account](skills/chunithm-account.md) | 츄니즘 | CHUNITHM-NET 로그인(입력창), 쿠키 만료 안내, 기록 공개 설정 | 없음 |
 | [chunithm-song](skills/chunithm-song.md) | 츄니즘 | 곡·별칭 검색, 상수, 노트 수, 채보 뷰어 링크, 한국어 별칭 | 없음 |
 | [chunithm-terms](skills/chunithm-terms.md) | 츄니즘 | 용어와 은어의 뜻, 서버 은어 제안·승인 | 없음. 승인만 `admin` |
@@ -774,7 +774,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | 플레이어 메모리 | 게임별 구획을 둔다. 호칭 같은 공용 사실은 구획 밖에 둔다 |
 | 슬래시 명령 | 지금은 게임 이름 없이 둔다. 게임이 늘면 그때 게임별 묶음으로 옮긴다 |
 
-- **게임과 무관한 것**: 플레이어와 디스코드 계정, 태그, 메모리, 약속과 함께한 기록, 오락실 목록과 별칭, 예약과 이벤트 틀, 인격과 반응 단계의 구조.
+- **게임과 무관한 것**: 플레이어와 디스코드 계정, 태그, 메모리, 약속과 이정표, 오락실 목록과 별칭, 예약과 이벤트 틀, 인격과 반응 단계의 구조.
 - **하지 않는 것**: 여러 게임을 아우르는 공통 인터페이스나 추상 계층은 지금 만들지 않는다. 두 번째 게임이 실제로 정해졌을 때 그 게임에 맞춰 만든다.
 - 유니는 츄니즘 캐릭터다. 다른 게임을 얹을 때 인격을 어떻게 할지는 그때 정한다.
 

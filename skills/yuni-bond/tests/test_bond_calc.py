@@ -15,32 +15,7 @@ calc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(calc)
 
 
-@pytest.mark.parametrize(
-    ("previous", "current", "expected"),
-    [
-        ("16.20", "16.26", "16.25"),
-        ("16.24", "16.25", "16.25"),  # 경계에 딱 닿아도 넘은 것이다
-        ("16.25", "16.30", None),  # 이미 경계 위에 있었다
-        ("16.20", "16.24", None),
-        ("16.20", "16.80", "16.75"),  # 여러 경계를 한 번에 넘으면 가장 높은 것
-        ("16.20", "17.00", "17.00"),
-        ("16.30", "16.20", None),  # 내려갔다
-        ("16.30", "16.30", None),
-    ],
-)
-def test_highest_milestone_crossed(previous: str, current: str, expected: str | None) -> None:
-    result = calc.highest_milestone_crossed(Decimal(previous), Decimal(current))
-    assert result == (Decimal(expected) if expected is not None else None)
-
-
-def test_milestone_is_unknown_when_a_rating_is_unknown() -> None:
-    assert calc.highest_milestone_crossed(None, Decimal("16.5")) is None
-    assert calc.highest_milestone_crossed(Decimal("16.5"), None) is None
-
-
-def test_next_milestone_and_remaining_round_the_remaining_up() -> None:
-    assert calc.next_milestone(Decimal("16.26")) == Decimal("16.50")
-    assert calc.next_milestone(Decimal("16.25")) == Decimal("16.50")
+def test_remaining_rounds_the_remaining_up() -> None:
     assert calc.remaining_to(Decimal("16.50"), Decimal("16.26")) == Decimal("0.2400")
     # 모자라게 말하지 않도록 넷째 자리에서 올린다: 0.24009가 남았으면 0.2401.
     assert calc.remaining_to(Decimal("16.50"), Decimal("16.25991")) == Decimal("0.2401")
@@ -62,6 +37,51 @@ def test_next_milestone_and_remaining_round_the_remaining_up() -> None:
 )
 def test_rank_tiers_reached(old: str | None, new: str, expected: list[str]) -> None:
     assert calc.rank_tiers_reached(old, new) == expected
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        (None, "FULL COMBO", ["FC"]),
+        (None, "ALL JUSTICE", ["FC", "AJ"]),  # 올저는 풀콤을 포함한다
+        ("NONE", "AJC", ["FC", "AJ"]),  # AJC는 따로 세지 않고 AJ에 든다
+        ("FULL COMBO", "ALL JUSTICE", ["AJ"]),
+        ("ALL JUSTICE", "AJC", []),
+        ("FULL COMBO", "FULL COMBO", []),
+        ("ALL JUSTICE", "FULL COMBO", []),
+        (None, "NONE", []),
+        (None, "", []),
+    ],
+)
+def test_lamp_tiers_reached(old: str | None, new: str, expected: list[str]) -> None:
+    assert calc.lamp_tiers_reached(old, new) == expected
+
+
+@pytest.mark.parametrize(
+    ("rank", "lamp", "tier", "expected"),
+    [
+        ("SSS", "NONE", "SSS", True),
+        ("SSS+", "NONE", "SSS", True),  # 트플플은 트리플도 만족한다
+        ("SSS", "NONE", "SSS+", False),
+        ("SS+", "FULL COMBO", "SSS", False),
+        ("S", "FULL COMBO", "FC", True),
+        ("S", "ALL JUSTICE", "FC", True),
+        ("S", "FULL COMBO", "AJ", False),
+        ("S", "AJC", "AJ", True),
+        (None, None, "FC", False),
+    ],
+)
+def test_holds_tier(rank: str | None, lamp: str | None, tier: str, expected: bool) -> None:
+    assert calc.holds_tier(rank, lamp, tier) is expected
+
+
+def test_const_text_always_has_one_decimal_place() -> None:
+    assert calc.const_text(15.0) == "15.0"
+    assert calc.const_text(15.4) == "15.4"
+
+
+def test_tier_labels_use_the_players_words() -> None:
+    assert calc.TIER_LABELS == {"SSS": "트리플", "SSS+": "트플플", "FC": "풀콤", "AJ": "올저"}
 
 
 def test_days_between_never_goes_negative() -> None:

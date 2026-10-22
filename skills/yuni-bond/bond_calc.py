@@ -1,14 +1,20 @@
 # skills/yuni-bond/bond_calc.py
-"""함께한 기록의 순수 계산. 날짜·기간·마일스톤 경계는 전부 여기서 코드가 정한다(LLM에 맡기지 않는다)."""
+"""이정표의 순수 계산. 날짜·기간·경계는 전부 여기서 코드가 정한다(LLM에 맡기지 않는다).
+레이팅 단계·별·층의 경계는 `services/chunithm/rating_tier.py`가 정한다."""
 from __future__ import annotations
 
 from datetime import date
 from decimal import ROUND_CEILING, Decimal
 
-# 레이팅 마일스톤은 이 간격의 경계를 넘을 때마다 하나다.
-MILESTONE_STEP = Decimal("0.25")
-# 랭크 첫 달성으로 남기는 랭크, 낮은 쪽부터. SSS+는 SSS를 포함한다.
+# 상수별 1호로 남기는 달성, 낮은 쪽부터. 랭크는 SSS(트리플)·SSS+(트플플), 램프는 FC(풀콤)·AJ(올저). 높은 쪽이 낮은 쪽을 포함한다
+# (SSS+ 기록은 SSS도 만족하고, AJ 램프는 FC도 만족한다). AJC는 따로 세지 않고 AJ에 든다(2026-10-22 결정).
 RANK_TIERS: tuple[str, ...] = ("SSS", "SSS+")
+LAMP_TIERS: tuple[str, ...] = ("FC", "AJ")
+FIRST_TIERS: tuple[str, ...] = (*RANK_TIERS, *LAMP_TIERS)
+TIER_LABELS = {"SSS": "트리플", "SSS+": "트플플", "FC": "풀콤", "AJ": "올저"}
+# records_pb의 콤보 램프 글자 → 높을수록 좋은 순서.
+_COMBO_ORDER = {"NONE": 0, "FULL COMBO": 1, "ALL JUSTICE": 2, "AJC": 3}
+_LAMP_NEEDS = {"FC": 1, "AJ": 2}
 # 같은 채보의 기록 갱신이 이만큼 쌓이면 '오래 붙잡은 곡'이다.
 LONG_HAUL_UPDATES = 5
 # 약속은 이 일수가 지나면 닫는다.
@@ -18,18 +24,6 @@ PROMISE_MAX_CHARS = 80
 PROMISE_PROMPT_LIMIT = 3
 # 오랜만의 동기화 기준(일)의 기본값.
 DEFAULT_AWAY_DAYS = 14
-
-
-def highest_milestone_crossed(previous: Decimal | None, current: Decimal | None) -> Decimal | None:
-    """`previous < 경계 <= current`인 0.25 단위 경계 중 가장 높은 것. 어느 쪽이든 모르거나 오르지 않았으면 None."""
-    if previous is None or current is None or current <= previous:
-        return None
-    boundary = (current // MILESTONE_STEP) * MILESTONE_STEP
-    return boundary if boundary > previous else None
-
-
-def next_milestone(current: Decimal) -> Decimal:
-    return ((current // MILESTONE_STEP) + 1) * MILESTONE_STEP
 
 
 def remaining_to(boundary: Decimal, current: Decimal) -> Decimal:
@@ -43,6 +37,26 @@ def rank_tiers_reached(old_rank: str | None, new_rank: str) -> list[str]:
     before = order.get(old_rank or "", 0)
     after = order.get(new_rank, 0)
     return [tier for tier in RANK_TIERS if before < order[tier] <= after]
+
+
+def lamp_tiers_reached(old_lamp: str | None, new_lamp: str | None) -> list[str]:
+    """이번에 처음 넘은 콤보 램프 단계(FC, AJ). 램프 글자는 records_pb 값이다."""
+    before = _COMBO_ORDER.get(old_lamp or "", 0)
+    after = _COMBO_ORDER.get(new_lamp or "", 0)
+    return [tier for tier in LAMP_TIERS if before < _LAMP_NEEDS[tier] <= after]
+
+
+def holds_tier(rank: str | None, combo_lamp: str | None, tier: str) -> bool:
+    """이 랭크·램프가 그 달성(SSS·SSS+·FC·AJ)을 만족하나."""
+    if tier in RANK_TIERS:
+        order = {name: index for index, name in enumerate(RANK_TIERS, start=1)}
+        return order.get(rank or "", 0) >= order[tier]
+    return _COMBO_ORDER.get(combo_lamp or "", 0) >= _LAMP_NEEDS[tier]
+
+
+def const_text(const: float) -> str:
+    """상수 글자(항상 소수 첫째 자리까지, 15.0)."""
+    return f"{const:.1f}"
 
 
 def days_between(start_iso: str, end_iso: str) -> int:

@@ -23,6 +23,7 @@ from services.chunithm import records as records_module
 from services.chunithm.chunithm_net import SyncFetch
 from services.chunithm.records import (
     FrameExit,
+    LampChange,
     PbRow,
     RecordsService,
     SessionInfo,
@@ -581,6 +582,7 @@ async def test_improved_pb_matched_in_recent_history_uses_play_date(conn, monkey
     assert update.session_id == session.id
     assert update.estimated_session is False
     assert update.entered_frame is False  # 원래 베스트30 안에 있던 채보다
+    assert (update.old_combo_lamp, update.new_combo_lamp) == ("NONE", "NONE")
     pb = await service.pb_row(player_id, song_title="I Wanna", difficulty="MAS")
     assert pb is not None and pb.score == new_score and pb.session_id == session.id
 
@@ -1114,6 +1116,14 @@ async def test_next_sync_repairs_lamps_of_unchanged_score_without_touching_sessi
     assert (after.clear_lamp, after.combo_lamp) == ("HARD", "ALL JUSTICE")
     assert (after.score, after.session_id, after.updated_at) == (before.score, before.session_id, before.updated_at)
     assert result.has_new_plays is False
+    diff = await service.sync_diff(result.sync_id)
+    assert diff is not None
+    assert diff.lamp_changes == [
+        LampChange(
+            song_title=key[0], difficulty=key[1], old_combo_lamp="NONE", new_combo_lamp="ALL JUSTICE", session_id=None
+        )
+    ]
+    assert diff.chart_updates == []  # 점수 변화가 아니라 램프만이라 갱신에는 들어가지 않는다
 
 
 async def test_lamp_repair_never_downgrades(conn, monkeypatch) -> None:

@@ -13,6 +13,7 @@ import logging
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -28,6 +29,7 @@ from core.tables import (
     visible_columns,
 )
 from services.chunithm import table_columns as tc
+from services.chunithm.rating_tier import tier_for
 
 logger = logging.getLogger(__name__)
 
@@ -320,36 +322,34 @@ def _header_lines(table: WorkTable, profile: HeaderProfile | None) -> tuple[str 
     return title, details, steps
 
 
-# 플레이어 레이팅 색 단계(게임 안내표 기준, 2026-10-21 사용자 제공 그림). 아래 값부터 그 색. 색값은 그림을 눈으로 옮긴 것.
-_RATING_TIERS: tuple[tuple[float, str, tuple[int, int, int] | None], ...] = (
-    (17.0, "무지개·극", None),
-    (16.0, "무지개", None),
-    (15.25, "백금", (250, 240, 200)),
-    (14.5, "금", (250, 206, 58)),
-    (13.25, "은", (190, 226, 242)),
-    (12.0, "동", (226, 132, 42)),
-    (10.0, "자주", (234, 92, 204)),
-    (7.0, "빨강", (238, 86, 96)),
-    (4.0, "주황", (250, 184, 36)),
-    (0.0, "초록", (112, 232, 52)),
-)
+# 플레이어 레이팅 색 단계의 색(2026-10-21 사용자 제공 그림). 단계 경계와 이름은 `rating_tier`(서비스)가 정하고, 색값은 그림을 눈으로 옮긴 것.
+# 무지개 계열은 단색이 아니라 None(그라데이션으로 그린다).
+_TIER_COLORS: dict[str, tuple[int, int, int] | None] = {
+    "극무지개": None,
+    "무지개": None,
+    "백금": (250, 240, 200),
+    "금": (250, 206, 58),
+    "은": (190, 226, 242),
+    "동": (226, 132, 42),
+    "자주": (234, 92, 204),
+    "빨강": (238, 86, 96),
+    "주황": (250, 184, 36),
+    "초록": (112, 232, 52),
+}
 _RATING_OUTLINE = (28, 22, 20)  # 게임 숫자처럼 모든 단계의 글자에 두르는 어두운 테두리
 
 
 def rating_tier(rating: str) -> tuple[str, tuple[int, int, int] | None] | None:
     """레이팅 글자("17.0024")의 색 단계 이름과 단색(무지개 계열은 None). 숫자가 아니면 None."""
     try:
-        value = float(rating)
-    except ValueError:
+        tier = tier_for(Decimal(rating))
+    except InvalidOperation:
         return None
-    for floor, name, color in _RATING_TIERS:
-        if value >= floor:
-            return name, color
-    return None
+    return None if tier is None else (tier.name, _TIER_COLORS[tier.name])
 
 
 _RAINBOW_PASTEL = (0.38, 1.0)  # 무지개(16.xx): 채도, 밝기 — 파스텔
-_RAINBOW_EXTREME = (0.72, 0.9)  # 무지개·극(17.xx): 채도, 밝기 — 원색보다 한 단계 눅인 짙은 무지개
+_RAINBOW_EXTREME = (0.72, 0.9)  # 극무지개(17.xx): 채도, 밝기 — 원색보다 한 단계 눅인 짙은 무지개
 _EXTREME_HIGHLIGHT = 95  # 극무지개 글자 윗부분에 섞는 흰색의 최대 세기(0~255), 가독성용
 _EXTREME_HIGHLIGHT_SPAN = 0.55  # 흰색이 사라지는 지점(글자 높이에 대한 비율)
 
@@ -399,7 +399,7 @@ def _draw_rating_value(canvas: Image.Image, xy: tuple[int, int], text: str, font
     if tier[1] is not None:
         ImageDraw.Draw(canvas).text(xy, text, font=font, fill=tier[1], stroke_width=2, stroke_fill=_RATING_OUTLINE)
         return
-    extreme = tier[0] == "무지개·극"
+    extreme = tier[0] == "극무지개"
     pad = 14
     size = (_width(font, text) + 2 * pad, _fs(40) + 12 + 2 * pad)
     mask = Image.new("L", size, 0)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from typing import TYPE_CHECKING
@@ -93,6 +93,20 @@ class ChartUpdate:
     session_id: str
     estimated_session: bool
     entered_frame: bool
+    # 콤보 램프(FULL COMBO·ALL JUSTICE·AJC, 없으면 NONE). 옛 세션 상태에는 없어서 None/빈 값으로 읽힌다.
+    old_combo_lamp: str | None = None
+    new_combo_lamp: str = ""
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class LampChange:
+    """점수는 그대로인데 콤보 램프만 오른 채보(점수가 오른 채보는 `ChartUpdate`에 램프가 같이 있다)."""
+
+    song_title: str
+    difficulty: str
+    old_combo_lamp: str
+    new_combo_lamp: str
+    session_id: str | None
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -121,6 +135,8 @@ class SyncDiff:
     previous_computed_rating: Decimal | None
     previous_best30_average: Decimal | None
     previous_new20_average: Decimal | None
+    # 이번 동기화에서 램프만 오른 채보. 세션 누적에는 넣지 않는다(리포트가 쓰지 않는다).
+    lamp_changes: list[LampChange] = field(default_factory=list)
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -460,12 +476,23 @@ class RecordsService:
 
         # 4) 채보별로 갱신 여부를 판단해 저장하고 ChartUpdate를 모은다.
         chart_updates: list[ChartUpdate] = []
+        lamp_changes: list[LampChange] = []
         improved_keys: set[ChartKey] = set()
         for key, pb in merged.items():
             existing = previous_by_key.get(key)
             if existing is not None and pb.score <= existing.score:
                 if pb.score == existing.score:
-                    await self._raise_lamps(player_id, existing, pb)
+                    raised = await self._raise_lamps(player_id, existing, pb)
+                    if raised is not None:
+                        lamp_session, _ = match_session_for_chart(
+                            key, recent_by_session_day, sessions_by_date, latest_session_id
+                        )
+                        lamp_changes.append(
+                            LampChange(
+                                song_title=key[0], difficulty=key[1], old_combo_lamp=raised[0],
+                                new_combo_lamp=raised[1], session_id=lamp_session,
+                            )
+                        )
                 continue
             improved_keys.add(key)
             # 처음 보는 채보(old_score=None)도 이미 있던 채보의 갱신과 똑같이 다룬다 — 최근 이력에서
@@ -496,6 +523,8 @@ class RecordsService:
                     session_id=session_id,
                     estimated_session=estimated,
                     entered_frame=key in entered,
+                    old_combo_lamp=existing.combo_lamp if existing is not None else None,
+                    new_combo_lamp=str(pb.combo_lamp),
                 )
             )
 
@@ -554,6 +583,7 @@ class RecordsService:
             previous_computed_rating=accumulated.previous_computed_rating,
             previous_best30_average=accumulated.previous_best30_average,
             previous_new20_average=accumulated.previous_new20_average,
+            lamp_changes=lamp_changes,
         )
         # "새 플레이가 있었다"의 정의는 여기 한 곳뿐이다: 직전 동기화 이후 최근 이력에 새 항목이
         # 있거나, 최근 이력엔 아직 안 보여도 PB가 실제로 올랐다(크레딧 직후 동기화하면 최근
@@ -876,19 +906,21 @@ class RecordsService:
         )
         return const, rating
 
-    async def _raise_lamps(self, player_id: str, existing: PbRow, pb: PersonalBest) -> None:
+    async def _raise_lamps(self, player_id: str, existing: PbRow, pb: PersonalBest) -> tuple[str, str] | None:
         """점수가 같은 채보의 램프를 더 좋은 쪽으로만 고친다(내리지 않는다). 점수·세션·시각은 그대로다.
-        예전에 램프 없이 저장된 행(위 `_merge_personal_bests`의 옛 버그)을 다음 동기화가 고친다."""
+        예전에 램프 없이 저장된 행(위 `_merge_personal_bests`의 옛 버그)을 다음 동기화가 고친다.
+        콤보 램프가 올랐으면 (이전, 이후)를 돌려준다."""
         clear = _better_lamp(existing.clear_lamp, str(pb.clear_lamp), _CLEAR_ORDER)
         combo = _better_lamp(existing.combo_lamp, str(pb.combo_lamp), _COMBO_ORDER)
         chain = _better_lamp(existing.chain_lamp, str(pb.chain_lamp), _CHAIN_ORDER)
         if (clear, combo, chain) == (existing.clear_lamp, existing.combo_lamp, existing.chain_lamp):
-            return
+            return None
         await self._conn.execute(
             "UPDATE records_pb SET clear_lamp = ?, combo_lamp = ?, chain_lamp = ? "
             "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
             (clear, combo, chain, player_id, _GAME, existing.song_title, existing.difficulty),
         )
+        return (existing.combo_lamp, combo) if combo != existing.combo_lamp else None
 
     async def _get_or_create_session(self, player_id: str, play_date: date, *, estimated: bool) -> SessionInfo:
         cursor = await self._conn.execute(
@@ -919,6 +951,7 @@ def merge_session_state(prior: SessionState, part: SessionState) -> SessionState
         updates[key] = update if earlier is None else replace(
             update,
             old_score=earlier.old_score, old_rank=earlier.old_rank, old_rating=earlier.old_rating,
+            old_combo_lamp=earlier.old_combo_lamp,
             entered_frame=earlier.entered_frame or update.entered_frame,
             estimated_session=earlier.estimated_session and update.estimated_session,
         )

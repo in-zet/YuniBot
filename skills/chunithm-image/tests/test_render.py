@@ -492,13 +492,13 @@ def test_bundled_font_is_used_and_covers_korean_and_japanese() -> None:
     [("0.00", "초록"), ("3.99", "초록"), ("4.00", "주황"), ("6.99", "주황"), ("7.00", "빨강"), ("10.00", "자주"),
      ("11.99", "자주"), ("12.00", "동"), ("13.24", "동"), ("13.25", "은"), ("14.49", "은"), ("14.50", "금"),
      ("15.24", "금"), ("15.25", "백금"), ("15.99", "백금"), ("16.00", "무지개"), ("16.99", "무지개"),
-     ("17.00", "무지개·극"), ("17.0024", "무지개·극")],
+     ("17.00", "극무지개"), ("17.0024", "극무지개")],
 )
 def test_rating_tier_names_follow_chunithm_table(rating: str, name: str) -> None:
     tier = render.rating_tier(rating)
 
     assert tier is not None and tier[0] == name
-    assert (tier[1] is None) == name.startswith("무지개")
+    assert (tier[1] is None) == name.endswith("무지개")
 
 
 def test_rating_tier_is_none_for_non_numbers() -> None:

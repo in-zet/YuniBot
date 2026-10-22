@@ -26,7 +26,15 @@ from core.tool_types import (
     ToolResult,
 )
 from services.chunithm import table_columns as tc
-from services.chunithm.rating_format import rating_text
+from services.chunithm.rating_format import rating_text, song_rating_text
+from services.chunithm.rating_tier import (
+    FLOOR,
+    LADDER,
+    STAR,
+    highest_rung_crossed,
+    next_star,
+)
+from services.chunithm.records import PbRow, SyncDiff
 from services.chunithm.songdb import SongRecord
 from services.common.arcades import Arcade
 
@@ -54,20 +62,24 @@ _COMMON = "common"
 _SETTING_HINTS = "동기화 때 덧붙이는 말"
 _SETTING_AWAY = "오랜만의 동기화 기준"
 
-# 사건 종류. chart_update는 기록 갱신 하나하나를 남겨 두는 바탕 자료라 사용자에게 직접 보이지 않는다.
+# 사건 종류. chart_update(점수 갱신 하나하나)와 rating_peak(지금까지 닿은 가장 높은 레이팅)는 바탕 자료라 사용자에게 직접 보이지 않는다.
 _FIRST_MET = "first_met"
-_RANK_FIRST = "rank_first"
-_RATING = "rating_milestone"
+_CONST_FIRST = "const_first"  # 상수별 1호: 값 SSS·SSS+·FC·AJ, 이름표 상수(15.4)
+_RATING_STAR = "rating_star"  # 0.25마다의 성·단계 이름 경계: 값 경계 레이팅, 이름표 "극무지개 2성"
+_RATING_FLOOR = "rating_floor"  # 0.1마다의 층: 값 경계 레이팅, 이름표 "무지개 7층"
+_RATING_PEAK = "rating_peak"
 _GOAL_DONE = "goal_done"
 _CHART_UPDATE = "chart_update"
 _LONG_HAUL = "long_haul"
-_KINDS = (_FIRST_MET, _RANK_FIRST, _RATING, _GOAL_DONE, _LONG_HAUL)
+_KINDS = (_FIRST_MET, _CONST_FIRST, _RATING_STAR, _RATING_FLOOR, _GOAL_DONE, _LONG_HAUL)
+_RATING_KINDS = (_RATING_STAR, _RATING_FLOOR)
 
 _HISTORY_LIMIT = 20
 _LONG_HAUL_LIMIT = 3
 _OPEN_PROMISE_CAP = 10
 _SYNC_HINT_ORDER = 90
 _FIRSTS_IN_HINT = 5
+_LISTED_IN_HISTORY = (_CONST_FIRST, _RATING_STAR, _RATING_FLOOR, _GOAL_DONE)
 _PLAN_DEFAULT_COUNT = 5
 _PLAN_MAX_COUNT = 10
 _PROMPT_CONTEXT_CHARS = 300
@@ -79,8 +91,8 @@ _E_DATE = "날짜"
 _E_KIND = "종류"
 _E_DETAIL = "내용"
 _EVENT_KIND_LABELS = {
-    _FIRST_MET: "처음 만난 날", _RANK_FIRST: "랭크 첫 달성", _RATING: "레이팅 돌파", _GOAL_DONE: "To-Do 달성",
-    _LONG_HAUL: "오래 붙잡은 곡",
+    _FIRST_MET: "처음 만난 날", _CONST_FIRST: "상수별 1호", _RATING_STAR: "레이팅 달성", _RATING_FLOOR: "레이팅 달성",
+    _GOAL_DONE: "To-Do 달성", _LONG_HAUL: "오래 붙잡은 곡",
 }
 _P_GOAL = "목표"
 _P_REMAINING = "남은 점수"
@@ -130,19 +142,45 @@ async def _earliest_update(db: aiosqlite.Connection, player_id: str, title: str,
     return row[0] if row is not None else None
 
 
-async def _rating_milestones(db: aiosqlite.Connection, player_id: str) -> list[tuple[Decimal, str]]:
-    """남겨 둔 레이팅 마일스톤 (값, 날짜). 값이 큰 순서."""
+async def _recorded_rating_high(db: aiosqlite.Connection, player_id: str) -> Decimal | None:
+    """저장된 레이팅 최고치와 남겨 둔 이정표 경계 중 가장 높은 레이팅. 아무것도 없으면 None."""
     cursor = await db.execute(
-        "SELECT value, occurred_on FROM yuni_bond_milestones WHERE player_id = ? AND game = ? AND kind = ?",
-        (player_id, _GAME, _RATING),
+        "SELECT value FROM yuni_bond_milestones WHERE player_id = ? AND game = ? AND kind IN (?, ?, ?)",
+        (player_id, _GAME, _RATING_PEAK, *_RATING_KINDS),
     )
-    found: list[tuple[Decimal, str]] = []
+    found: list[Decimal] = []
     for row in await cursor.fetchall():
         try:
-            found.append((Decimal(row[0]), row[1]))
+            found.append(Decimal(row[0]))
         except InvalidOperation:
             continue
-    return sorted(found, reverse=True)
+    return max(found) if found else None
+
+
+async def _last_star_date(db: aiosqlite.Connection, player_id: str) -> str | None:
+    cursor = await db.execute(
+        "SELECT MAX(occurred_on) FROM yuni_bond_milestones WHERE player_id = ? AND game = ? AND kind = ?",
+        (player_id, _GAME, _RATING_STAR),
+    )
+    row = await cursor.fetchone()
+    return row[0] if row is not None else None
+
+
+async def _raise_rating_peak(db: aiosqlite.Connection, player_id: str, rating: Decimal, today_iso: str) -> None:
+    """지금까지 닿은 가장 높은 레이팅을 올린다(내리지 않는다). 새 버전에서 레이팅이 내려갔다 다시 올라와도
+    이미 닿은 단계·성·층을 다시 기록하지 않으려고 둔다(2026-10-22 결정)."""
+    cursor = await db.execute(
+        "SELECT id, value FROM yuni_bond_milestones WHERE player_id = ? AND game = ? AND kind = ?",
+        (player_id, _GAME, _RATING_PEAK),
+    )
+    row = await cursor.fetchone()
+    text = rating_text(rating)
+    if row is None:
+        _ = await _record_event(db, player_id=player_id, kind=_RATING_PEAK, occurred_on=today_iso, value=text)
+    elif Decimal(row["value"]) < rating:
+        _ = await db.execute(
+            "UPDATE yuni_bond_milestones SET value = ?, occurred_on = ? WHERE id = ?", (text, today_iso, row["id"])
+        )
 
 
 # ---------------------------------------------------------------- 이벤트
@@ -197,16 +235,105 @@ async def _expire_and_close_promises(
     return kept
 
 
+async def _const_firsts(
+    ctx: ToolContext, db: aiosqlite.Connection, diff: SyncDiff, *, player_id: str, today_iso: str
+) -> list[dict[str, Any]]:
+    """이번 동기화에서 상수별 1호(트리플·트플플·풀콤·올저)가 된 달성을 남기고 돌려준다.
+    1호는 그 상수의 다른 채보가 동기화 전에 이미 그 달성을 가졌으면 아니다. 동기화 전 상태는 지금 PB에서
+    이번에 바뀐 채보만 옛 값으로 되돌려 다시 만든다(첫 동기화 이전부터 있던 달성도 이미 있는 것으로 센다)."""
+    play_date = {s.id: s.play_date for s in diff.sessions}
+    reached: list[tuple[str, str, str, str]] = []  # (날짜, 곡, 난이도, 달성)
+    old_state: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    for update in diff.chart_updates:
+        old_state[(update.song_title, update.difficulty)] = (update.old_rank, update.old_combo_lamp)
+        on_date = play_date.get(update.session_id, today_iso)
+        for tier in (
+            *calc.rank_tiers_reached(update.old_rank, update.new_rank),
+            *calc.lamp_tiers_reached(update.old_combo_lamp, update.new_combo_lamp),
+        ):
+            reached.append((on_date, update.song_title, update.difficulty, tier))
+    lamp_old = {(c.song_title, c.difficulty): c.old_combo_lamp for c in diff.lamp_changes}
+    for change in diff.lamp_changes:
+        on_date = play_date.get(change.session_id, today_iso) if change.session_id else today_iso
+        for tier in calc.lamp_tiers_reached(change.old_combo_lamp, change.new_combo_lamp):
+            reached.append((on_date, change.song_title, change.difficulty, tier))
+    if not reached:
+        return []
+
+    rows: list[PbRow] = await ctx.records.all_pb_rows(player_id)
+    const_of: dict[tuple[str, str], str] = {}
+    taken: set[tuple[str, str]] = set()  # (상수, 달성) — 동기화 전에 이미 누가 가진 것
+    for row in rows:
+        if row.const is None:
+            continue  # 상수를 모르는 채보는 상수별 1호에 세지 않는다
+        key = (row.song_title, row.difficulty)
+        const = calc.const_text(row.const)
+        const_of[key] = const
+        if key in old_state:
+            rank, lamp = old_state[key]
+        elif key in lamp_old:
+            rank, lamp = row.rank, lamp_old[key]
+        else:
+            rank, lamp = row.rank, row.combo_lamp
+        taken.update((const, tier) for tier in calc.FIRST_TIERS if calc.holds_tier(rank, lamp, tier))
+
+    firsts: list[dict[str, Any]] = []
+    for on_date, title, difficulty, tier in sorted(reached):
+        const = const_of.get((title, difficulty))
+        if const is None or (const, tier) in taken:
+            continue
+        taken.add((const, tier))  # 같은 동기화에서 같은 상수·달성은 가장 이른 채보 하나만
+        if await _const_first_exists(db, player_id, const, tier):
+            continue
+        started = await _earliest_update(db, player_id, title, difficulty) or on_date
+        if await _record_event(
+            db, player_id=player_id, kind=_CONST_FIRST, occurred_on=on_date, song_title=title,
+            difficulty=difficulty, value=tier, label=const, started_on=started,
+        ):
+            firsts.append(
+                {
+                    "song_title": title, "difficulty": difficulty, "const": const, "tier": calc.TIER_LABELS[tier],
+                    "days_on_chart": calc.days_between(started, on_date),
+                }
+            )
+    return firsts
+
+
+async def _const_first_exists(db: aiosqlite.Connection, player_id: str, const: str, tier: str) -> bool:
+    cursor = await db.execute(
+        "SELECT 1 FROM yuni_bond_milestones WHERE player_id = ? AND game = ? AND kind = ? AND label = ? AND value = ?",
+        (player_id, _GAME, _CONST_FIRST, const, tier),
+    )
+    return await cursor.fetchone() is not None
+
+
 @on("chunithm.sync.completed")
 async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
-    """동기화에서 랭크 첫 달성·레이팅 마일스톤을 남기고, 약속을 정리하고, 유니의 한마디에 쓸 귀띔을 돌려준다.
-    표시물은 내지 않는다. 변화가 없는 동기화에는 아무것도 하지 않는다."""
-    if not payload.get("has_new_plays"):
-        return None
+    """동기화에서 상수별 1호·레이팅 이정표(성·층)를 남기고, 약속을 정리하고, 유니의 한마디에 쓸 귀띔을 돌려준다.
+    표시물은 내지 않는다. 변화가 없는 동기화에는 레이팅 최고치만 갱신하고 아무것도 남기지 않는다."""
     db = _db(ctx)
     player_id: str = payload["player_id"]
     today = _today()
     today_iso = today.isoformat()
+
+    deltas = await ctx.records.rating_deltas(player_id)
+    current = deltas.computed_rating if deltas is not None else None
+    # 지금까지 닿은 최고 레이팅: 저장된 최고치·남긴 이정표·직전 동기화 레이팅 중 가장 높은 값.
+    known = [
+        value
+        for value in (
+            await _recorded_rating_high(db, player_id),
+            deltas.previous_computed_rating if deltas is not None else None,
+        )
+        if value is not None
+    ]
+    peak_before = max(known) if known else None
+    if not payload.get("has_new_plays"):
+        if current is not None:
+            await _raise_rating_peak(db, player_id, max(current, peak_before or current), today_iso)
+            await db.commit()
+        return None
+
     data: dict[str, Any] = {"kind": "bond_hint"}
     hints: list[str] = []
 
@@ -217,49 +344,44 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         play_date = {s.id: s.play_date for s in diff.sessions}
         for update in diff.chart_updates:
             updated_titles.add(update.song_title)
-            on_date = play_date.get(update.session_id, today_iso)
             _ = await _record_event(
-                db, player_id=player_id, kind=_CHART_UPDATE, occurred_on=on_date,
+                db, player_id=player_id, kind=_CHART_UPDATE, occurred_on=play_date.get(update.session_id, today_iso),
                 song_title=update.song_title, difficulty=update.difficulty, value=str(update.new_score),
             )
-            for tier in calc.rank_tiers_reached(update.old_rank, update.new_rank):
-                started = await _earliest_update(db, player_id, update.song_title, update.difficulty) or on_date
-                if await _record_event(
-                    db, player_id=player_id, kind=_RANK_FIRST, occurred_on=on_date,
-                    song_title=update.song_title, difficulty=update.difficulty, value=tier, started_on=started,
-                ):
-                    firsts.append(
-                        {
-                            "song_title": update.song_title, "difficulty": update.difficulty, "rank": tier,
-                            "days_on_chart": calc.days_between(started, on_date),
-                        }
-                    )
+        firsts = await _const_firsts(ctx, db, diff, player_id=player_id, today_iso=today_iso)
     if firsts:
         data["first_achievements"] = firsts[:_FIRSTS_IN_HINT]
         hints.append(
-            "랭크 첫 달성: "
+            "상수별 1호: "
             + ", ".join(
-                f"{f['song_title']} {f['difficulty']} {f['rank']}(그 곡에 {f['days_on_chart']}일 걸림)"
+                f"{f['const']} {f['tier']} 1호 {f['song_title']} {f['difficulty']}(그 곡에 {f['days_on_chart']}일 걸림)"
                 for f in firsts[:_FIRSTS_IN_HINT]
             )
         )
 
-    deltas = await ctx.records.rating_deltas(player_id)
-    if deltas is not None and deltas.computed_rating is not None:
-        boundary = calc.highest_milestone_crossed(deltas.previous_computed_rating, deltas.computed_rating)
-        recorded = await _rating_milestones(db, player_id)
-        is_new_high = boundary is not None and (not recorded or boundary > recorded[0][0])
-        if boundary is not None and is_new_high and await _record_event(
-            db, player_id=player_id, kind=_RATING, occurred_on=today_iso, value=rating_text(boundary)
-        ):
-            following = calc.next_milestone(deltas.computed_rating)
-            data.update(
-                rating_milestone=rating_text(boundary), next_milestone=rating_text(following),
-                remaining_to_next=rating_text(calc.remaining_to(following, deltas.computed_rating)),
-            )
-            if recorded:
-                data["days_since_previous_milestone"] = calc.days_between(recorded[0][1], today_iso)
-            hints.append(f"레이팅 {rating_text(boundary)} 돌파, 다음 {rating_text(following)}까지 {data['remaining_to_next']} 남음")
+    if current is not None:
+        star = highest_rung_crossed(LADDER, peak_before, current, series=STAR)
+        floor = highest_rung_crossed(LADDER, peak_before, current, series=FLOOR)
+        previous_star_on = await _last_star_date(db, player_id)
+        labels: list[str] = []
+        for rung, kind in ((star, _RATING_STAR), (floor, _RATING_FLOOR)):
+            if rung is not None and await _record_event(
+                db, player_id=player_id, kind=kind, occurred_on=today_iso,
+                value=song_rating_text(rung.threshold), label=rung.label,
+            ):
+                labels.append(rung.label)
+        if labels:
+            data["rating_milestones"] = labels
+            following = next_star(LADDER, current)
+            text = f"레이팅 {', '.join(labels)} 달성"
+            if following is not None:
+                remaining = rating_text(calc.remaining_to(following.threshold, current))
+                data.update(next_milestone=following.label, remaining_to_next=remaining)
+                text += f", 다음 {following.label}까지 {remaining} 남음"
+            if previous_star_on and star is not None:
+                data["days_since_previous_milestone"] = calc.days_between(previous_star_on, today_iso)
+            hints.append(text)
+        await _raise_rating_peak(db, player_id, max(current, peak_before or current), today_iso)
 
     kept = await _expire_and_close_promises(db, player_id, updated_titles=updated_titles, today=today_iso)
     if kept:
@@ -294,7 +416,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
 
 @on("chunithm.song.viewed")
 async def on_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
-    """그 곡과 얽힌 기록(랭크 첫 달성, 오래 붙잡은 기록)을 조각으로 돌려준다. 없으면 None."""
+    """그 곡과 얽힌 이정표(상수별 1호, 오래 붙잡은 기록)를 조각으로 돌려준다. 없으면 None."""
     events = await _song_events(ctx, payload["player_id"], payload["song_title"])
     if not events:
         return None
@@ -315,7 +437,7 @@ async def _song_events(ctx: ToolContext, player_id: str, title: str) -> list[dic
     cursor = await db.execute(
         "SELECT kind, song_title, difficulty, value, label, occurred_on, started_on FROM yuni_bond_milestones "
         "WHERE player_id = ? AND game = ? AND kind = ? AND song_title = ? ORDER BY occurred_on, id",
-        (player_id, _GAME, _RANK_FIRST, title),
+        (player_id, _GAME, _CONST_FIRST, title),
     )
     events = [dict(row) for row in await cursor.fetchall()]
     events.extend(await _long_hauls(db, player_id, title=title, limit=_HISTORY_LIMIT))
@@ -367,10 +489,12 @@ def _event_item(event: dict[str, Any], today: date) -> dict[str, Any]:
         item["song_title"] = event["song_title"]
         item["difficulty"] = event["difficulty"]
     kind = event["kind"]
-    if kind == _RANK_FIRST:
-        item["rank"] = event["value"]
-    elif kind == _RATING:
+    if kind == _CONST_FIRST:
+        item["const"] = event["label"]
+        item["tier"] = calc.TIER_LABELS.get(event["value"], event["value"])
+    elif kind in _RATING_KINDS:
         item["rating"] = event["value"]
+        item["rating_label"] = event["label"]
     elif kind == _GOAL_DONE:
         item["goal"] = event["label"]
     elif kind == _LONG_HAUL:
@@ -389,10 +513,10 @@ def _event_line(item: dict[str, Any]) -> str:
     taken = f" · {item['days_taken']}일 걸림" if item.get("days_taken") else ""
     if kind == _FIRST_MET:
         return f"처음 만난 날  {item['date_label']} ({item['days_ago']}일 전)"
-    if kind == _RANK_FIRST:
-        return f"{chart}  {item['rank']} 첫 달성  {item['date_label']}{taken}"
-    if kind == _RATING:
-        return f"레이팅 {rating_text(item['rating'])} 돌파  {item['date_label']}"
+    if kind == _CONST_FIRST:
+        return f"{item['const']} {item['tier']} 1호  {chart}  {item['date_label']}{taken}"
+    if kind in _RATING_KINDS:
+        return f"레이팅 {item['rating_label']} 달성  {item['date_label']}"
     if kind == _GOAL_DONE:
         return f"To-Do 달성  {item['goal']}  {item['date_label']}{taken}"
     return (
@@ -401,11 +525,11 @@ def _event_line(item: dict[str, Any]) -> str:
     )
 
 
-@tool(slash="기록들")
+@tool(slash="이정표")
 async def history(ctx: ToolContext, song: SongQuery | None = None, kind: str | None = None) -> ToolResult:
-    """유니와 함께한 기록을 날짜와 함께 보여 준다: 처음 만난 날(first_met), 랭크 첫 달성(rank_first),
-    레이팅 마일스톤(rating_milestone), To-Do 달성(goal_done), 오래 붙잡은 곡(long_haul).
-    song을 주면 그 곡의 기록만, kind를 주면 그 종류만 본다. 날짜와 기간은 결과의 값만 말한다."""
+    """유니와 함께 넘은 이정표를 날짜와 함께 보여 준다: 처음 만난 날(first_met), 상수별 1호(const_first — 상수마다 처음
+    트리플·트플플·풀콤·올저), 레이팅 성·단계 달성(rating_star), 레이팅 층 달성(rating_floor), To-Do 달성(goal_done),
+    오래 붙잡은 곡(long_haul). song을 주면 그 곡의 이정표만, kind를 주면 그 종류만 본다. 날짜와 기간은 결과의 값만 말한다."""
     assert song is None or isinstance(song, SongRecord)
     if kind is not None and kind not in _KINDS:
         return ToolResult(error=f"kind는 {', '.join(_KINDS)} 중 하나여야 해")
@@ -417,12 +541,13 @@ async def history(ctx: ToolContext, song: SongQuery | None = None, kind: str | N
     if song is not None:
         events = [e for e in await _song_events(ctx, ctx.player_id, song.title) if e["kind"] in wanted]
     else:
-        placeholders = ",".join("?" for _ in wanted & {_RANK_FIRST, _RATING, _GOAL_DONE})
-        if placeholders:
+        listed = sorted(wanted & set(_LISTED_IN_HISTORY))
+        if listed:
+            placeholders = ",".join("?" for _ in listed)
             cursor = await db.execute(
                 "SELECT kind, song_title, difficulty, value, label, occurred_on, started_on FROM yuni_bond_milestones "
                 f"WHERE player_id = ? AND kind IN ({placeholders}) ORDER BY occurred_on DESC, id DESC LIMIT ?",
-                [ctx.player_id, *(wanted & {_RANK_FIRST, _RATING, _GOAL_DONE}), _HISTORY_LIMIT],
+                [ctx.player_id, *listed, _HISTORY_LIMIT],
             )
             events = [dict(row) for row in await cursor.fetchall()]
         if _FIRST_MET in wanted:
@@ -436,16 +561,16 @@ async def history(ctx: ToolContext, song: SongQuery | None = None, kind: str | N
     if not events:
         return ToolResult(
             data={"events": []},
-            display=Display(content="아직 남은 기록이 없어. 같이 쌓아 가자."),
+            display=Display(content="아직 남은 이정표가 없어. 같이 쌓아 가자."),
             display_mode="optional",
         )
     items = [_event_item(e, today) for e in events]
-    builder = TableBuilder(subject=ctx.player_id, unit="기록")
+    builder = TableBuilder(subject=ctx.player_id, unit="이정표")
     builder.column(_E_DATE)
     builder.column(_E_KIND)
     tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
     builder.column(_E_DETAIL)
-    builder.step("유니와 함께한 기록 (날짜순)")
+    builder.step("함께한 이정표 (날짜순)")
     for item in items:
         title = item.get("song_title", "")
         difficulty = item.get("difficulty", "")
@@ -464,15 +589,15 @@ async def history(ctx: ToolContext, song: SongQuery | None = None, kind: str | N
 
 
 def _event_detail_cell(item: dict[str, Any]) -> Any:
-    """기록 한 줄의 "내용"(종류 칸이 이미 말하는 것은 빼고 값과 걸린 기간만)."""
+    """이정표 한 줄의 "내용"(종류 칸이 이미 말하는 것은 빼고 값과 걸린 기간만)."""
     kind = item["kind"]
     taken = f" · {item['days_taken']}일 걸림" if item.get("days_taken") else ""
     if kind == _FIRST_MET:
         text = f"{item['days_ago']}일 전"
-    elif kind == _RANK_FIRST:
-        text = f"{item['rank']}{taken}"
-    elif kind == _RATING:
-        text = rating_text(item["rating"])
+    elif kind == _CONST_FIRST:
+        text = f"{item['const']} {item['tier']} 1호{taken}"
+    elif kind in _RATING_KINDS:
+        text = item["rating_label"]
     elif kind == _GOAL_DONE:
         text = f"{item['goal']}{taken}"
     else:

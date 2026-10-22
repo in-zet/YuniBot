@@ -23,7 +23,7 @@ VALID_CATEGORIES: frozenset[str] = frozenset(
         "알림",
         "질문 답변",
         "메모리",
-        "함께한 기록",
+        "이정표",
         "관리",
         "폴더",
         "유니 설정",
