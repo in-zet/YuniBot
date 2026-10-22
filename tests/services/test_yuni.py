@@ -10,7 +10,7 @@ from services.common.memory import (
     PendingMessage,
     PendingSummary,
 )
-from services.common.yuni import YuniService
+from services.common.yuni import _MEMORY_TASK, YuniService
 from tests.support.fake_llm import FakeLlmAdapter
 
 
@@ -240,3 +240,11 @@ async def test_merge_memory_dm_scope_usage_when_no_guild() -> None:
     service = _service(FakeLlmAdapter([_turn('{"content": "x"}')]), usage=usage)
     await service.merge_memory(_state(), _pending("a", guild_id=None))
     assert usage.records[0]["guild_id"] == "dm"
+
+
+def test_memory_task_keeps_to_the_design_scope() -> None:
+    """저장 대상은 게임 관련 사실만이다(설계서 "플레이어 메모리", 2026-10-22 사용자 결정으로 완화를 되돌림)."""
+    assert "잘 변하지 않는 게임 관련 사실" in _MEMORY_TASK
+    assert "게임과 무관한 개인사" in _MEMORY_TASK.split("담지 않는다")[0]
+    assert "아마도" not in _MEMORY_TASK
+    assert "취향" not in _MEMORY_TASK
