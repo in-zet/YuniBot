@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from core.decorators import tool
-from core.tables import TableNeeds, WorkTable
+from core.tables import TableError, TableNeeds, WorkTable
 from core.tool_types import Display, DisplayFile, TableRef, ToolContext, ToolResult
 from services.chunithm import table_columns as tc
 from services.chunithm.image_cache import jacket_url
@@ -61,6 +61,10 @@ async def table_image(
 ) -> ToolResult:
     """표를 재킷이 들어간 그림으로 그려 보낸다. 그림을 달라고 했을 때만 쓴다. layout은 안 주면 card(재킷 카드 격자)다. 사용자가 "목록", "리스트", "한 줄씩"이라고 말했을 때만 list를 준다 — 정렬 순서나 곡 수가 많은 것만으로 list를 고르지 않는다."""
     assert isinstance(table, WorkTable)
+    try:
+        render.check_extras(table, Layout(layout).value)
+    except TableError as exc:
+        return ToolResult(error=str(exc))
     titles = list(dict.fromkeys(row.cell(tc.SONG).text for row in table.rows))
     jacket_urls = {title: jacket_url(ctx.songdb.jacket_for(title)) for title in titles}
     extra, profile_urls = await _header_profile(ctx, table)
@@ -90,7 +94,10 @@ async def table_image(
     files = render.render_pages(table, layout=Layout(layout).value, jackets=jackets, profile=header, stale=stale)
     missing = sum(1 for data in jackets.values() if data is None)
     return ToolResult(
-        data={"table": table.id, "images": len(files), "rows": table.row_count, "missing_jackets": missing},
+        data={
+            "table": table.id, "images": len(files), "rows": table.row_count, "missing_jackets": missing,
+            "drawn_columns": render.drawn_labels(table),
+        },
         display=Display(files=[DisplayFile(name, data) for name, data in files]),
         drew_table=table.id,
     )

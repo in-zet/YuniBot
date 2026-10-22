@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from PIL import Image, ImageDraw
 
-from core.tables import EMPTY_CELL, Cell, TableBuilder, WorkTable, cell
+from core.tables import EMPTY_CELL, Cell, TableBuilder, TableError, WorkTable, cell
 from services.chunithm import table_columns as tc
 
 _RENDER_PY = Path(__file__).parent.parent / "render.py"
@@ -666,3 +666,148 @@ def test_list_row_background_is_tinted_by_difficulty_like_a_card() -> None:
 
     assert master.getpixel(probe) != ultima.getpixel(probe)
     assert master.getpixel(probe) != render._PANEL
+
+
+# ---------------------------------------------------------------- 그릴 칸(보이는 칸을 따른다, 2026-10-22)
+
+_NOTES = "노트 수"
+_ARTIST = "작곡가"
+
+
+def _extras_table(
+    names: tuple[str, ...], *, hidden: tuple[str, ...] = (), count: int = 2, values: dict[str, str] | None = None
+) -> WorkTable:
+    """곡·난이도·상수 + `names`(공통 칸 이름)를 가진 표. `hidden`은 글자 출력에서 숨긴다."""
+    columns = (tc.SONG, tc.DIFFICULTY, tc.CONST, *names)
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, *columns, hidden_in_text=hidden)
+    values = values or {}
+    for index in range(count):
+        cells: dict[str, Cell] = {
+            tc.SONG: tc.song_cell(f"곡 {index}"),
+            tc.DIFFICULTY: tc.difficulty_cell("MAS"),
+            tc.CONST: tc.const_cell(15.0),
+            tc.NOTE_COUNT: tc.note_count_cell(1519),
+            tc.ARTIST: tc.text_cell(values.get(tc.ARTIST, "작곡가 A")),
+            tc.VERSION: tc.text_cell("LUMINOUS"),
+            tc.LEVEL: tc.level_cell("15"),
+            tc.SCORE: tc.score_cell(1_007_500),
+            tc.RANK: tc.rank_cell("SSS", {"SSS": 1_007_500}),
+            tc.LAMP: tc.lamp_cell("ALL JUSTICE"),
+            tc.RATING: cell(16.0, "16.00"),
+        }
+        builder.row(tc.chart_ref(f"곡 {index}", "MAS"), {name: cells.get(name, EMPTY_CELL) for name in columns})
+    return builder.build()
+
+
+def _height(table: WorkTable, layout: str) -> int:
+    ((_, data),) = render.render_pages(table, layout=layout, jackets={})
+    return _size(data)[1]
+
+
+def test_shown_columns_follow_visible_columns_and_always_keep_song() -> None:
+    table = _extras_table((_NOTES, _ARTIST, tc.LAMP), hidden=(tc.SONG, tc.LAMP, _ARTIST))
+
+    shown = render.shown_columns(table)
+
+    assert tc.SONG in shown.names  # 곡은 숨겨도 그린다(카드의 틀)
+    assert tc.LAMP not in shown.names
+    assert [column.label for column in shown.extras] == [_NOTES]
+    assert render.drawn_labels(table) == ["곡", "난이도", "상수", "노트 수"]
+
+
+def test_extras_keep_table_column_order() -> None:
+    table = _extras_table((_ARTIST, _NOTES))
+
+    assert [column.label for column in render.shown_columns(table).extras] == [_ARTIST, _NOTES]
+
+
+def test_card_height_grows_one_info_line_per_extra() -> None:
+    base = _height(_extras_table(()), "card")
+    one = _height(_extras_table((_NOTES,)), "card")
+    four = _height(_extras_table((_NOTES, _ARTIST, tc.VERSION, tc.LEVEL)), "card")
+
+    assert one - base == render._INFO_LINE
+    assert four - base == 4 * render._INFO_LINE
+
+
+def test_hidden_extras_do_not_change_the_picture_size() -> None:
+    base = _height(_extras_table(()), "card")
+    hidden = _height(_extras_table((_NOTES, _ARTIST), hidden=(_NOTES, _ARTIST)), "card")
+
+    assert hidden == base
+
+
+def test_card_with_more_than_four_extras_is_an_error_that_names_the_columns() -> None:
+    table = _extras_table((_NOTES, _ARTIST, tc.VERSION, tc.LEVEL, tc.SONG_RAW_NAME))
+
+    with pytest.raises(TableError, match="노트 수·작곡가·버전·레벨·곡 이름\\(원문\\).*table_query"):
+        render.render_pages(table, layout="card", jackets={})
+
+
+def test_list_extra_limit_shrinks_when_standard_columns_take_the_room() -> None:
+    full = frozenset({tc.RATING, tc.LAMP, tc.RANK, tc.SCORE})
+    assert render._list_extra_limit(frozenset()) == render.LIST_EXTRA_MAX
+    assert 0 < render._list_extra_limit(full) < render.LIST_EXTRA_MAX
+    table = _extras_table((tc.SCORE, tc.RANK, tc.LAMP, tc.RATING, _NOTES, _ARTIST, tc.VERSION))
+
+    render.render_pages(table, layout="card", jackets={})  # 카드는 3칸이라 된다
+    with pytest.raises(TableError, match="목록"):
+        render.render_pages(table, layout="list", jackets={})
+
+
+def test_list_draws_extras_when_there_is_room() -> None:
+    table = _extras_table((_NOTES, _ARTIST, tc.VERSION, tc.LEVEL))
+
+    ((_, data),) = render.render_pages(table, layout="list", jackets={})
+
+    assert _size(data)[0] == render._LIST_W
+
+
+class _Spy:
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def text(self, _xy: object, text: str, **_kwargs: object) -> None:
+        self.texts.append(text)
+
+
+def test_card_extra_draws_label_then_value_and_dashes_an_empty_value() -> None:
+    spy = _Spy()
+
+    render._draw_card_extra(spy, (14, 192, 0), "노트 수", "1519", 14)  # type: ignore[arg-type]
+    render._draw_card_extra(spy, (14, 192, 0), "작곡가", "", 14)  # type: ignore[arg-type]
+
+    assert spy.texts == ["노트 수 ", "1519", "작곡가 ", "-"]
+
+
+def test_card_extra_ellipsizes_a_long_value_but_not_the_label() -> None:
+    spy = _Spy()
+
+    render._draw_card_extra(spy, (14, 192, 0), "작곡가", "아주아주아주아주아주아주 긴 작곡가 이름", 14)  # type: ignore[arg-type]
+
+    label, value = spy.texts
+    assert label == "작곡가 " and value.endswith("…") and len(value) < 20
+
+
+def test_hidden_difficulty_and_lamp_are_not_drawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(render, "_draw_difficulty", lambda *args, **kwargs: calls.append("difficulty"))
+    monkeypatch.setattr(render, "_draw_lamp", lambda *args, **kwargs: calls.append("lamp"))
+    shown_all = _extras_table((tc.LAMP,))
+    hidden = _extras_table((tc.LAMP,), hidden=(tc.DIFFICULTY, tc.LAMP))
+
+    render.render_pages(shown_all, layout="card", jackets={})
+    assert set(calls) == {"difficulty", "lamp"}
+    calls.clear()
+    render.render_pages(hidden, layout="card", jackets={})
+    assert calls == []
+    render.render_pages(hidden, layout="list", jackets={})
+    assert calls == []
+
+
+def test_hidden_const_and_score_columns_take_no_info_line() -> None:
+    with_const = _height(_extras_table(()), "card")
+    without = _height(_extras_table((), hidden=(tc.CONST,)), "card")
+
+    assert with_const - without == render._INFO_LINE

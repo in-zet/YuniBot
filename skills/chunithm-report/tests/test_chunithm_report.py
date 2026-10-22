@@ -351,15 +351,18 @@ async def test_best_both_returns_table_with_groups_and_contribution(skill: Modul
     assert first.cell(tc.RATING).raw == 17.31
 
 
-async def test_best_text_line_keeps_the_old_shape_and_hides_lamp(skill: ModuleType) -> None:
+async def test_best_text_line_shows_lamp_and_hides_contribution_until_asked(skill: ModuleType) -> None:
     f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, deltas={"me": _DELTAS_SECOND}))
 
     result = await skill.best(f.ctx)
 
     assert result.table is not None
     text = render_text(result.table).content
-    assert "1. 곡 A MAS 15.3  1,007,620 SSS  곡 레이팅 17.31  기여 0.3462" in text
-    assert "FULL COMBO" not in text
+    # 그림이 보이는 칸을 따르므로(2026-10-22) 램프는 보이고, 그림에 없는 기여는 물을 때만 `columns`로 보인다.
+    assert "1. 곡 A MAS 15.3  1,007,620 SSS  곡 레이팅 17.31  램프 FULL COMBO" in text
+    assert "기여" not in text
+    contribution = result.table.column_by_label("기여")
+    assert contribution is not None and contribution.hidden_in_text
     assert "── 베스트 30 · 2채보 · 평균 17.0200 ──" in text
     assert "닉네임 펭귄 · 레이팅 16.94" in text
 

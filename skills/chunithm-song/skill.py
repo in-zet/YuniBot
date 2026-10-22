@@ -103,6 +103,9 @@ async def chart(ctx: ToolContext, chart: ChartRef) -> ToolResult:
 
 
 _SEARCH_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION)
+# 검색 결과 표의 기본 칸은 곡·난이도·상수다. 나머지는 표에 있어도 글자 출력과 그림에서 숨기고, 물었을 때만
+# `table_query`의 `columns`로 보인다(2026-10-22 결정).
+_SEARCH_HIDDEN = (tc.LEVEL, tc.NOTE_COUNT, tc.VERSION, tc.ARTIST)
 _NO_ARTIST_SONGS = "해당 작곡가의 곡이 없어."
 
 
@@ -119,7 +122,7 @@ def _note_range_text(min_notes: int | None, max_notes: int | None) -> str | None
 def _chart_table(hits: list[ConstRangeHit], conditions: list[str | None]) -> WorkTable:
     """채보 검색 결과를 표로. 순서는 서비스가 정한 그대로(상수 오름차순)다."""
     builder = TableBuilder(unit="채보")
-    tc.add_columns(builder, *_SEARCH_COLUMNS)
+    tc.add_columns(builder, *_SEARCH_COLUMNS, hidden_in_text=_SEARCH_HIDDEN)
     builder.step(" ".join(c for c in conditions if c))
     for hit in hits:
         builder.row(
@@ -176,7 +179,7 @@ async def find_linked_verse(
     if not hits:
         return ToolResult(data={"count": 0}, display=Display(content="해당하는 해금곡 채보가 없어."))
     builder = TableBuilder(unit="채보")
-    tc.add_columns(builder, *_SEARCH_COLUMNS)
+    tc.add_columns(builder, *_SEARCH_COLUMNS, hidden_in_text=_SEARCH_HIDDEN)
     builder.step(" ".join(c for c in ["Linked VERSE", gate, short_code] if c))
     current: str | None = None
     for hit in hits:
@@ -256,7 +259,7 @@ async def find_by_artist(
         if not songs:
             return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS))
         builder = TableBuilder(unit="곡")
-        tc.add_columns(builder, *columns).step(condition)
+        tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN).step(condition)
         for song in songs:
             builder.row(tc.song_ref(song.title), tc.song_cells(song, columns))
         return ToolResult(data={"count": len(songs)}, table=builder.build())
@@ -270,7 +273,7 @@ async def find_by_artist(
     if not charts:
         return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS))
     builder = TableBuilder(unit="채보")
-    tc.add_columns(builder, *columns).step(f"{condition} {short_code}")
+    tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN).step(f"{condition} {short_code}")
     for song, chart_record in charts:
         builder.row(tc.chart_ref(song.title, short_code), tc.chart_cells(song, chart_record, columns))
     return ToolResult(data={"count": len(charts)}, table=builder.build())
@@ -307,7 +310,7 @@ async def charts_of(
         cells = {**row.cells, **tc.chart_cells(song, chart_record, _EXPAND_COLUMNS)}
         return [Row(tc.chart_ref(song.title, code), MappingProxyType(cells))]
 
-    result = expand_rows(table, expand, tc.common_columns(*_EXPAND_COLUMNS))
+    result = expand_rows(table, expand, tc.common_columns(*_EXPAND_COLUMNS, hidden_in_text=_SEARCH_HIDDEN))
     steps = [f"{code}로 펼침"] if expanded else ["펼칠 곡 단위 행 없음"]
     if missing:
         steps.append(f"{code} 없는 곡 {missing}개 뺌")

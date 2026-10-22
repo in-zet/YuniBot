@@ -176,7 +176,7 @@ async def profile(ctx: ToolContext, player: PlayerRef | None = None) -> ToolResu
 _CONTRIBUTION = "기여"
 _BEST_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
 # 한 줄 서식(램프는 글자 출력에서 숨긴다 — 줄 모양은 지금 베스트 줄 그대로).
-_BEST_ROW_FORMAT = "{곡} {난이도} {상수}  {점수} {랭크}  곡 레이팅 {곡 레이팅}  기여 {기여}"
+_BEST_ROW_FORMAT = "{곡} {난이도} {상수}  {점수} {랭크}  곡 레이팅 {곡 레이팅}"
 
 
 def _pb_row_cells(row: PbRow, rank_scores: dict[str, int]) -> dict[str, Cell]:
@@ -219,8 +219,8 @@ async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind
         frames.append(("신곡 20", new_rows, summary.new20_average))
 
     builder = TableBuilder(subject=target.id, unit="채보")
-    tc.add_columns(builder, *_BEST_COLUMNS, hidden_in_text=(tc.LAMP,))
-    builder.column(_CONTRIBUTION, value_type="number")
+    tc.add_columns(builder, *_BEST_COLUMNS)
+    builder.column(_CONTRIBUTION, value_type="number", hidden_in_text=True)  # 물을 때만 `columns`로 보인다
     builder.row_formats([_BEST_ROW_FORMAT])
     builder.step(" · ".join(title for title, _, _ in frames))
     header: dict[str, str] = {"닉네임": summary.nickname or "(닉네임 없음)"}

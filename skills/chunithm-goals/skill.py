@@ -350,10 +350,11 @@ def _song_target_text(goal: Any) -> str:
     return f"{target:,}점"
 
 
-def _goal_label(goal: Any) -> str:
+def _goal_label(goal: Any, *, with_chart: bool = True) -> str:
     ref = goal.target_ref
     if goal.kind == "song":
-        return f"{ref['song_title']} {ref['difficulty']}  {_song_target_text(goal)}"
+        target = _song_target_text(goal)
+        return f"{ref['song_title']} {ref['difficulty']}  {target}" if with_chart else target
     if goal.kind == "rating":
         target_text = calc.truncate4(_dec(goal.target_value)) if goal.target_value is not None else "?"
         return f"레이팅 {target_text}"
@@ -806,6 +807,9 @@ _G_DUE = "기한"
 _G_PUBLIC = "공개"
 _G_ID = "id"
 _GOAL_LIST_FORMATS = (
+    "[{상태}] {곡} {난이도}  {목표}  {진행}  기한 {기한}",
+    "[{상태}] {곡} {난이도}  {목표}  {진행}",
+    "[{상태}] {곡} {난이도}  {목표}",
     "[{상태}] {목표}  {진행}  기한 {기한}",
     "[{상태}] {목표}  {진행}",
     "[{상태}] {목표}",
@@ -858,7 +862,7 @@ def _goal_cells(goal: Any, summary: dict[str, Any]) -> dict[str, Cell]:
         _G_KIND: cell(_KIND_LABELS.get(goal.kind, goal.kind)),
         tc.SONG: tc.song_cell(ref["song_title"]) if is_song else EMPTY_CELL,
         tc.DIFFICULTY: tc.difficulty_cell(ref["difficulty"]) if is_song else EMPTY_CELL,
-        _G_LABEL: cell(_goal_label(goal)),
+        _G_LABEL: cell(_goal_label(goal, with_chart=False)),  # 곡·난이도는 곡·난이도 칸이 따로 보인다
         _G_STATUS: cell(goal.status, _STATUS_LABELS.get(goal.status, goal.status)),
         _G_PROGRESS: cell(detail) if detail else EMPTY_CELL,
         _G_RATIO: (
@@ -889,9 +893,9 @@ async def list_goals(ctx: ToolContext, player: PlayerRef | None = None, kind: Go
     if not rows:
         return ToolResult(data={"player_id": target.id, "count": 0}, display=Display(content="목표가 없어."))
     builder = TableBuilder(subject=target.id, unit="목표")
-    # 줄에는 목표·상태·진행·기한만 보인다(나머지는 거르기·정렬용).
+    # 줄에는 곡·난이도(곡 목표만)·목표·상태·진행·기한만 보인다(나머지는 거르기·정렬용).
     builder.column(_G_KIND, hidden_in_text=True)
-    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, hidden_in_text=(tc.SONG, tc.DIFFICULTY))
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
     builder.column(_G_LABEL)
     builder.column(_G_STATUS)
     builder.column(_G_PROGRESS)

@@ -199,3 +199,27 @@ async def test_current_version_goes_to_header_only_for_rating_table(skill: Modul
 
     assert seen[0] is not None and seen[0].version == "X-VERSE-X"
     assert seen[1] is None
+
+
+async def test_table_image_reports_drawn_columns(skill: ModuleType) -> None:
+    ctx = _ctx(songdb=_FakeSongDb(), cache=_FakeImageCache(), records=_FakeRecords())
+
+    result = await skill.table_image(ctx, _table(subject=None))
+
+    assert result.data["drawn_columns"] == ["곡", "난이도", "상수"]
+
+
+async def test_table_image_returns_error_when_extra_columns_do_not_fit(skill: ModuleType) -> None:
+    builder = TableBuilder(subject=None, unit="채보")
+    extras = (tc.NOTE_COUNT, tc.ARTIST, tc.VERSION, tc.LEVEL, tc.SONG_RAW_NAME)
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, *extras)
+    builder.row(tc.chart_ref("곡 A", "MAS"), {tc.SONG: tc.song_cell("곡 A"), tc.DIFFICULTY: tc.difficulty_cell("MAS")})
+    table = replace(builder.build(), id="t1")
+    cache = _FakeImageCache()
+    ctx = _ctx(songdb=_FakeSongDb(), cache=cache, records=_FakeRecords())
+
+    result = await skill.table_image(ctx, table)
+
+    assert result.error is not None and "table_query" in result.error
+    assert result.display is None
+    assert cache.requested == []  # 재킷도 받지 않고 바로 돌려준다

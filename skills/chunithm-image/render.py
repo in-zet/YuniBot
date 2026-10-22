@@ -2,7 +2,8 @@
 """작업 표를 Pillow로 그림(PNG)으로 그린다. 입출력(그림 받기·DB)은 하지 않는다 — skill.py가 받아 둔 그림 바이트를 넘긴다.
 
 그림 도구는 배치만 고른다: 묶음·표지·정렬·요약은 표가 가진 그대로 그리고, 행 번호는 글자 출력과 같은 번호를 찍는다.
-칸은 공통 칸 이름(`table_columns`)으로 알아보고 있는 칸만 그린다. 글자는 셀의 보일 글자를 그대로 쓴다."""
+그릴 칸은 글자 출력에 보이는 칸과 같다(`visible_columns`). 곡 칸만 숨겨도 그린다(카드의 틀). 상수·곡 레이팅·점수·랭크·난이도·램프는
+정해진 자리에, 그 밖의 보이는 칸(노트 수·작곡가·어택 수 등)은 범용 칸으로 그린다. 글자는 셀의 보일 글자를 그대로 쓴다."""
 
 from __future__ import annotations
 
@@ -18,7 +19,14 @@ from typing import Literal
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-from core.tables import Row, WorkTable, table_file_name
+from core.tables import (
+    Column,
+    Row,
+    TableError,
+    WorkTable,
+    table_file_name,
+    visible_columns,
+)
 from services.chunithm import table_columns as tc
 
 logger = logging.getLogger(__name__)
@@ -508,6 +516,54 @@ def _draw_band(draw: ImageDraw.ImageDraw, width: int, y: int, segment: Segment, 
     return y + _BAND_H + 12
 
 
+# ---------------------------------------------------------------- 그릴 칸
+
+# 전용 자리와 서식이 있는 칸. 이 밖에 보이는 칸은 범용 칸이다.
+_SLOT_COLUMNS = frozenset({tc.SONG, tc.DIFFICULTY, tc.LAMP, tc.CONST, tc.RATING, tc.SCORE, tc.RANK})
+CARD_EXTRA_MAX = 4  # 카드 한 장에 더할 수 있는 범용 칸 줄 수(2026-10-22 결정)
+LIST_EXTRA_MAX = 4  # 목록 한 줄에 더할 수 있는 범용 칸 수. 정해진 칸이 자리를 차지하면 이보다 적다
+_EXTRA_EMPTY = "-"  # 범용 칸의 값이 없을 때 — 빈칸이면 "없는 건지 안 그린 건지" 헷갈린다
+
+
+@dataclass(frozen=True, slots=True)
+class Shown:
+    """그릴 칸. `names`는 정해진 칸 중 그릴 것(곡은 늘 든다), `extras`는 범용 칸(표의 칸 순서)."""
+
+    names: frozenset[str]
+    extras: tuple[Column, ...]
+
+
+def shown_columns(table: WorkTable) -> Shown:
+    visible = visible_columns(table)
+    return Shown(
+        names=frozenset({tc.SONG, *(column.name for column in visible)}),
+        extras=tuple(column for column in visible if column.name not in _SLOT_COLUMNS),
+    )
+
+
+def drawn_labels(table: WorkTable) -> list[str]:
+    """그림에 그려지는 칸의 보이는 이름. 곡이 숨겨져 있어도 들어간다."""
+    labels = [column.label for column in visible_columns(table)]
+    song = table.column_by_name(tc.SONG)
+    if song is not None and song.label not in labels:
+        labels.insert(0, song.label)
+    return labels
+
+
+def check_extras(table: WorkTable, layout: Layout) -> None:
+    """범용 칸이 그 모양에 다 안 들어가면 말없이 자르지 않고 오류로 돌려준다."""
+    shown = shown_columns(table)
+    limit = CARD_EXTRA_MAX if layout == "card" else _list_extra_limit(shown.names)
+    if len(shown.extras) <= limit:
+        return
+    labels = "·".join(column.label for column in shown.extras)
+    raise TableError(
+        f"그림에 넣을 수 있는 칸이 모자라다. {'카드' if layout == 'card' else '목록'}은 곡·난이도·상수·점수 같은 정해진 칸 외에 "
+        f"{limit}칸까지 그릴 수 있는데 지금 {len(shown.extras)}칸({labels})이다. "
+        "`table_query`의 `columns`로 보일 칸을 줄인 뒤 다시 그려라."
+    )
+
+
 # ---------------------------------------------------------------- 카드
 
 _CARD_W = 206
@@ -531,14 +587,22 @@ _FIVE_COLUMN_MAX_ROWS = 40  # 이 수 이하면 _FIVE_COLUMNS로 그린다
 
 @dataclass(frozen=True, slots=True)
 class _CardLines:
-    """재킷 아래 줄: 첫 줄은 상수(왼쪽)·곡 레이팅(오른쪽 끝), 둘째 줄은 점수(왼쪽)·랭크(오른쪽 끝)."""
+    """재킷 아래 줄: 첫 줄은 상수(왼쪽)·곡 레이팅(오른쪽 끝), 둘째 줄은 점수(왼쪽)·랭크(오른쪽 끝),
+    그 아래는 범용 칸이 한 줄씩. 줄 수는 표 전체에서 같다(카드 높이가 같아야 한다)."""
 
-    const_rating: bool
-    score_rank: bool
+    shown: Shown
+
+    @property
+    def const_rating(self) -> bool:
+        return bool(self.shown.names & {tc.CONST, tc.RATING})
+
+    @property
+    def score_rank(self) -> bool:
+        return bool(self.shown.names & {tc.SCORE, tc.RANK})
 
     @property
     def count(self) -> int:
-        return int(self.const_rating) + int(self.score_rank)
+        return int(self.const_rating) + int(self.score_rank) + len(self.shown.extras)
 
     @property
     def height(self) -> int:
@@ -546,11 +610,7 @@ class _CardLines:
 
 
 def _card_lines(table: WorkTable) -> _CardLines:
-    names = {column.name for column in table.columns}
-    return _CardLines(
-        const_rating=bool(names & {tc.CONST, tc.RATING}),
-        score_rank=bool(names & {tc.SCORE, tc.RANK}),
-    )
+    return _CardLines(shown_columns(table))
 
 
 def _draw_difficulty(draw: ImageDraw.ImageDraw, right_top: tuple[int, int], row: Row) -> None:
@@ -645,12 +705,23 @@ def _card_value_size() -> int:
     return _CARD_VALUE_MIN_SIZE
 
 
+def _draw_card_extra(draw: ImageDraw.ImageDraw, span: tuple[int, int, int], label: str, value: str, size: int) -> None:
+    """범용 칸 한 줄: 왼쪽에 `라벨`(회색), 이어서 `값`(흰색 굵게). 넘치면 값 끝을 `…`로 줄인다(라벨은 폭 절반까지)."""
+    left, right, y = span
+    label_font, value_font = _font(size, False), _font(size, True)
+    prefix = _ellipsize(label_font, label, (right - left) // 2) + " "
+    prefix_w = _width(label_font, prefix)
+    draw.text((left, y), prefix, font=label_font, fill=_CARD_SUBTEXT)
+    draw.text((left + prefix_w, y), _ellipsize(value_font, value or _EXTRA_EMPTY, right - left - prefix_w), font=value_font, fill=_TEXT)
+
+
 def _draw_card(
     canvas: Image.Image, origin: tuple[int, int], number: int, table_number: int, row: Row,
     jacket: Image.Image | None, lines: _CardLines,
 ) -> None:
     x, y = origin
-    panel = _tinted_panel(row.cell(tc.DIFFICULTY).text)
+    names = lines.shown.names
+    panel = _tinted_panel(row.cell(tc.DIFFICULTY).text if tc.DIFFICULTY in names else None)
     # 카드를 따로 그려 둥근 모서리로 오려 붙인다 — 재킷이 윗모서리까지 닿는다.
     background = _card_background(panel, lines.height)
     card = background.copy()
@@ -664,37 +735,43 @@ def _draw_card(
     canvas.alpha_composite(card, (x, y))
 
     draw = ImageDraw.Draw(canvas, "RGBA")
-    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if row.cell(tc.LAMP).filled else None
+    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if tc.LAMP in names and row.cell(tc.LAMP).filled else None
     draw.rounded_rectangle(
         (x, y, x + _CARD_W - 1, y + lines.height - 1), radius=_CARD_RADIUS,
         outline=_LAMP_COLORS[lamp] if lamp is not None else _CARD_OUTLINE, width=_LAMP_BORDER,
     )
     badge_end = _number_badge(draw, (x + _CHIP_INSET, y + _CHIP_INSET), number, table_number)
-    _draw_lamp(draw, (badge_end + 4, y + _CHIP_INSET), row)
-    _draw_difficulty(draw, (x + _CARD_W - _CHIP_INSET, y + _CHIP_INSET), row)
+    if tc.LAMP in names:
+        _draw_lamp(draw, (badge_end + 4, y + _CHIP_INSET), row)
+    if tc.DIFFICULTY in names:
+        _draw_difficulty(draw, (x + _CARD_W - _CHIP_INSET, y + _CHIP_INSET), row)
 
     left, right = x + _CARD_PAD, x + _CARD_W - _CARD_PAD
     cy = y + _INFO_TOP
     value_size = _card_value_size()
     if lines.const_rating:
         const = row.cell(tc.CONST)
-        if const.text:
+        if tc.CONST in names and const.text:
             draw.text((left, cy), f"상수 {const.text}", font=_font(value_size, False), fill=_CARD_SUBTEXT)
         rating = row.cell(tc.RATING)
-        if rating.filled:
+        if tc.RATING in names and rating.filled:
             font = _font(value_size, True)
             draw.text((right - _width(font, rating.text), cy), rating.text, font=font, fill=_TEXT)
         cy += _INFO_LINE
     if lines.score_rank:
         score, rank = row.cell(tc.SCORE), row.cell(tc.RANK)
-        rank_text = rank.text if rank.filled else None
-        if score.filled:
+        rank_text = rank.text if tc.RANK in names and rank.filled else None
+        if tc.SCORE in names and score.filled:
             draw.text((left, cy), score.text, font=_font(value_size, True), fill=_TEXT)
-        elif score.text:
+        elif tc.SCORE in names and score.text:
             draw.text((left, cy), score.text, font=_font(value_size, False), fill=_CARD_SUBTEXT)
         if rank_text:
             font = _font(value_size, True)
             draw.text((right - _width(font, rank_text), cy), rank_text, font=font, fill=_rank_color(rank_text))
+        cy += _INFO_LINE
+    for column in lines.shown.extras:
+        _draw_card_extra(draw, (left, right, cy), column.label, row.cell(column.name).text, value_size)
+        cy += _INFO_LINE
 
 
 def card_columns(table: WorkTable) -> int:
@@ -747,22 +824,48 @@ _LIST_W = 1240
 _LIST_ROW_H = 90
 _LIST_JACKET = 72  # 외곽선(4px) 안쪽에 들어가게 카드 쪽보다 조금 작다
 _LIST_RADIUS = _CARD_RADIUS
+_LIST_EXTRA_W = 112  # 범용 칸 하나의 너비
+_LIST_TEXT_X = _MARGIN + 80 + _LIST_JACKET + 20  # 곡명이 시작하는 x
+_LIST_TITLE_MIN = 260  # 곡명에 남겨야 하는 최소 너비
+_LIST_STACK = ((tc.RATING, 114), (tc.LAMP, 86), (tc.RANK, 100), (tc.SCORE, 200))  # 오른쪽 끝부터 정해진 칸이 차지하는 너비
+
+
+def _list_stack_left(names: frozenset[str]) -> int:
+    """정해진 칸들이 오른쪽 끝에서부터 차지하고 남긴 경계 x."""
+    return _LIST_W - _MARGIN - 18 - sum(width for name, width in _LIST_STACK if name in names)
+
+
+def _list_extra_limit(names: frozenset[str]) -> int:
+    room = _list_stack_left(names) - _LIST_TEXT_X - _LIST_TITLE_MIN
+    return max(0, min(LIST_EXTRA_MAX, room // _LIST_EXTRA_W))
+
+
+def _draw_list_extras(draw: ImageDraw.ImageDraw, x: int, y: int, extras: Sequence[Column], row: Row) -> None:
+    """범용 칸마다 칸 하나: 위에 작은 `라벨`(회색), 아래에 `값`."""
+    label_font, value_font = _font(11, False), _font(15, True)
+    inner = _LIST_EXTRA_W - 14
+    for index, column in enumerate(extras):
+        left = x + index * _LIST_EXTRA_W
+        draw.text((left, y + 16), _ellipsize(label_font, column.label, inner), font=label_font, fill=_MUTED)
+        value = row.cell(column.name).text or _EXTRA_EMPTY
+        draw.text((left, y + 38), _ellipsize(value_font, value, inner), font=value_font, fill=_TEXT)
 
 
 def _draw_list_row(
     canvas: Image.Image, y: int, number: int, table_number: int, row: Row, jacket: Image.Image | None,
-    names: set[str],
+    shown: Shown,
 ) -> None:
+    names = shown.names
     # 카드와 같은 바탕(난이도 색 + 사선 무늬)을 둥근 모서리로 오려 붙이고, 램프 색(없으면 회색) 외곽선을 두른다.
     row_w, row_h = _LIST_W - 2 * _MARGIN, _LIST_ROW_H - 6
-    panel = _tinted_panel(row.cell(tc.DIFFICULTY).text)
+    panel = _tinted_panel(row.cell(tc.DIFFICULTY).text if tc.DIFFICULTY in names else None)
     background = _pattern_background(panel, row_w, row_h, row_w * 0.80, row_h / 2).copy()
     mask = Image.new("L", background.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, row_w - 1, row_h - 1), radius=_LIST_RADIUS, fill=255)
     background.putalpha(ImageChops.multiply(background.getchannel("A"), mask))
     canvas.alpha_composite(background, (_MARGIN, y))
     draw = ImageDraw.Draw(canvas, "RGBA")
-    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if row.cell(tc.LAMP).filled else None
+    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if tc.LAMP in names and row.cell(tc.LAMP).filled else None
     draw.rounded_rectangle(
         (_MARGIN, y, _MARGIN + row_w - 1, y + row_h - 1), radius=_LIST_RADIUS,
         outline=_LAMP_COLORS[lamp] if lamp is not None else _CARD_OUTLINE, width=_LAMP_BORDER,
@@ -799,12 +902,14 @@ def _draw_list_row(
             draw.text((right - _width(font, score.text), y + 22), score.text, font=font, fill=_TEXT if score.filled else _MUTED)
         right -= 200
 
+    right -= len(shown.extras) * _LIST_EXTRA_W
+    _draw_list_extras(draw, right, y, shown.extras, row)
     text_x = jx + _LIST_JACKET + 20
     title_font = _font(17, True)
     draw.text((text_x, y + 10), _ellipsize(title_font, row.cell(tc.SONG).text, right - text_x), font=title_font, fill=_TEXT)
     cursor = text_x
     code = row.cell(tc.DIFFICULTY)
-    if code.filled:
+    if tc.DIFFICULTY in names and code.filled:
         cursor = _chip(draw, (cursor, y + 48), code.text, _DIFFICULTY_COLORS.get(code.text, (90, 90, 110))) + 10
     if tc.CONST in names and row.cell(tc.CONST).text:
         draw.text((cursor, y + 51), f"상수 {row.cell(tc.CONST).text}", font=_font(13, False), fill=_MUTED)
@@ -814,7 +919,7 @@ def _draw_list(
     segments: Sequence[Segment], table: WorkTable, jackets: Mapping[str, Image.Image | None],
     profile: HeaderProfile | None, *, stale: bool, page: int, pages: int,
 ) -> Image.Image:
-    names = {column.name for column in table.columns}
+    shown = shown_columns(table)
     bare = len(table.groups) == 1 and table.groups[0].title is None
     probe = Image.new("RGBA", (_LIST_W, _HEADER_PROBE_H))
     header_height = _draw_header(probe, _LIST_W, table, profile, stale=stale, page=page, pages=pages)
@@ -830,7 +935,7 @@ def _draw_list(
             y = _draw_band(draw, _LIST_W, y, segment, table.unit)
         for number, row in segment.rows:
             _draw_list_row(
-                canvas, y, segment.local_number(number), number, row, jackets.get(row.cell(tc.SONG).text), names
+                canvas, y, segment.local_number(number), number, row, jackets.get(row.cell(tc.SONG).text), shown
             )
             y += _LIST_ROW_H
         y += 8
@@ -849,6 +954,7 @@ def render_pages(
 ) -> list[tuple[str, bytes]]:
     """표를 그림으로 그려 (파일 이름, PNG 바이트) 목록으로 돌려준다. 쪽 상한을 넘으면 여러 장이다.
     `jackets`는 곡 제목 → 재킷 그림 바이트(받기 실패·없음은 None 또는 빠짐 → 빈 사각형)."""
+    check_extras(table, layout)
     pages = split_pages(table, CARD_PAGE_ROWS, card_columns(table)) if layout == "card" else split_pages(table, LIST_PAGE_LIMIT)
     opened = {title: _open(data) for title, data in jackets.items()}
     draw_page = _draw_cards if layout == "card" else _draw_list

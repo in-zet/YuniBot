@@ -733,7 +733,8 @@ _FORMAT_SLOT_RE = re.compile(r"\{([^{}]+)\}")
 _FILENAME_KEEP_RE = re.compile(r"[^\w.\-]+")
 
 
-def _visible_columns(table: WorkTable, *, slash: bool) -> list[Column]:
+def visible_columns(table: WorkTable, *, slash: bool = False) -> list[Column]:
+    """글자 출력에 보이는 칸. 그림 표도 같은 기준으로 그릴 칸을 정한다."""
     return [
         column
         for column in table.columns
@@ -743,7 +744,7 @@ def _visible_columns(table: WorkTable, *, slash: bool) -> list[Column]:
 
 def row_text(table: WorkTable, row: Row, *, slash: bool = False) -> str:
     """행 한 줄의 글. 보일 칸만 골라, 칸이 모두 찬 첫 한 줄 서식을 쓰고, 없으면 기본 출력(칸 이름 + 값)으로 쓴다."""
-    visible = _visible_columns(table, slash=slash)
+    visible = visible_columns(table, slash=slash)
     by_label = {column.label: column for column in visible}
     used: set[str] = set()
     line: str | None = None
