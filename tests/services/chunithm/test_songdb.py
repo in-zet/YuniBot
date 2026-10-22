@@ -205,7 +205,7 @@ async def test_find_by_const_returns_sorted_hits_in_range(songdb: SongDbService)
     # 타입 체커에게도 알려주기 위한 것이다(동작에는 영향 없음).
     consts = [c for hit in hits if (c := hit.chart.const) is not None]
     assert len(consts) == len(hits)
-    assert consts == sorted(consts)
+    assert consts == sorted(consts, reverse=True)
     assert all(12.0 <= c <= 13.0 for c in consts)
 
 
@@ -228,7 +228,7 @@ async def test_find_by_level_returns_matching_hits(songdb: SongDbService) -> Non
     assert all(hit.chart.level == "12+" for hit in hits)
     assert any(hit.song.title == "B.B.K.K.B.K.K." for hit in hits)
     consts = [c for hit in hits if (c := hit.chart.const) is not None]
-    assert consts == sorted(consts)
+    assert consts == sorted(consts, reverse=True)
 
 
 async def test_find_by_level_excludes_unavailable_song() -> None:
@@ -377,14 +377,25 @@ async def test_find_songs_without_any_filter_returns_more_than_a_narrowed_query(
     assert len(everything) > len(narrowed)
 
 
-async def test_find_songs_order_is_const_ascending_unknown_last_then_title(songdb: SongDbService) -> None:
+async def test_find_songs_order_is_const_descending_unknown_last_then_title(songdb: SongDbService) -> None:
     hits = songdb.find_songs(min_const=12.0, max_const=13.0)
-    keys = [(hit.chart.const, hit.song.title) for hit in hits]
+    keys = [(-(hit.chart.const or 0.0), hit.song.title) for hit in hits]
     assert keys == sorted(keys)
     everything = songdb.find_songs()
     consts = [hit.chart.const for hit in everything]
     known = [c for c in consts if c is not None]
     assert consts[: len(known)] == known and all(c is None for c in consts[len(known) :])
+    assert known == sorted(known, reverse=True)
+
+
+def test_version_order_puts_the_newest_version_last_and_covers_every_seed_version(songdb: SongDbService) -> None:
+    """Mate는 가장 최신 버전이다(2026-10-22: 처음엔 PARADISE LOST와 NEW 사이에 잘못 들어 있었다)."""
+    from services.chunithm.songdb import VERSION_ORDER
+
+    assert VERSION_ORDER[-1] == "Mate"
+    assert VERSION_ORDER.index("Mate") > VERSION_ORDER.index("X-VERSE-X") > VERSION_ORDER.index("VERSE")
+    seed_versions = {song.version for song in songdb._songs.values() if song.version}
+    assert seed_versions <= set(VERSION_ORDER)
 
 
 async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService) -> None:

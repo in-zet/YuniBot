@@ -32,8 +32,8 @@ _DIFFICULTY_RANGE_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT")
 # 이 순서로 정렬·묶기·비교한다. 목록에 없는 새 버전은 정렬에서 값 없음으로 취급되므로 새 버전이 나오면 끝에 더한다.
 VERSION_ORDER: tuple[str, ...] = (
     "CHUNITHM", "CHUNITHM PLUS", "AIR", "AIR PLUS", "STAR", "STAR PLUS", "AMAZON", "AMAZON PLUS",
-    "CRYSTAL", "CRYSTAL PLUS", "PARADISE", "PARADISE LOST", "Mate", "NEW", "NEW PLUS", "SUN", "SUN PLUS",
-    "LUMINOUS", "LUMINOUS PLUS", "VERSE", "X-VERSE", "X-VERSE-X",
+    "CRYSTAL", "CRYSTAL PLUS", "PARADISE", "PARADISE LOST", "NEW", "NEW PLUS", "SUN", "SUN PLUS",
+    "LUMINOUS", "LUMINOUS PLUS", "VERSE", "X-VERSE", "X-VERSE-X", "Mate",
 )
 
 # terms.resolve_difficulty()가 돌려주는 정식 긴 이름("MASTER")을 이 서비스가 쓰는
@@ -55,6 +55,12 @@ def _difficulty_range(low: str | None, high: str | None) -> frozenset[str] | Non
     start = order.index(low) if low is not None else 0
     end = order.index(high) if high is not None else len(order) - 1
     return frozenset(order[start : end + 1])
+
+
+def _const_descending(hit: ConstRangeHit) -> tuple[bool, float, str]:
+    """검색 결과의 고정 순서: 상수 큰 것부터, 상수를 모르는 채보는 뒤, 같으면 제목순(2026-10-22 — 사용자는 상수·난이도·
+    레이팅을 방향 말이 없으면 큰 쪽부터 본다)."""
+    return (hit.chart.const is None, -(hit.chart.const or 0.0), hit.song.title)
 
 
 class _HttpGetJson(Protocol):
@@ -364,7 +370,7 @@ class SongDbService:
         self, *, min_const: float, max_const: float | None = None, difficulty: str | None = None,
         new_only: bool = False,
     ) -> list[ConstRangeHit]:
-        """상수 범위(양끝 포함)로, 지금 국제판에서 고를 수 있는 채보를 상수 오름차순(같으면
+        """상수 범위(양끝 포함)로, 지금 국제판에서 고를 수 있는 채보를 상수 내림차순(같으면
         제목순)으로 찾는다. difficulty는 짧은 코드("MAS" 등)다. 비우면 난이도를 가리지 않고
         그 상수 범위에 드는 채보를 전부 찾는다(2026-10-18 결정 — 상수는 채보 단위로 이미
         유일하게 정해지므로 난이도로 좁힐 필요가 없다는 실기 피드백). max_const를 비우면 위쪽 한계 없이
@@ -380,7 +386,7 @@ class SongDbService:
                     continue
                 if min_const <= chart.const and (max_const is None or chart.const <= max_const):
                     hits.append(ConstRangeHit(song=song, chart=chart))
-        hits.sort(key=lambda hit: (hit.chart.const, hit.song.title))
+        hits.sort(key=_const_descending)
         return hits
 
     def find_by_level(self, *, level: str, difficulty: str | None = None) -> list[ConstRangeHit]:
@@ -398,7 +404,7 @@ class SongDbService:
                 if chart is None or not chart.is_available or chart.level != level:
                     continue
                 hits.append(ConstRangeHit(song=song, chart=chart))
-        hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
+        hits.sort(key=_const_descending)
         return hits
 
     def find_by_version(self, *, version: str, difficulty: str | None = None) -> list[ConstRangeHit]:
@@ -417,7 +423,7 @@ class SongDbService:
                 if chart is None or not chart.is_available:
                     continue
                 hits.append(ConstRangeHit(song=song, chart=chart))
-        hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
+        hits.sort(key=_const_descending)
         return hits
 
     def find_songs(
@@ -444,7 +450,7 @@ class SongDbService:
         메서드가 아니라 호출부(스킬)가 한다. new_only는 find_by_const와 같은 뜻이다(2026-10-20
         "신곡 중 14.7 이상" 실기 결정을 그대로 따른다).
 
-        순서는 상수 오름차순, 상수를 모르는 채보는 뒤, 같으면 제목순으로 고정이다. 다른 순서는
+        순서는 상수 내림차순(큰 것부터), 상수를 모르는 채보는 뒤, 같으면 제목순으로 고정이다. 다른 순서는
         표를 받은 `table_query`가 맡는다(2026-10-20 작업 표)."""
         wanted = [difficulty] if isinstance(difficulty, str) else None if difficulty is None else list(dict.fromkeys(difficulty))
         in_range = _difficulty_range(min_difficulty, max_difficulty)
@@ -472,7 +478,7 @@ class SongDbService:
                 if max_note_count is not None and (chart.note_count is None or chart.note_count > max_note_count):
                     continue
                 hits.append(ConstRangeHit(song=song, chart=chart))
-        hits.sort(key=lambda hit: (hit.chart.const is None, hit.chart.const or 0.0, hit.song.title))
+        hits.sort(key=_const_descending)
         return hits
 
     def linked_verse_gates(self) -> list[str]:

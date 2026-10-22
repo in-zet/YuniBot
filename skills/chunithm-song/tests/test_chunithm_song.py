@@ -137,7 +137,7 @@ async def test_find_by_const_returns_sorted_results() -> None:
     assert table.steps[0] == "12.0~13.0 상수 MAS"
     assert all(row.ref.kind == tc.CHART for row in table.rows)
     consts = [row.cell(tc.CONST).raw for row in table.rows]
-    assert consts == sorted(consts)
+    assert consts == sorted(consts, reverse=True)
     assert table.row_count == result.data["count"]
 
 
@@ -305,7 +305,7 @@ async def test_find_songs_orders_by_const_then_title_with_unknown_last() -> None
 
     table = result.table
     assert table is not None
-    keys = [(row.cell(tc.CONST).raw, row.cell(tc.SONG).raw) for row in table.rows]
+    keys = [(-row.cell(tc.CONST).raw, row.cell(tc.SONG).raw) for row in table.rows]
     assert keys == sorted(keys)
 
 

@@ -129,7 +129,7 @@ def _note_range_text(min_notes: int | None, max_notes: int | None) -> str | None
 
 
 def _chart_table(hits: list[ConstRangeHit], conditions: list[str | None]) -> WorkTable:
-    """채보 검색 결과를 표로. 순서는 서비스가 정한 그대로(상수 오름차순)다."""
+    """채보 검색 결과를 표로. 순서는 서비스가 정한 그대로(상수 내림차순)다."""
     builder = TableBuilder(unit="채보")
     tc.add_columns(builder, *_SEARCH_COLUMNS, hidden_in_text=_SEARCH_HIDDEN)
     builder.step(" ".join(c for c in conditions if c))
@@ -222,7 +222,7 @@ async def find_songs(
     "마스터나 울티마"처럼 난이도를 둘 말했으면 difficulty와 other_difficulty에 하나씩 준다(둘 중 어느 쪽이든 맞는 채보).
     난이도가 셋 이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 min_difficulty/max_difficulty를 준다(BASIC<ADVANCED<EXPERT<MASTER<ULTIMA).
     조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다.
-    결과는 상수 오름차순 표다. 다른 순서가 필요하면 표에 `table_query`를 쓴다."""
+    결과는 상수 큰 것부터인 표다. 다른 순서가 필요하면 표에 `table_query`를 쓴다."""
     if not new_only and all(
         v is None
         for v in (

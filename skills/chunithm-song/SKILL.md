@@ -31,8 +31,8 @@ emits: [chunithm.song.viewed]
 - 수록 버전으로 찾을 때 난이도를 안 말했으면 `find_by_version`의 난이도를 비워 그 버전
   전체를 보여준다. 난이도를 말했으면 그 난이도만 좁힌다.
 - 수록 버전 이름은 곡 DB의 것만 쓴다: CHUNITHM, CHUNITHM PLUS, AIR, AIR PLUS, STAR, STAR PLUS, AMAZON, AMAZON PLUS,
-  CRYSTAL, CRYSTAL PLUS, PARADISE, PARADISE LOST, Mate, NEW, NEW PLUS, SUN, SUN PLUS, LUMINOUS, LUMINOUS PLUS, VERSE,
-  X-VERSE, X-VERSE-X. 이 목록에 없는 말을 버전으로 짐작해 `find_by_version`에 넣지 않는다. "VERSE"가 들어 있어도
+  CRYSTAL, CRYSTAL PLUS, PARADISE, PARADISE LOST, NEW, NEW PLUS, SUN, SUN PLUS, LUMINOUS, LUMINOUS PLUS, VERSE,
+  X-VERSE, X-VERSE-X, Mate(출시 순서이고 Mate가 가장 최신이다). 이 목록에 없는 말을 버전으로 짐작해 `find_by_version`에 넣지 않는다. "VERSE"가 들어 있어도
   X-VERSE나 VERSE로 줄여 읽지 않는다.
 - **Linked VERSE(링크드 버스, 링버)는 수록 버전이 아니라 X-VERSE에서 생긴 해금 시스템**이다. 그 해금곡은
   `find_linked_verse`로 찾는다(게이트별 묶음 표, `gate`로 한 게이트만). 상수표·그림을 달라고 하면서 난이도를 안
@@ -45,13 +45,17 @@ emits: [chunithm.song.viewed]
   또는 버전 하나만이면 `find_by_const`/`find_by_version`이 먼저다 — 레벨만으로 찾는 건
   `find_songs`뿐이다). 말하지 않은 조건은 비워 둔다 — 지어내지 않는다.
 - 상수·버전·검색·작곡가 결과는 표로 나온다. 표 id를 받으면 행을 다시 나열하지 않는다. 결과는 상수
-  오름차순이고, "노트 수 많은 순"처럼 다른 순서나 추가 조건은 그 표에 `table_query`를 쓴다(다시 찾지 않는다).
+  큰 것부터이고, "노트 수 많은 순"처럼 다른 순서나 추가 조건은 그 표에 `table_query`를 쓴다(다시 찾지 않는다).
   검색 결과 표의 기본 칸은 곡·난이도·상수다. 레벨·노트 수·버전·작곡가는 표에 있어도 숨겨져 있으니, 사용자가 물으면
   `table_query`의 `columns`로 보이게 하거나 `table_peek`로 읽는다(그림에도 보이는 칸만 그려진다).
   "출시 최신순"은 `sort="버전", descending=true`다(버전 칸은 출시 순서를 안다). "곡명만", "이름만"은 `columns=["곡"]`이지
   `group_by="곡"`이 아니다. 묶으면 곡마다 표지 줄이 붙어 줄이 두 배가 된다. 곡 이름만 한 번씩(같은 곡의 채보가 둘이어도
   한 줄) 보여 달라면 `songs_of`로 곡 단위로 합친 뒤 `columns=["곡"]`을 쓴다. 칸 값이 같은 행을 하나만 남기는 일반 연산은
   `table_query`의 `distinct_by`다("작곡가마다 상수 제일 높은 곡 하나").
+- 같은 검색 도구를 조건만 바꿔 여러 번 불러 표를 나누지 않는다(표가 따로따로면 합칠 수 없고 마지막 표만 그려진다).
+  가장 넓은 조건으로 한 번 찾고 `table_query`의 `where`로 거른다. 버전 범위("버스부터 엑스버스엑스까지")는
+  `버전 >= VERSE`와 `버전 <= X-VERSE-X` 두 조건이다(버전 칸은 출시순을 안다). 이 도구에 인자가 없다고 못 한다고 하기 전에
+  `table_query`로 되는지 먼저 본다.
 - 난이도를 둘 말했으면("마스터나 울티마") `find_songs`의 `difficulty`와 `other_difficulty`에 하나씩 준다. 난이도가 셋
   이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 `min_difficulty`/`max_difficulty`를 한 번에 준다(익스퍼트·마스터·울티마면
   `min_difficulty=EXPERT` 하나). 난이도를 따로따로 찾아 표를 둘로 나누지 않는다 — 마지막 표만 그려져 한쪽이 빠진다.
