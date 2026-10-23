@@ -10,8 +10,8 @@ from typing import Annotated, Any
 from core.decorators import tool
 from core.tables import TableError, TableNeeds, WorkTable
 from core.tool_types import Display, DisplayFile, TableRef, ToolContext, ToolResult
-from services.chunithm import table_columns as tc
-from services.chunithm.image_cache import jacket_url
+from services.game import table_columns as tc
+from services.game.image_cache import jacket_url
 
 # skills/image는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다 — 같은 폴더의
 # render.py를 파일 경로로 직접 불러온다(goals와 같은 방식).

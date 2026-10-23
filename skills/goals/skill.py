@@ -33,14 +33,14 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
-from services.chunithm import table_columns as tc
-from services.chunithm.chart_ref import ResolvedChart
-from services.chunithm.rating_format import rating_delta_text, rating_text
-from services.chunithm.records import PbRow, RatingDeltas
-from services.chunithm.records_calc import chart_rating
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
 from services.chunithm.terms import ResolvedDifficulty, ResolvedRank
 from services.common.players import Player
+from services.game import table_columns as tc
+from services.game.chart_ref import ResolvedChart
+from services.game.rating_format import rating_delta_text, rating_text
+from services.game.records import PbRow, RatingDeltas
+from services.game.records_calc import chart_rating
 
 # skills/goals는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다
 # (skills/account-link/skill.py가 쓰는 것과 같은 이유) — 같은 폴더의 models.py/goals_calc.py를

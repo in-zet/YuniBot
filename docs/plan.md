@@ -97,7 +97,7 @@
     - [X] 1-8 수명 연결(`core/mention.py`: 묶기·`retain_only`·프롬프트 조각·번호 기준 줄) — 구현 완료(2026-10-20)
     - [X] 1-9 프롬프트(`prompts/rules.md`) — 구현 완료(2026-10-20)
   - [X] Part 2: 첫 범위 스킬(곡 검색 4개·`best`·`add_scores`·폴더 보기/저장) — 구현 완료(2026-10-20). 실기 미확인: 멘션에서 표가 실제로 붙고 11행 이상이 .txt로 나가는지, "그중에…"·"2번" 후속 요청, 곡 검색 표에 `add_scores`·`save_table`을 이어 쓰는 흐름, 동기화 뒤 옛 값 표가 거절되는지, `/상수`·`/베스트` 슬래시 출력 모양. 세부
-    - [X] 2-1 공통 칸 `services/chunithm/table_columns.py` — 구현 완료(2026-10-20)
+    - [X] 2-1 공통 칸 `services/game/table_columns.py` — 구현 완료(2026-10-20)
     - [X] 2-2 `song` 곡 검색 4개 표로(`find_songs`의 `sort_by`·`descending` 제거, `find_by_artist`에 `difficulty`) — 구현 완료(2026-10-20)
     - [X] 2-3 `report` `best` 표 + `add_scores` — 구현 완료(2026-10-20)
     - [X] 2-4 `folders` `show_folder` 표 + `save_table` — 구현 완료(2026-10-20)
@@ -112,8 +112,8 @@
 - [ ] 17. maimai DX 국제판 확장(게임 매개변수·게임 프로필, 스킬 이름 게임 중립화, aime 쿠키 공유, otoge-db 곡 DB) — `2026-10-23_수정.md` §17
   - [ ] Part 1: 게임 공통화와 스킬 이름 바꾸기(츄니즘 동작 변화 없음) — §17.3. 네 덩어리로 나눔(2026-10-23)
     - [X] 1-1 스킬 이름 바꾸기(`chunithm-X` → `X`, `chunithm-account` → `sega-account`, `arcade`·`settings`·`updates` 포함, `chunithm-border`만 그대로) + 코어 마이그레이션 022로 저장된 이름 갱신 — 구현 완료(2026-10-23). 실기 미확인: 재배포 뒤 기존 설정(스킬 끄기·서버별 값)·예약·마이그레이션 기록이 그대로인지, 멘션 라우팅(도구 이름이 `song_…`처럼 바뀜)이 이전과 같은지
-    - [ ] 1-2 서비스 폴더 정리(`services/game/`)와 게임 프로필 자료형·등록부
-    - [ ] 1-3 서비스에 `game` 매개변수 관통, 게임 고르기 함수
+    - [X] 1-2 서비스 폴더 정리(공통 모듈 6개를 `services/game/`로)와 게임 프로필 자료형·등록부·builder — 구현 완료(2026-10-23). `core/bot.py`는 builder와 `choose_game`만 안다
+    - [X] 1-3 `RecordsService`·`SongDbService`가 `game`/프로필을 받음, 게임 고르기 함수 `choose_game`을 실행기 `invoke`에 연결(`ctx.game`) — 구현 완료(2026-10-23). `TermsService`·NET은 쓰는 곳이 생기는 Part 2~5에서 `game`을 받는다. 주 게임 저장소는 Part 2
     - [ ] 1-4 코어 이름 정리(상태 태그·`sega.login.expired`·`games:`·슬래시 `게임` 인자)
   - [ ] Part 2: DB 마이그레이션(`chart_type`, `dx_score`, 쿠키 테이블 이름, 주 게임) — §17.4
   - [ ] Part 3: aime 인증 공통화와 maimai DX NET 어댑터 — §17.5. 시작 조건: SEGA 사이트 복구 후 실측

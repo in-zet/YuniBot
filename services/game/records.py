@@ -1,4 +1,4 @@
-# services/chunithm/records.py
+# services/game/records.py
 from __future__ import annotations
 
 import asyncio
@@ -14,8 +14,10 @@ import msgspec
 from chuni_penguin.types.lamp import ChainLamp, ClearLamp, ComboLamp
 
 from core.db import transaction as db_transaction
-from core.tool_types import ToolContext
-from services.chunithm.records_calc import (
+from core.tool_types import DEFAULT_GAME, ToolContext
+from services.chunithm.songdb import SongDbService
+from services.common.players import PlayersService
+from services.game.records_calc import (
     allowed_attacks,
     assign_session_date,
     average_rating,
@@ -26,30 +28,23 @@ from services.chunithm.records_calc import (
     overall_rating,
     remaining_to_target,
 )
-from services.chunithm.songdb import SongDbService
-from services.common.players import PlayersService
+from services.game.registry import profile_for
 
 if TYPE_CHECKING:
     from chuni_penguin.types import Difficulty, PersonalBest
 
     from services.chunithm.chunithm_net import SyncFetch
 
-_GAME = "chunithm"
 # records_pb.rating / records_sync_log.computed_rating은 TEXT NOT NULL이라 None을
 # 그대로 넣을 수 없다 — 상수를 몰라 계산하지 못한 값은 이 표시로 남긴다.
 _UNKNOWN_RATING = "계산 불가"
 # 동기화 비교 데이터(diff)는 메모리에만 둔다(sync.md "구현 결정"). 한 요청 안에서 쓰고 버려지므로
 # 이 이상 쌓일 일이 없다 — 넘치면 가장 오래된 것부터 지운다.
 _DIFF_CACHE_LIMIT = 200
-_BEST_FRAME_SIZE = 30
-_NEW_FRAME_SIZE = 20
 # 후보곡 추천 대역: 프레임 안 3~8위 레이팅 사이(양끝 포함). SSS를 냈을 때 그 정도 곡 레이팅이 되는
 # 채보만 "닿을 만한" 후보로 본다(2026-10-19 사용자 결정).
 _CANDIDATE_BAND_FIRST_RANK = 3
 _CANDIDATE_BAND_LAST_RANK = 8
-# 후보곡 상승폭·남은 점수의 기준점은 SSS다(report.md "후보곡").
-_SSS_SCORE = 1_007_500
-_DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 
 type ChartKey = tuple[str, str]
 _PB_KEYS_PER_QUERY = 400
@@ -254,7 +249,7 @@ def _known_min(ratings: list[Decimal | None]) -> Decimal | None:
     return min(known) if known else None
 
 
-def _merge_personal_bests(fetch: SyncFetch) -> dict[ChartKey, PersonalBest]:
+def _merge_personal_bests(fetch: SyncFetch, chart_codes: tuple[str, ...]) -> dict[ChartKey, PersonalBest]:
     """베스트30·신곡20·전체 PB를 (제목, 난이도)로 합친다. 같은 채보가 여러 목록에 있으면
     점수가 높은 쪽을 쓴다. 점수가 같으면 전체 PB 쪽을 쓴다 — 베스트30·신곡20(ratingDetail) 페이지에는
     램프 이미지가 아예 없어 파서가 FAILED/NONE을 기본값으로 채우므로, 램프는 전체 PB 페이지 것이 맞다
@@ -265,7 +260,7 @@ def _merge_personal_bests(fetch: SyncFetch) -> dict[ChartKey, PersonalBest]:
         existing = merged.get(key)
         if existing is None or pb.score > existing.score:
             merged[key] = pb
-    for code in _DIFFICULTY_CODES:
+    for code in chart_codes:
         for pb in fetch.all_personal_bests.get(code, []):
             key = (pb.song.title, _difficulty_code(pb.chart.difficulty))
             existing = merged.get(key)
@@ -292,7 +287,11 @@ def _as_aware(value: datetime) -> datetime:
 class RecordsService:
     """기록 스냅샷, 베스트, 세션 id, 레이팅 계산과 CHUNITHM-NET 대조."""
 
-    def __init__(self, *, conn: aiosqlite.Connection, songdb: SongDbService, players: PlayersService) -> None:
+    def __init__(
+        self, *, conn: aiosqlite.Connection, songdb: SongDbService, players: PlayersService, game: str = DEFAULT_GAME
+    ) -> None:
+        self._game = game
+        self._profile = profile_for(game)
         self._conn = conn
         self._conn.row_factory = aiosqlite.Row
         self._songdb = songdb
@@ -321,14 +320,14 @@ class RecordsService:
         cursor = await self._conn.execute(
             "SELECT synced_at, computed_rating FROM records_sync_log WHERE player_id = ? AND game = ? "
             "ORDER BY synced_at DESC LIMIT 1",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         previous_log = await cursor.fetchone()
         is_first_sync = previous_log is None
 
         sync_id = str(uuid.uuid4())
         synced_at = datetime.now(UTC)
-        merged = _merge_personal_bests(fetch)
+        merged = _merge_personal_bests(fetch, self._profile.chart_codes)
 
         # "베스트 평균"(통과 기준)은 베스트30과 신곡20을 각각 따로 평균한 값이다 — 둘을
         # 합쳐 50으로 나눈 전체 레이팅과는 다른 숫자다. 평균을 공식대로(30곡/20곡 가중)
@@ -378,7 +377,7 @@ class RecordsService:
                 "overpower_value, overpower_percentage, best30_average_snapshot, new20_average_snapshot) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    sync_id, player_id, _GAME, synced_at.isoformat(), fetch.profile.username,
+                    sync_id, player_id, self._game, synced_at.isoformat(), fetch.profile.username,
                     str(displayed_rating) if displayed_rating is not None else None,
                     _rating_str(computed_rating), int(rating_mismatch), int(is_first_sync),
                     overpower_value, overpower_percentage,
@@ -395,7 +394,7 @@ class RecordsService:
                 "character_image_url = excluded.character_image_url, "
                 "character_frame_url = excluded.character_frame_url, updated_at = excluded.updated_at",
                 (
-                    player_id, _GAME, fetch.profile.level, fetch.profile.reincarnation_stars,
+                    player_id, self._game, fetch.profile.level, fetch.profile.reincarnation_stars,
                     fetch.profile.profile_picture, fetch.profile.profile_picture_frame,
                     synced_at.isoformat(),
                 ),
@@ -653,7 +652,7 @@ class RecordsService:
         cursor = await self._conn.execute(
             "SELECT overpower_value, overpower_percentage FROM records_sync_log "
             "WHERE player_id = ? AND game = ? ORDER BY synced_at DESC LIMIT 1",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         row = await cursor.fetchone()
         if row is None:
@@ -669,7 +668,7 @@ class RecordsService:
         cursor = await self._conn.execute(
             "SELECT nickname, computed_rating, synced_at FROM records_sync_log "
             "WHERE player_id = ? AND game = ? ORDER BY synced_at DESC LIMIT 1",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         row = await cursor.fetchone()
         if row is None:
@@ -692,7 +691,7 @@ class RecordsService:
         cursor = await self._conn.execute(
             "SELECT computed_rating, best30_average_snapshot, new20_average_snapshot FROM records_sync_log "
             "WHERE player_id = ? AND game = ? ORDER BY synced_at DESC LIMIT 2",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         rows = list(await cursor.fetchall())
         if not rows:
@@ -713,7 +712,7 @@ class RecordsService:
         cursor = await self._conn.execute(
             f"SELECT {_PB_COLUMNS} FROM records_pb "
             "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
-            (player_id, _GAME, song_title, difficulty),
+            (player_id, self._game, song_title, difficulty),
         )
         row = await cursor.fetchone()
         return self._current(_pb_row_from(row)) if row is not None else None
@@ -729,7 +728,7 @@ class RecordsService:
             cursor = await self._conn.execute(
                 f"SELECT {_PB_COLUMNS} FROM records_pb "
                 f"WHERE player_id = ? AND game = ? AND (song_title, difficulty) IN (VALUES {pairs})",
-                (player_id, _GAME, *(value for key in chunk for value in key)),
+                (player_id, self._game, *(value for key in chunk for value in key)),
             )
             for row in await cursor.fetchall():
                 pb = self._current(_pb_row_from(row))
@@ -741,7 +740,7 @@ class RecordsService:
         cursor = await self._conn.execute(
             f"SELECT {_PB_COLUMNS} FROM records_pb "
             "WHERE player_id = ? AND game = ? ORDER BY song_title, difficulty",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         return [self._current(_pb_row_from(row)) for row in await cursor.fetchall()]
 
@@ -761,8 +760,8 @@ class RecordsService:
         rows = await self.all_pb_rows(player_id)
         best, new = self._frames(rows)
         frame_keys = {(r.song_title, r.difficulty) for r in (*best, *new)}
-        best_floor = _frame_floor(best, _BEST_FRAME_SIZE)
-        new_floor = _frame_floor(new, _NEW_FRAME_SIZE)
+        best_floor = _frame_floor(best, self._profile.best_frame_size)
+        new_floor = _frame_floor(new, self._profile.new_frame_size)
         best_band = _candidate_band(best)
         new_band = _candidate_band(new)
         rows_by_key = {(r.song_title, r.difficulty): r for r in rows}
@@ -770,7 +769,7 @@ class RecordsService:
         high = max_const if max_const is not None else 99.0
 
         hits: list[CandidateHit] = []
-        for code in _DIFFICULTY_CODES:
+        for code in self._profile.chart_codes:
             for hit in self._songdb.find_by_const(min_const=low, max_const=high, difficulty=code):
                 key = (hit.song.title, code)
                 const = hit.chart.const
@@ -786,7 +785,9 @@ class RecordsService:
                 if not band[0] <= sss_rating <= band[1]:
                     continue
                 current_score = rows_by_key[key].score if key in rows_by_key else 0
-                remaining = remaining_to_target(hit.chart.note_count, current_score, _SSS_SCORE)
+                remaining = remaining_to_target(
+                    hit.chart.note_count, current_score, self._profile.candidate_target_score
+                )
                 hits.append(
                     CandidateHit(
                         song_title=hit.song.title,
@@ -803,7 +804,7 @@ class RecordsService:
     async def best_score(self, player_id: str, *, song_title: str, difficulty: str) -> int | None:
         cursor = await self._conn.execute(
             "SELECT score FROM records_pb WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
-            (player_id, _GAME, song_title, difficulty),
+            (player_id, self._game, song_title, difficulty),
         )
         row = await cursor.fetchone()
         return row["score"] if row is not None else None
@@ -814,14 +815,14 @@ class RecordsService:
         `candidate_upside(const, floor)`로 판정할 때 쓴다(`candidates()`의 new_floor와 같은
         계산이라 숫자가 어긋나지 않는다)."""
         _, new = self._frames(await self.all_pb_rows(player_id))
-        return _frame_floor(new, _NEW_FRAME_SIZE)
+        return _frame_floor(new, self._profile.new_frame_size)
 
     async def player_profile(self, player_id: str) -> PlayerProfile | None:
         """마지막 동기화 때 저장한 레벨·환생 별·캐릭터 그림 주소. 동기화한 적 없으면 None."""
         cursor = await self._conn.execute(
             "SELECT level, reincarnation_stars, character_image_url, character_frame_url, updated_at "
             "FROM records_profile WHERE player_id = ? AND game = ?",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         row = await cursor.fetchone()
         if row is None:
@@ -838,7 +839,7 @@ class RecordsService:
         cursor = await self._conn.execute(
             "SELECT synced_at FROM records_sync_log WHERE player_id = ? AND game = ? "
             "ORDER BY synced_at DESC LIMIT 1",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         row = await cursor.fetchone()
         return row["synced_at"] if row is not None else None
@@ -849,7 +850,7 @@ class RecordsService:
         cursor = await self._conn.execute(
             "SELECT id, play_date, estimated FROM records_sessions WHERE player_id = ? AND game = ? "
             "ORDER BY play_date DESC LIMIT 1",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         row = await cursor.fetchone()
         if row is None:
@@ -858,7 +859,7 @@ class RecordsService:
 
     @staticmethod
     def allowed_attacks(note_count: int | None, target_score: int) -> Decimal | None:
-        """chunithm-border 스킬이 쓰는 순수 계산 패스스루(services/chunithm/records_calc.py)."""
+        """chunithm-border 스킬이 쓰는 순수 계산 패스스루(services/game/records_calc.py)."""
         return allowed_attacks(note_count, target_score)
 
     @staticmethod
@@ -885,7 +886,7 @@ class RecordsService:
         숫자는 어긋나지 않고, 이 갱신은 저장값을 정직하게 두려는 것이다. 커밋은 부르는 쪽이 한다."""
         cursor = await self._conn.execute(
             "SELECT song_title, difficulty, score, const, rating FROM records_pb WHERE player_id = ? AND game = ?",
-            (player_id, _GAME),
+            (player_id, self._game),
         )
         for row in await cursor.fetchall():
             const = self._songdb.const_for(row["song_title"], row["difficulty"])
@@ -897,7 +898,7 @@ class RecordsService:
             await self._conn.execute(
                 "UPDATE records_pb SET const = ?, rating = ? "
                 "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
-                (const, rating, player_id, _GAME, row["song_title"], row["difficulty"]),
+                (const, rating, player_id, self._game, row["song_title"], row["difficulty"]),
             )
 
     def _frames(self, rows: list[PbRow]) -> tuple[list[PbRow], list[PbRow]]:
@@ -907,9 +908,9 @@ class RecordsService:
         new: list[PbRow] = []
         for row in sorted(rows, key=_frame_sort_key):
             if self._songdb.is_new_for(row.song_title):
-                if len(new) < _NEW_FRAME_SIZE:
+                if len(new) < self._profile.new_frame_size:
                     new.append(row)
-            elif len(best) < _BEST_FRAME_SIZE:
+            elif len(best) < self._profile.best_frame_size:
                 best.append(row)
         return best, new
 
@@ -934,7 +935,7 @@ class RecordsService:
             "updated_at = excluded.updated_at "
             "WHERE excluded.score > records_pb.score",
             (
-                player_id, _GAME, title, difficulty, pb.score, str(pb.rank),
+                player_id, self._game, title, difficulty, pb.score, str(pb.rank),
                 str(pb.clear_lamp), str(pb.combo_lamp), str(pb.chain_lamp),
                 const, _rating_str(rating), session_id, synced_at.isoformat(),
             ),
@@ -953,14 +954,14 @@ class RecordsService:
         await self._conn.execute(
             "UPDATE records_pb SET clear_lamp = ?, combo_lamp = ?, chain_lamp = ? "
             "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
-            (clear, combo, chain, player_id, _GAME, existing.song_title, existing.difficulty),
+            (clear, combo, chain, player_id, self._game, existing.song_title, existing.difficulty),
         )
         return (existing.combo_lamp, combo) if combo != existing.combo_lamp else None
 
     async def _get_or_create_session(self, player_id: str, play_date: date, *, estimated: bool) -> SessionInfo:
         cursor = await self._conn.execute(
             "SELECT id, estimated FROM records_sessions WHERE player_id = ? AND game = ? AND play_date = ?",
-            (player_id, _GAME, play_date.isoformat()),
+            (player_id, self._game, play_date.isoformat()),
         )
         row = await cursor.fetchone()
         if row is not None:
@@ -970,7 +971,7 @@ class RecordsService:
         await self._conn.execute(
             "INSERT INTO records_sessions (id, player_id, game, play_date, estimated, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (session_id, player_id, _GAME, play_date.isoformat(), int(estimated), datetime.now(UTC).isoformat()),
+            (session_id, player_id, self._game, play_date.isoformat(), int(estimated), datetime.now(UTC).isoformat()),
         )
         return SessionInfo(id=session_id, play_date=play_date.isoformat(), estimated=estimated)
 

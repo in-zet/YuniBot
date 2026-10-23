@@ -8,10 +8,10 @@ from types import ModuleType
 
 from core.tables import TableBuilder, WorkTable
 from core.tool_types import ToolContext
-from services.chunithm import table_columns as tc
-from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.songdb import ChartRecord, SongRecord
 from services.chunithm.terms import ResolvedRank
+from services.game import table_columns as tc
+from services.game.chart_ref import ResolvedChart
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 
@@ -35,13 +35,13 @@ class _FakeRecords:
 
     @staticmethod
     def allowed_attacks(note_count, target_score):
-        from services.chunithm.records_calc import allowed_attacks
+        from services.game.records_calc import allowed_attacks
 
         return allowed_attacks(note_count, target_score)
 
     @staticmethod
     def remaining_to_target(note_count, current_score, target_score):
-        from services.chunithm.records_calc import remaining_to_target
+        from services.game.records_calc import remaining_to_target
 
         return remaining_to_target(note_count, current_score, target_score)
 
@@ -210,7 +210,7 @@ class _TableRecords(_FakeRecords):
         self._scores = scores
 
     async def pb_rows_for(self, player_id: str, keys):
-        from services.chunithm.records import PbRow
+        from services.game.records import PbRow
 
         return {
             key: PbRow(

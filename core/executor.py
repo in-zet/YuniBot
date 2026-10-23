@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from core.decorators import DRY_RUN_PARAM, SlashOnlySpec, ToolSpec
@@ -74,6 +74,7 @@ class ToolExecutor:
         scheduler: Scheduler | None = None,
         tables: TableStore | None = None,
         partial_row_hints: Sequence[PartialRowHint] = (),
+        game_chooser: Callable[[str | None], str] | None = None,
     ) -> None:
         self._resolvers = resolvers
         self._tag_provider = tag_provider
@@ -85,6 +86,7 @@ class ToolExecutor:
         self._scheduler = scheduler
         self._tables = tables
         self._partial_row_hints = tuple(partial_row_hints)
+        self._game_chooser = game_chooser
         self._pending: dict[str, _PendingConfirm] = {}
 
     @property
@@ -150,6 +152,15 @@ class ToolExecutor:
             and not await self._settings.is_skill_enabled(guild_id=ctx.guild_id, skill=skill_name)
         ):
             return ExecutionOutcome(result=ToolResult(error="모르는 명령이야"))
+
+        if self._game_chooser is not None:
+            # 도구가 `game` 인자를 받으면 사용자가 말한 게임이다. 없으면 선택은 기본 규칙을 따른다.
+            requested = raw_args.get("game")
+            try:
+                game = self._game_chooser(requested if isinstance(requested, str) else None)
+            except UserFacingError as exc:
+                return ExecutionOutcome(result=ToolResult(error=str(exc)))
+            ctx = replace(ctx, game=game)
 
         schema = build_arg_schema(spec.fn)
 

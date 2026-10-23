@@ -7,7 +7,6 @@ import io
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -50,25 +49,13 @@ from core.thread_memory import queue_thread_memory
 from core.thread_view import ThreadEndView
 from core.threads import ThreadManager, ThreadSession, ThreadTranscript
 from core.tool_types import (
+    DEFAULT_GAME,
     ArcadeRef,
-    ChartRef,
-    DifficultyRef,
     Display,
-    LampRef,
     PlayerRef,
-    RankRef,
-    ScoreRef,
-    SongQuery,
     ToolContext,
 )
 from core.usage import UsageService
-from services.chunithm.chart_ref import ChartRefResolver
-from services.chunithm.chunithm_net import ChunithmNetService
-from services.chunithm.image_cache import ImageCache
-from services.chunithm.records import RecordsService
-from services.chunithm.songdb import SongDbService
-from services.chunithm.table_columns import PARTIAL_ROW_HINTS
-from services.chunithm.terms import TermsService
 from services.common.arcades import ArcadesService
 from services.common.http import HttpService, build_http_service
 from services.common.memory import SUMMARY_DELAY_SECONDS, MemoryService, PendingSummary
@@ -78,46 +65,14 @@ from services.common.secrets import SecretsService
 from services.common.settings import SettingsService
 from services.common.websearch import WebsearchService
 from services.common.yuni import YuniService
+from services.game.builder import build_game_services
+from services.game.image_cache import ImageCache
+from services.game.registry import choose_game
+from services.game.table_columns import PARTIAL_ROW_HINTS
 
 logger = logging.getLogger(__name__)
 
 CORE_MIGRATIONS_ROOT = Path("migrations/core")
-
-
-@dataclass(slots=True, kw_only=True)
-class _RankRefAdapter:
-    """ResolverRegistry는 타입 하나에 resolve(raw, ctx) 하나만 등록받는다 — TermsService는
-    랭크/난이도/램프/점수를 이름이 다른 네 메서드로 노출하므로, 값 타입마다 이 얇은
-    어댑터로 감싸 등록한다(TermsService 자신을 네 번 등록할 수 없다)."""
-
-    terms: TermsService
-
-    async def resolve(self, raw: str, ctx: ToolContext):
-        return await self.terms.resolve_rank(raw, ctx)
-
-
-@dataclass(slots=True, kw_only=True)
-class _DifficultyRefAdapter:
-    terms: TermsService
-
-    async def resolve(self, raw: str, ctx: ToolContext):
-        return await self.terms.resolve_difficulty(raw, ctx)
-
-
-@dataclass(slots=True, kw_only=True)
-class _LampRefAdapter:
-    terms: TermsService
-
-    async def resolve(self, raw: str, ctx: ToolContext):
-        return await self.terms.resolve_lamp(raw, ctx)
-
-
-@dataclass(slots=True, kw_only=True)
-class _ScoreRefAdapter:
-    terms: TermsService
-
-    async def resolve(self, raw: str, ctx: ToolContext):
-        return await self.terms.resolve_score(raw, ctx)
 
 
 _SCHEDULE_POLL_SECONDS = 60
@@ -518,40 +473,22 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     arcades_service = ArcadesService(conn)
     secrets_service = SecretsService(config.cookie_encryption_key) if config.cookie_encryption_key else None
 
-    songdb_service = SongDbService(conn=conn)
-    terms_service = TermsService(conn=conn)
-    await terms_service.load_aliases()
-    chunithm_net_service = (
-        ChunithmNetService(conn=conn, secrets=secrets_service, players=players)
-        if secrets_service is not None
-        else None
-    )
-    records_service = RecordsService(conn=conn, songdb=songdb_service, players=players)
-    chart_ref_resolver = ChartRefResolver(songdb=songdb_service, terms=terms_service)
+    games = await build_game_services(DEFAULT_GAME, conn=conn, players=players, secrets=secrets_service)
 
     resolvers = ResolverRegistry()
     resolvers.register(PlayerRef, players)
     resolvers.register(ArcadeRef, arcades_service)
-    resolvers.register(SongQuery, songdb_service)
-    resolvers.register(ChartRef, chart_ref_resolver)
-    resolvers.register(RankRef, _RankRefAdapter(terms=terms_service))
-    resolvers.register(DifficultyRef, _DifficultyRefAdapter(terms=terms_service))
-    resolvers.register(LampRef, _LampRefAdapter(terms=terms_service))
-    resolvers.register(ScoreRef, _ScoreRefAdapter(terms=terms_service))
+    games.register_resolvers(resolvers)
 
     services: dict[str, object] = {
         "players": players,
         "settings": settings_service,
         "memory": memory_service,
         "arcades": arcades_service,
-        "songdb": songdb_service,
-        "terms": terms_service,
-        "records": records_service,
+        **games.skill_services(),
     }
     if secrets_service is not None:
         services["secrets"] = secrets_service
-    if chunithm_net_service is not None:
-        services["chunithm_net"] = chunithm_net_service
 
     executor = ToolExecutor(
         resolvers=resolvers,
@@ -564,6 +501,8 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         scheduler=scheduler,
         tables=table_store,
         partial_row_hints=PARTIAL_ROW_HINTS,
+        # 플레이어별 주 게임은 아직 저장하지 않는다(17단계 Part 2). 그 전까지는 말한 게임 → 기본 게임이다.
+        game_chooser=lambda requested: choose_game(requested=requested, preferred=None),
     )
     # services는 이 시점에 아직 notify/yuni/usage/http가 없지만, 같은 dict 객체를 그대로
     # 들고 있는다 — build_client()가 뒤에서 그 dict를 더 채우면(아래) EventBus도 같은
@@ -580,7 +519,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     # refresh_from_chunimaru는 실패를 삼키고 로그만 남기므로, 네트워크가 안 되는
     # 기동에서도 build_client() 전체가 죽지 않는다.
     if config.fetch_chunimaru_on_startup:
-        await songdb_service.refresh_from_chunimaru(http_service)
+        await games.songdb.refresh_from_chunimaru(http_service)
 
     # client → mention_entry → notify_service → _BotDiscordGateway → client로 이어지는
     # 순환을 끊으려고, notify_service의 게이트웨이는 client를 바로 쥐지 않고 아래
@@ -637,8 +576,8 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
 
     # 호칭: 메모리의 호칭 칸 → CHUNITHM-NET 닉네임 → (멘션이면) 디스코드 서버 닉네임. 게임 쪽 닉네임은 소스로 받는다.
     address_sources: list[NicknameSource] = []
-    if chunithm_net_service is not None:
-        net_service = chunithm_net_service
+    if games.net is not None:
+        net_service = games.net
 
         async def _net_nickname(player_id: str) -> str | None:
             return (await net_service.status(player_id)).nickname

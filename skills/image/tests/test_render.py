@@ -12,7 +12,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from core.tables import EMPTY_CELL, Cell, TableBuilder, TableError, WorkTable, cell
-from services.chunithm import table_columns as tc
+from services.game import table_columns as tc
 
 _RENDER_PY = Path(__file__).parent.parent / "render.py"
 

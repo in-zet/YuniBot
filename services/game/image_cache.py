@@ -1,4 +1,4 @@
-# services/chunithm/image_cache.py
+# services/game/image_cache.py
 """그림 표에 들어가는 그림(재킷·캐릭터 그림·프레임)을 받아 디스크에 캐시한다.
 
 주소 규칙은 chuni-penguin의 `get_jacket_url`과 같다(국제판 기본, 일본 시각 4~7시 점검 때만 일본판).

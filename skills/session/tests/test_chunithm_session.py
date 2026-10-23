@@ -18,9 +18,9 @@ from core.events import EventBus
 from core.tables import render_text
 from core.threads import ThreadMessage, ThreadTranscript
 from core.tool_types import ToolContext
-from services.chunithm.records import PbRow, SyncLogSummary
 from services.common.arcades import Arcade, ArcadeVisit
 from services.common.players import Player, PlayersService
+from services.game.records import PbRow, SyncLogSummary
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CORE_PLAYERS_SQL = Path("migrations/core/001_players.sql").read_text()

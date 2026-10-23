@@ -4,8 +4,8 @@ from decimal import Decimal
 
 import pytest
 
-from services.chunithm import rating_format as rf
-from services.chunithm import table_columns as tc
+from services.game import rating_format as rf
+from services.game import table_columns as tc
 
 
 @pytest.mark.parametrize(

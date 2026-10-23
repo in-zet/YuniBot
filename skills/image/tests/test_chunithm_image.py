@@ -14,8 +14,8 @@ from PIL import Image
 
 from core.tables import TableBuilder, WorkTable
 from core.tool_types import ToolContext
-from services.chunithm import table_columns as tc
-from services.chunithm.records import PlayerProfile
+from services.game import table_columns as tc
+from services.game.records import PlayerProfile
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 

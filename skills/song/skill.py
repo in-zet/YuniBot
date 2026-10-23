@@ -29,10 +29,10 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
-from services.chunithm import table_columns as tc
-from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, ConstRangeHit, SongRecord
 from services.chunithm.terms import ResolvedDifficulty
+from services.game import table_columns as tc
+from services.game.chart_ref import ResolvedChart
 
 _DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 

@@ -1,4 +1,4 @@
-# tests/services/chunithm/test_table_columns.py
+# tests/services/game/test_table_columns.py
 from __future__ import annotations
 
 from decimal import Decimal
@@ -6,9 +6,9 @@ from decimal import Decimal
 import pytest
 
 from core.tables import TableBuilder, TableError
-from services.chunithm import table_columns as tc
-from services.chunithm.records import PbRow
 from services.chunithm.songdb import ChartRecord, SongRecord
+from services.game import table_columns as tc
+from services.game.records import PbRow
 
 RANKS = {"SSS": 1_007_500, "S": 975_000}
 

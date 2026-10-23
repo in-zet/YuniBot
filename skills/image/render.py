@@ -28,8 +28,8 @@ from core.tables import (
     table_file_name,
     visible_columns,
 )
-from services.chunithm import table_columns as tc
 from services.chunithm.rating_tier import tier_for
+from services.game import table_columns as tc
 
 logger = logging.getLogger(__name__)
 

@@ -15,9 +15,9 @@ from core.decorators import on, schedule, tool
 from core.events import Section
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.tool_types import Display, ToolContext, ToolResult
-from services.chunithm import table_columns as tc
-from services.chunithm.records_calc import candidate_upside
 from services.common.notify import parse_channel_ref
+from services.game import table_columns as tc
+from services.game.records_calc import candidate_upside
 
 logger = logging.getLogger(__name__)
 

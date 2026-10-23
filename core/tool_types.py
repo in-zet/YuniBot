@@ -14,6 +14,9 @@ from core.scheduler import Scheduler
 from core.tables import TableStore, WorkTable, render_text
 from core.usage import UsageService
 
+# 코어는 게임 이름만 들고 다닌다. 게임 규칙과 등록된 게임 목록은 services/game/registry.py가 안다.
+DEFAULT_GAME = "chunithm"
+
 
 class UserFacingError(Exception):
     """도구가 일부러 올리는 실패. 메시지는 모델과 사용자에게 그대로 전해도 되는 한국어 문장이다.
@@ -47,6 +50,8 @@ class ToolContext:
     tables: TableStore | None = None
     # 요청이 온 채널(대화 스레드면 스레드) id. 슬래시는 표를 보관하지 않으므로 None이다.
     channel_id: str | None = None
+    # 이 호출이 다루는 게임. 실행기가 도구를 부르기 전에 정한다(services/game/registry.py의 choose_game).
+    game: str = DEFAULT_GAME
 
     def __getattr__(self, name: str) -> Any:
         # dataclass가 정의한 필드(player_id, tags, services)는 정상 __getattribute__로 먼저 해석되므로

@@ -690,3 +690,46 @@ async def test_user_facing_error_becomes_error_result_without_traceback(caplog: 
     assert outcome.result.error == "지금은 못 해. 조금 뒤에 다시 해 줘."
     assert "raised" not in caplog.text
     assert all(record.exc_info is None for record in caplog.records)
+
+
+@tool(slash="게임확인")
+async def which_game(ctx: ToolContext, game: str | None = None) -> ToolResult:
+    """ctx.game을 그대로 돌려주는 도구."""
+    return ToolResult(data={"game": ctx.game})
+
+
+def _game_chooser(requested: str | None) -> str:
+    if requested is None:
+        return "chunithm"
+    if requested == "maimai":
+        return "maimai"
+    raise UserFacingError("모르는 게임이야")
+
+
+@pytest.mark.asyncio
+async def test_invoke_sets_ctx_game_from_the_chooser_using_the_requested_game_arg() -> None:
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={},
+        game_chooser=_game_chooser,
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    spec = which_game.__yuni_tool__  # pyright: ignore[reportFunctionMemberAccess]
+    default = await executor.invoke(spec, ctx, {})
+    said = await executor.invoke(spec, ctx, {"game": "maimai"})
+    unknown = await executor.invoke(spec, ctx, {"game": "other"})
+
+    assert default.result is not None and default.result.data == {"game": "chunithm"}
+    assert said.result is not None and said.result.data == {"game": "maimai"}
+    assert unknown.result is not None and unknown.result.error == "모르는 게임이야"
+    assert ctx.game == "chunithm"
+
+
+@pytest.mark.asyncio
+async def test_invoke_without_a_chooser_leaves_ctx_game_alone() -> None:
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(which_game.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.data == {"game": "chunithm"}

@@ -12,8 +12,8 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 from core.decorators import tool
 from core.events import Section
 from core.tool_types import ArcadeRef, ChartRef, Display, ToolContext, ToolResult
-from services.chunithm.chart_ref import ResolvedChart
 from services.common.arcades import Arcade
+from services.game.chart_ref import ResolvedChart
 
 logger = logging.getLogger(__name__)
 

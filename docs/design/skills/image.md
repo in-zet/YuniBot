@@ -24,7 +24,7 @@ services: [songdb, records, image_cache, tables]
 
 ## 구현 결정 (2026-10-20, 작업 표 Part 3)
 
-- **서비스 이름**: 설계는 `services: [songdb, records, http]`였다. 그림 받기와 디스크 캐시를 `services/chunithm/image_cache.py`의 `ImageCache`(서비스 이름 `image_cache`, `core/bot.py`에서 `data/images/`로 만든다)로 묶어, 스킬은 `image_cache`를 쓴다. `http` 서비스는 `ImageCache`가 안에서 쓴다. 옛 값 표시를 알아내려고 `tables`도 선언한다(`ctx.tables.is_stale`).
+- **서비스 이름**: 설계는 `services: [songdb, records, http]`였다. 그림 받기와 디스크 캐시를 `services/game/image_cache.py`의 `ImageCache`(서비스 이름 `image_cache`, `core/bot.py`에서 `data/images/`로 만든다)로 묶어, 스킬은 `image_cache`를 쓴다. `http` 서비스는 `ImageCache`가 안에서 쓴다. 옛 값 표시를 알아내려고 `tables`도 선언한다(`ctx.tables.is_stale`).
 - **재킷 주소**: `image_cache.jacket_url`. 파일 이름이면 국제판 `INTERNATIONAL_JACKET_BASE`, 일본 시각 4~7시에는 `JACKET_BASE`(chuni-penguin `constants`). 이미 `http(s)://`로 시작하면 그대로 쓴다.
 - **`SongRecord.jacket`**: 시드의 `jacket` 값(파일 이름). Chunimaru 덧씌우기가 시드에 없던 곡을 만들 때나, 시드에 재킷이 없던 곡에는 Chunimaru가 준 전체 주소를 넣는다(설계에는 없던 보강 — 최신 곡의 재킷이 빈 사각형이 되지 않게). 시드에 값이 있으면 덮어쓰지 않는다. `songdb.jacket_for(title)`로 꺼낸다. Chunimaru가 준 주소는 시드 값이 있어도 `SongRecord.jacket_fallback`에 따로 두고(`songdb.jacket_fallback_for`), `table_image`가 CHUNITHM-NET 재킷을 못 받은 곡만 이 주소로 한 번 더 받는다(2026-10-22, 세가 사이트 장애 때 신곡 재킷이 전부 빈 칸이었다). 이것도 못 받으면 기본 재킷이다.
 - **캐시와 받기**: 파일 이름은 주소의 마지막 부분. 디스크에 있으면 받지 않는다. 받은 바이트는 Pillow로 그림인지 검사한 뒤에만 저장한다(HTML 오류 페이지가 영구 캐시되지 않게). 실패한 그림은 None이고 캐시하지 않는다. 재킷이 None이면 빈 사각형이 아니라 음표가 있는 **기본 재킷**을 그린다(`_paste_jacket`, 2026-10-22 사용자 지시, 그림 파일 없이 도형으로). 같은 주소는 한 번만 받고 동시에 8개까지.

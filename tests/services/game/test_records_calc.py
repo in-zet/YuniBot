@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from services.chunithm.records_calc import (
+from services.game.records_calc import (
     allowed_attacks,
     assign_session_date,
     average_rating,

@@ -7,7 +7,7 @@ import httpx
 import pytest
 from PIL import Image
 
-from services.chunithm.image_cache import ImageCache, jacket_url
+from services.game.image_cache import ImageCache, jacket_url
 
 _JST = ZoneInfo("Asia/Tokyo")
 

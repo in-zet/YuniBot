@@ -29,9 +29,9 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
-from services.chunithm import table_columns as tc
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, SongRecord
 from services.chunithm.terms import ResolvedDifficulty
+from services.game import table_columns as tc
 
 _GAME = "chunithm"
 # 남의 공개 메모를 한 번에 보여주는 개수(최근 것부터). 더 있으면 개수만 알려준다(더보기

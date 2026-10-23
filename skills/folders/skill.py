@@ -15,9 +15,9 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
-from services.chunithm import table_columns as tc
-from services.chunithm.chart_ref import ResolvedChart
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
+from services.game import table_columns as tc
+from services.game.chart_ref import ResolvedChart
 
 _GAME = "chunithm"
 _FOLDER = "folders.folder"

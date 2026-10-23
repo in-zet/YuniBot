@@ -28,9 +28,14 @@ from core.tables import (
     summarize_table,
 )
 from core.tool_types import DifficultyRef, RankRef, ScoreRef, ToolContext
-from services.chunithm import table_columns as tc
-from services.chunithm.chart_ref import ResolvedChart
-from services.chunithm.records import (
+from services.chunithm.songdb import ChartRecord, SongRecord
+from services.chunithm.terms import ResolvedDifficulty, ResolvedRank, TermsService
+from services.common.players import PlayersService
+from services.common.settings import SettingsService
+from services.common.yuni import YuniService
+from services.game import table_columns as tc
+from services.game.chart_ref import ResolvedChart
+from services.game.records import (
     ChartUpdate,
     PbRow,
     RatingDeltas,
@@ -38,12 +43,7 @@ from services.chunithm.records import (
     SyncDiff,
     UnchangedPlay,
 )
-from services.chunithm.records_calc import remaining_to_target
-from services.chunithm.songdb import ChartRecord, SongRecord
-from services.chunithm.terms import ResolvedDifficulty, ResolvedRank, TermsService
-from services.common.players import PlayersService
-from services.common.settings import SettingsService
-from services.common.yuni import YuniService
+from services.game.records_calc import remaining_to_target
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CORE_PLAYERS_SQL = Path("migrations/core/001_players.sql").read_text()

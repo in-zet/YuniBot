@@ -7,7 +7,8 @@
 ```
 core/                  입구, 에이전트, 도구 실행기, 레지스트리, 메모리, 예약, 이벤트, LLM 어댑터
 services/common/       players, settings, memory, notify, yuni, secrets, arcades, http (websearch는 10단계)
-services/chunithm/     chunithm_net, songdb, records, terms
+services/game/         게임 공통 틀: records, chart_ref, table_columns, image_cache, rating_format, 게임 프로필·등록부·builder
+services/chunithm/     츄니즘 전용: chunithm_net, songdb, terms, 프로필
 skills/<스킬>/         SKILL.md(manifest+지침) · skill.py · migrations/ · tests/
 skills/_template/      새 스킬의 복사본
 prompts/               rules.md(규칙), persona.md(유니 말투)
@@ -17,7 +18,7 @@ scripts/               sync_upstream.py, eval_agent.py, clear_global_commands.py
 tests/                 코어·서비스 시험(스킬 시험은 각 스킬의 tests/)
 ```
 
-- 코어는 츄니즘을 모른다. 츄니즘 지식은 `services/chunithm/`과 `chunithm-*` 스킬에만 둔다.
+- 코어는 츄니즘을 모른다. 츄니즘 지식은 `services/chunithm/`과 `chunithm-border` 같은 `chunithm-*` 스킬에만 둔다. 게임마다 다른 값은 게임 프로필(`services/game/profile.py`)에 두고, 어떤 게임이 있는지 아는 곳은 등록부(`services/game/registry.py`)와 `builder.py`뿐이다. 17단계 Part 1 동안 `services/game/`의 모듈이 츄니즘 자료형(`SyncFetch`·`SongRecord` 등)을 아직 import한다 — Part 5까지 풀어 나간다.
 - 스킬은 다른 스킬을 import하지 않는다. 스킬끼리는 서비스와 이벤트로만 주고받는다.
 - 스킬은 manifest의 `services`에 적은 서비스만 `ctx`로 쓴다. 다른 스킬의 테이블과 설정은 읽지 않는다(그 스킬 문서가 다른 스킬의 재사용을 명시한 설정은 예외 — `00-core.md` "데이터, 권한, 비밀 값" 참고).
 - 새 스킬은 `skills/_template/`을 복사해 만든다. 스킬을 더하려고 코어나 다른 스킬을 고쳐야 한다면 규격이 모자라다는 뜻이므로 규격부터 고친다. 서비스에 메서드를 더하는 것은 정상 경로다.

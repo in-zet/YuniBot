@@ -9,9 +9,9 @@ from typing import Any
 from core.events import EventBus, Section
 from core.tables import WorkTable
 from core.tool_types import Display, ToolContext
-from services.chunithm import table_columns as tc
 from services.chunithm.songdb import VERSION_ORDER, SongDbService
 from services.chunithm.terms import TermsService
+from services.game import table_columns as tc
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CTX_NO_GUILD = ToolContext(player_id="p1", tags=frozenset(), services={}, event_bus=EventBus())
@@ -55,7 +55,7 @@ async def test_chart_reports_const_and_note_count() -> None:
     song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX_NO_GUILD)
     chart = song.charts["MAS"]
 
-    from services.chunithm.chart_ref import ResolvedChart
+    from services.game.chart_ref import ResolvedChart
 
     result = await skill.chart(_ctx_with_songdb(songdb), chart=ResolvedChart(song=song, chart=chart))
 
@@ -85,7 +85,7 @@ async def test_chart_emits_song_viewed_with_real_difficulty_and_renders_sections
     skill = _load_skill()
     songdb = SongDbService()
     song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX_NO_GUILD)
-    from services.chunithm.chart_ref import ResolvedChart
+    from services.game.chart_ref import ResolvedChart
 
     bus = _RecordingBus([
         Section(order=10, display=Display(content="투두 목표 1,007,500점"), data={}),
@@ -378,7 +378,7 @@ async def test_chart_link_prefers_sdvxin_mapping() -> None:
     song = await songdb.resolve("B.B.K.K.B.K.K.", _CTX_NO_GUILD)
     chart = song.charts["MAS"]
 
-    from services.chunithm.chart_ref import ResolvedChart
+    from services.game.chart_ref import ResolvedChart
 
     result = await skill.chart_link(_ctx_with_songdb(songdb), chart=ResolvedChart(song=song, chart=chart))
 

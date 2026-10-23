@@ -15,9 +15,9 @@ from core.events import Section
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.threads import ThreadTranscript
 from core.tool_types import ArcadeRef, Display, PlayerRef, ToolContext, ToolResult
-from services.chunithm.rating_format import rating_text, song_rating_text
 from services.common.arcades import Arcade
 from services.common.players import Player
+from services.game.rating_format import rating_text, song_rating_text
 
 _GAME = "chunithm"
 _SESSION = "session.session"

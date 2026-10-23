@@ -15,6 +15,8 @@ import yaml
 from core.fuzzy import similar_names
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
+from services.chunithm.profile import CHUNITHM
+from services.game.profile import GameProfile
 
 logger = logging.getLogger(__name__)
 
@@ -24,31 +26,18 @@ _SEED_PATH = (
 )
 _LINKED_VERSE_PATH = Path(__file__).parent / "data" / "linked_verse.yaml"
 _MAX_CANDIDATES = 8
-_CHART_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
-# 난이도 범위("익스퍼트 이상")가 훑는 순서. WORLD'S END는 쉬움·어려움 축에 없어 범위에 넣지 않는다.
-_DIFFICULTY_RANGE_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT")
 
-# 수록 버전 이름을 출시 순서(오래된 것부터)로 나열한 것. 곡 DB의 `version` 값과 철자가 같다. 작업 표의 버전 칸이
-# 이 순서로 정렬·묶기·비교한다. 목록에 없는 새 버전은 정렬에서 값 없음으로 취급되므로 새 버전이 나오면 끝에 더한다.
-VERSION_ORDER: tuple[str, ...] = (
-    "CHUNITHM", "CHUNITHM PLUS", "AIR", "AIR PLUS", "STAR", "STAR PLUS", "AMAZON", "AMAZON PLUS",
-    "CRYSTAL", "CRYSTAL PLUS", "PARADISE", "PARADISE LOST", "NEW", "NEW PLUS", "SUN", "SUN PLUS",
-    "LUMINOUS", "LUMINOUS PLUS", "VERSE", "X-VERSE", "X-VERSE-X", "Mate",
-)
-
-# terms.resolve_difficulty()가 돌려주는 정식 긴 이름("MASTER")을 이 서비스가 쓰는
-# 짧은 코드("MAS")로 바꾼다. chart_ref.py도 이 매핑을 그대로 쓴다(중복 정의하지 않는다).
-LONG_TO_SHORT_DIFFICULTY: dict[str, str] = {
-    "BASIC": "BAS", "ADVANCED": "ADV", "EXPERT": "EXP",
-    "MASTER": "MAS", "ULTIMA": "ULT", "WORLD'S END": "WE",
-}
+# 기본 게임(츄니즘)의 값. 스킬이 게임을 고르게 되기 전까지 스킬과 표 모듈이 이 이름으로 가져다 쓴다.
+VERSION_ORDER: tuple[str, ...] = CHUNITHM.version_order
+LONG_TO_SHORT_DIFFICULTY: dict[str, str] = dict(CHUNITHM.long_to_short)
 
 
-def _difficulty_range(low: str | None, high: str | None) -> frozenset[str] | None:
+def _difficulty_range(
+    low: str | None, high: str | None, order: tuple[str, ...]
+) -> frozenset[str] | None:
     """난이도 범위가 걸린 코드들. 범위를 안 걸었으면 None(가리지 않는다). 낮은 쪽이 높은 쪽보다 높으면 빈 집합이다."""
     if low is None and high is None:
         return None
-    order = _DIFFICULTY_RANGE_ORDER
     for code in (low, high):
         if code is not None and code not in order:
             raise ValueError(f"난이도 범위는 {order[0]}~{order[-1]} 안에서만 줄 수 있다: {code}")
@@ -210,7 +199,9 @@ class SongDbService:
         *,
         conn: aiosqlite.Connection | None = None,
         linked_verse_path: Path = _LINKED_VERSE_PATH,
+        profile: GameProfile = CHUNITHM,
     ) -> None:
+        self._profile = profile
         self._songs = _load_seed(seed_path)
         self._linked_verse = _load_linked_verse(linked_verse_path)
         # Chunimaru가 아직 한 번도 안 덧씌워졌으면 시드 자신의 available 플래그로
@@ -221,6 +212,10 @@ class SongDbService:
         self._conn = conn
         if self._conn is not None:
             self._conn.row_factory = aiosqlite.Row
+
+    @property
+    def profile(self) -> GameProfile:
+        return self._profile
 
     def by_id(self, song_id: int) -> SongRecord | None:
         """즐겨찾기 곡 목록처럼 CHUNITHM-NET의 실제 musicId만 들고 있을 때 곡으로
@@ -453,7 +448,7 @@ class SongDbService:
         순서는 상수 내림차순(큰 것부터), 상수를 모르는 채보는 뒤, 같으면 제목순으로 고정이다. 다른 순서는
         표를 받은 `table_query`가 맡는다(2026-10-20 작업 표)."""
         wanted = [difficulty] if isinstance(difficulty, str) else None if difficulty is None else list(dict.fromkeys(difficulty))
-        in_range = _difficulty_range(min_difficulty, max_difficulty)
+        in_range = _difficulty_range(min_difficulty, max_difficulty, self._profile.range_codes)
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():
             if title not in self._available_intl or (new_only and not song.is_new):
@@ -500,7 +495,7 @@ class SongDbService:
                 song = self._songs.get(title)
                 if song is None or title not in self._available_intl:
                     continue
-                codes = [difficulty] if difficulty is not None else [c for c in _CHART_ORDER if c in song.charts]
+                codes = [difficulty] if difficulty is not None else [c for c in self._profile.chart_codes if c in song.charts]
                 for code in codes:
                     chart = song.charts.get(code)
                     if chart is not None and chart.is_available:

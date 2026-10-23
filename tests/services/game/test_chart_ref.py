@@ -2,9 +2,9 @@ import pytest
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
-from services.chunithm.chart_ref import ChartRefResolver
 from services.chunithm.songdb import SongDbService
 from services.chunithm.terms import TermsService
+from services.game.chart_ref import ChartRefResolver
 
 _CTX = ToolContext(player_id="p1", tags=frozenset(), services={})
 

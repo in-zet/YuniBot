@@ -16,10 +16,10 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 from core.events import EventBus, Section
 from core.tables import RowRef, TableBuilder, TableStore, WorkTable, cell
 from core.tool_types import Display, ToolContext
-from services.chunithm.chart_ref import ResolvedChart
-from services.chunithm.records import SessionInfo, SyncDiff, SyncResult
 from services.chunithm.songdb import ChartRecord, SongRecord
 from services.common.arcades import Arcade
+from services.game.chart_ref import ResolvedChart
+from services.game.records import SessionInfo, SyncDiff, SyncResult
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _NOW = datetime(2026, 10, 17, 12, 0, 0, tzinfo=UTC)

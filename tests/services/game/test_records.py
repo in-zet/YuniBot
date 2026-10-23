@@ -1,4 +1,4 @@
-# tests/services/chunithm/test_records.py
+# tests/services/game/test_records.py
 import dataclasses
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -19,9 +19,12 @@ from selectolax.lexbor import LexborHTMLParser
 
 from core.events import EventBus
 from core.tool_types import ToolContext
-from services.chunithm import records as records_module
 from services.chunithm.chunithm_net import SyncFetch
-from services.chunithm.records import (
+from services.chunithm.profile import CHUNITHM
+from services.chunithm.songdb import SongDbService
+from services.common.players import PlayersService
+from services.game import records as records_module
+from services.game.records import (
     FrameExit,
     LampChange,
     PbRow,
@@ -29,7 +32,7 @@ from services.chunithm.records import (
     SessionInfo,
     UnchangedPlay,
 )
-from services.chunithm.records_calc import (
+from services.game.records_calc import (
     allowed_attacks,
     assign_session_date,
     average_rating,
@@ -37,8 +40,6 @@ from services.chunithm.records_calc import (
     chart_rating,
     remaining_to_target,
 )
-from services.chunithm.songdb import SongDbService
-from services.common.players import PlayersService
 
 _PLAYERS_MIGRATION = (
     Path("migrations/core/001_players.sql").read_text()
@@ -1130,7 +1131,7 @@ def test_merge_prefers_all_pb_lamps_on_equal_score() -> None:
     full = _lamped(frame_pb, clear=ClearLamp.hard, combo=ComboLamp.full_combo)
     fetch.all_personal_bests = {"MAS": [full]}
 
-    merged = records_module._merge_personal_bests(fetch)
+    merged = records_module._merge_personal_bests(fetch, CHUNITHM.chart_codes)
 
     key = (frame_pb.song.title, records_module._difficulty_code(frame_pb.chart.difficulty))
     assert str(merged[key].combo_lamp) == "FULL COMBO"
@@ -1143,7 +1144,7 @@ def test_merge_still_prefers_higher_score_over_lamps() -> None:
     older = _lamped(_with_score(frame_pb, frame_pb.score - 100), clear=ClearLamp.hard, combo=ComboLamp.full_combo)
     fetch.all_personal_bests = {"MAS": [older]}
 
-    merged = records_module._merge_personal_bests(fetch)
+    merged = records_module._merge_personal_bests(fetch, CHUNITHM.chart_codes)
 
     key = (frame_pb.song.title, records_module._difficulty_code(frame_pb.chart.difficulty))
     assert merged[key].score == frame_pb.score

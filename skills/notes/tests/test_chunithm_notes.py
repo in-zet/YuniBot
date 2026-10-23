@@ -437,7 +437,7 @@ class _NoTags:
 
 def _title_table(*rows: tuple[str, str | None]):
     from core.tables import TableBuilder
-    from services.chunithm import table_columns as tc
+    from services.game import table_columns as tc
 
     builder = TableBuilder(unit="채보")
     tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)

@@ -8,7 +8,6 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 from core.decorators import tool
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, TableNeeds, WorkTable, cell
 from core.tool_types import Display, SongQuery, TableRef, ToolContext, ToolResult
-from services.chunithm import table_columns as tc
 from services.chunithm.arcade_settings import (
     FIELD_LABELS,
     named_from_settings,
@@ -16,6 +15,7 @@ from services.chunithm.arcade_settings import (
 )
 from services.chunithm.chunithm_net import ChangeNotAppliedError
 from services.chunithm.songdb import SongRecord
+from services.game import table_columns as tc
 
 _UNKNOWN_SONG = "settings.unknown_song"
 # 일괄 추가 결과에 곡 이름을 늘어놓을 때 자르는 개수.

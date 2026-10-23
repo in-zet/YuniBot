@@ -17,7 +17,9 @@ import pytest
 from core.events import EventBus, Section
 from core.tables import RowRef, TableBuilder, WorkTable, cell, render_text
 from core.tool_types import Display, ToolContext
-from services.chunithm.records import (
+from services.chunithm.songdb import SongDbService
+from services.common.arcades import Arcade
+from services.game.records import (
     ChartUpdate,
     LampChange,
     PbRow,
@@ -25,8 +27,6 @@ from services.chunithm.records import (
     SessionInfo,
     SyncDiff,
 )
-from services.chunithm.songdb import SongDbService
-from services.common.arcades import Arcade
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _SQL = Path(__file__).parent.parent / "migrations" / "001_init.sql"

@@ -33,11 +33,11 @@ from core.tool_types import (
     SongQuery,
     ToolContext,
 )
-from services.chunithm.table_columns import PARTIAL_ROW_HINTS
 from services.common.notify import NotifyService
 from services.common.players import PlayersService
 from services.common.settings import SettingsService
 from services.common.websearch import WebsearchService
+from services.game.table_columns import PARTIAL_ROW_HINTS
 from tests.core.skill_factory import slash_tool, write_skill
 
 

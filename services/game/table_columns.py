@@ -1,4 +1,4 @@
-# services/chunithm/table_columns.py
+# services/game/table_columns.py
 """츄니즘 작업 표의 공통 칸. 칸 이름·가리키는 것 종류·보일 글자 규칙을 한곳에 둔다.
 
 표를 만드는 모든 스킬이 이 모듈의 상수와 도우미를 쓴다 — 스킬이 칸 이름을 문자열로 직접 쓰지 않는다.
@@ -22,14 +22,11 @@ from core.tables import (
     TableError,
     cell,
 )
-from services.chunithm.rating_format import song_rating_text
-from services.chunithm.records import PbRow
-from services.chunithm.songdb import (
-    LONG_TO_SHORT_DIFFICULTY,
-    VERSION_ORDER,
-    ChartRecord,
-    SongRecord,
-)
+from core.tool_types import DEFAULT_GAME
+from services.chunithm.songdb import ChartRecord, SongRecord
+from services.game.rating_format import song_rating_text
+from services.game.records import PbRow
+from services.game.registry import profile_for
 
 SONG = "곡"
 DIFFICULTY = "난이도"
@@ -54,9 +51,12 @@ _UNKNOWN = "계산 불가"
 _NO_LAMP = "NONE"
 
 # 난이도 칸의 원래 값(정식 이름)을 쉬운 쪽부터 나열한 순서. 정렬·묶기·크기 비교(`난이도 >= MASTER`)가 이 순서를 따른다.
-DIFFICULTY_ORDER: tuple[str, ...] = tuple(LONG_TO_SHORT_DIFFICULTY)
+# 스킬이 게임을 고르게 되기 전까지 표 칸은 기본 게임의 값을 쓴다.
+_PROFILE = profile_for(DEFAULT_GAME)
 
-SHORT_TO_LONG_DIFFICULTY: dict[str, str] = {short: long for long, short in LONG_TO_SHORT_DIFFICULTY.items()}
+DIFFICULTY_ORDER: tuple[str, ...] = tuple(_PROFILE.long_to_short)
+
+SHORT_TO_LONG_DIFFICULTY: dict[str, str] = {short: long for long, short in _PROFILE.long_to_short.items()}
 
 # 곡 단위 행(곡은 차 있고 난이도만 빈 행)을 난이도가 필요한 도구가 뺄 때 붙이는 안내.
 PARTIAL_ROW_HINTS: tuple[PartialRowHint, ...] = (
@@ -74,7 +74,7 @@ _COLUMNS: dict[str, Column] = {
     LEVEL: Column(name=LEVEL, label=LEVEL),
     CONST: Column(name=CONST, label=CONST, value_type="number"),
     NOTE_COUNT: Column(name=NOTE_COUNT, label=NOTE_COUNT, value_type="number"),
-    VERSION: Column(name=VERSION, label=VERSION, order=VERSION_ORDER),
+    VERSION: Column(name=VERSION, label=VERSION, order=_PROFILE.version_order),
     ARTIST: Column(name=ARTIST, label=ARTIST),
     SCORE: Column(name=SCORE, label=SCORE, value_type="ScoreRef"),
     RANK: Column(name=RANK, label=RANK, value_type="RankRef"),
