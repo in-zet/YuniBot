@@ -164,7 +164,7 @@ async def test_open_thread_delegates_to_thread_manager(env) -> None:
             pass
 
     session = await notify.open_thread(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id=player.id,
         transport=_Transport(),
         channel_id="c1",
@@ -172,7 +172,7 @@ async def test_open_thread_delegates_to_thread_manager(env) -> None:
         now=datetime.now(UTC),
     )
 
-    assert session.skill_name == "chunithm-session"
+    assert session.skill_name == "session"
     assert session.player_id == player.id
 
 
@@ -194,7 +194,7 @@ async def test_open_dm_thread_sends_opening_with_button_and_records_it(env) -> N
     closed: list[ThreadTranscript] = []
 
     session = await notify.open_dm_thread(
-        skill_name="chunithm-session", player_id=player_id, opening="이번엔 어땠어?",
+        skill_name="session", player_id=player_id, opening="이번엔 어땠어?",
         on_close=closed.append, guidance="후기 지침", now=datetime.now(UTC),
     )
 
@@ -203,7 +203,7 @@ async def test_open_dm_thread_sends_opening_with_button_and_records_it(env) -> N
     assert session.guidance == "후기 지침"
     assert gateway.channel_messages == [("dm-111", "이번엔 어땠어?")]
     assert [(m.content, m.is_yuni) for m in session.transcript] == [("이번엔 어땠어?", True)]
-    assert notify.has_open_thread(player_id, "chunithm-session")
+    assert notify.has_open_thread(player_id, "session")
 
 
 async def test_open_dm_thread_uses_the_end_button_factory(env) -> None:

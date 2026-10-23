@@ -40,7 +40,7 @@ class SettingsService:
     async def scope_ids_with_value(self, *, scope: str, skill: str, name: str) -> list[tuple[str, Any]]:
         """그 설정을 명시적으로 넣은 scope_id 전부와 그 값. 기본값만 쓰는(한 번도 설정 안 한)
         scope_id는 저장된 행이 없어 포함되지 않는다 — 서버마다 도는 예약 작업이 "이 설정을
-        켜 둔 서버가 어디냐"를 스스로 찾아야 할 때 쓴다(예: chunithm-updates의 알림 채널)."""
+        켜 둔 서버가 어디냐"를 스스로 찾아야 할 때 쓴다(예: updates의 알림 채널)."""
         cursor = await self._conn.execute(
             "SELECT scope_id, value FROM settings_values WHERE scope = ? AND skill = ? AND name = ?",
             (scope, skill, name),

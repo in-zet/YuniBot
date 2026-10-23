@@ -38,7 +38,7 @@ _GAME = "chunithm"
 # records_pb.rating / records_sync_log.computed_rating은 TEXT NOT NULL이라 None을
 # 그대로 넣을 수 없다 — 상수를 몰라 계산하지 못한 값은 이 표시로 남긴다.
 _UNKNOWN_RATING = "계산 불가"
-# 동기화 비교 데이터(diff)는 메모리에만 둔다(chunithm-sync.md "구현 결정"). 한 요청 안에서 쓰고 버려지므로
+# 동기화 비교 데이터(diff)는 메모리에만 둔다(sync.md "구현 결정"). 한 요청 안에서 쓰고 버려지므로
 # 이 이상 쌓일 일이 없다 — 넘치면 가장 오래된 것부터 지운다.
 _DIFF_CACHE_LIMIT = 200
 _BEST_FRAME_SIZE = 30
@@ -47,7 +47,7 @@ _NEW_FRAME_SIZE = 20
 # 채보만 "닿을 만한" 후보로 본다(2026-10-19 사용자 결정).
 _CANDIDATE_BAND_FIRST_RANK = 3
 _CANDIDATE_BAND_LAST_RANK = 8
-# 후보곡 상승폭·남은 점수의 기준점은 SSS다(chunithm-report.md "후보곡").
+# 후보곡 상승폭·남은 점수의 기준점은 SSS다(report.md "후보곡").
 _SSS_SCORE = 1_007_500
 _DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 
@@ -313,7 +313,7 @@ class RecordsService:
     async def _save_sync_locked(self, player_id: str, fetch: SyncFetch, ctx: ToolContext) -> SyncResult:
         """동기화 결과를 저장한다. 베스트30·신곡20·전체 PB를 records_pb에 합쳐 넣고
         (점수가 오른 채보만 행 전체를 바꾼다), 첫 동기화가 아니면 직전 상태와 비교한
-        diff를 계산해 메모리 캐시에 둔다(sync_diff로 읽는다, chunithm-sync.md "구현 결정").
+        diff를 계산해 메모리 캐시에 둔다(sync_diff로 읽는다, sync.md "구현 결정").
 
         첫 동기화는 기준점만 만든다 — 세션도 diff도 만들지 않는다(리포트를 내지 않는다).
         세션 날짜는 동기화 시각이 아니라 최근 플레이 이력의 achieved_at(CHUNITHM-NET이
@@ -648,7 +648,7 @@ class RecordsService:
         return self._diff_cache.get(sync_id)
 
     async def latest_overpower(self, player_id: str) -> tuple[float | None, float | None] | None:
-        """최신 동기화 로그의 (오버파워 값, 퍼센트). CHUNITHM-NET 표시값 그대로다(chunithm-goals.md "구현 결정").
+        """최신 동기화 로그의 (오버파워 값, 퍼센트). CHUNITHM-NET 표시값 그대로다(goals.md "구현 결정").
         동기화한 적이 없으면 None, 있지만 값이 없으면 (None, None)."""
         cursor = await self._conn.execute(
             "SELECT overpower_value, overpower_percentage FROM records_sync_log "
@@ -810,7 +810,7 @@ class RecordsService:
 
     async def new_frame_floor(self, player_id: str) -> Decimal:
         """지금 신곡20 프레임의 최저 레이팅(`_frame_floor`와 같은 규칙 — 20곡을 아직 못
-        채웠으면 0.00). `chunithm-updates`가 새로 들어온 곡이 이 프레임에 들어올 상수대인지
+        채웠으면 0.00). `updates`가 새로 들어온 곡이 이 프레임에 들어올 상수대인지
         `candidate_upside(const, floor)`로 판정할 때 쓴다(`candidates()`의 new_floor와 같은
         계산이라 숫자가 어긋나지 않는다)."""
         _, new = self._frames(await self.all_pb_rows(player_id))
@@ -844,7 +844,7 @@ class RecordsService:
         return row["synced_at"] if row is not None else None
 
     async def latest_session(self, player_id: str) -> SessionInfo | None:
-        """가장 최근 플레이 세션(날짜 기준). `chunithm-arcade`의 `record_visit`이
+        """가장 최근 플레이 세션(날짜 기준). `arcade`의 `record_visit`이
         날짜를 안 받았을 때 기본값("최근 세션")을 정하는 데 쓴다."""
         cursor = await self._conn.execute(
             "SELECT id, play_date, estimated FROM records_sessions WHERE player_id = ? AND game = ? "

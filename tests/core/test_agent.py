@@ -922,11 +922,11 @@ def test_skills_used_picks_skills_from_tool_names_in_order_without_duplicates() 
     loop = _loop(registry, [])
 
     used = loop._skills_used(
-        ["open_skill", "chunithm-song_find_songs", "table_query", "chunithm-image_table_image", "chunithm-song_info"],
+        ["open_skill", "song_find_songs", "table_query", "image_table_image", "song_info"],
         set(),
     )
 
-    assert used == ["chunithm-song", "chunithm-image"]
+    assert used == ["song", "image"]
 
 
 def _loop(registry: SkillRegistry, script: list[GenerationTurn], *, max_tokens: int = 50000) -> AgentLoop:
@@ -995,7 +995,7 @@ async def test_agent_loop_pre_opens_skills_whose_triggers_match_the_message() ->
         ctx=_ctx(frozenset({"chunithm-linked"})), skill_state=state, user_text="내 즐겨찾기 보여줘",
         prompt_context_snippets=[],
     )
-    assert state.level_for("chunithm-settings") == "full"
+    assert state.level_for("settings") == "full"
     assert state.level_for("chunithm-border") == "card"
 
 

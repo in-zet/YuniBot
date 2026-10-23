@@ -23,7 +23,7 @@ async def test_receive_appends_transcript_and_resets_idle_timer() -> None:
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
     session = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p1",
         transport=transport,
         channel_id="c1",
@@ -50,7 +50,7 @@ async def test_idle_timeout_asks_then_closes() -> None:
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
     _ = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p1",
         transport=transport,
         channel_id="c1",
@@ -76,7 +76,7 @@ async def test_message_during_check_phase_cancels_close() -> None:
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
     session = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p1",
         transport=transport,
         channel_id="c1",
@@ -101,7 +101,7 @@ async def test_explicit_close_delivers_transcript_immediately() -> None:
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
     session = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p1",
         transport=transport,
         channel_id="c1",
@@ -130,7 +130,7 @@ async def test_message_from_other_player_is_rejected() -> None:
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
     session = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p1",
         transport=transport,
         channel_id="c1",
@@ -157,7 +157,7 @@ async def test_receive_on_unknown_or_closed_thread_is_noop() -> None:
     await manager.receive("no-such-thread", "p1", "유령", now=base)  # 예외 없이 무시
 
     session = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p1",
         transport=transport,
         channel_id="c1",
@@ -179,7 +179,7 @@ async def test_double_close_delivers_transcript_once() -> None:
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
     session = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p1",
         transport=transport,
         channel_id="c1",
@@ -201,7 +201,7 @@ async def test_failing_session_does_not_block_other_sessions() -> None:
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
     _ = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p1",
         transport=_RaisingTransport(),
         channel_id="c1",
@@ -209,7 +209,7 @@ async def test_failing_session_does_not_block_other_sessions() -> None:
         now=base,
     )
     good = await manager.open(
-        skill_name="chunithm-session",
+        skill_name="session",
         player_id="p2",
         transport=good_transport,
         channel_id="c2",
@@ -233,7 +233,7 @@ async def test_session_for_channel_finds_only_open_sessions() -> None:
     manager = ThreadManager()
     base = datetime(2026, 1, 1, tzinfo=UTC)
     session = await manager.open(
-        skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id="c9",
+        skill_name="session", player_id="p1", transport=_FakeTransport(), channel_id="c9",
         on_close=lambda t: None, now=base,
     )
 
@@ -250,7 +250,7 @@ async def test_receive_keeps_discord_message_id_in_transcript() -> None:
     base = datetime(2026, 1, 1, tzinfo=UTC)
     closed: list[ThreadTranscript] = []
     session = await manager.open(
-        skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
+        skill_name="session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
         on_close=closed.append, now=base,
     )
     await manager.receive(session.thread_id, "p1", "안녕", now=base, message_id="m1")
@@ -258,7 +258,7 @@ async def test_receive_keeps_discord_message_id_in_transcript() -> None:
 
     assert closed[0].messages[0].message_id == "m1"
     assert closed[0].channel_id == "c1"
-    assert closed[0].skill_name == "chunithm-session"
+    assert closed[0].skill_name == "session"
 
 
 @pytest.mark.asyncio
@@ -272,7 +272,7 @@ async def test_core_close_hook_runs_before_skill_callback_and_survives_failure()
     manager = ThreadManager(on_closed=hook)
     base = datetime(2026, 1, 1, tzinfo=UTC)
     session = await manager.open(
-        skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
+        skill_name="session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
         on_close=lambda t: order.append("skill"), now=base,
     )
     await manager.close(session.thread_id, reason="explicit")
@@ -287,7 +287,7 @@ async def test_close_all_closes_every_open_session_as_shutdown() -> None:
     closed: list[ThreadTranscript] = []
     for channel in ("c1", "c2"):
         _ = await manager.open(
-            skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id=channel,
+            skill_name="session", player_id="p1", transport=_FakeTransport(), channel_id=channel,
             on_close=closed.append, now=base,
         )
 
@@ -300,16 +300,16 @@ async def test_close_all_closes_every_open_session_as_shutdown() -> None:
 async def test_open_for_finds_only_this_players_open_conversation_for_the_skill() -> None:
     manager = ThreadManager()
     session = await manager.open(
-        skill_name="chunithm-session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
+        skill_name="session", player_id="p1", transport=_FakeTransport(), channel_id="c1",
         on_close=lambda t: None, now=datetime.now(UTC),
     )
 
-    assert manager.open_for("p1", "chunithm-session") is session
-    assert manager.open_for("p2", "chunithm-session") is None
+    assert manager.open_for("p1", "session") is session
+    assert manager.open_for("p2", "session") is None
     assert manager.open_for("p1", "other-skill") is None
 
     await manager.close(session.thread_id, reason="explicit")
-    assert manager.open_for("p1", "chunithm-session") is None
+    assert manager.open_for("p1", "session") is None
 
 
 async def test_discard_drops_the_session_without_running_hooks() -> None:

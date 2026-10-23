@@ -25,7 +25,7 @@ def chart_rating(score: int, const: float | None) -> Decimal | None:
     둘째 자리에서 버리는 것이 맞다 — 넷째 자리까지 들고 있다가 합산 뒤에만 버리면
     안 된다. 실제 저장본(베스트30+신곡20+프로필, 같은 로그인 시점)으로 검산했을 때
     곡마다 둘째 자리 버림 후 합산해야 표시 레이팅과 맞았고, 넷째 자리를 유지하면
-    어긋났다. docs/design/skills/chunithm-report.md도 이 정밀도로 고쳤다."""
+    어긋났다. docs/design/skills/report.md도 이 정밀도로 고쳤다."""
     if const is None:
         return None
     return calculate_rating(score, const)
@@ -93,7 +93,7 @@ def remaining_to_target(
 
 def assign_session_date(played_at: datetime, *, boundary_hour: int = 4) -> date:
     """자정을 넘긴 플레이는 날짜 경계(기본 새벽 4시) 전까지 전날 세션에 붙는다
-    (chunithm-session.md). 경계 시각 자체는 "그날"에 속한다(>=)."""
+    (session.md). 경계 시각 자체는 "그날"에 속한다(>=)."""
     if played_at.hour < boundary_hour:
         return (played_at - _ONE_DAY).date()
     return played_at.date()

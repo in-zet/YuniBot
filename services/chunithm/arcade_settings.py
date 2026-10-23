@@ -16,7 +16,7 @@ _NAMED_FIELDS: dict[str, str] = {
 }
 _ATTR_TO_SELECT_NAME: dict[str, str] = {attr: name for name, attr in _NAMED_FIELDS.items()}
 
-# chunithm-arcade(오락실별 방문 이력)와 chunithm-settings(지금 계정 설정 조회·변경)가
+# arcade(오락실별 방문 이력)와 settings(지금 계정 설정 조회·변경)가
 # 똑같이 쓰는 표시 포맷 — 복사하지 않고 여기 하나만 둔다.
 FIELD_LABELS: dict[str, str] = {
     "speed": "스피드",

@@ -27,7 +27,7 @@ class _FakeMemory:
 def _transcript(messages: list[ThreadMessage]) -> ThreadTranscript:
     return ThreadTranscript(
         thread_id="t1", player_id="p1", messages=messages, closed_reason="timeout",
-        skill_name="chunithm-session", channel_id="c1",
+        skill_name="session", channel_id="c1",
     )
 
 

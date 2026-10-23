@@ -94,3 +94,55 @@ async def test_run_migrations_detects_changed_applied_file(tmp_path: Path) -> No
 
         with pytest.raises(MigrationError, match="바뀌었다"):
             await run_migrations(conn, roots=[("core", core_dir)])
+
+
+@pytest.mark.asyncio
+async def test_022_moves_stored_skill_names_to_new_names(tmp_path: Path) -> None:
+    real_core = Path("migrations/core")
+    old_dir = tmp_path / "core_old"
+    old_dir.mkdir()
+    for sql in sorted(real_core.glob("*.sql")):
+        if sql.name < "022":
+            (old_dir / sql.name).write_text(sql.read_text())
+
+    async with aiosqlite.connect(":memory:") as conn:
+        await run_migrations(conn, roots=[("core", old_dir)])
+        await conn.execute(
+            "INSERT INTO schema_migrations (owner, filename, checksum, applied_at) VALUES "
+            "('chunithm-sync', '001_init.sql', 'x', 't'), ('memory', '001_init.sql', 'x', 't')"
+        )
+        await conn.execute(
+            "INSERT INTO settings_skill_toggles (guild_id, skill, enabled, updated_by, updated_at) VALUES "
+            "('g', 'chunithm-account', 0, 'u', 't'), ('g', 'memory', 0, 'u', 't')"
+        )
+        await conn.execute(
+            "INSERT INTO settings_values (scope, scope_id, skill, name, value, updated_at) "
+            "VALUES ('guild', 'g', 'chunithm-sync', 'cooldown', '60', 't')"
+        )
+        await conn.execute(
+            "INSERT INTO schedule_recurring (owner_skill, fn_name, cron, catch_up, next_run_at) "
+            "VALUES ('chunithm-updates', 'check', '* * * * *', 1, 't')"
+        )
+        await conn.execute(
+            "INSERT INTO schedule_once (owner_skill, event_name, payload, fire_at, catch_up) "
+            "VALUES ('chunithm-goals', 'e', '{}', 't', 0)"
+        )
+        await conn.execute(
+            "INSERT INTO conversation_skills (message_id, skills, created_at) "
+            '''VALUES ('m', '["chunithm-song", "memory", "chunithm-sync"]', 0)'''
+        )
+        await conn.commit()
+
+        applied = await run_migrations(conn, roots=[("core", real_core)])
+        assert applied == ["core/022_rename_skills.sql"]
+
+        async def column(sql: str) -> list[str]:
+            cursor = await conn.execute(sql)
+            return sorted(row[0] for row in await cursor.fetchall())
+
+        assert await column("SELECT owner FROM schema_migrations WHERE filename = '001_init.sql'") == ["memory", "sync"]
+        assert await column("SELECT skill FROM settings_skill_toggles") == ["memory", "sega-account"]
+        assert await column("SELECT skill FROM settings_values") == ["sync"]
+        assert await column("SELECT owner_skill FROM schedule_recurring") == ["updates"]
+        assert await column("SELECT owner_skill FROM schedule_once") == ["goals"]
+        assert await column("SELECT skills FROM conversation_skills") == ['["song", "memory", "sync"]']

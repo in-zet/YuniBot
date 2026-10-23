@@ -411,7 +411,7 @@ class SongDbService:
         """수록 버전으로 채보를 찾는다. difficulty를 주면 find_by_const처럼 그 난이도 하나만
         본다. difficulty를 비우면("버전 전체" 폴더) 그 버전 곡들의 **고를 수 있는 채보를
         전부**(난이도마다 하나씩) 돌려준다 — 폴더 목표의 "그 버전 전체"는 특정 난이도 하나로
-        좁힐 이유가 설계서에 없다(docs/design/skills/chunithm-goals.md "폴더 정의"는 난이도를
+        좁힐 이유가 설계서에 없다(docs/design/skills/goals.md "폴더 정의"는 난이도를
         조합한다고만 적었지, 버전 폴더에서 난이도가 필수라고 하지 않았다)."""
         hits: list[ConstRangeHit] = []
         for title, song in self._songs.items():

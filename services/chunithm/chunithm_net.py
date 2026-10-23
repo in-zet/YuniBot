@@ -98,11 +98,11 @@ class ChunithmNetAdapterLike(Protocol):
     async def logout(self) -> None: ...
     async def aclose(self) -> None: ...
 
-    # chunithm-arcade·chunithm-settings 전용: 설정 페이지(get_profile 등과 달리
+    # arcade·settings 전용: 설정 페이지(get_profile 등과 달리
     # chuni-penguin에 메서드가 없다)를 읽고 쓰려고 어댑터의 공용 요청 메서드와 CSRF
     # 역할의 `_t` 쿠키를 그대로 쓴다. 이름이 private(밑줄)인 건 third_party 내부
     # 구현이라서다 — 쿠키·인증·에러 훅까지 다시 구현하는 중복을 피하려고 이 Protocol에
-    # 얹었다(docs/design/skills/chunithm-arcade.md 구현 결정).
+    # 얹었다(docs/design/skills/arcade.md 구현 결정).
     async def _request_as_soup(self, method: str, url: str, **kwargs: object) -> LexborHTMLParser: ...
 
     @property
@@ -326,7 +326,7 @@ class ChunithmNetService:
         """동기화에 필요한 것(프로필, 베스트30, 신곡20, 최근 이력, 난이도별 전체 PB)을
         한 번에 가져온다. 인증 실패(AuthenticationError)일 때만 만료로 보고
         chunithm-linked를 떼고 chunithm.login.expired를 낸 뒤 그대로 예외를 다시
-        던진다 — 호출한 쪽(chunithm-sync 스킬)이 "/로그인 안내" 오류로 바꾼다.
+        던진다 — 호출한 쪽(sync 스킬)이 "/로그인 안내" 오류로 바꾼다.
         점검(MaintenanceError), 네트워크 오류, 파서 오류는 로그인과 무관하므로 태그를
         건드리지 않고 그대로 올려 보낸다."""
         cookie = await self._decrypted_cookie(player_id)
@@ -377,7 +377,7 @@ class ChunithmNetService:
     async def get_arcade_settings(
         self, player_id: str, *, ctx: ToolContext | None = None
     ) -> ArcadeSettings:
-        """지금 계정의 게임 설정 페이지를 읽는다(`chunithm-arcade` 전용). 인증 실패는
+        """지금 계정의 게임 설정 페이지를 읽는다(`arcade` 전용). 인증 실패는
         다른 메서드와 똑같이 만료로 처리하고 예외를 다시 던진다."""
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
@@ -397,7 +397,7 @@ class ChunithmNetService:
         self, player_id: str, *, changes: dict[str, str], ctx: ToolContext | None = None
     ) -> ArcadeSettings:
         """게임 설정 중 `changes`에 담긴 항목만 바꾸고 나머지는 지금 값 그대로 다시
-        제출한다(`chunithm-settings` 전용). POST 응답을 믿지 않고 다시 읽어 실제로
+        제출한다(`settings` 전용). POST 응답을 믿지 않고 다시 읽어 실제로
         반영된 값을 돌려주며, 요청한 값과 다르면 `ChangeNotAppliedError`다. `changes`의 표시 텍스트가 선택지에 없으면
         `build_update_payload`의 ValueError가 그대로 올라간다(모델에 보여줄 한글 메시지)."""
         cookie = await self._decrypted_cookie(player_id)
@@ -429,7 +429,7 @@ class ChunithmNetService:
             await adapter.aclose()
 
     async def get_favorite_music(self, player_id: str, *, ctx: ToolContext | None = None) -> list[int]:
-        """지금 즐겨찾기 곡 id 목록을 읽는다(`chunithm-settings` 전용)."""
+        """지금 즐겨찾기 곡 id 목록을 읽는다(`settings` 전용)."""
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
             raise ConnectionError("로그인되어 있지 않다")
@@ -446,7 +446,7 @@ class ChunithmNetService:
     async def set_favorite_music(
         self, player_id: str, ids: Sequence[int], *, ctx: ToolContext | None = None
     ) -> None:
-        """즐겨찾기 곡 id 목록을 통째로 교체한다(`chunithm-settings` 전용) — 호출하는
+        """즐겨찾기 곡 id 목록을 통째로 교체한다(`settings` 전용) — 호출하는
         쪽이 추가·삭제를 반영한 전체 목록을 만들어 넘긴다."""
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:

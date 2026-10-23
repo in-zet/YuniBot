@@ -2,7 +2,7 @@ FROM python:3.14-slim
 
 # tzdata: docker-compose.yml의 TZ=Asia/Tokyo가 실제로 먹게 한다(세션 날짜 배정과 예약 작업이
 # 로컬 벽시계 기준이다). 공식 python slim 이미지에도 들어 있지만, 베이스 이미지 사정에 기대지 않게 명시한다.
-# fonts-noto-cjk: 그림 표(chunithm-image)가 한글·일본어를 그리는 글꼴.
+# fonts-noto-cjk: 그림 표(image)가 한글·일본어를 그리는 글꼴.
 RUN apt-get update && apt-get install -y --no-install-recommends git tzdata fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 

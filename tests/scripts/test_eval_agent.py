@@ -14,9 +14,9 @@ def test_collect_eval_cases_includes_all_examples() -> None:
 
 def test_score_tool_choice_full_mode_requires_open_skill_first() -> None:
     assert score_tool_choice(expected_skill="chunithm-border", first_tool_name="open_skill", mode="full") is True
-    assert score_tool_choice(expected_skill="chunithm-border", first_tool_name="chunithm-song_info", mode="full") is False
+    assert score_tool_choice(expected_skill="chunithm-border", first_tool_name="song_info", mode="full") is False
 
 
 def test_score_tool_choice_instructions_mode_checks_skill_prefix() -> None:
     assert score_tool_choice(expected_skill="chunithm-border", first_tool_name="chunithm-border_lookup", mode="instructions") is True
-    assert score_tool_choice(expected_skill="chunithm-border", first_tool_name="chunithm-song_info", mode="instructions") is False
+    assert score_tool_choice(expected_skill="chunithm-border", first_tool_name="song_info", mode="instructions") is False

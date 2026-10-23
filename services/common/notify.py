@@ -25,7 +25,7 @@ _BARE_CHANNEL_ID_RE = re.compile(r"^\d{15,25}$")
 
 def parse_channel_ref(raw: str) -> str | None:
     """#채널 멘션(<#id>)이나 맨 숫자 id를 채널 id로 바꾼다. 못 읽으면 None. 여러 스킬이
-    "채널을 설정값으로 받는" 같은 모양이라 공통 함수로 둔다(admin, chunithm-updates)."""
+    "채널을 설정값으로 받는" 같은 모양이라 공통 함수로 둔다(admin, updates)."""
     text = raw.strip()
     mention = _CHANNEL_MENTION_RE.match(text)
     if mention:

@@ -42,7 +42,7 @@ def _shown_sources(found: list[SearchSource]) -> list[dict[str, str]]:
 @tool(cost="llm", max_calls_per_turn=5)
 async def search(ctx: ToolContext, question: str) -> ToolResult:
     """츄니즘 일반 질문(시스템, 공략, 이벤트 등)을 웹에서 찾아 내용과 출처를 돌려준다. 상수·노트
-    수·수록 버전이나 용어 사전에 있는 말은 이 도구를 쓰지 말고 chunithm-song/chunithm-terms를 쓴다."""
+    수·수록 버전이나 용어 사전에 있는 말은 이 도구를 쓰지 말고 song/terms를 쓴다."""
     try:
         async with asyncio.timeout(_SEARCH_TOTAL_SECONDS):
             result = await ctx.websearch.search(query=question, player_id=ctx.player_id, now=_now())

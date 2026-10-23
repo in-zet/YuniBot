@@ -35,7 +35,7 @@ tests/                 코어·서비스 시험(스킬 시험은 각 스킬의 t
 - SQLite + aiosqlite. ORM과 alembic은 쓰지 않고 SQL 문을 직접 쓴다.
 - 테이블은 `migrations/NNN_설명.sql` 파일로 만든다. 코어(`migrations/core/`)가 먼저, 스킬은 이름순으로 실행하고 `schema_migrations`에 기록한다.
 - 한 번 적용한 SQL 파일은 고치지 않는다(체크섬으로 잡혀 기동이 멈춘다). 바꿀 것이 있으면 다음 번호 파일을 더한다.
-- 스킬 테이블 이름은 스킬 이름에서 `chunithm-`을 빼고 하이픈을 밑줄로 바꾼 접두사로 시작한다(`chunithm-goals` → `goals_`, `yuni-bond` → `yuni_bond_`).
+- 스킬 테이블 이름은 스킬 이름에서 `chunithm-`을 빼고 하이픈을 밑줄로 바꾼 접두사로 시작한다(`goals` → `goals_`, `yuni-bond` → `yuni_bond_`).
 - 게임에 딸린 테이블에는 `game` 열을, 플레이어 데이터에는 `player_id` 열을 둔다.
 
 ## 4. 시험

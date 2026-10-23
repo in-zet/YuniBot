@@ -35,7 +35,7 @@ Oct 9, 2026 · @astrove
 - 별칭 필드는 없다. 노트 수가 0으로 비어 있는 채보가 MAS 8개, EXP 16개 있다. 추정 상수 표시가 붙은 채보는 EXP 308개, ADV 12개다.
 - 자동 동기화는 암호화한 clal 쿠키만 저장하는 방식이고 국제판에서만 동작한다. 이 봇도 같은 방식을 쓴다.
 
-**공식 출처**: 일본판 공지 RSS와 곡 목록(music.json), 국제판 공지 페이지와 곡 목록(music.json)이 모두 열린다. 국제판 공지에는 RSS가 없다. 자세한 내용은 `chunithm-updates` 문서에 있다.
+**공식 출처**: 일본판 공지 RSS와 곡 목록(music.json), 국제판 공지 페이지와 곡 목록(music.json)이 모두 열린다. 국제판 공지에는 RSS가 없다. 자세한 내용은 `updates` 문서에 있다.
 
 **chuni-penguin** ([저장소](https://github.com/beer-psi/chuni-penguin))
 
@@ -164,9 +164,9 @@ skills/chunithm-border/
 
 값이 되는 용어(랭크, 난이도, 램프, 점수)는 모델이 기억으로 해석하지 않는다. 별칭은 `terms` 서비스의 `terms.yaml` 하나에 있고, 그래서 모든 스킬이 같은 은어를 알아듣는다.
 
-**못 알아들은 이름은 짐작해서 되묻고, 확인받으면 저장한다(2026-10-21 사용자 결정).** 곡·오락실·난이도·랭크·램프·작곡가 같은 이름이나 말을 해석기가 못 알아들으면, 모델은 후보(해석기가 주는 비슷한 이름)나 아는 것에서 가장 비슷한 하나를 짐작해 "○○ 말하는 거 맞아?"라고 먼저 묻는다. 확인받기 전에는 그 짐작으로 조회·저장·계산을 하지 않고, 웹 검색으로 대신하지 않는다. 맞다고 하면 그 이름으로 다시 도구를 부르고 그 말을 저장한다: 곡은 `alias_add`(`chunithm-song`), 난이도·랭크·램프·작곡가는 `alias_add`(`chunithm-terms`, `terms_aliases`), 오락실은 `register_arcade`(`chunithm-arcade`). **모든 별칭은 봇 전역이다**(서버·플레이어별이 아니다) — 한 사람이 가르치면 모두에게 적용되고, 잘못 저장한 것은 추가한 사람과 admin이 지운다. 규칙은 `prompts/rules.md`에 있다. 같은 규칙 파일에 "계정"이라고만 하면 세가(오락실, CHUNITHM-NET) 계정이고 디코 계정은 "디코 계정"이라고 말했을 때만이라는 약속도 있다.
+**못 알아들은 이름은 짐작해서 되묻고, 확인받으면 저장한다(2026-10-21 사용자 결정).** 곡·오락실·난이도·랭크·램프·작곡가 같은 이름이나 말을 해석기가 못 알아들으면, 모델은 후보(해석기가 주는 비슷한 이름)나 아는 것에서 가장 비슷한 하나를 짐작해 "○○ 말하는 거 맞아?"라고 먼저 묻는다. 확인받기 전에는 그 짐작으로 조회·저장·계산을 하지 않고, 웹 검색으로 대신하지 않는다. 맞다고 하면 그 이름으로 다시 도구를 부르고 그 말을 저장한다: 곡은 `alias_add`(`song`), 난이도·랭크·램프·작곡가는 `alias_add`(`terms`, `terms_aliases`), 오락실은 `register_arcade`(`arcade`). **모든 별칭은 봇 전역이다**(서버·플레이어별이 아니다) — 한 사람이 가르치면 모두에게 적용되고, 잘못 저장한 것은 추가한 사람과 admin이 지운다. 규칙은 `prompts/rules.md`에 있다. 같은 규칙 파일에 "계정"이라고만 하면 세가(오락실, CHUNITHM-NET) 계정이고 디코 계정은 "디코 계정"이라고 말했을 때만이라는 약속도 있다.
 
-후보가 여러 개일 때 멘션 경로에서는 모델이 되묻거나 다시 고르고, 슬래시 경로에서는 코어가 후보 버튼을 낸다. 곡·채보 데이터 자체는 `songdb` 서비스에 있고, `chunithm-song` 스킬은 사용자가 곡 정보를 물을 때 쓰는 창구일 뿐이다. 다른 스킬은 이 스킬을 거치지 않는다.
+후보가 여러 개일 때 멘션 경로에서는 모델이 되묻거나 다시 고르고, 슬래시 경로에서는 코어가 후보 버튼을 낸다. 곡·채보 데이터 자체는 `songdb` 서비스에 있고, `song` 스킬은 사용자가 곡 정보를 물을 때 쓰는 창구일 뿐이다. 다른 스킬은 이 스킬을 거치지 않는다.
 
 **도구가 돌려주는 것**은 세 칸이다.
 
@@ -186,7 +186,7 @@ skills/chunithm-border/
 - **슬래시 전용 본문**: `Display.slash_content`가 있으면 슬래시는 `content` 대신 그것을 보낸다. 멘션은 `content`만 쓴다. 다음 슬래시 명령에 타이핑할 id(`/목표 목록`의 목표 id 등)는 여기에만 넣어 멘션 답에는 안 보이게 한다.
 - 언제 붙이고 언제 말로 끝낼지는 스킬의 `SKILL.md` 본문에 적는다. 예시는 아래 보더 스킬에 있다.
 
-### 작업 표 (초안 2026-10-20, 코어 구현 2026-10-20, 스킬 연결은 16단계 Part 2~6 진행 중(Part 4까지 완료), 그림 표 구현 2026-10-20 — `docs/design/skills/chunithm-image.md`)
+### 작업 표 (초안 2026-10-20, 코어 구현 2026-10-20, 스킬 연결은 16단계 Part 2~6 진행 중(Part 4까지 완료), 그림 표 구현 2026-10-20 — `docs/design/skills/image.md`)
 
 **왜.** "15 상수 마스 중 SSS 못 한 거"처럼 여러 채보를 고른 뒤 다른 스킬이 채보마다 값을 붙이는 질문은, 지금 구조에서는 모델이 목록을 받아 채보마다 다른 도구를 다시 불러야 한다. 호출 상한(5)에 바로 걸리고, 도구마다 표시물이 붙어 같은 목록이 여러 번 나오며, 숫자가 모델 손을 거쳐 옮겨진다. 그래서 행 목록은 **작업 표**로 만들어 코어가 보관하고, 모델과 스킬은 표 id만 주고받는다.
 
@@ -197,7 +197,7 @@ skills/chunithm-border/
 | 부분 | 내용 |
 | --- | --- |
 | `id` | `t1`, `t2`… 플레이어+채널마다 늘어나는 번호 |
-| 가리키는 것 (`ref`) | **행마다 정확히 하나.** 그 행 자체가 무엇인지를 종류와 키로 적는다(예: 목표 행은 종류 `chunithm-goals.goal`, 키 목표 id). 종류 이름은 그 종류를 해석하는 스킬 이름을 앞에 붙이고, 여러 스킬이 같이 쓰는 종류(`chunithm.chart`, `chunithm.song`)만 `services/chunithm`에 정한다. 키는 코어가 보관만 하고 모델에게 보이지 않는다. 스킬 고유 종류는 그 스킬의 도구만 해석한다. 그 행이 채보와 관련 있는지는 이 칸이 아니라 아래 곡·난이도 칸으로 판단한다 |
+| 가리키는 것 (`ref`) | **행마다 정확히 하나.** 그 행 자체가 무엇인지를 종류와 키로 적는다(예: 목표 행은 종류 `goals.goal`, 키 목표 id). 종류 이름은 그 종류를 해석하는 스킬 이름을 앞에 붙이고, 여러 스킬이 같이 쓰는 종류(`chunithm.chart`, `chunithm.song`)만 `services/chunithm`에 정한다. 키는 코어가 보관만 하고 모델에게 보이지 않는다. 스킬 고유 종류는 그 스킬의 도구만 해석한다. 그 행이 채보와 관련 있는지는 이 칸이 아니라 아래 곡·난이도 칸으로 판단한다 |
 | `subject` | 표의 데이터가 누구 것인지(플레이어). 키처럼 모델에게 보이지 않는다. 남의 공개 기록으로 만든 표인지 확인하거나, 그림 표가 그 플레이어의 레벨·캐릭터 그림을 찾을 때 쓴다. 플레이어와 무관한 표(곡 검색 등)는 비어 있다 |
 | `columns` | 칸마다 이름, 보이는 이름, 값 종류. 값 종류는 `text`·`number` 또는 표준 인자 타입(`ScoreRef`·`RankRef`·`LampRef`·`DifficultyRef`)이다. 칸은 표마다 다르다 — 정해진 칸 목록은 없고, 원천 도구가 처음 칸을 정하고 표를 받는 도구가 칸을 더해 새 표를 낸다. 여러 스킬이 알아봐야 하는 칸은 이름을 한 곳에 정해 둔다(아래 "곡·난이도 칸") |
 | 셀 | 셀마다 **원래 값**(거르기·정렬용)과 **보일 글자**(출력용)를 함께 둔다. 보일 글자는 칸을 붙인 스킬이 만든다 — 레이팅 소수 둘째 자리 버림 같은 게임 규칙을 코어가 몰라도 된다. 값이 없을 때의 글자("점수 없음" 등)도 스킬이 정한다 |
@@ -212,8 +212,8 @@ skills/chunithm-border/
 - 묶음 순서(2026-10-21 결정): 다시 묶은 묶음은 묶은 칸 종류에 따라 정해진다. **숫자·점수·순서가 있는 칸**(상수, 버전은 출시순)은 큰 값(최신)부터이고, 그 칸을 `sort`로 정렬했으면 `descending`을 따른다. **글 칸**(곡, 작곡가, 램프 등)은 `sort`한 순서에서 그 값이 처음 나온 순서다(`sort`가 없으면 표에 나온 순서. 이름 역순이 아니다). 값이 없는 행의 묶음과 순서 목록에 없는 값의 묶음은 맨 뒤. 원천 도구가 만든 묶음은 만든 순서(베스트 → 신곡)를 따른다.
 - 정렬은 묶음 안에서 한다. 글 칸으로 묶을 때만 먼저 표 전체를 정렬하고 묶어서, 묶음 순서와 묶음 안 순서가 모두 그 정렬을 따른다.
 - **순서가 있는 글 칸(2026-10-21 결정)**: 칸은 `order`(작은 쪽부터 나열한 값 목록)를 가질 수 있다. 원래 값은 그대로 글이라 `==`·`contains`는 그대로이고, 정렬·묶기·크기 비교(`<`, `>=`)는 목록 위치를 따른다. `where` 값은 목록의 철자로 바로잡고(대소문자 무시) 목록에 없으면 쓸 수 있는 값을 알려 주는 에러다. 목록에 없는 값은 정렬·묶기에서 맨 뒤, 크기 비교에서는 탈락. 츄니즘의 수록 버전 칸이 이것을 쓴다(목록은 `services/chunithm/songdb.py`의 `VERSION_ORDER`).
-- **겹치는 행 줄이기(2026-10-21 결정)**: `table_query`의 `distinct_by`(칸 이름)는 그 칸 값이 같은 행을 정렬한 순서에서 첫 행만 남긴다. 묶음을 넘어 표 전체에서 겹침을 보고, 값이 없는 행은 서로 겹치지 않는다. 순서는 정렬 → 줄이기 → `limit`이다("작곡가마다 상수 제일 높은 곡 하나" = 상수 내림차순 정렬 + `distinct_by="작곡가"`). 행의 종류와 가리키는 것은 그대로이니 채보를 곡 단위로 바꾸는 일은 코어가 모르는 일이라 스킬 도구(`chunithm-song.songs_of`)가 맡는다.
-- **보일 칸 고르기(2026-10-21 결정)**: `table_query`의 `columns`(칸 보이는 이름 목록)를 주면 그 칸만 글자 출력에 보인다("곡명만"이면 `["곡"]`). 나머지 칸은 지우지 않고 숨기기만 하므로(`hidden_in_text`) 이어서 거르기·정렬·다른 도구에 넘기기는 그대로 된다. 그림 표도 같은 칸을 그린다(2026-10-22 결정, `chunithm-image.md`): 곡은 숨겨도 그리고, 정해진 칸 밖의 보이는 칸은 범용 칸으로 그린다. 그래서 스킬이 정하는 `hidden_in_text` 기본값은 "글자와 그림에 기본으로 보일 칸"이다.
+- **겹치는 행 줄이기(2026-10-21 결정)**: `table_query`의 `distinct_by`(칸 이름)는 그 칸 값이 같은 행을 정렬한 순서에서 첫 행만 남긴다. 묶음을 넘어 표 전체에서 겹침을 보고, 값이 없는 행은 서로 겹치지 않는다. 순서는 정렬 → 줄이기 → `limit`이다("작곡가마다 상수 제일 높은 곡 하나" = 상수 내림차순 정렬 + `distinct_by="작곡가"`). 행의 종류와 가리키는 것은 그대로이니 채보를 곡 단위로 바꾸는 일은 코어가 모르는 일이라 스킬 도구(`song.songs_of`)가 맡는다.
+- **보일 칸 고르기(2026-10-21 결정)**: `table_query`의 `columns`(칸 보이는 이름 목록)를 주면 그 칸만 글자 출력에 보인다("곡명만"이면 `["곡"]`). 나머지 칸은 지우지 않고 숨기기만 하므로(`hidden_in_text`) 이어서 거르기·정렬·다른 도구에 넘기기는 그대로 된다. 그림 표도 같은 칸을 그린다(2026-10-22 결정, `image.md`): 곡은 숨겨도 그리고, 정해진 칸 밖의 보이는 칸은 범용 칸으로 그린다. 그래서 스킬이 정하는 `hidden_in_text` 기본값은 "글자와 그림에 기본으로 보일 칸"이다.
 - 거르면 표지 이름은 남고 묶음 요약은 버린다. 비어 버린 묶음은 뺀다.
 
 **표는 바꾸지 않는다.** 칸을 붙이거나 거르거나 다시 묶으면 언제나 새 id의 새 표가 나온다. 원래 표는 그대로 남는다.
@@ -229,10 +229,10 @@ skills/chunithm-border/
 **도구와 표.**
 - 여러 항목을 돌려주는 도구는 `ToolResult.table`에 표를 담고 `display`는 비운다.
 - 표를 받는 도구는 새 표준 인자 타입 `TableRef`를 쓴다. 모델은 `"t3"`를 넘기고, 코어가 보관소에서 표를 찾아 넘긴다. 이때 소유자(요청한 플레이어)와 채널이 같은지, 아직 살아 있는지 확인한다. 실패하면 "그 표 없음". 다른 플레이어의 기록을 붙이는 도구는 지금처럼 그 스킬이 공개 여부를 검사한다.
-- 표를 받는 도구는 **필요한 것**을 선언한다. 선언할 수 있는 것은 두 가지다: 가리키는 것의 종류(예: 목표 도구는 `chunithm-goals.goal`), 또는 차 있어야 하는 칸(예: `add_scores`는 곡·난이도). 코어가 도구를 부르기 전에 행마다 확인한다.
+- 표를 받는 도구는 **필요한 것**을 선언한다. 선언할 수 있는 것은 두 가지다: 가리키는 것의 종류(예: 목표 도구는 `goals.goal`), 또는 차 있어야 하는 칸(예: `add_scores`는 곡·난이도). 코어가 도구를 부르기 전에 행마다 확인한다.
 - **필요한 것이 없는 행은 뺀다 (2026-10-20 결정).** 예: 목표 표(레이팅 목표 1개 + 곡 목표 2개)를 `add_scores`에 넘기면 곡이 없는 레이팅 목표는 빠지고, 결과 표에는 곡 목표 2개만 점수 칸과 함께 남는다. 뺀 행 수는 결과 표의 `steps`에 "채보 없는 행 1개 뺌"처럼 적어 모델과 사용자가 알 수 있게 한다. 남는 행이 0개면 도구를 부르지 않고 "대상 행이 없다" 에러를 돌려준다.
 - **곡 단위 행을 채보로 펼치기 (2026-10-20 결정).** 곡 단위 행(난이도 빈 값)이 채보가 필요한 도구(점수·보더·채보 링크·폴더 저장·상수대 통계)에 오면 위 규칙대로 빠진다. 그때 뺀 이유를 따로 적는다: steps와 (모두 빠졌을 때의) 에러에 "곡 단위 행(난이도 없음) N개 뺌 — `charts_of`로 난이도를 정할 수 있다". 모델은 이걸 보고 다음 수를 안다.
-  - 펼치는 도구는 `chunithm-song.charts_of(table, difficulty: DifficultyRef | None = None)`다. **곡 단위 행만** 그 곡의 채보 행으로 바꾸고, 이미 채보인 행은 그대로 둔다(곡 전체 메모와 채보 메모가 섞인 메모 표에서도 안전하다).
+  - 펼치는 도구는 `song.charts_of(table, difficulty: DifficultyRef | None = None)`다. **곡 단위 행만** 그 곡의 채보 행으로 바꾸고, 이미 채보인 행은 그대로 둔다(곡 전체 메모와 채보 메모가 섞인 메모 표에서도 안전하다).
   - 난이도를 주면 그 난이도, **안 주면 MAS**다(사용자 결정 — 모든 난이도로 펼치지 않는다). 그 난이도가 없는 곡은 빠지고 steps에 "ULT 없는 곡 3개 뺌"처럼 적는다.
   - 처음부터 난이도를 말했으면 펼칠 필요가 없다: "nora2r 마스 곡 내 점수" → `find_by_artist(nora2r, difficulty=MAS)` → `add_scores`. 곡 표를 본 뒤 "마스로 점수 붙여줘" → `charts_of("t3")` → `add_scores`.
   - `find_by_artist`가 난이도를 안 받으면 MAS가 아니라 곡 단위 행을 만드는 것(위 "첫 범위")과 다르다. 검색은 곡을 보여 주는 것이 목적이고, 펼치기는 채보 도구에 넘기려는 것이 목적이라서다.
@@ -282,7 +282,7 @@ skills/chunithm-border/
 - 파일을 붙이려면 표시물에 첨부 파일 자리(`Display.files`)가 있어야 한다. 멘션과 슬래시가 보내는 곳 두 군데가 이걸 실어 보낸다.
 
 **그림 표 (2026-10-20 결정).**
-- 새 스킬 `chunithm-image`의 도구 `table_image(table, layout)` 하나다. 기본 출력이 아니라 "그림으로", "레이팅표", "상수표로" 같은 요청이 있을 때만 모델이 부른다. 재킷을 받아야 해서 무겁다(`weight: heavy`).
+- 새 스킬 `image`의 도구 `table_image(table, layout)` 하나다. 기본 출력이 아니라 "그림으로", "레이팅표", "상수표로" 같은 요청이 있을 때만 모델이 부른다. 재킷을 받아야 해서 무겁다(`weight: heavy`).
 - `layout`은 `card`(재킷 카드 격자 — 레이팅표·상수표 모양)와 `list`(한 줄에 재킷·제목·난이도·점수·랭크) 둘이다.
 - 재킷, 난이도 색, 랭크 색은 츄니즘 전용이라 코어가 아니라 스킬에 둔다. 곡 칸이 차 있어야 한다고 선언하므로, 곡이 없는 행은 위 규칙대로 빠진다. 곡 단위 행(난이도 빈 값)은 난이도·상수·점수 없이 재킷과 곡 제목만 그린다.
 - 묶음·표지·정렬·머리말은 표가 가진 그대로 그리고, 그림 도구는 배치만 고른다. 레이팅표 전용 머리말은 따로 두지 않는다 — `best`가 표 요약에 닉네임·레벨·레이팅을 넣는다. 캐릭터 그림은 표의 `subject` 플레이어의 저장된 프로필에서 찾는다(아래 "플레이어 레벨·캐릭터 그림").
@@ -317,25 +317,25 @@ skills/chunithm-border/
    - 살아 있는 표 프롬프트 조각에 `t1 (동기화 전 값)`으로 보인다. 모델은 이걸 보면 그 표를 쓰지 않고 원래 도구를 다시 부른다(`rules.md` 지침).
    - 그 표로 `table_query`를 하면 결과 표도 "옛 값"이고, 글자 출력과 그림 표의 머리말에 "동기화 전 값"이 찍힌다.
    - `subject`가 없는 표(곡 검색 등)에는 붙지 않는다.
-   - 코어는 츄니즘의 동기화를 모른다. 보관소는 "이 플레이어 데이터의 표에 옛 값 표시"라는 일반 기능만 열고, 동기화를 저장하는 쪽(`chunithm-sync`)이 저장 직후에 그 기능을 부른다.
+   - 코어는 츄니즘의 동기화를 모른다. 보관소는 "이 플레이어 데이터의 표에 옛 값 표시"라는 일반 기능만 열고, 동기화를 저장하는 쪽(`sync`)이 저장 직후에 그 기능을 부른다.
 2. **데이터를 바꾸는 도구(`mutates=True`)는 "옛 값" 표를 받지 않는다.** 실행기가 도구를 부르기 전에 막고 "표가 동기화 전 값이라 다시 만들어야 한다" 에러를 돌려준다. 모델은 표를 새로 만들어 다시 한다. 예: 14:00 표에서 "100만 안 되는 곡"을 골랐는데 14:30 동기화로 한 곡이 100만을 넘었다면, 그 곡이 투두로 들어가는 것을 막는다.
 3. **데이터를 바꾸는 도구는 실행 직전에 지금 DB를 키로 다시 읽는다.** 이미 없어진 항목·이미 바뀐 항목은 실제로 바꿀 대상에서 빼고, 확인 화면과 결과에 "2개 중 1개는 이미 없음"처럼 실제로 바뀐 것만 말한다. 슬래시로 직접 바꾼 경우에는 1번 표시가 붙지 않지만, 이 규칙이 바꾸는 쪽을 지킨다.
 - 동기화되면 표를 지우는 안은 "그중에…"가 갑자기 "그 표 없음"이 돼 헷갈리고, 표가 만들어진 과정을 기억했다가 다시 계산하는 안은 바꾸지 않는 표라는 원칙이 깨지고 복잡해서 택하지 않았다.
 
 **흐름 예시.** "15 상수 마스 중에 SSS 못 한 거 노트 수 많은 순으로 보여줘"
-1. `chunithm-song.find_songs(min_const=15.0, max_const=15.0, difficulty="MAS")` → `t1`(24행, 곡·난이도·상수·노트 수)
-2. `chunithm-report.add_scores(table="t1")` → `t2`(점수·램프 칸 추가). `records`의 여러 채보 PB를 한 번에 조회한다.
+1. `song.find_songs(min_const=15.0, max_const=15.0, difficulty="MAS")` → `t1`(24행, 곡·난이도·상수·노트 수)
+2. `report.add_scores(table="t1")` → `t2`(점수·램프 칸 추가). `records`의 여러 채보 PB를 한 번에 조회한다.
 3. `table_query(table="t2", where=[점수 < "SSS"], sort="노트 수", descending=true)` → `t3`
 4. 유니: "SSS 못 한 건 9곡이야." → 코어가 `t3`만 그려 붙인다. 다음 멘션 "그중 AJ 한 건 빼줘"는 `table_query(table="t3", …)` 한 번이다.
 
-"레이팅 전체 보여줘"는 `chunithm-report.best(kind="both")` 한 번이다. 결과는 "베스트 30 · 평균 …"/"신곡 20 · 평균 …" 두 표지의 50행 표에 요약(닉네임·레이팅)이 붙은 형태다. 유니는 요약의 레이팅만 말한다. 11행이 넘으니 행 목록은 텍스트 파일로 나간다. "레이팅표 그림으로"면 `table_image(table="t1", layout="card")`를 한 번 더 부른다.
+"레이팅 전체 보여줘"는 `report.best(kind="both")` 한 번이다. 결과는 "베스트 30 · 평균 …"/"신곡 20 · 평균 …" 두 표지의 50행 표에 요약(닉네임·레이팅)이 붙은 형태다. 유니는 요약의 레이팅만 말한다. 11행이 넘으니 행 목록은 텍스트 파일로 나간다. "레이팅표 그림으로"면 `table_image(table="t1", layout="card")`를 한 번 더 부른다.
 
-"15 이상 마스 상수표 내 점수로 만들어줘"는 `chunithm-report.const_table(min_const=15.0, difficulty="MAS")` → `table_image(layout="card")`로 호출 2번이다(2026-10-21 정형화 — 전에는 `find_songs` → `add_scores` → `table_query` → `table_image` 4번이었다. `const_table`이 상수 → 난이도 → 점수 정렬과 점수 칸까지 코드로 만든다).
+"15 이상 마스 상수표 내 점수로 만들어줘"는 `report.const_table(min_const=15.0, difficulty="MAS")` → `table_image(layout="card")`로 호출 2번이다(2026-10-21 정형화 — 전에는 `find_songs` → `add_scores` → `table_query` → `table_image` 4번이었다. `const_table`이 상수 → 난이도 → 점수 정렬과 점수 칸까지 코드로 만든다).
 
 **첫 범위.**
-- 표를 만드는 쪽: `chunithm-song`의 `find_by_const`·`find_by_version`·`find_songs`·`find_by_artist`, `chunithm-report.best`, `chunithm-folders`의 폴더 불러오기
+- 표를 만드는 쪽: `song`의 `find_by_const`·`find_by_version`·`find_songs`·`find_by_artist`, `report.best`, `folders`의 폴더 불러오기
 - `find_by_artist`에 선택 인자 `difficulty`를 더한다. 난이도를 말했으면 그 난이도의 채보 행, 말하지 않았으면 **곡 단위 행**(난이도 칸 비움)을 만든다. MAS로 가정하지 않는다(2026-10-20 결정 — 앞서 정한 "기본 MAS"를 바꿨다).
-- 표를 받는 쪽: `chunithm-report.add_scores`(새 도구), `chunithm-folders`의 표를 폴더로 저장하기(칸은 버리고 채보 목록만), `chunithm-image.table_image`
+- 표를 받는 쪽: `report.add_scores`(새 도구), `folders`의 표를 폴더로 저장하기(칸은 버리고 채보 목록만), `image.table_image`
 - `find_songs`의 `sort_by`/`descending`은 `table_query`와 겹쳐서 뺀다.
 - 친 곡 전체를 레이팅순으로 보는 원천 도구는 만들지 않는다(2026-10-20 결정).
 - 첫 범위 밖에서 표를 내거나 받을 도구 목록은 `docs/plan/2026-10-20_수정.md` §16 Part 4~6에 있다. 그대로 두는 도구와 그 이유도 거기 있다.
@@ -362,7 +362,7 @@ skills/chunithm-border/
 
 ### 데이터와 설정
 
-- 스킬 테이블은 이름이 스킬 이름에서 게임 접두사(`chunithm-`)를 빼고 하이픈을 밑줄로 바꾼 것으로 시작한다(`chunithm-goals` → `goals_`, `yuni-bond` → `yuni_bond_`, `account-link` → `account_link_`). 접두사가 겹치면 계약 테스트에서 걸린다. 게임에 딸린 테이블은 `game` 열을, 플레이어 데이터는 `player_id` 열을 둔다. 계정 연결로 한쪽 플레이어의 데이터를 버릴 때, 코어가 이 열로 모든 스킬 테이블의 행을 미리 세고 지운다.
+- 스킬 테이블은 이름이 스킬 이름에서 게임 접두사(`chunithm-`)를 빼고 하이픈을 밑줄로 바꾼 것으로 시작한다(`goals` → `goals_`, `yuni-bond` → `yuni_bond_`, `account-link` → `account_link_`). 접두사가 겹치면 계약 테스트에서 걸린다. 게임에 딸린 테이블은 `game` 열을, 플레이어 데이터는 `player_id` 열을 둔다. 계정 연결로 한쪽 플레이어의 데이터를 버릴 때, 코어가 이 열로 모든 스킬 테이블의 행을 미리 세고 지운다.
 - 마이그레이션은 스킬 폴더마다 따로 둔다. `migrations/001_init.sql`처럼 `번호_설명.sql` 파일을 두고, 봇이 시작할 때 코어가 아직 실행하지 않은 파일만 번호순으로 실행한다. 코어(`migrations/core/`)가 먼저, 스킬은 이름순이다. 파일 하나는 트랜잭션 하나로 돌리고, 실행한 파일은 `schema_migrations` 테이블(스킬, 파일 이름, 적용 시각, 내용 체크섬)에 남긴다. 실패하면 봇을 띄우지 않는다. 이미 적용한 파일은 고치지 않고 다음 번호 파일을 더한다. 적용한 파일의 내용이 바뀌면 체크섬으로 잡아 기동을 멈춘다.
 - 다른 스킬의 테이블은 직접 읽거나 쓰지 않는다. 필요하면 서비스나 이벤트를 거친다.
 
@@ -459,7 +459,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | `hint` | 유니에게 주는 짧은 귀띔. 숫자는 `data`에 있는 것만 쓴다 |
 | `stage` | 코드가 고른 반응 단계(`great`, `good`, `close`, `rest`). `yuni` 서비스는 조각들 중 가장 높은 단계를 쓴다 |
 
-동기화를 예로 들면 이렇다. `chunithm-sync`가 `records`에 스냅샷을 저장하고 `chunithm.sync.completed`를 모은다. 리포트·목표·신곡·오락실 스킬이 조각을, `yuni-bond`가 표시물 없는 귀띔을 돌려준다. `chunithm-sync`는 조각을 순서대로 붙이고 `yuni` 서비스에 한마디를 한 번만 요청한 뒤, 보낸 내용을 담아 `chunithm.sync.reported`를 낸다. 세션 스킬이 이걸 받아 보관한다. 목표 스킬을 끄면 리포트에서 그 조각만 빠진다.
+동기화를 예로 들면 이렇다. `sync`가 `records`에 스냅샷을 저장하고 `chunithm.sync.completed`를 모은다. 리포트·목표·신곡·오락실 스킬이 조각을, `yuni-bond`가 표시물 없는 귀띔을 돌려준다. `sync`는 조각을 순서대로 붙이고 `yuni` 서비스에 한마디를 한 번만 요청한 뒤, 보낸 내용을 담아 `chunithm.sync.reported`를 낸다. 세션 스킬이 이걸 받아 보관한다. 목표 스킬을 끄면 리포트에서 그 조각만 빠진다.
 
 **규칙**
 
@@ -476,15 +476,15 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | --- | --- | --- | --- |
 | `players.first_seen` | 알림 | 코어 | `yuni-bond` |
 | `players.linked` | 알림 | `account-link` | 없음 |
-| `chunithm.login.expired` | 알림 | `chunithm_net` 서비스 | `chunithm-account` |
-| `chunithm.sync.completed` | 모으기 | `chunithm-sync` | `chunithm-report`, `chunithm-goals`, `chunithm-updates`, `chunithm-arcade`, `yuni-bond` |
-| `chunithm.sync.reported` | 알림 | `chunithm-sync` | `chunithm-session` |
-| `chunithm.song.viewed` | 모으기 | `chunithm-song` | `chunithm-notes`, `chunithm-goals`, `yuni-bond` |
-| `chunithm.session.viewed` | 모으기 | `chunithm-session` | `chunithm-arcade` |
-| `chunithm.session.closed` | 알림 | `chunithm-session` | 없음 |
-| `chunithm.goal.completed` | 알림 | `chunithm-goals` | `yuni-bond` |
-| `chunithm.plan.requested` | 모으기 | `yuni-bond` | `chunithm-goals`, `chunithm-notes` |
-| `chunithm.update.detected` | 알림 | `chunithm-updates` | 없음 |
+| `chunithm.login.expired` | 알림 | `chunithm_net` 서비스 | `sega-account` |
+| `chunithm.sync.completed` | 모으기 | `sync` | `report`, `goals`, `updates`, `arcade`, `yuni-bond` |
+| `chunithm.sync.reported` | 알림 | `sync` | `session` |
+| `chunithm.song.viewed` | 모으기 | `song` | `notes`, `goals`, `yuni-bond` |
+| `chunithm.session.viewed` | 모으기 | `session` | `arcade` |
+| `chunithm.session.closed` | 알림 | `session` | 없음 |
+| `chunithm.goal.completed` | 알림 | `goals` | `yuni-bond` |
+| `chunithm.plan.requested` | 모으기 | `yuni-bond` | `goals`, `notes` |
+| `chunithm.update.detected` | 알림 | `updates` | 없음 |
 
 받는 스킬이 없는 이벤트는 나중에 더할 스킬을 위해 내 둔다.
 
@@ -513,7 +513,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - 다른 사람의 기록은 그 사람이 공개한 경우만 보인다. 메모와 목표는 기본 비공개, 동기화 리포트는 플레이어별 설정이고 기본은 채널 공개다. 본인이 채널에서 자기 기록을 요청하면 공개 설정과 상관없이 그 채널에 답한다.
 - 바꾸는 도구는 요청한 플레이어 본인의 데이터만 바꾼다(서버 공유 데이터는 mutates 설명의 예외를 따른다). 여러 건을 바꾸거나 지우면 확인 버튼을 거친다.
 - 디스코드 계정 연결과 해제는 account-link 스킬의 슬래시 명령과 버튼으로만 한다. 도구로 만들지 않는다.
-- 스킬은 manifest의 `services`에 적은 서비스만 `ctx`로 받는다. 자기 스킬이 정의한 설정(manifest의 `settings`)을 읽을 때도 `settings`를 다른 서비스와 똑같이 `services`에 선언해야 `ctx.settings`를 받는다. 다른 스킬의 설정은 읽지 않는다 — 예외는 `admin`의 "보고 채널"처럼 admin.md가 "스킬 전용이 아니라 다른 스킬이 재사용할 수 있게" admin 설정으로 두기로 명시한 경우뿐이다(`admin.md` "구현 결정", `chunithm-terms`가 첫 소비자).
+- 스킬은 manifest의 `services`에 적은 서비스만 `ctx`로 받는다. 자기 스킬이 정의한 설정(manifest의 `settings`)을 읽을 때도 `settings`를 다른 서비스와 똑같이 `services`에 선언해야 `ctx.settings`를 받는다. 다른 스킬의 설정은 읽지 않는다 — 예외는 `admin`의 "보고 채널"처럼 admin.md가 "스킬 전용이 아니라 다른 스킬이 재사용할 수 있게" admin 설정으로 두기로 명시한 경우뿐이다(`admin.md` "구현 결정", `terms`가 첫 소비자).
 
 **권한 태그**
 
@@ -599,7 +599,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - 나비는 화자로 나오지 않는다. 유니가 이름을 언급하는 것은 된다.
 - 한국어 말투는 직접 정한다. 국제판에 공식 한국어 대사가 있는지는 확인하지 못했다. 말투 파일의 예시로 쓸 원문은 저장본에서 직접 옮긴다.
 - LLM 장애 때 나가는 고정 문구(`core/fallback_messages.py`)도 유니 말투로 써 둔다.
-- **구현 결정 (2026-10-19, 11단계)**: 말투는 밝은 반말로 정했다(원작이 반말이고 지인 서버라서). 한마디는 `yuni` 서비스가 `SUMMARY_MODEL`로 만든다. 프롬프트는 `rules.md` + `persona.md` + 한마디 지침이고, 입력은 조각의 `stage`·`data`·`hint` JSON이다. 호출이 실패하거나, 빈 응답이거나, 200자를 넘거나, `data`에 없는 숫자가 있으면 정해진 문구로 되돌린다(2026-10-20부터 단계별 문구 없이 중립 문구 하나 — 아래 "고정 문구 제거"). 사용량은 `kind="yuni_line"`으로 기록하며 `line()`에 `player_id`·`guild_id`를 넘긴 호출만 기록한다(`chunithm-sync`·`chunithm-goals`는 넘긴다. 서버 전체 알림인 `chunithm-updates`는 플레이어가 없어 기록하지 않는다). 호칭("~상")은 persona.md에 규칙만 있고 실제 호칭을 넘기는 일은 12단계다.
+- **구현 결정 (2026-10-19, 11단계)**: 말투는 밝은 반말로 정했다(원작이 반말이고 지인 서버라서). 한마디는 `yuni` 서비스가 `SUMMARY_MODEL`로 만든다. 프롬프트는 `rules.md` + `persona.md` + 한마디 지침이고, 입력은 조각의 `stage`·`data`·`hint` JSON이다. 호출이 실패하거나, 빈 응답이거나, 200자를 넘거나, `data`에 없는 숫자가 있으면 정해진 문구로 되돌린다(2026-10-20부터 단계별 문구 없이 중립 문구 하나 — 아래 "고정 문구 제거"). 사용량은 `kind="yuni_line"`으로 기록하며 `line()`에 `player_id`·`guild_id`를 넘긴 호출만 기록한다(`sync`·`goals`는 넘긴다. 서버 전체 알림인 `updates`는 플레이어가 없어 기록하지 않는다). 호칭("~상")은 persona.md에 규칙만 있고 실제 호칭을 넘기는 일은 12단계다.
 - **말투 조정 (2026-10-20)**: 원작 대사 원문(`docs/persona/yuni-lines/`)을 근거로 `persona.md`를 고쳤다. 소리 늘임·물결표·감탄사·나비짱 언급·으쓱하고 공 돌리기를 넣되 한 답에 한 번 정도로 제한하고, 사과·도구 실패·나쁜 소식에서는 늘임과 장난을 뺀다. 느낌표는 문장마다 하나까지(크게 감탄할 때만 "!!"). 호칭은 부를 이름이 없으면 "플레이어상"(원작 プレイヤーさん)을 답에 한 번 정도 쓴다. 10년 뒤의 유니 대사는 자료에서 뺐다.
 - **말투 재조정 (2026-10-20, 같은 날 두 번째)**: 처음 고친 판은 "한 답에 한 번 정도" 같은 제한 때문에 실기에서 변화가 거의 안 보였다. 사용자 요청으로 `persona.md`를 10줄 미만으로 줄이고 구체적으로 다시 썼다 — 늘임이나 감탄사를 거의 모든 답에 하나 이상 넣고(숫자 답·사과·실패·나쁜 소식은 예외), 반응의 결 표와 예시는 한 줄씩으로 압축했다. 예시 20개로 늘리는 안은 10줄 제한과 맞지 않아 접었다.
 - **잡담 형식·생각 노출 방지 (2026-10-20, 실기)**: 근황 잡담에 "대다아안해"식 과한 칭찬과 격려·마무리 인사가 붙고 대화가 끝나는 듯한 느낌이 났다. 잡담은 한마디 반응(전에 들은 일이 있으면 회상) + 다음 말을 끌어내는 질문 하나로 하고, 작별 인사는 플레이어가 끝내자고 했을 때만 쓰게 `persona.md`를 고쳤다. `rules.md`에는 "계획·규칙·도구 이름을 답에 쓰지 않는다"를 넣고 `GeminiLlmAdapter`는 `thought` part를 답 텍스트에서 뺀다.
@@ -661,7 +661,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - 그 플레이어가 지금 쓸 수 있는 것과, 상태 태그를 얻으면 쓸 수 있는 것(예: 로그인하면)을 나눠 보여 준다. 부여 태그가 없는 스킬은 보여 주지 않는다.
 - 처음 멘션한 플레이어에게는 짧게 자기소개를 하고 로그인부터 안내한다. 코드 분기가 아니라 프롬프트 맥락 한 줄("이 플레이어는 유니를 처음 멘션했다")로 넣고 `rules.md`가 처리한다.
 - 못 하는 일도 적어 둔다. 일본판 계정 동기화, 멘션 없는 대화에 끼어들기, 꺼져 있는 새벽 시간의 응답, 말만 듣고 디스코드 계정 연결하기, 한 플레이어가 CHUNITHM-NET 계정 여러 개 쓰기.
-- 슬래시 `/도움말`도 같은 목록을 LLM 없이 보여 준다. 유니 말투의 인사와 사용법 한 줄, 아직 열리지 않은 상태 태그를 여는 방법(`/로그인` 등), 보일 분류 한 줄씩, 못 하는 일을 첫 화면에 보이고(본인에게만 보이는 임시 메시지), 아래 선택 메뉴에서 분류를 고르면 같은 메시지가 그 분류의 안내로 바뀐다(2026-10-21). 분류 안내는 스킬마다 `summary`, 말 걸기 예시(`examples` 앞 2개), 지금 쓸 수 있는 슬래시 명령(같은 묶음은 `/폴더 생성·삭제`처럼 합치고 스킬 파일에 적힌 순서)이다. 스킬 내부 이름(`chunithm-song` 등)은 보이지 않는다. 모든 태그가 있을 때도 한 메시지(2,000자)를 넘지 않는 것을 시험이 지킨다. 모델용 `list_capabilities` 글도 같은 `collect_capabilities`에서 만들고 슬래시 명령을 함께 준다.
+- 슬래시 `/도움말`도 같은 목록을 LLM 없이 보여 준다. 유니 말투의 인사와 사용법 한 줄, 아직 열리지 않은 상태 태그를 여는 방법(`/로그인` 등), 보일 분류 한 줄씩, 못 하는 일을 첫 화면에 보이고(본인에게만 보이는 임시 메시지), 아래 선택 메뉴에서 분류를 고르면 같은 메시지가 그 분류의 안내로 바뀐다(2026-10-21). 분류 안내는 스킬마다 `summary`, 말 걸기 예시(`examples` 앞 2개), 지금 쓸 수 있는 슬래시 명령(같은 묶음은 `/폴더 생성·삭제`처럼 합치고 스킬 파일에 적힌 순서)이다. 스킬 내부 이름(`song` 등)은 보이지 않는다. 모든 태그가 있을 때도 한 메시지(2,000자)를 넘지 않는 것을 시험이 지킨다. 모델용 `list_capabilities` 글도 같은 `collect_capabilities`에서 만들고 슬래시 명령을 함께 준다.
 
 ## 플레이어 메모리
 
@@ -690,23 +690,23 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [admin](skills/admin.md) | 공통 | 사용량, 서버별 스킬 켜기·끄기, 부여 태그, 비용 상한 | `admin` |
 | [memory](skills/memory.md) | 공통 | 기억한 내용 보기, 지우기, 자동 저장 끄기 | 없음 |
 | [yuni-bond](skills/yuni-bond.md) | 공통 | 이정표, 동기화 때 덧붙이는 귀띔, 플레이 계획과 약속 | 없음 |
-| [chunithm-account](skills/chunithm-account.md) | 츄니즘 | CHUNITHM-NET 로그인(입력창), 쿠키 만료 안내, 기록 공개 설정 | 없음 |
-| [chunithm-song](skills/chunithm-song.md) | 츄니즘 | 곡·별칭 검색, 상수, 노트 수, 채보 뷰어 링크, 한국어 별칭 | 없음 |
-| [chunithm-terms](skills/chunithm-terms.md) | 츄니즘 | 용어와 은어의 뜻, 서버 은어 제안·승인 | 없음. 승인만 `admin` |
+| [sega-account](skills/sega-account.md) | 츄니즘 | CHUNITHM-NET 로그인(입력창), 쿠키 만료 안내, 기록 공개 설정 | 없음 |
+| [song](skills/song.md) | 츄니즘 | 곡·별칭 검색, 상수, 노트 수, 채보 뷰어 링크, 한국어 별칭 | 없음 |
+| [terms](skills/terms.md) | 츄니즘 | 용어와 은어의 뜻, 서버 은어 제안·승인 | 없음. 승인만 `admin` |
 | [chunithm-border](skills/chunithm-border.md) | 츄니즘 | 허용 어택 개수, 목표까지 남은 어택 | 없음. 남은 어택만 `chunithm-synced` |
-| [chunithm-sync](skills/chunithm-sync.md) | 츄니즘 | 동기화 실행, 리포트 조각 모으기 | `chunithm-linked` |
-| [chunithm-report](skills/chunithm-report.md) | 츄니즘 | 프로필, 베스트, 최근 플레이, 분석, 후보곡, 리포트 본문 | `chunithm-synced` |
-| [chunithm-goals](skills/chunithm-goals.md) | 츄니즘 | 레이팅·오버파워·폴더·곡별(To-Do)·자유 목표, 기한 알림 | 없음. 기록 기반 도구만 `chunithm-synced` |
-| [chunithm-session](skills/chunithm-session.md) | 츄니즘 | 세션 보관·목록·불러오기, 세션 후기 대화 | `chunithm-synced` |
-| [chunithm-arcade](skills/chunithm-arcade.md) | 츄니즘 | 오락실별 게임 설정 저장·조회 | `chunithm-linked` |
-| [chunithm-settings](skills/chunithm-settings.md) | 츄니즘 | 지금 계정의 인게임 설정 조회·변경, 즐겨찾기 곡 조회·추가·삭제 | `chunithm-linked` |
-| [chunithm-notes](skills/chunithm-notes.md) | 츄니즘 | 곡별 메모 | 없음 |
-| [chunithm-updates](skills/chunithm-updates.md) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
-| [chunithm-folders](skills/chunithm-folders.md) | 츄니즘 | 채보를 모은 이름 붙인 폴더 생성·조회, 표로 일괄 추가/삭제, 메모 | 없음 |
+| [sync](skills/sync.md) | 츄니즘 | 동기화 실행, 리포트 조각 모으기 | `chunithm-linked` |
+| [report](skills/report.md) | 츄니즘 | 프로필, 베스트, 최근 플레이, 분석, 후보곡, 리포트 본문 | `chunithm-synced` |
+| [goals](skills/goals.md) | 츄니즘 | 레이팅·오버파워·폴더·곡별(To-Do)·자유 목표, 기한 알림 | 없음. 기록 기반 도구만 `chunithm-synced` |
+| [session](skills/session.md) | 츄니즘 | 세션 보관·목록·불러오기, 세션 후기 대화 | `chunithm-synced` |
+| [arcade](skills/arcade.md) | 츄니즘 | 오락실별 게임 설정 저장·조회 | `chunithm-linked` |
+| [settings](skills/settings.md) | 츄니즘 | 지금 계정의 인게임 설정 조회·변경, 즐겨찾기 곡 조회·추가·삭제 | `chunithm-linked` |
+| [notes](skills/notes.md) | 츄니즘 | 곡별 메모 | 없음 |
+| [updates](skills/updates.md) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
+| [folders](skills/folders.md) | 츄니즘 | 채보를 모은 이름 붙인 폴더 생성·조회, 표로 일괄 추가/삭제, 메모 | 없음 |
 | [yuni-lore](skills/yuni-lore.md) | 공통 | 유니·나비·Linked VERSE 설정집을 구간별로 읽어 답하기(결말은 스포일러 확인 후) | 없음 |
 | [web-qa](skills/web-qa.md) | 츄니즘 | 용어 사전에 없는 일반 질문을 검색해 출처와 함께 답하기 | 없음 |
 
-17단계에서 두 게임을 다루는 스킬은 게임 중립 이름으로 바뀐다(`chunithm-song` → `song` 등, 표는 `docs/plan/2026-10-23_수정.md` §17.3). 바뀌기 전까지 이 표는 지금 이름을 쓴다.
+17단계에서 두 게임을 다루는 스킬은 게임 중립 이름으로 바뀐다(`song` → `song` 등, 표는 `docs/plan/2026-10-23_수정.md` §17.3). 바뀌기 전까지 이 표는 지금 이름을 쓴다.
 
 스킬끼리 주고받는 이벤트는 "이벤트, 예약 작업, 서비스" 절의 이벤트 목록에 모었다. 스킬 문서의 이벤트 표와 이 목록이 어긋나면 이 목록을 기준으로 맞춘다.
 

@@ -534,7 +534,7 @@ async def test_failing_catch_up_job_is_isolated_and_others_still_run(caplog: pyt
         raise RuntimeError("예약 작업 실패")
 
     async def ok(ctx: Any) -> None:
-        # 예약 작업이 ctx.db를 쓸 수 있어야 한다(chunithm-updates가 db 없이 죽었던 적이 있다).
+        # 예약 작업이 ctx.db를 쓸 수 있어야 한다(updates가 db 없이 죽었던 적이 있다).
         assert ctx.db is not None
         ran.append("ok")
 
@@ -869,7 +869,7 @@ async def test_session_review_flow_runs_through_the_real_bus_notify_and_thread_m
 ) -> None:
     client, registry, executor = await build_client(_config(tmp_path, Path("skills")))
     try:
-        skill = next(s for s in registry.enabled_skills() if s.manifest.name == "chunithm-session")
+        skill = next(s for s in registry.enabled_skills() if s.manifest.name == "session")
         monkeypatch.setitem(skill.code.tools[0].fn.__globals__, "_ASK_DELAY_SECONDS", 0.0)
         gateway = _RecordingGateway()
         notify = cast("NotifyService", client._services["notify"])  # pyright: ignore[reportPrivateUsage]
@@ -878,13 +878,13 @@ async def test_session_review_flow_runs_through_the_real_bus_notify_and_thread_m
         player = await players.create_player()
         await players.link_account(player.id, "111")
         # 실제 경로에서는 이 이벤트가 나갈 때 이미 최소 한 번 동기화를 마친 뒤다
-        # (records.save_sync가 첫 동기화 때 이 태그를 붙인다) — chunithm-session이
+        # (records.save_sync가 첫 동기화 때 이 태그를 붙인다) — session이
         # chunithm-synced를 요구하므로 여기서도 그 전제를 맞춰 준다.
         await players.set_status_tag(player.id, "chunithm-synced", source="records:first_sync")
         # 후기 질문은 기본이 꺼짐이다(2026-10-21) — 이 흐름은 플레이어가 켜 둔 경우다.
         settings = cast("SettingsService", client._services["settings"])  # pyright: ignore[reportPrivateUsage]
         await settings.set_value(
-            scope="player", scope_id=player.id, skill="chunithm-session", name="후기 물어보기",
+            scope="player", scope_id=player.id, skill="session", name="후기 물어보기",
             value=True, updated_by=player.id,
         )
         await executor.event_bus.emit_notify(
@@ -899,7 +899,7 @@ async def test_session_review_flow_runs_through_the_real_bus_notify_and_thread_m
 
         assert [(c, v is not None) for c, _t, v in gateway.sent] == [("dm-111", True)]  # 첫 말에 끝내기 버튼이 붙는다
         session = client._threads.session_for_channel("dm-111")  # pyright: ignore[reportPrivateUsage, reportOptionalMemberAccess]
-        assert session is not None and session.skill_name == "chunithm-session"
+        assert session is not None and session.skill_name == "session"
         assert "세션 요약" in session.guidance
 
         await client._threads.receive(session.thread_id, player.id, "좋았어", now=datetime.datetime.now(datetime.UTC))  # pyright: ignore[reportPrivateUsage, reportOptionalMemberAccess]

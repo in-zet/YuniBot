@@ -33,7 +33,7 @@ KNOWN_SERVICE_NAMES: frozenset[str] = frozenset(
 # 스킬 manifest의 emits에는 없으므로 여기서 "정의된 이벤트"로 등록한다.
 # 3~4단계 전까지는 실제로 내는 코드가 없어도 "정의된 이벤트"로 취급한다.
 # chunithm.plan.requested는 `yuni-bond`가 낸다. 그 스킬을 설치에서 뺀 경우에도 구독하는
-# `chunithm-goals`·`chunithm-notes`가 뜨도록 "정의는 됐다"고 여기에도 적어 둔다(같은
+# `goals`·`notes`가 뜨도록 "정의는 됐다"고 여기에도 적어 둔다(같은
 # 패턴을 players.first_seen/chunithm.login.expired에도 쓴다).
 CORE_EMITTED_EVENTS: frozenset[str] = frozenset(
     {"players.first_seen", "chunithm.login.expired", "chunithm.plan.requested"}
@@ -41,7 +41,7 @@ CORE_EMITTED_EVENTS: frozenset[str] = frozenset(
 
 # admin/tester는 어떤 스킬도 defines_tags로 정의할 수 없다 — 빠졌을 때 항상 숨김
 # (describe_lock이 정의를 못 찾으면 fail-closed) 처리되어야 하는 진짜 코어 전용 태그다.
-# chunithm-linked/chunithm-synced는 여기 없다 — 상태 태그지만 설명은 chunithm-account의
+# chunithm-linked/chunithm-synced는 여기 없다 — 상태 태그지만 설명은 sega-account의
 # defines_tags가 소유한다("보이되 잠긴다" 안내문을 내려면 설명이 필요하다. 00-core.md 345행).
 CORE_DEFINED_TAGS: frozenset[str] = frozenset({"admin", "tester"})
 

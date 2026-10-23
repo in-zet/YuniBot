@@ -2,7 +2,7 @@ from core.skill_loading import SkillLoadState
 
 
 def test_instructions_mode_starts_with_instructions_for_every_skill() -> None:
-    state = SkillLoadState(mode="instructions", known_skills={"chunithm-border", "chunithm-song"})
+    state = SkillLoadState(mode="instructions", known_skills={"chunithm-border", "song"})
     assert state.level_for("chunithm-border") == "instructions"
     assert state.opened_skills() == set()
 

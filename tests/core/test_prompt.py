@@ -75,7 +75,7 @@ def test_triggered_skills_matches_lowercased_trigger_words_in_message() -> None:
     names = assembler.triggered_skills(
         "즐겨찾기에 HERA 넣고 Linked VERSE 스토리도 알려줘", player_tags={"chunithm-linked"}
     )
-    assert "chunithm-settings" in names
+    assert "settings" in names
     assert "yuni-lore" in names
     assert "chunithm-border" not in names
 

@@ -92,7 +92,7 @@ class ArcadesService:
         await self._conn.commit()
 
     async def record_visit(self, arcade_id: str, *, player_id: str, game: str) -> int:
-        """새 방문을 남기고 그 행의 rowid를 돌려준다. `chunithm-arcade`가 그날 읽은
+        """새 방문을 남기고 그 행의 rowid를 돌려준다. `arcade`가 그날 읽은
         설정을 이 방문에 매달려고 쓴다(arcade_visits에 따로 PK가 없어 rowid를 쓴다)."""
         now = datetime.now(UTC).isoformat()
         cursor = await self._conn.execute(
@@ -120,7 +120,7 @@ class ArcadesService:
     async def resolve(self, raw: str, ctx: ToolContext) -> Arcade:
         """ArcadeRef 해석기. 이름이나 별칭이 (공백·대소문자 무시하고) 같으면 그 오락실이다. 아니면 비슷한
         이름·별칭을 후보로 돌려준다 — 모델이 "이거 맞아?"하고 되묻는 재료다. 새 오락실과 별칭은 여기서
-        만들지 않는다(사용자가 맞다고 한 뒤 chunithm-arcade의 register_arcade가 저장한다)."""
+        만들지 않는다(사용자가 맞다고 한 뒤 arcade의 register_arcade가 저장한다)."""
         text = raw.strip()
         wanted = normalize_name(text)
         arcades = await self.list_all()

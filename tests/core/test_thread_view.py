@@ -41,7 +41,7 @@ def _interaction(user_id: int) -> Any:
 async def _view(closed: list[ThreadTranscript]) -> tuple[ThreadEndView, ThreadManager, str]:
     manager = ThreadManager()
     session = await manager.open(
-        skill_name="chunithm-session", player_id="p1", transport=_Transport(), channel_id="dm-1",
+        skill_name="session", player_id="p1", transport=_Transport(), channel_id="dm-1",
         on_close=closed.append, now=datetime.now(UTC),
     )
     return ThreadEndView(threads=manager, players=cast("Any", _Players()), session=session), manager, session.thread_id

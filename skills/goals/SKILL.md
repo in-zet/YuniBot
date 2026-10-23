@@ -1,0 +1,76 @@
+---
+name: goals
+description: 레이팅·오버파워·폴더 순회·곡별(To-Do)·자유 목표를 기한과 함께 정하고, 진행률을 보고, 기한 알림을 받는다.
+summary: 레이팅, 오버파워, 곡별 목표를 기한과 함께 정하고 진행률을 알려 줄게.
+examples:
+  - 12월 31일까지 17.00 목표로 잡아 줘
+  - 15.0에서 15.3 마스 중 SSS 안 된 거 전부 투두에 넣어 줘
+  - 내 목표 어디까지 왔어?
+triggers: [목표, 투두, todo, to-do, 기한, 순회]
+category: 목표
+game: chunithm
+version: 1
+services: [records, songdb, notify, players, settings, scheduler, yuni, db]
+listens: [chunithm.sync.completed, chunithm.song.viewed, chunithm.plan.requested, goals.notify_due, goals.final_deadline]
+emits: [chunithm.goal.completed, goals.notify_due, goals.final_deadline]
+settings:
+  - name: 알림 채널
+    kind: str
+    default: ""
+    description: 목표 기한 알림을 올릴 채널 id. 비우면 그 서버에서 만든 목표의 알림은 DM으로 간다.
+    scope: guild
+  - name: 알림 시각
+    kind: str
+    default: "10:00"
+    description: 목표 기한 알림을 보낼 시각(HH:MM, 서버 시간대 기준).
+    scope: guild
+---
+
+스킬 자체의 태그 조건은 없다. 로그인하지 않아도 곡별 목표(`todo_*`)와 자유 목표
+(`set_goal(kind="freeform")`)는 쓸 수 있다. 레이팅·오버파워·폴더 목표(`set_goal`의 해당 kind)는
+`chunithm-synced`가 있어야 한다.
+
+- 목표를 만들어 달라고 분명히 말한 때만 `set_goal`·`todo_add`·`add_todos`를 부른다. "17까지 얼마나
+  남았어?"처럼 남은 양만 묻는 말은 목표 설정이 아니다 — 목표를 만들지 말고, 이미 있는 목표의 진행
+  (`goal_progress`)이나 지금 레이팅(`report`)으로 답한다. 목표가 없으면 "목표로 잡아 줄까?"라고
+  되묻기만 한다.
+- "15.0에서 15.3 마스 중 SSS 안 된 거 전부 투두에 넣어 줘"처럼 조건으로 투두를 일괄 추가할 때는 곡 검색 도구로 그 상수 범위의 표를 만들고(곡 단위면 `charts_of`로 채보로 펼친다), `add_scores`로 점수·랭크 칸을 붙여 `table_query`로 "SSS 안 된" 행만 거른 뒤 그 표를 `add_todos`에 `target_score`(말한 그대로, 예: "SSS")와 함께 준다. 이미 목표 점수를 넘긴 채보와 이미 투두가 있는 채보는 `add_todos`가 알아서 빼고 개수만 알려 준다.
+- `list_goals`·`todo_list`는 목록 표가 자동으로 붙는다(모델은 목표 id를 다루지 않는다). 기존 목표를 바꾸거나 볼 때는 그 표를 `table`로 넘기는 도구를 쓴다: 수정 `update_goal`, 진행 하나 보기 `goal_progress`, 삭제 `delete_goals`, 투두 완료 `complete_todos`. 일부만 다룰 때는 표의 번호("2번 목표" → `table`에 `t3:2`)나 거른 표로 가리킨다. 가리킬 표가 없으면 먼저 `list_goals`/`todo_list`를 부른다(곡 이름으로 고르려면 `table_query`로 거른 표를 넘긴다). 슬래시 명령(`/목표 수정` 등)의 id를 지어내지 않는다. 답에서 목표를 다시 줄줄이 나열하지 말고 짧은 한마디만 한다. 삭제·수정 뒤에는 결과만 말하고, 목록은 플레이어가 보여 달라 했을 때만 한 번 부른다. 이미 없거나 이미 끝난 항목은 도구가 알아서 빼고 실제로 바뀐 개수만 알려 준다 — 그 개수만 말한다.
+- "목표 보여줘"·"목표 어디까지 왔어?" 같은 목록 질문에는 `list_goals`만 부른다. 그 안에 목표마다 달성률·현재값·남은 양이 이미 있다. `goal_progress`는 목표 하나의 기한·페이스·진행 기록·예상 레이팅을 따로 물었을 때만 부르고, 목록 질문에 이어 불러 같은 목표를 또 보여주지 않는다.
+- 목표 종류가 애매하면 하나만 묻는다. 기한을 말하지 않으면 기한 없이 만든다.
+- 달성률과 남은 양은 도구 `data`의 값만 말한다. 어택 개수는 여기서 안 쓴다 — 어택으로 세는 건 보더(`chunithm-border`) 확인용이다.
+- 미달을 탓하지 않는다. 반응 단계에 맞는 말과 제안만 한다.
+- 일괄 추가(`add_todos`)와 여러 개 삭제(`delete_goals`)·여러 개 완료(`complete_todos`)는 대상이 2개 이상이면 개수를 보여 주는 확인
+  버튼을 거친다(0~1개면 바로 실행된다 — 실행기의 `confirm="bulk"`).
+- 곡·난이도·랭크·점수는 플레이어가 말한 그대로 넘긴다(`chart`, `difficulty`, `rank`,
+  `target_score`). 해석기가 정식 곡 제목·난이도 코드·기준 점수로 바꾼다 — 랭크를 점수로
+  직접 환산하거나 곡 이름을 고쳐 쓰지 않는다.
+- 곡별 목표를 세우거나 고칠 때 그 곡 정보를 먼저 조회하지 않는다(`song` 등). `chart`
+  해석기가 알아서 찾으므로 필요 없다 — 플레이어가 물은 적 없는 곡 정보를 먼저 보여주지 않는다.
+- **레이팅 최종 목표는 플레이어당 하나뿐이다.** 이미 있는데 또 만들려고 하면 덮어쓰지 않고
+  "이미 레이팅 목표가 있어. `/목표 수정`을 써 줘."라고 안내한다.
+- **곡별 목표(`todo_add`/`set_goal(kind="song")`)는 이미 그 점수를 넘긴 채보면 만들지 않는다.**
+  "이미 그 목표를 달성했어."라고 바로 알린다.
+- 폴더 정의는 **상수 범위, 표기 레벨, 수록 버전 중 하나 + 선택적 난이도**를 지원한다(장르는
+  songdb에 그 필드가 없어 이번 범위 밖). `set_goal(kind="folder")`는 `folder_min_const`+
+  `folder_max_const`, `folder_level`, `folder_version` 중 정확히 하나와 `folder_difficulty`(선택)를
+  받는다. `folder_difficulty`를 비우면 난이도를 가리지 않고 그 상수/레벨/버전에 맞는 채보를 전부
+  묶는다.
+- 오버파워 목표는 전체(overall)만 지원한다. 폴더별 오버파워 퍼센트는 이번 단계 범위 밖이다 —
+  요청받으면 아직 안 된다고 분명히 말한다.
+- `due_at`은 YYYY-MM-DD 날짜만 받고, 꼬리표를 안 주면 기한으로 단기/중기/장기를 정한다.
+- 기한이 있으면 `notify_offsets`(기본 7·1·0일 전, 장기면 30일 전도)만큼 그 서버의 "알림 채널"에
+  (없으면 DM으로) 리마인더를 보낸다. 목표를 만들거나 기한/알림 수정한 자리의 서버가 그 목표의
+  알림 채널이 된다(DM에서 만들면 계속 DM).
+- 기한이 지나도 못 채운 목표는 동기화 결과로(또는 기한+4일까지 소식이 없으면 그때까지 아는
+  값으로) 자동으로 "기한 만료"가 되고, 달성률에 따라 good(80%↑)/close/rest(진행 거의 없음) 반응이
+  붙는다. 미달을 탓하지 않는다.
+- 레이팅·오버파워 목표는 지금 값보다 높아야 만들 수 있다(이미 달성했거나 내려가야 닿는 목표는 거절).
+- 남의 목표는 목표마다 고른 공개 여부(`public`)로 거른다. 다만 공개 목표라도 그 사람이 기록을
+  비공개(`records_public` 꺼짐)로 해 두었으면 목표 정의만 보이고 현재값·달성률·남은 양은 빠진다
+  ("진행 상황은 비공개야"). 그 숫자를 짐작해 말하지 않는다.
+- 곡별 목표는 점수(`target_score`)나 램프(`lamp`: 풀콤보 `full_combo`, 올 저스티스 `all_justice`)
+  중 하나다. 풀콤보·올 저스티스는 점수로 바꾸지 않고 램프로 판정한다.
+- `list_goals`/`todo_list`의 슬래시 출력에는 목표 id가 붙는다. 슬래시 명령(`/목표 수정`·`/목표 진행`·
+  `/목표 삭제`·`/투두 완료`)은 그 id를 받고, 모델은 같은 일을 표를 받는 도구(`update_goal`·`goal_progress`·
+  `delete_goals`·`complete_todos`)로 한다.

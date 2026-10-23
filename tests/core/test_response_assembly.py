@@ -62,7 +62,7 @@ def test_assemble_response_shows_display_requested_via_show_tag() -> None:
 
 
 def test_assemble_response_always_includes_required_displays_without_violation() -> None:
-    # C1 회귀: display_mode="required" 표시물(예: chunithm-song_info, admin_skills)은
+    # C1 회귀: display_mode="required" 표시물(예: song_info, admin_skills)은
     # 모델이 [[show:..]]를 안 써도, 숫자 위반이 없어도 항상 붙어야 한다 — optional 표시물과
     # 달리 "강제 표시 모드"는 00-core.md의 기본값이고 응답 조립을 거치지 않는다.
     result = AgentTurnResult(

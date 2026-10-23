@@ -40,7 +40,7 @@ from services.common.arcades import Arcade
 
 logger = logging.getLogger(__name__)
 
-# 폴더 이름에 하이픈이 있어 보통의 import 경로로 쓸 수 없다(chunithm-goals와 같은 이유) — 같은 폴더의 순수
+# 폴더 이름에 하이픈이 있어 보통의 import 경로로 쓸 수 없다(goals와 같은 이유) — 같은 폴더의 순수
 # 계산 모듈을 파일 경로로 직접 불러온다.
 _SKILL_DIR = Path(__file__).parent
 

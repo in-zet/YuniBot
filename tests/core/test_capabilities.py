@@ -50,7 +50,7 @@ def test_build_capabilities_text_filters_by_category() -> None:
     text = build_capabilities_text(
         registry=registry, player_tags=set(), tag_definitions=registry.tag_definitions(), category="곡 정보",
     )
-    assert "chunithm-song" in text
+    assert "song" in text
     assert "account-link" not in text
 
 

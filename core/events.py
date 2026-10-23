@@ -98,7 +98,7 @@ class EventBus:
 
         db/scheduler는 core/slash.py의 _dispatch와 같은 이유로 services dict 밖에 있는
         ToolContext 전용 필드다(core/registry.py의 CTX_FIELD_SERVICE_NAMES) — 자기 테이블을
-        직접 SQL로 건드리는 스킬(예: chunithm-goals)이나 예약을 거는 스킬이 이벤트 핸들러
+        직접 SQL로 건드리는 스킬(예: goals)이나 예약을 거는 스킬이 이벤트 핸들러
         안에서도 그 접근을 그대로 쓰려면, 여기서도 슬래시 경로와 같은 연결을 핸들러의
         manifest.services 선언에 따라 채워 줘야 한다(아래 _build_handler_ctx)."""
         self._services = services

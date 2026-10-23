@@ -90,7 +90,7 @@
   aliases: [풀콤, 풀콤보]
 # --- 아래 네 항목은 2026-10-11, 5단계 구현 중 임시로 채워 넣은 개념/기술/판정 용어다.
 # 커뮤니티에서 실제로 쓰는 표현을 확인한 출처가 없어 뜻 설명은 추정이다 — 사용자가
-# 검토해 틀린 점을 고치거나 더 흔히 쓰는 표현으로 바꿔야 한다(chunithm-terms.md
+# 검토해 틀린 점을 고치거나 더 흔히 쓰는 표현으로 바꿔야 한다(terms.md
 # "미확인 사항" 참고. 랭크/난이도/램프는 이미 확인된 값 용어라 손대지 않았다).
 - canonical: "저스티스 크리티컬"
   category: judgment
@@ -111,5 +111,5 @@
 - canonical: "Linked VERSE"
   category: concept
   aliases: [링크드 버스, 링크드버스, 링버, LinkedVERSE]
-  meaning: CHUNITHM X-VERSE에서 시작한 해금 시스템(수록 버전 이름이 아니다). 시대별 게이트(ORIGIN~VERSE)를 열면 곡이 하나씩 풀리고, 이어서 전도 악곡·RE:VERSE·UNIVERSE·ENDING 단계가 있다. 해금곡은 X-VERSE와 X-VERSE-X 수록곡에 흩어져 있다. 곡 목록은 chunithm-song의 find_linked_verse로 본다. 국제판은 온라인 기능이 빠지고 일부 게이트 조건이 단순 플레이로 바뀌어 있다.
+  meaning: CHUNITHM X-VERSE에서 시작한 해금 시스템(수록 버전 이름이 아니다). 시대별 게이트(ORIGIN~VERSE)를 열면 곡이 하나씩 풀리고, 이어서 전도 악곡·RE:VERSE·UNIVERSE·ENDING 단계가 있다. 해금곡은 X-VERSE와 X-VERSE-X 수록곡에 흩어져 있다. 곡 목록은 song의 find_linked_verse로 본다. 국제판은 온라인 기능이 빠지고 일부 게이트 조건이 단순 플레이로 바뀌어 있다.
   source: 나무위키 Linked VERSE (2026-10-21 확인)
