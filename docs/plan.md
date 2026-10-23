@@ -117,7 +117,7 @@
     - [X] 1-4 코어 이름 정리(`chunithm-linked` → `sega-linked`, `chunithm.login.expired` → `sega.login.expired`, manifest `game:` → `games:`; 코어 마이그레이션 023이 저장된 태그를 옮김) — 구현 완료(2026-10-23). 슬래시 `게임` 선택 인자는 `game` 인자를 받는 도구가 생기는 Part 6에서 붙인다
   - [X] Part 2: DB 마이그레이션 — 구현 완료(2026-10-23). 코어 024(`records_pb` 기본 키에 `chart_type`, `dx_score`)·025(`songdb_aliases` 게임 칸)·026(쿠키 테이블 → `sega_cookies`)·027(`players.main_game`), 스킬 `folders`·`notes`·`yuni-bond`의 002(`chart_type`을 키에 넣음, 2026-10-23 사용자 결정으로 `yuni-bond`도 같이). 운영 DB 사본에 적용해 행 수·외래키 확인. `chart_type`·`dx_score`·`main_game`을 채우고 읽는 코드는 Part 5·6 — §17.4
   - [ ] Part 3: aime 인증 공통화와 maimai DX NET 어댑터 — §17.5. 시작 조건: SEGA 사이트 복구 후 실측
-  - [ ] Part 4: maimai 곡 DB(otoge-db) — §17.6
+  - [X] Part 4: maimai 곡 DB(otoge-db) — 구현 완료(2026-10-23). `services/game/songdb.py`(곡·채보 자료형·찾기 공통 틀, `chart_type` 조건)에서 츄니즘 `SongDbService`와 `services/maimai/songdb.py`의 `MaimaiSongDbService`가 갈라진다. 봇 부팅·등록부 연결은 아직 없다(Part 6) — §17.6
   - [ ] Part 5: 기록·레이팅·동기화 — §17.7
   - [ ] Part 6: 스킬 확장과 프롬프트 — §17.8. 시작 전에 §17.9 1번(유니 인격) 결정
 

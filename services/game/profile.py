@@ -19,6 +19,8 @@ class GameProfile:
     chart_codes: tuple[str, ...]
     # 난이도 범위("익스퍼트 이상")가 훑는 순서. 쉬움·어려움 축에 없는 채보는 뺀다.
     range_codes: tuple[str, ...]
+    # 같은 곡·난이도에 채보 종류가 따로 있는 게임(maimai STD/DX)의 종류. 없는 게임은 ("",).
+    chart_types: tuple[str, ...] = ("",)
     # `terms`가 돌려주는 정식 긴 이름("MASTER") → 짧은 코드("MAS").
     long_to_short: Mapping[str, str]
     # 난이도를 말하지 않았을 때 쓰는 채보.

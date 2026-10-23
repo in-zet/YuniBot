@@ -23,10 +23,10 @@ from core.tables import (
     cell,
 )
 from core.tool_types import DEFAULT_GAME
-from services.chunithm.songdb import ChartRecord, SongRecord
 from services.game.rating_format import song_rating_text
 from services.game.records import PbRow
 from services.game.registry import profile_for
+from services.game.songdb import ChartRecord, SongRecord
 
 SONG = "곡"
 DIFFICULTY = "난이도"

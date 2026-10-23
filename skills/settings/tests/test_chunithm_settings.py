@@ -14,8 +14,8 @@ from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import ToolContext
 from services.chunithm.arcade_settings import ArcadeSettings
 from services.chunithm.chunithm_net import ChangeNotAppliedError
-from services.chunithm.songdb import SongRecord
 from services.game import table_columns as tc
+from services.game.songdb import SongRecord
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 

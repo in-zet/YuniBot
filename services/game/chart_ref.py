@@ -4,8 +4,9 @@ from dataclasses import dataclass
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
-from services.chunithm.songdb import ChartRecord, SongDbService, SongRecord
+from services.chunithm.songdb import SongDbService
 from services.chunithm.terms import TermsService
+from services.game.songdb import ChartRecord, SongRecord
 
 
 @dataclass(slots=True, kw_only=True)

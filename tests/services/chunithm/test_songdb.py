@@ -406,7 +406,7 @@ async def test_chart_link_uses_sdvxin_mapping_when_present(songdb: SongDbService
 
 
 async def test_chart_link_falls_back_to_youtube_without_mapping(songdb: SongDbService) -> None:
-    from services.chunithm.songdb import ChartRecord, SongRecord
+    from services.game.songdb import ChartRecord, SongRecord
 
     fake_song = SongRecord(title="테스트곡", aliases=(), artist="", id=1, charts={})
     fake_chart = ChartRecord(difficulty="MAS", const=10.0, note_count=1000, sdvxin=None)

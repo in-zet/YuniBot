@@ -33,7 +33,7 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
-from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY, ConstRangeHit
+from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
 from services.chunithm.terms import ResolvedDifficulty
 from services.common.players import Player
 from services.game import table_columns as tc
@@ -49,6 +49,7 @@ from services.game.records import (
     RatingDeltas,
     SyncDiff,
 )
+from services.game.songdb import ConstRangeHit
 
 # 판정 수(상세 판정)는 CHUNITHM-NET 플레이 상세 페이지를 한 곡씩 따로 열어야 붙는다.
 # 설계서가 고정한 상한이다 — 바꾸지 않는다.

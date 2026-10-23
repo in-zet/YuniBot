@@ -28,7 +28,6 @@ from core.tables import (
     summarize_table,
 )
 from core.tool_types import DifficultyRef, RankRef, ScoreRef, ToolContext
-from services.chunithm.songdb import ChartRecord, SongRecord
 from services.chunithm.terms import ResolvedDifficulty, ResolvedRank, TermsService
 from services.common.players import PlayersService
 from services.common.settings import SettingsService
@@ -44,6 +43,7 @@ from services.game.records import (
     UnchangedPlay,
 )
 from services.game.records_calc import remaining_to_target
+from services.game.songdb import ChartRecord, SongRecord
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CORE_PLAYERS_SQL = Path("migrations/core/001_players.sql").read_text()

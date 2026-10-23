@@ -32,11 +32,11 @@ from services.chunithm.rating_tier import (
     highest_rung_crossed,
     next_star,
 )
-from services.chunithm.songdb import SongRecord
 from services.common.arcades import Arcade
 from services.game import table_columns as tc
 from services.game.rating_format import rating_text, song_rating_text
 from services.game.records import PbRow, SyncDiff
+from services.game.songdb import SongRecord
 
 logger = logging.getLogger(__name__)
 

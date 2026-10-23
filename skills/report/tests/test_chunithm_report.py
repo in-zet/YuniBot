@@ -19,7 +19,6 @@ from chuni_penguin.types.score import Judgements, RecentScore
 from core.events import Section
 from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import Display, ToolContext, ToolResult
-from services.chunithm.songdb import ChartRecord, SongRecord
 from services.chunithm.terms import TermsService
 from services.common.players import Player
 from services.game import table_columns as tc
@@ -36,6 +35,7 @@ from services.game.records import (
     SyncLogSummary,
     UnchangedPlay,
 )
+from services.game.songdb import ChartRecord, SongRecord
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _JST = ZoneInfo("Asia/Tokyo")

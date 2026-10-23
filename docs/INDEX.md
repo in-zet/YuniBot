@@ -18,7 +18,7 @@
 | `skills/yuni-lore/lore.md` | 유니 설정집(우리말, 구간·스포일러 구분). `yuni-lore` 스킬의 `read_lore`가 읽는다 | **관리대상** |
 | `progress/` | 날짜별 작업 일지(`YYYY-MM-DD.md`) — 실제 작업의 유일한 확정 기록 | **관리대상** |
 | `core/` | 입구·에이전트·도구 실행기·레지스트리·이벤트·예약·LLM 어댑터 | **관리대상** |
-| `services/common/` · `services/game/` · `services/chunithm/` | 공통 서비스 · 게임 공통 틀(기록·표 칸·프로필·등록부·builder) · 츄니즘 전용(`data/terms.yaml`·`data/linked_verse.yaml` 포함) | **관리대상** |
+| `services/common/` · `services/game/` · `services/chunithm/` · `services/maimai/` | 공통 서비스 · 게임 공통 틀(기록·곡 DB 틀·표 칸·프로필·등록부·builder) · 츄니즘 전용(`data/terms.yaml`·`data/linked_verse.yaml` 포함) · maimai 전용(곡 DB·프로필, 아직 등록부에 없음) | **관리대상** |
 | `skills/` | 스킬 폴더(`SKILL.md`·`skill.py`·`migrations/`·`tests/`), `_template/` | **관리대상** |
 | `prompts/` | `rules.md`(규칙) · `persona.md`(말투) — 모델에 그대로 들어간다 | **관리대상** |
 | `migrations/core/` | 코어·서비스 SQL. 적용한 파일은 고치지 않는다 | **관리대상** |

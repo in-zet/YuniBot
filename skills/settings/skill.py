@@ -14,8 +14,8 @@ from services.chunithm.arcade_settings import (
     settings_line,
 )
 from services.chunithm.chunithm_net import ChangeNotAppliedError
-from services.chunithm.songdb import SongRecord
 from services.game import table_columns as tc
+from services.game.songdb import SongRecord
 
 _UNKNOWN_SONG = "settings.unknown_song"
 # 일괄 추가 결과에 곡 이름을 늘어놓을 때 자르는 개수.

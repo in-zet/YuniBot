@@ -6,9 +6,9 @@ from decimal import Decimal
 import pytest
 
 from core.tables import TableBuilder, TableError
-from services.chunithm.songdb import ChartRecord, SongRecord
 from services.game import table_columns as tc
 from services.game.records import PbRow
+from services.game.songdb import ChartRecord, SongRecord
 
 RANKS = {"SSS": 1_007_500, "S": 975_000}
 
