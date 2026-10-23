@@ -393,7 +393,7 @@ async def test_alias_add_then_resolve_by_alias(tmp_path) -> None:
     await conn.executescript(
         "".join(
             Path(f"migrations/core/{name}.sql").read_text()
-            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global", "025_songdb_aliases_game")
         )
     )
     await conn.commit()
@@ -416,7 +416,7 @@ async def test_alias_remove_rejects_non_owner_non_admin() -> None:
     await conn.executescript(
         "".join(
             Path(f"migrations/core/{name}.sql").read_text()
-            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global", "025_songdb_aliases_game")
         )
     )
     await conn.commit()
@@ -439,7 +439,7 @@ async def test_alias_remove_allows_admin() -> None:
     await conn.executescript(
         "".join(
             Path(f"migrations/core/{name}.sql").read_text()
-            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global", "025_songdb_aliases_game")
         )
     )
     await conn.commit()

@@ -38,6 +38,7 @@ async def db() -> AsyncGenerator[aiosqlite.Connection]:
     conn = await aiosqlite.connect(":memory:")
     conn.row_factory = aiosqlite.Row
     await conn.executescript(_NOTES_SQL.read_text())
+    await conn.executescript(_NOTES_SQL.with_name("002_chart_type.sql").read_text())
     try:
         yield conn
     finally:

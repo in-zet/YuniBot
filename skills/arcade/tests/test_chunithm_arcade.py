@@ -23,7 +23,7 @@ _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CORE_PLAYERS_SQL = Path("migrations/core/001_players.sql").read_text()
 _CORE_ARCADES_SQL = "".join(
     Path(f"migrations/core/{name}.sql").read_text()
-    for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+    for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global", "025_songdb_aliases_game")
 )
 _ARCADE_SQL = (Path(__file__).parent.parent / "migrations" / "001_init.sql").read_text()
 

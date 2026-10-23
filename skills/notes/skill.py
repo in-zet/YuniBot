@@ -134,7 +134,7 @@ async def set_note(
     await ctx.db.execute(
         "INSERT INTO notes_notes (player_id, game, song_title, difficulty, body, public, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT (player_id, game, song_title, difficulty) "
+        "ON CONFLICT (player_id, game, song_title, chart_type, difficulty) "
         "DO UPDATE SET body = excluded.body, public = excluded.public, updated_at = excluded.updated_at",
         (ctx.player_id, _GAME, song.title, code, body, int(public), now),
     )

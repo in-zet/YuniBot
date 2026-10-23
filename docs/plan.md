@@ -115,7 +115,7 @@
     - [X] 1-2 서비스 폴더 정리(공통 모듈 6개를 `services/game/`로)와 게임 프로필 자료형·등록부·builder — 구현 완료(2026-10-23). `core/bot.py`는 builder와 `choose_game`만 안다
     - [X] 1-3 `RecordsService`·`SongDbService`가 `game`/프로필을 받음, 게임 고르기 함수 `choose_game`을 실행기 `invoke`에 연결(`ctx.game`) — 구현 완료(2026-10-23). `TermsService`·NET은 쓰는 곳이 생기는 Part 2~5에서 `game`을 받는다. 주 게임 저장소는 Part 2
     - [X] 1-4 코어 이름 정리(`chunithm-linked` → `sega-linked`, `chunithm.login.expired` → `sega.login.expired`, manifest `game:` → `games:`; 코어 마이그레이션 023이 저장된 태그를 옮김) — 구현 완료(2026-10-23). 슬래시 `게임` 선택 인자는 `game` 인자를 받는 도구가 생기는 Part 6에서 붙인다
-  - [ ] Part 2: DB 마이그레이션(`chart_type`, `dx_score`, 쿠키 테이블 이름, 주 게임) — §17.4
+  - [X] Part 2: DB 마이그레이션 — 구현 완료(2026-10-23). 코어 024(`records_pb` 기본 키에 `chart_type`, `dx_score`)·025(`songdb_aliases` 게임 칸)·026(쿠키 테이블 → `sega_cookies`)·027(`players.main_game`), 스킬 `folders`·`notes`·`yuni-bond`의 002(`chart_type`을 키에 넣음, 2026-10-23 사용자 결정으로 `yuni-bond`도 같이). 운영 DB 사본에 적용해 행 수·외래키 확인. `chart_type`·`dx_score`·`main_game`을 채우고 읽는 코드는 Part 5·6 — §17.4
   - [ ] Part 3: aime 인증 공통화와 maimai DX NET 어댑터 — §17.5. 시작 조건: SEGA 사이트 복구 후 실측
   - [ ] Part 4: maimai 곡 DB(otoge-db) — §17.6
   - [ ] Part 5: 기록·레이팅·동기화 — §17.7

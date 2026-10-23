@@ -51,6 +51,7 @@ _RECORDS_MIGRATION = (
     + Path("migrations/core/014_records_sync_log_snapshot_averages.sql").read_text()
     + Path("migrations/core/018_records_profile.sql").read_text()
     + Path("migrations/core/019_records_session_state.sql").read_text()
+    + Path("migrations/core/024_records_chart_type.sql").read_text()
 )
 _JST = ZoneInfo("Asia/Tokyo")
 

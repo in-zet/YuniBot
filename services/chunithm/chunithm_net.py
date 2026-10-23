@@ -272,7 +272,7 @@ class ChunithmNetService:
         encrypted = self._secrets.encrypt(clal)
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
-            "INSERT INTO chunithm_net_cookies (player_id, encrypted_cookie, linked_at, last_checked_at, nickname) "
+            "INSERT INTO sega_cookies (player_id, encrypted_cookie, linked_at, last_checked_at, nickname) "
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT (player_id) DO UPDATE SET "
             "encrypted_cookie = excluded.encrypted_cookie, linked_at = excluded.linked_at, "
             "last_checked_at = excluded.last_checked_at, nickname = excluded.nickname",
@@ -286,7 +286,7 @@ class ChunithmNetService:
         닉네임은 login()이 저장해 둔 값을 그대로 돌려준다."""
         row = await (
             await self._conn.execute(
-                "SELECT last_checked_at, nickname FROM chunithm_net_cookies WHERE player_id = ?",
+                "SELECT last_checked_at, nickname FROM sega_cookies WHERE player_id = ?",
                 (player_id,),
             )
         ).fetchone()
@@ -317,7 +317,7 @@ class ChunithmNetService:
             finally:
                 await adapter.aclose()
         await self._conn.execute(
-            "DELETE FROM chunithm_net_cookies WHERE player_id = ?", (player_id,)
+            "DELETE FROM sega_cookies WHERE player_id = ?", (player_id,)
         )
         await self._conn.commit()
         await self._players.revoke_status_tag(player_id, "sega-linked")
@@ -507,7 +507,7 @@ class ChunithmNetService:
         로그나 LLM 입력에 넣지 않는 것은 호출하는 쪽의 책임이다(CLAUDE.md)."""
         row = await (
             await self._conn.execute(
-                "SELECT encrypted_cookie FROM chunithm_net_cookies WHERE player_id = ?", (player_id,)
+                "SELECT encrypted_cookie FROM sega_cookies WHERE player_id = ?", (player_id,)
             )
         ).fetchone()
         if row is None:

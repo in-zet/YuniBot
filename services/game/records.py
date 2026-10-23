@@ -928,7 +928,7 @@ class RecordsService:
             "INSERT INTO records_pb (player_id, game, song_title, difficulty, score, rank, "
             "clear_lamp, combo_lamp, chain_lamp, const, rating, session_id, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT (player_id, game, song_title, difficulty) DO UPDATE SET "
+            "ON CONFLICT (player_id, game, song_title, chart_type, difficulty) DO UPDATE SET "
             "score = excluded.score, rank = excluded.rank, clear_lamp = excluded.clear_lamp, "
             "combo_lamp = excluded.combo_lamp, chain_lamp = excluded.chain_lamp, "
             "const = excluded.const, rating = excluded.rating, session_id = excluded.session_id, "

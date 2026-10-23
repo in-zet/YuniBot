@@ -277,8 +277,8 @@ class SongDbService:
 
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
-            "INSERT INTO songdb_aliases (alias, song_title, added_by, created_at) VALUES (?, ?, ?, ?)",
-            (alias, song_title, added_by, now),
+            "INSERT INTO songdb_aliases (game, alias, song_title, added_by, created_at) VALUES (?, ?, ?, ?, ?)",
+            (self._profile.game, alias, song_title, added_by, now),
         )
         await self._conn.commit()
 
@@ -299,8 +299,8 @@ class SongDbService:
         assert self._conn is not None
         alias = alias.lower()
         cursor = await self._conn.execute(
-            "SELECT alias, song_title, added_by FROM songdb_aliases WHERE alias = ?",
-            (alias,),
+            "SELECT alias, song_title, added_by FROM songdb_aliases WHERE game = ? AND alias = ?",
+            (self._profile.game, alias),
         )
         row = await cursor.fetchone()
         if row is None:
@@ -310,7 +310,7 @@ class SongDbService:
     async def remove_alias(self, *, alias: str) -> None:
         assert self._conn is not None
         alias = alias.lower()
-        await self._conn.execute("DELETE FROM songdb_aliases WHERE alias = ?", (alias,))
+        await self._conn.execute("DELETE FROM songdb_aliases WHERE game = ? AND alias = ?", (self._profile.game, alias))
         await self._conn.commit()
 
     def song_by_title(self, title: str) -> SongRecord | None:

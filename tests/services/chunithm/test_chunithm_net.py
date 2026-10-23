@@ -49,6 +49,7 @@ _PLAYERS_MIGRATION = (
 _COOKIES_MIGRATION = (
     Path("migrations/core/007_chunithm_net_cookies.sql").read_text()
     + Path("migrations/core/010_chunithm_net_cookies_nickname.sql").read_text()
+    + Path("migrations/core/026_sega_cookies.sql").read_text()
 )
 
 _PROFILE_HTML = Path("docs/reference/chunithm-net/player_data.html").read_text(encoding="utf-8")
@@ -251,7 +252,7 @@ async def test_login_failure_does_not_store_cookie_or_grant_tag(conn, secrets) -
 async def _stored_clal(conn: aiosqlite.Connection, secrets: SecretsService, player_id: str) -> str | None:
     conn.row_factory = aiosqlite.Row
     row = await (
-        await conn.execute("SELECT encrypted_cookie FROM chunithm_net_cookies WHERE player_id = ?", (player_id,))
+        await conn.execute("SELECT encrypted_cookie FROM sega_cookies WHERE player_id = ?", (player_id,))
     ).fetchone()
     if row is None:
         return None
@@ -457,7 +458,7 @@ async def test_logout_cleans_up_locally_even_when_remote_logout_fails(conn, secr
     await service.logout(player.id, ctx)
 
     assert await players.tags_for(player.id) == set()
-    cursor = await conn.execute("SELECT COUNT(*) FROM chunithm_net_cookies WHERE player_id = ?", (player.id,))
+    cursor = await conn.execute("SELECT COUNT(*) FROM sega_cookies WHERE player_id = ?", (player.id,))
     row = await cursor.fetchone()
     assert row is not None and row[0] == 0
 

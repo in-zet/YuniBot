@@ -24,7 +24,7 @@ async def songdb_with_conn() -> AsyncIterator[SongDbService]:
     await conn.executescript(
         "".join(
             Path(f"migrations/core/{name}.sql").read_text()
-            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global")
+            for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global", "025_songdb_aliases_game")
         )
     )
     await conn.commit()

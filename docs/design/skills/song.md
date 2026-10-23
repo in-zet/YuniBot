@@ -153,7 +153,7 @@ emits: [chunithm.song.viewed]
 ## 구현 결정 (2026-10-11, 5단계 계획서에서 옮김)
 
 - `SongQuery` 해석 순서: ① 정확한 제목 ② 저장된 별칭(전역) ③ 시드의 전역 별칭(대소문자 무시) ④ 부분 일치 후보.
-- 한국어 별칭은 봇 전역이다(`songdb_aliases`, 기본키 `alias`, `songdb` 서비스가 관리. 2026-10-21 `migrations/core/020_aliases_global.sql`에서 서버별 구조를 바꿨다). 서버 밖(DM)에서도 추가·삭제할 수 있다.
+- 한국어 별칭은 봇 전역이다(`songdb_aliases`, 기본키 `(game, alias)` — 2026-10-23 `025`에서 게임 칸을 더했다, 기존 별칭은 `chunithm`. `songdb` 서비스가 관리. 2026-10-21 `migrations/core/020_aliases_global.sql`에서 서버별 구조를 바꿨다). 서버 밖(DM)에서도 추가·삭제할 수 있다.
 - `chunithm.song.viewed`는 지금 내기만 하고 돌아온 조각은 버린다. 조각을 곡 정보 아래에 붙이는 코드는 실제로 받는 스킬(notes/goals)이 생길 때 넣는다.
 - 상수 범위 검색은 결과를 전부 돌려주되, 표시는 상위 25개까지만 하고 나머지는 "...외 N개"로 줄인다.
 - sdvx.in 링크는 vendored `sdvxin_link`를 그대로 쓰고, 매핑이 없을 때의 유튜브 검색 링크("곡명 譜面確認")는 `songdb.py`의 전용 함수가 만든다.
