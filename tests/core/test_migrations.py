@@ -97,7 +97,7 @@ async def test_run_migrations_detects_changed_applied_file(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_022_moves_stored_skill_names_to_new_names(tmp_path: Path) -> None:
+async def test_022_023_move_stored_skill_names_and_login_tag_to_new_names(tmp_path: Path) -> None:
     real_core = Path("migrations/core")
     old_dir = tmp_path / "core_old"
     old_dir.mkdir()
@@ -131,10 +131,15 @@ async def test_022_moves_stored_skill_names_to_new_names(tmp_path: Path) -> None
             "INSERT INTO conversation_skills (message_id, skills, created_at) "
             '''VALUES ('m', '["chunithm-song", "memory", "chunithm-sync"]', 0)'''
         )
+        await conn.execute("INSERT INTO players (id, first_seen_at) VALUES ('p1', 't')")
+        await conn.execute(
+            "INSERT INTO player_tags (player_id, tag, source, granted_at) VALUES "
+            "('p1', 'chunithm-linked', 'login', 't'), ('p1', 'chunithm-synced', 'sync', 't')"
+        )
         await conn.commit()
 
         applied = await run_migrations(conn, roots=[("core", real_core)])
-        assert applied == ["core/022_rename_skills.sql"]
+        assert applied == ["core/022_rename_skills.sql", "core/023_rename_login_tag.sql"]
 
         async def column(sql: str) -> list[str]:
             cursor = await conn.execute(sql)
@@ -146,3 +151,4 @@ async def test_022_moves_stored_skill_names_to_new_names(tmp_path: Path) -> None
         assert await column("SELECT owner_skill FROM schedule_recurring") == ["updates"]
         assert await column("SELECT owner_skill FROM schedule_once") == ["goals"]
         assert await column("SELECT skills FROM conversation_skills") == ['["song", "memory", "sync"]']
+        assert await column("SELECT tag FROM player_tags") == ["chunithm-synced", "sega-linked"]

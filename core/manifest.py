@@ -29,7 +29,8 @@ VALID_CATEGORIES: frozenset[str] = frozenset(
         "유니 설정",
     }
 )
-VALID_GAMES: frozenset[str] = frozenset({"chunithm", "common"})
+# 등록된 게임 이름. 새 게임을 services/game/registry.py에 등록할 때 여기에도 더한다.
+VALID_GAMES: frozenset[str] = frozenset({"chunithm"})
 
 # 00-core.md: name은 "소문자, 숫자, 하이픈"이고 64자 이내다.
 MAX_NAME_LENGTH = 64
@@ -61,7 +62,8 @@ class SkillManifest(msgspec.Struct, kw_only=True, forbid_unknown_fields=True):
     # 모델이 open_skill을 부르는 왕복 한 번을 아끼는 용도라, 틀려도 손해는 펼친 지침 분량뿐이다.
     triggers: list[str] = []
     category: str
-    game: str
+    # 이 스킬이 다루는 게임 목록. 게임과 무관한 스킬(계정 연결, 메모리 등)은 빈 목록이다.
+    games: list[str]
     version: int
     services: list[str] = []
     tags: list[str] = []
@@ -102,8 +104,9 @@ def parse_manifest(text: str) -> SkillManifest:
         raise ManifestError(
             f"category '{manifest.category}'는 허용된 분류가 아니다: {sorted(VALID_CATEGORIES)}"
         )
-    if manifest.game not in VALID_GAMES:
-        raise ManifestError(f"game '{manifest.game}'은 'chunithm' 또는 'common'이어야 한다")
+    unknown_games = [game for game in manifest.games if game not in VALID_GAMES]
+    if unknown_games:
+        raise ManifestError(f"games {unknown_games}는 등록된 게임이 아니다: {sorted(VALID_GAMES)}")
 
     return manifest
 

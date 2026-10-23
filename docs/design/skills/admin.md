@@ -15,7 +15,7 @@ examples:
   - 이번 달 LLM 비용 얼마야?
   - 이 서버에서 web-qa 꺼 줘
 category: 관리
-game: common
+games: []
 version: 1
 services: [players, settings, registry_snapshot]
 tags: [admin]

@@ -9,10 +9,10 @@ examples:
   - 즐겨찾기 목록 보여줘
 triggers: [설정, 스피드, 즐겨찾기, 가이드음, 필드 월, 필드월, 타이밍]
 category: 오락실
-game: chunithm
+games: [chunithm]
 version: 1
 services: [chunithm_net, songdb]
-tags: [chunithm-linked]
+tags: [sega-linked]
 ---
 
 # 유니 스킬: settings

@@ -37,7 +37,7 @@ async def skills(ctx: ToolContext) -> ToolResult:
     snapshot = ctx.registry_snapshot
     if snapshot is None:
         return ToolResult(error="스킬 현황을 아직 알 수 없어")
-    lines = [f"- {s.name} ({s.game}, v{s.version})" for s in snapshot.skills]
+    lines = [f"- {s.name} ({', '.join(s.games) or '공통'}, v{s.version})" for s in snapshot.skills]
     lines += [f"- {name} 등록 실패: {reason}" for name, reason in snapshot.failures.items()]
     return ToolResult(
         data={"enabled": [s.name for s in snapshot.skills], "failures": snapshot.failures},

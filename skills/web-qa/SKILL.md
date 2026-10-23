@@ -7,7 +7,7 @@ examples:
   - 크로노 마스 공략 있어?
 triggers: [공략, 해금, 이벤트, 검색, 출처]
 category: 질문 답변
-game: chunithm
+games: [chunithm]
 version: 1
 weight: heavy
 services: [websearch, usage]

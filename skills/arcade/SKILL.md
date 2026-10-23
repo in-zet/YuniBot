@@ -8,7 +8,7 @@ examples:
   - 오늘 광주 게임플라자에서 했어
 triggers: [오락실, 겜플, 게임플라자, 방문, 세팅]
 category: 오락실
-game: chunithm
+games: [chunithm]
 version: 1
 services: [chunithm_net, arcades, records, db]
 listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.viewed]

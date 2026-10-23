@@ -7,7 +7,7 @@ examples:
   - 이번에 들어온 신곡 보여 줘
 triggers: [업데이트, 알림, 일정, 신곡]
 category: 알림
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, records, notify, http, players, settings, scheduler, yuni, db]
 emits: [chunithm.update.detected, updates.notice_due]

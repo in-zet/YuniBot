@@ -14,7 +14,7 @@ examples:
   - 15.4 트리플 1호가 뭐였지?
   - 다음엔 크로노 연습할게, 기억해 줘
 category: 이정표
-game: common
+games: []
 version: 1
 services: [players, songdb, records, settings, db]
 listens: [chunithm.sync.completed, chunithm.goal.completed, chunithm.song.viewed, players.first_seen]

@@ -4,7 +4,7 @@ description: 2단계 코어 뼈대를 수동으로 확인하기 위한 연습용
 examples:
   - 연습 스킬 테스트
 category: 메모
-game: common
+games: []
 version: 1
 services: [players]
 defines_tags:

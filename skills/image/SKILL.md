@@ -8,7 +8,7 @@ examples:
   - 방금 그 표 그림으로
 triggers: [그림, 이미지, 레이팅표, 상수표, 사진]
 category: 기록과 리포트
-game: chunithm
+games: [chunithm]
 version: 1
 weight: heavy
 services: [songdb, records, image_cache, tables]

@@ -8,7 +8,7 @@ examples:
   - 다음엔 크로노 연습할게, 기억해 줘
 triggers: [처음 만난, 이정표, 1호, 마일스톤, 약속, 뭐 치면, 오늘 갈]
 category: 이정표
-game: common
+games: []
 version: 1
 services: [players, songdb, records, settings, db]
 emits: [chunithm.plan.requested]

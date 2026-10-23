@@ -268,7 +268,7 @@ class ChunithmNetService:
 
     async def _store_clal(self, player_id: str, clal: str, nickname: str) -> None:
         """login()과 login_with_credentials()가 공유하는 저장 로직 — 암호화해 넣고
-        chunithm-linked 태그를 붙인다."""
+        sega-linked 태그를 붙인다."""
         encrypted = self._secrets.encrypt(clal)
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
@@ -279,7 +279,7 @@ class ChunithmNetService:
             (player_id, encrypted, now, now, nickname),
         )
         await self._conn.commit()
-        await self._players.set_status_tag(player_id, "chunithm-linked", source="chunithm_net:login")
+        await self._players.set_status_tag(player_id, "sega-linked", source="chunithm_net:login")
 
     async def status(self, player_id: str) -> LoginStatus:
         """상태 조회는 DB만 읽는 가벼운 호출이어야 한다 — 네트워크를 타지 않는다.
@@ -293,7 +293,7 @@ class ChunithmNetService:
         if row is None:
             return LoginStatus(linked=False)
         tags = await self._players.tags_for(player_id)
-        if "chunithm-linked" not in tags:
+        if "sega-linked" not in tags:
             return LoginStatus(linked=False)
         return LoginStatus(
             linked=True, nickname=row["nickname"], last_checked_at=row["last_checked_at"]
@@ -320,12 +320,12 @@ class ChunithmNetService:
             "DELETE FROM chunithm_net_cookies WHERE player_id = ?", (player_id,)
         )
         await self._conn.commit()
-        await self._players.revoke_status_tag(player_id, "chunithm-linked")
+        await self._players.revoke_status_tag(player_id, "sega-linked")
 
     async def fetch_for_sync(self, player_id: str, *, ctx: ToolContext | None = None) -> SyncFetch:
         """동기화에 필요한 것(프로필, 베스트30, 신곡20, 최근 이력, 난이도별 전체 PB)을
         한 번에 가져온다. 인증 실패(AuthenticationError)일 때만 만료로 보고
-        chunithm-linked를 떼고 chunithm.login.expired를 낸 뒤 그대로 예외를 다시
+        sega-linked를 떼고 sega.login.expired를 낸 뒤 그대로 예외를 다시
         던진다 — 호출한 쪽(sync 스킬)이 "/로그인 안내" 오류로 바꾼다.
         점검(MaintenanceError), 네트워크 오류, 파서 오류는 로그인과 무관하므로 태그를
         건드리지 않고 그대로 올려 보낸다."""
@@ -492,13 +492,13 @@ class ChunithmNetService:
         return detailed + scores[limit:]
 
     async def _expire_login(self, player_id: str, ctx: ToolContext | None) -> None:
-        """인증 실패(쿠키 만료) 처리: chunithm-linked를 떼고 chunithm.login.expired를 낸다.
+        """인증 실패(쿠키 만료) 처리: sega-linked를 떼고 sega.login.expired를 낸다.
         이벤트의 대상은 쿠키 주인(player_id)이다 — /최근처럼 요청한 사람과 쿠키 주인이 다를
         수 있으므로 ctx.emit(요청한 사람 기준) 대신 버스에 대상 플레이어를 직접 넘긴다."""
-        await self._players.revoke_status_tag(player_id, "chunithm-linked")
+        await self._players.revoke_status_tag(player_id, "sega-linked")
         if ctx is not None:
             await ctx.event_bus.emit_notify(
-                "chunithm.login.expired", {"player_id": player_id},
+                "sega.login.expired", {"player_id": player_id},
                 player_id=player_id, guild_id=ctx.guild_id,
             )
 

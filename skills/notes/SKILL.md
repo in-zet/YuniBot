@@ -7,7 +7,7 @@ examples:
   - 크로노 마스 내 메모 보여 줘
 triggers: [메모]
 category: 메모
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, players, db]
 listens: [chunithm.song.viewed, chunithm.plan.requested]

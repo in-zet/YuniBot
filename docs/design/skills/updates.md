@@ -13,7 +13,7 @@ examples:
   - 다음 업데이트 언제야?
   - 이번에 들어온 신곡 보여 줘
 category: 알림
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, records, notify, http, players, yuni]
 emits: [chunithm.update.detected]

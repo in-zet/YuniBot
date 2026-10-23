@@ -455,7 +455,7 @@ description: 테스트용 서비스 스코프 확인 스킬
 examples:
   - 예시
 category: 메모
-game: common
+games: []
 version: 1
 services: {services_yaml}
 ---
@@ -530,7 +530,7 @@ def _write_tables_probe_skill(root: Path, name: str, *, services: list[str]) -> 
     services_yaml = "[" + ", ".join(services) + "]"
     (skill_dir / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: 테스트용 표 보관소 확인 스킬\nexamples:\n  - 예시\n"
-        f"category: 메모\ngame: common\nversion: 1\nservices: {services_yaml}\n---\n\n테스트용.\n"
+        f"category: 메모\ngames: []\nversion: 1\nservices: {services_yaml}\n---\n\n테스트용.\n"
     )
     (skill_dir / "skill.py").write_text(
         "from core.decorators import tool\n"
@@ -992,7 +992,7 @@ async def test_agent_loop_pre_opens_skills_whose_triggers_match_the_message() ->
     script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
     state = _state(registry, mode="full")
     await _loop(registry, script).run(
-        ctx=_ctx(frozenset({"chunithm-linked"})), skill_state=state, user_text="내 즐겨찾기 보여줘",
+        ctx=_ctx(frozenset({"sega-linked"})), skill_state=state, user_text="내 즐겨찾기 보여줘",
         prompt_context_snippets=[],
     )
     assert state.level_for("settings") == "full"

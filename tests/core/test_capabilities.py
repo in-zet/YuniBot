@@ -63,7 +63,7 @@ def test_build_capabilities_text_describes_locked_status_tags() -> None:
     assert "CHUNITHM-NET" in text
 
 
-_ALL_TAGS = {"admin", "chunithm-linked", "chunithm-synced"}
+_ALL_TAGS = {"admin", "sega-linked", "chunithm-synced"}
 _DISCORD_MESSAGE_LIMIT = 2000
 
 

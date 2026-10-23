@@ -13,7 +13,7 @@ examples:
   - 월드 엔드 곡은 어떻게 해금해?
   - 크로노 마스 공략 있어?
 category: 질문 답변
-game: chunithm
+games: [chunithm]
 version: 1
 weight: heavy
 services: [websearch]

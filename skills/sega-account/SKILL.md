@@ -7,13 +7,13 @@ examples:
   - 내 기록 다른 사람도 볼 수 있게 해 줘
 triggers: [계정, 세가, 로그인, 로그아웃, 공개, 비공개, 내 기록 다른]
 category: 계정 연결
-game: chunithm
+games: [chunithm]
 version: 1
 weight: heavy
 services: [chunithm_net, secrets, players, notify, records]
-listens: [chunithm.login.expired]
+listens: [sega.login.expired]
 defines_tags:
-  - name: chunithm-linked
+  - name: sega-linked
     description: CHUNITHM-NET 계정을 연결했다.
     how_to_get: "`/로그인`으로 CHUNITHM-NET 계정을 연결하면 동기화와 인게임 설정을 쓸 수 있어."
   - name: chunithm-synced

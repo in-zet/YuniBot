@@ -73,7 +73,7 @@ def test_build_tool_declarations_hides_tagged_skill_tools() -> None:
 def test_triggered_skills_matches_lowercased_trigger_words_in_message() -> None:
     assembler = PromptAssembler(rules_text="규칙", persona_text="말투", registry=_registry())
     names = assembler.triggered_skills(
-        "즐겨찾기에 HERA 넣고 Linked VERSE 스토리도 알려줘", player_tags={"chunithm-linked"}
+        "즐겨찾기에 HERA 넣고 Linked VERSE 스토리도 알려줘", player_tags={"sega-linked"}
     )
     assert "settings" in names
     assert "yuni-lore" in names

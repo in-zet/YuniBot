@@ -31,23 +31,23 @@ async def test_in_memory_tag_provider_grant_revoke() -> None:
     provider = InMemoryTagProvider()
     assert await provider.tags_for("p1") == set()
 
-    provider.grant("p1", "chunithm-linked")
-    assert await provider.tags_for("p1") == {"chunithm-linked"}
+    provider.grant("p1", "sega-linked")
+    assert await provider.tags_for("p1") == {"sega-linked"}
 
-    provider.revoke("p1", "chunithm-linked")
+    provider.revoke("p1", "sega-linked")
     assert await provider.tags_for("p1") == set()
 
 
 def test_describe_lock_visible_status_tag_has_guidance() -> None:
     defs = {
-        "chunithm-linked": DefinedTag(
-            name="chunithm-linked",
+        "sega-linked": DefinedTag(
+            name="sega-linked",
             description="CHUNITHM-NET 연동됨",
             how_to_get="/계정 연결 로그인으로 로그인하면 얻는다",
             hidden=False,
         )
     }
-    lock = describe_lock(missing_tags=["chunithm-linked"], tag_definitions=defs)
+    lock = describe_lock(missing_tags=["sega-linked"], tag_definitions=defs)
     assert lock.visible is True
     assert "로그인" in (lock.message or "")
 

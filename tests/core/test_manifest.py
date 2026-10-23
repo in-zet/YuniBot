@@ -9,7 +9,7 @@ examples:
   - 크로노 마스 SSS+ 보더 알려줘
   - 내 최고점에서 트플플까지 몇 어택 남았어?
 category: 곡 정보
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, records]
 ---
@@ -23,7 +23,7 @@ def test_parse_manifest_happy_path() -> None:
 
     assert manifest.name == "chunithm-border"
     assert manifest.category == "곡 정보"
-    assert manifest.game == "chunithm"
+    assert manifest.games == ["chunithm"]
     assert manifest.version == 1
     assert manifest.services == ["songdb", "records"]
     assert manifest.tags == []
@@ -60,7 +60,7 @@ def test_parse_manifest_bad_category() -> None:
 
 
 def test_parse_manifest_bad_game() -> None:
-    text = BORDER_EXAMPLE.replace("game: chunithm", "game: maimai")
+    text = BORDER_EXAMPLE.replace("games: [chunithm]", "games: [chunithm, maimai]")
     with pytest.raises(ManifestError, match="game"):
         parse_manifest(text)
 
@@ -72,7 +72,7 @@ def test_parse_manifest_defines_tags_and_settings() -> None:
         "description: 데모\n"
         "examples: [하나]\n"
         "category: 메모\n"
-        "game: common\n"
+        "games: []\n"
         "version: 1\n"
         "services: []\n"
         "defines_tags:\n"
@@ -103,7 +103,7 @@ def test_parse_manifest_setting_scope_guild() -> None:
         "description: 데모\n"
         "examples: [하나]\n"
         "category: 메모\n"
-        "game: common\n"
+        "games: []\n"
         "version: 1\n"
         "services: []\n"
         "settings:\n"

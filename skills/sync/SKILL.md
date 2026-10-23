@@ -7,11 +7,11 @@ examples:
   - 오늘 친 거 갱신해서 크로노만 봐 줘
 triggers: [동기화, 싱크, 갱신]
 category: 기록과 리포트
-game: chunithm
+games: [chunithm]
 version: 1
 weight: heavy
 services: [chunithm_net, records, settings, yuni, notify, players, tables]
-tags: [chunithm-linked]
+tags: [sega-linked]
 emits: [chunithm.sync.completed, chunithm.sync.reported]
 settings:
   - name: 동기화 쿨다운

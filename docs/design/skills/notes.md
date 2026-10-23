@@ -13,7 +13,7 @@ examples:
   - 크로노 마스에 "후반 어지러운 패턴 왼손 주의" 메모해 줘
   - 이 곡 내 메모 보여 줘
 category: 메모
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, players]
 listens: [chunithm.song.viewed, chunithm.plan.requested]

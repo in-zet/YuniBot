@@ -15,10 +15,10 @@ examples:
   - 즐겨찾기에 크로노마기아 추가해줘
   - 즐겨찾기 목록 보여줘
 category: 오락실
-game: chunithm
+games: [chunithm]
 version: 1
 services: [chunithm_net, songdb]
-tags: [chunithm-linked]
+tags: [sega-linked]
 ```
 
 ## 왜 `arcade`가 아니라 별도 스킬인가

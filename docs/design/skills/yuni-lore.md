@@ -12,7 +12,7 @@ examples:
   - 나비는 누구야?
   - Linked VERSE 스토리 알려줘
 category: 유니 설정
-game: common
+games: []
 version: 1
 services: []
 ```

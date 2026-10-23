@@ -130,7 +130,7 @@ async def status(ctx: ToolContext) -> ToolResult:
     )
 
 
-@tool(slash="기록공개", tags=["chunithm-linked"], mutates=True)
+@tool(slash="기록공개", tags=["sega-linked"], mutates=True)
 async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
     """기록(프로필, 베스트, 곡별 기록) 공개 여부를 켜거나 끈다."""
     await ctx.players.set_visibility(ctx.player_id, "records_public", public)
@@ -140,14 +140,14 @@ async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
     )
 
 
-@tool(slash="로그아웃", tags=["chunithm-linked"], mutates=True, confirm="always")
+@tool(slash="로그아웃", tags=["sega-linked"], mutates=True, confirm="always")
 async def logout(ctx: ToolContext) -> ToolResult:
     """저장된 clal 쿠키를 지운다. 동기화된 기록은 남는다."""
     await ctx.chunithm_net.logout(ctx.player_id, ctx)
     return ToolResult(data={"logged_out": True}, display=Display(content="로그아웃했어. 보관하던 쿠키는 지웠고, 모아 둔 기록은 그대로 남아 있어.", ephemeral=True))
 
 
-@on("chunithm.login.expired")
+@on("sega.login.expired")
 async def on_login_expired(ctx: ToolContext, payload: dict[str, object]) -> None:
     """만료된 로그인에 대해 대표 계정에 재로그인을 한 번만 안내한다(이 프로세스가 켜져
     있는 동안만 — 재시작하면 다시 보낸다. 이 이벤트는 core/events.py의 EventBus가 이

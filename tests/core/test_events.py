@@ -246,7 +246,7 @@ async def test_notify_handler_skipped_when_player_missing_required_tags() -> Non
         called.append("called")
 
     bus.register_notify(
-        "evt", owner_skill="s", fn=handler, skill_services=[], tags=["chunithm-linked"]
+        "evt", owner_skill="s", fn=handler, skill_services=[], tags=["sega-linked"]
     )
     await bus.emit_notify("evt", {}, player_id="p1", guild_id=None)
     await bus.drain()
@@ -258,16 +258,16 @@ async def test_notify_handler_skipped_when_player_missing_required_tags() -> Non
 async def test_notify_handler_runs_when_player_has_required_tags() -> None:
     bus = EventBus()
     bus.bind_dispatch(
-        services={}, tag_provider=_FakeTagProvider({"p1": {"chunithm-linked"}}), settings=None
+        services={}, tag_provider=_FakeTagProvider({"p1": {"sega-linked"}}), settings=None
     )
     called: list[str] = []
 
     async def handler(ctx: ToolContext, payload: object) -> None:
         called.append("called")
-        assert ctx.tags == frozenset({"chunithm-linked"})
+        assert ctx.tags == frozenset({"sega-linked"})
 
     bus.register_notify(
-        "evt", owner_skill="s", fn=handler, skill_services=[], tags=["chunithm-linked"]
+        "evt", owner_skill="s", fn=handler, skill_services=[], tags=["sega-linked"]
     )
     await bus.emit_notify("evt", {}, player_id="p1", guild_id=None)
     await bus.drain()
@@ -297,11 +297,11 @@ async def test_notify_handler_tags_any_requires_at_least_one() -> None:
 
 @pytest.mark.asyncio
 async def test_handler_skipped_when_player_lacks_skill_level_tags() -> None:
-    # 핸들러 자신의 조건(chunithm-linked)은 갖췄지만 그 스킬의 manifest 조건(chunithm-synced)은
+    # 핸들러 자신의 조건(sega-linked)은 갖췄지만 그 스킬의 manifest 조건(chunithm-synced)은
     # 없는 플레이어: 알림은 안 불리고 모으기 조각은 빠진다. 두 조건은 따로 검사한다.
     bus = EventBus()
     bus.bind_dispatch(
-        services={}, tag_provider=_FakeTagProvider({"p1": {"chunithm-linked"}}), settings=None
+        services={}, tag_provider=_FakeTagProvider({"p1": {"sega-linked"}}), settings=None
     )
     notified: list[str] = []
 
@@ -316,11 +316,11 @@ async def test_handler_skipped_when_player_lacks_skill_level_tags() -> None:
 
     bus.register_notify(
         "evt", owner_skill="s", fn=notify_handler, skill_services=[],
-        tags=["chunithm-linked"], skill_tags=["chunithm-synced"],
+        tags=["sega-linked"], skill_tags=["chunithm-synced"],
     )
     bus.register_gather(
         "evt", owner_skill="s", fn=gather_handler, skill_services=[],
-        tags=["chunithm-linked"], skill_tags=["chunithm-synced"],
+        tags=["sega-linked"], skill_tags=["chunithm-synced"],
     )
     bus.register_gather("evt", owner_skill="other", fn=other_gather, skill_services=[])
 

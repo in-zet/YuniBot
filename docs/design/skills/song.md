@@ -18,7 +18,7 @@ examples:
   - 15.0에서 15.2 상수 중에 노트 수 1000개 넘는 곡 뭐 있어?
   - 15 상수 곡들 노트 수 많은 순으로 보여줘
 category: 곡 정보
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb]
 emits: [chunithm.song.viewed]

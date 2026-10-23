@@ -13,7 +13,7 @@ examples:
   - 디코 부계정도 연결하고 싶어
   - 연결된 계정 보여 줘
 category: 계정 연결
-game: common
+games: []
 version: 1
 services: [players, notify, memory, db, player_data]
 emits: [players.linked]

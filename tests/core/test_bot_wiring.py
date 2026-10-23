@@ -144,13 +144,13 @@ async def test_register_event_handlers_scopes_ctx_to_skill_services_and_applies_
 
     code = SkillCode(
         event_handlers=[
-            EventHandlerSpec(fn=handle, event_name="players.first_seen", tags=["chunithm-linked"])
+            EventHandlerSpec(fn=handle, event_name="players.first_seen", tags=["sega-linked"])
         ]
     )
     skill = LoadedSkill(
         manifest=SkillManifest(
             name="notif-skill", description="테스트용", examples=["예시"], category="메모",
-            game="common", version=1, services=["memory"],
+            games=[], version=1, services=["memory"],
         ),
         path=Path("."),
         code=code,
@@ -162,7 +162,7 @@ async def test_register_event_handlers_scopes_ctx_to_skill_services_and_applies_
     _register_event_handlers(bus, registry)
     bus.bind_dispatch(
         services={"memory": object(), "secrets": object()},
-        tag_provider=_FakeTagProvider({"p1": {"chunithm-linked"}}),
+        tag_provider=_FakeTagProvider({"p1": {"sega-linked"}}),
         settings=None,
     )
 
@@ -185,14 +185,14 @@ async def test_register_event_handlers_exposes_scheduler_only_when_declared() ->
     declared_skill = LoadedSkill(
         manifest=SkillManifest(
             name="declared-skill", description="테스트용", examples=["예시"], category="메모",
-            game="common", version=1, services=["scheduler", "tables"],
+            games=[], version=1, services=["scheduler", "tables"],
         ),
         path=Path("."), code=code,
     )
     undeclared_skill = LoadedSkill(
         manifest=SkillManifest(
             name="undeclared-skill", description="테스트용", examples=["예시"], category="메모",
-            game="common", version=1, services=[],
+            games=[], version=1, services=[],
         ),
         path=Path("."), code=code,
     )
@@ -226,13 +226,13 @@ async def test_register_event_handlers_drops_handler_when_player_lacks_tag() -> 
 
     code = SkillCode(
         event_handlers=[
-            EventHandlerSpec(fn=handle, event_name="players.first_seen", tags=["chunithm-linked"])
+            EventHandlerSpec(fn=handle, event_name="players.first_seen", tags=["sega-linked"])
         ]
     )
     skill = LoadedSkill(
         manifest=SkillManifest(
             name="notif-skill", description="테스트용", examples=["예시"], category="메모",
-            game="common", version=1, services=[],
+            games=[], version=1, services=[],
         ),
         path=Path("."),
         code=code,
@@ -264,7 +264,7 @@ async def test_register_event_handlers_applies_skill_manifest_tags() -> None:
     skill = LoadedSkill(
         manifest=SkillManifest(
             name="notif-skill", description="테스트용", examples=["예시"], category="메모",
-            game="common", version=1, services=[], tags=["chunithm-synced"],
+            games=[], version=1, services=[], tags=["chunithm-synced"],
         ),
         path=Path("."),
         code=code,
@@ -394,7 +394,7 @@ def _fake_skill(tmp_path: Path, *, name: str) -> LoadedSkill:
             description="테스트용",
             examples=["예시"],
             category="메모",
-            game="common",
+            games=[],
             version=1,
         ),
         path=tmp_path,

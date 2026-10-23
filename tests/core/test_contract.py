@@ -22,7 +22,7 @@ def _skill_with_migrations(tmp_path: Path, *, skill_name: str, sql: str) -> Load
         description="테스트용",
         examples=["예시"],
         category="메모",
-        game="common",
+        games=[],
         version=1,
     )
     return LoadedSkill(manifest=manifest, path=tmp_path, code=SkillCode())
@@ -126,7 +126,7 @@ def _spec(fn: object) -> ToolSpec:
 
 def test_tool_with_table_arg_must_not_have_slash(tmp_path: Path) -> None:
     manifest = SkillManifest(
-        name="table-skill", description="테스트용", examples=["예시"], category="메모", game="common", version=1
+        name="table-skill", description="테스트용", examples=["예시"], category="메모", games=[], version=1
     )
     skill = LoadedSkill(
         manifest=manifest, path=tmp_path,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -9,7 +9,7 @@ class _ManifestLike(Protocol):
     @property
     def name(self) -> str: ...
     @property
-    def game(self) -> str: ...
+    def games(self) -> Sequence[str]: ...
     @property
     def version(self) -> int: ...
 
@@ -36,7 +36,7 @@ class _SkillRegistryLike(Protocol):
 @dataclass(slots=True, kw_only=True, frozen=True)
 class SkillSummary:
     name: str
-    game: str
+    games: tuple[str, ...]
     version: int
     enabled: bool
 
@@ -51,7 +51,7 @@ def build_snapshot(registry: _SkillRegistryLike) -> RegistrySnapshot:
     """레지스트리의 읽기 전용 스냅샷을 한 번 만든다. 스킬은 레지스트리를 직접 못 보므로
     admin의 `skills` 도구가 이 스냅샷으로만 등록 현황을 본다."""
     skills = tuple(
-        SkillSummary(name=s.manifest.name, game=s.manifest.game, version=s.manifest.version, enabled=True)
+        SkillSummary(name=s.manifest.name, games=tuple(s.manifest.games), version=s.manifest.version, enabled=True)
         for s in registry.enabled_skills()
     )
     return RegistrySnapshot(skills=skills, failures=registry.failures())

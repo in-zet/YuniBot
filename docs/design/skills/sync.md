@@ -13,10 +13,10 @@ examples:
   - 동기화해 줘
   - 오늘 친 거 갱신해서 크로노만 봐 줘
 category: 기록과 리포트
-game: chunithm
+games: [chunithm]
 version: 1
 services: [chunithm_net, records, settings, yuni, notify, players]
-tags: [chunithm-linked]
+tags: [sega-linked]
 emits: [chunithm.sync.completed, chunithm.sync.reported]
 ```
 

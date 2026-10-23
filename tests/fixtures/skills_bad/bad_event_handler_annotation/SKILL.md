@@ -4,7 +4,7 @@ description: 반환 타입 힌트가 해석되지 않는 @on 핸들러를 가진
   (코어 전체가 아니라 이 스킬만) 비활성화되어야 한다.
 examples: [예시]
 category: 메모
-game: common
+games: []
 version: 1
 services: []
 listens: [players.first_seen]

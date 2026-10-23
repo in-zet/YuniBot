@@ -7,7 +7,7 @@ examples:
   - 질문 예시 2
 triggers: [메시지에 있으면 이 스킬을 미리 펼칠 낱말]
 category: 메모
-game: common
+games: []
 version: 1
 services: []
 ---

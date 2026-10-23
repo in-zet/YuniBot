@@ -232,7 +232,7 @@ async def test_login_success_stores_cookie_and_grants_linked_tag(conn, secrets) 
     profile = await service.login(player.id, "a" * 64, ctx)
 
     assert profile.username
-    assert await players.tags_for(player.id) == {"chunithm-linked"}
+    assert await players.tags_for(player.id) == {"sega-linked"}
 
 
 async def test_login_failure_does_not_store_cookie_or_grant_tag(conn, secrets) -> None:
@@ -271,7 +271,7 @@ async def test_login_with_credentials_success_stores_only_clal_and_grants_linked
     profile = await service.login_with_credentials(player.id, "my-sega-id", "my-password", ctx)
 
     assert profile.username
-    assert await players.tags_for(player.id) == {"chunithm-linked"}
+    assert await players.tags_for(player.id) == {"sega-linked"}
     assert await _stored_clal(conn, secrets, player.id) == "c" * 64
 
 
@@ -401,7 +401,7 @@ async def test_fetch_for_sync_on_connection_failure_expires_login(conn, secrets)
 
     bus = EventBus()
     bus.register_notify(
-        "chunithm.login.expired", owner_skill="test", fn=_record_expired, skill_services=[]
+        "sega.login.expired", owner_skill="test", fn=_record_expired, skill_services=[]
     )
     ctx_with_bus = ToolContext(
         player_id=player.id, tags=frozenset(), services={}, event_bus=bus
@@ -432,7 +432,7 @@ async def test_fetch_for_sync_on_non_auth_failure_keeps_login(conn, secrets) -> 
 
     bus = EventBus()
     bus.register_notify(
-        "chunithm.login.expired", owner_skill="test", fn=_record_expired, skill_services=[]
+        "sega.login.expired", owner_skill="test", fn=_record_expired, skill_services=[]
     )
     ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
 
@@ -444,7 +444,7 @@ async def test_fetch_for_sync_on_non_auth_failure_keeps_login(conn, secrets) -> 
     await bus.drain()
 
     assert received == []
-    assert await players.tags_for(player.id) == {"chunithm-linked"}
+    assert await players.tags_for(player.id) == {"sega-linked"}
 
 
 async def test_logout_cleans_up_locally_even_when_remote_logout_fails(conn, secrets) -> None:
@@ -704,7 +704,7 @@ async def test_enrich_recent_with_detail_without_login_raises_connection_error(c
 
 
 async def _linked_player_with_expiry_bus(conn, secrets):
-    """로그인된 플레이어와, chunithm.login.expired를 (이벤트 대상 player_id, payload)로 기록하는 버스."""
+    """로그인된 플레이어와, sega.login.expired를 (이벤트 대상 player_id, payload)로 기록하는 버스."""
     players = PlayersService(conn)
     player = await players.create_player()
     ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
@@ -716,7 +716,7 @@ async def _linked_player_with_expiry_bus(conn, secrets):
         received.append((ctx.player_id, payload))
 
     bus = EventBus()
-    bus.register_notify("chunithm.login.expired", owner_skill="test", fn=_record_expired, skill_services=[])
+    bus.register_notify("sega.login.expired", owner_skill="test", fn=_record_expired, skill_services=[])
     return players, player, bus, received
 
 
@@ -813,7 +813,7 @@ async def test_recent_on_non_auth_failure_keeps_login(conn, secrets) -> None:
     await bus.drain()
 
     assert received == []
-    assert await players.tags_for(player.id) == {"chunithm-linked"}
+    assert await players.tags_for(player.id) == {"sega-linked"}
 
 
 async def test_set_favorite_music_reads_first_so_the_request_token_exists_then_verifies(conn, secrets) -> None:

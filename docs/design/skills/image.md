@@ -10,7 +10,7 @@ Oct 20, 2026 · @astrove
 name: image
 description: 방금 만든 표(곡 검색 결과, 베스트, 폴더 등)를 재킷이 들어간 그림으로 그려 준다. 레이팅표, 상수표처럼 그림으로 보고 싶을 때 쓴다.
 category: 기록과 리포트
-game: chunithm
+games: [chunithm]
 version: 1
 weight: heavy
 services: [songdb, records, image_cache, tables]

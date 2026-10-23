@@ -14,7 +14,7 @@ examples:
   - 트플플이 몇 점부터야?
   - 비비기가 뭐야?
 category: 질문 답변
-game: chunithm
+games: [chunithm]
 version: 1
 services: [terms, players, notify, settings]
 ```

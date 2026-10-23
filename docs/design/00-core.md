@@ -122,10 +122,10 @@ skills/chunithm-border/
 | `examples` | 예 | 이 스킬을 골라야 하는 질문 예시 2\~3개. 선택 정확도 시험에도 쓴다. |
 | `triggers` | 아니오 | 메시지에 들어 있으면 코어가 이 스킬을 미리 펼치는 낱말 목록("스킬 불러오기"). 소문자 부분 문자열로 비교한다. 넓게 잡아도 손해는 펼친 지침 분량뿐이다. 계약 테스트가 들어 있는 스킬에 `triggers`가 있는지 확인한다. |
 | `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 이정표, 관리, 폴더, 유니 설정 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
-| `game` | 예 | `chunithm` 또는 `common`. 다른 게임을 붙일 때 묶는 단위다. 17단계에서 게임 목록 `games:`로 바뀐다("여러 게임" 절). |
+| `games` | 예 | 이 스킬이 다루는 게임 목록(예: `[chunithm]`). 게임과 무관한 스킬은 빈 목록 `[]`이다. 등록되지 않은 게임 이름은 거부한다("여러 게임" 절). |
 | `version` | 예 | 스킬 버전. 바꾼 것을 추적한다. |
 | `services` | 예 | 쓰는 서비스 목록. 예: `songdb`, `chunithm_net`, `players`. 선언하지 않은 서비스는 못 쓴다. 코어 전용 맥락(`db` 원시 DB 연결, `player_data` 스킬 테이블 전체의 플레이어 데이터 집계·삭제, `registry_snapshot` 스킬 등록 현황, `usage` LLM 사용량, `tables` 작업 표 보관소 — 동기화 저장 뒤 `mark_stale`을 부르는 스킬만)도 같은 방식으로 여기 적어야 받는다(account-link, admin처럼 꼭 필요한 공통 스킬만). |
-| `tags` | 아니오 | 이 스킬을 쓰는 데 필요한 권한 태그. 없으면 누구나 쓴다. 예: `[chunithm-linked]`, `[admin]`. |
+| `tags` | 아니오 | 이 스킬을 쓰는 데 필요한 권한 태그. 없으면 누구나 쓴다. 예: `[sega-linked]`, `[admin]`. |
 | `defines_tags` | 아니오 | 이 스킬이 새로 정의하는 태그(이름, 설명, 얻는 방법, 없을 때 숨길지). |
 | `emits` / `listens` | 아니오 | 내는 이벤트와 받는 이벤트 이름. |
 | `settings` | 아니오 | 플레이어가 바꿀 수 있는 설정(이름, 형식, 기본값, 설명, 범위 `scope: player|guild` — 기본 player). 코어의 공통 설정 화면(`/설정 보기`, `/설정 바꾸기 skill:… setting:… value:…`, 자동완성 없음)에 자동으로 나온다. guild 범위 값을 바꾸려면 admin 태그가 필요하다. |
@@ -376,7 +376,7 @@ examples:
   - 크로노 마스 SSS+ 보더 알려줘
   - 내 최고점에서 트플플까지 몇 어택 남았어?
 category: 곡 정보
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, records]
 ---
@@ -439,7 +439,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | `arcades` | 공통 | 오락실 목록(봇 전역), 전역 별칭, 이름 확인, 방문 기록(게임별) |
 | `websearch` | 공통 | Gemini 검색 도구 호출, 출처 추출, 응답당 검색 횟수 상한 |
 | `http` | 공통 | 공개 웹 페이지와 JSON 가져오기. 캐시, ETag, 호스트별 호출 간격 제한 |
-| `chunithm_net` | 츄니즘 | 원본 어댑터를 플레이어별로 열어 주고, 접속 횟수를 제한한다. 로그인 성공과 쿠키 만료에 따라 `chunithm-linked` 태그를 붙이고 떼며, 만료 때 `chunithm.login.expired`를 낸다 |
+| `chunithm_net` | 츄니즘 | 원본 어댑터를 플레이어별로 열어 주고, 접속 횟수를 제한한다. 로그인 성공과 쿠키 만료에 따라 `sega-linked` 태그를 붙이고 떼며, 만료 때 `sega.login.expired`를 낸다 |
 | `songdb` | 츄니즘 | 곡·채보 정보, 상수, 노트 수, 별칭, sdvx.in 매핑, 위키 문서명, 국제판 수록 여부. 원본 시드 위에 Chunimaru songdb를 덧씌운다(지금은 기동 때 한 번. 실패하면 시드의 수록 여부를 쓴다. 1시간 주기 갱신은 아직 없다) |
 | `records` | 츄니즘 | 기록 스냅샷, 베스트, 변화량, 플레이 날짜별 세션 id(날짜 경계 기본 새벽 4시), 레이팅·오버파워 계산과 CHUNITHM-NET 대조, 점수·어택 환산 함수. 첫 동기화가 끝나면 `chunithm-synced` 태그를 붙인다 |
 | `terms` | 츄니즘 | 용어 사전. 랭크·난이도·램프·점수의 별칭(표준 타입이 읽음), 개념 용어의 뜻, 승인된 서버 은어. 원본은 `terms.yaml` |
@@ -476,7 +476,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | --- | --- | --- | --- |
 | `players.first_seen` | 알림 | 코어 | `yuni-bond` |
 | `players.linked` | 알림 | `account-link` | 없음 |
-| `chunithm.login.expired` | 알림 | `chunithm_net` 서비스 | `sega-account` |
+| `sega.login.expired` | 알림 | `chunithm_net` 서비스 | `sega-account` |
 | `chunithm.sync.completed` | 모으기 | `sync` | `report`, `goals`, `updates`, `arcade`, `yuni-bond` |
 | `chunithm.sync.reported` | 알림 | `sync` | `session` |
 | `chunithm.song.viewed` | 모으기 | `song` | `notes`, `goals`, `yuni-bond` |
@@ -522,7 +522,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | 종류 | 예 | 누가 붙이나 | 없는 사람에게 |
 | --- | --- | --- | --- |
 | 부여 태그 | `admin`, `tester` | 관리자가 `admin` 스킬로. 첫 관리자는 `.env`에 적은 디스코드 ID | 숨긴다. 카드와 안내에서 빠진다. 슬래시 목록에는 보이지만(디스코드에서 막을 수 없다) 실행하면 안내 없이 "모르는 명령"으로만 답한다 |
-| 상태 태그 | `chunithm-linked`, `chunithm-synced` | 서비스가 상태를 보고 자동으로. 로그인 성공, 쿠키 만료, 첫 동기화 | 보이되 잠긴다. "CHUNITHM-NET 로그인하면 쓸 수 있어요"처럼 얻는 방법을 안내한다 |
+| 상태 태그 | `sega-linked`, `chunithm-synced` | 서비스가 상태를 보고 자동으로. 로그인 성공, 쿠키 만료, 첫 동기화 | 보이되 잠긴다. "CHUNITHM-NET 로그인하면 쓸 수 있어요"처럼 얻는 방법을 안내한다 |
 | 스킬 태그 | 예: `goals-beta` | 스킬이 `defines_tags`로 정의하고, 관리자가 붙인다 | 정의할 때 숨길지 안내할지 고른다 |
 
 - **조건 적는 법**: `tags: [a, b]`는 둘 다 있어야 한다. 하나만 있어도 되면 `tags_any: [a, b]`를 쓴다. 도구의 `tags`는 스킬의 조건에 더해진다.
@@ -694,12 +694,12 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [song](skills/song.md) | 츄니즘 | 곡·별칭 검색, 상수, 노트 수, 채보 뷰어 링크, 한국어 별칭 | 없음 |
 | [terms](skills/terms.md) | 츄니즘 | 용어와 은어의 뜻, 서버 은어 제안·승인 | 없음. 승인만 `admin` |
 | [chunithm-border](skills/chunithm-border.md) | 츄니즘 | 허용 어택 개수, 목표까지 남은 어택 | 없음. 남은 어택만 `chunithm-synced` |
-| [sync](skills/sync.md) | 츄니즘 | 동기화 실행, 리포트 조각 모으기 | `chunithm-linked` |
+| [sync](skills/sync.md) | 츄니즘 | 동기화 실행, 리포트 조각 모으기 | `sega-linked` |
 | [report](skills/report.md) | 츄니즘 | 프로필, 베스트, 최근 플레이, 분석, 후보곡, 리포트 본문 | `chunithm-synced` |
 | [goals](skills/goals.md) | 츄니즘 | 레이팅·오버파워·폴더·곡별(To-Do)·자유 목표, 기한 알림 | 없음. 기록 기반 도구만 `chunithm-synced` |
 | [session](skills/session.md) | 츄니즘 | 세션 보관·목록·불러오기, 세션 후기 대화 | `chunithm-synced` |
-| [arcade](skills/arcade.md) | 츄니즘 | 오락실별 게임 설정 저장·조회 | `chunithm-linked` |
-| [settings](skills/settings.md) | 츄니즘 | 지금 계정의 인게임 설정 조회·변경, 즐겨찾기 곡 조회·추가·삭제 | `chunithm-linked` |
+| [arcade](skills/arcade.md) | 츄니즘 | 오락실별 게임 설정 저장·조회 | `sega-linked` |
+| [settings](skills/settings.md) | 츄니즘 | 지금 계정의 인게임 설정 조회·변경, 즐겨찾기 곡 조회·추가·삭제 | `sega-linked` |
 | [notes](skills/notes.md) | 츄니즘 | 곡별 메모 | 없음 |
 | [updates](skills/updates.md) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
 | [folders](skills/folders.md) | 츄니즘 | 채보를 모은 이름 붙인 폴더 생성·조회, 표로 일괄 추가/삭제, 메모 | 없음 |
@@ -773,7 +773,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | 게임 프로필 | 게임마다 다른 것(점수 형식, 난이도·랭크·램프 표, 레이팅 공식과 프레임 크기, 채보 키, 곡 DB 소스, NET 어댑터)을 게임 프로필 한 곳에 모은다. 서비스는 프로필을 받아 동작하고 `if game == …`를 흩뿌리지 않는다 | 없음(츄니즘 값이 서비스에 고정) |
 | 게임 고르기 | ① 사용자가 말한 게임(모델이 도구 인자 `game`에 넣는다) → ② 플레이어별 "주 게임" 설정 → ③ 기본 게임(츄니즘). 한 함수(`choose_game`)로 두고 도구 실행기(`invoke`)가 `ctx.game`에 담는다 — 슬래시도 같은 `invoke`를 지난다 | 구현됨(17단계 Part 1-3). ②는 Part 2 저장소 전까지 비어 있음, `game` 인자를 받는 도구는 아직 없음 |
 | 서비스 | 공통 틀은 `services/game/`, 게임별 모듈은 `services/<게임>/`. 공통 서비스(`players` 등)는 게임을 모른다. 게임 서비스 한 벌은 `services/game/builder.py`가 만든다 | 구현됨(17단계 Part 1-2, 기본 게임 한 벌만) |
-| 로그인 | SEGA aime 공통 게이트웨이 쿠키(`clal`) 하나를 두 게임이 같이 쓴다. 게임마다 `site_id`·`redirect_url`만 다르다. 상태 태그 `sega-linked`, 만료 이벤트 `sega.login.expired` | `chunithm-linked`, `chunithm.login.expired` |
+| 로그인 | SEGA aime 공통 게이트웨이 쿠키(`clal`) 하나를 두 게임이 같이 쓴다. 게임마다 `site_id`·`redirect_url`만 다르다. 상태 태그 `sega-linked`, 만료 이벤트 `sega.login.expired` | 구현됨(17단계 Part 1-4) |
 | 스킬 | 두 게임을 다루는 스킬은 게임 중립 이름(`song`·`report`…, 세가 계정은 `sega-account`)이고 manifest `games:`에 게임 목록을 적는다. 한 게임 전용 스킬은 `<게임>-` 접두사(`chunithm-border` 등) | 모두 `chunithm-*`, manifest `game:` 한 값 |
 | 태그 | 동기화 상태 태그는 게임별(`chunithm-synced`·`maimai-synced`). 두 게임 스킬은 `tags_any`로 받고, 고른 게임의 기록이 없으면 도구가 그렇게 돌려준다 | `chunithm-synced` |
 | 테이블 | 게임에 딸린 테이블에는 `game` 열을 둔다. 채보 키는 (곡, `chart_type`, 난이도) — 츄니즘은 `chart_type=''`, maimai는 `STD`·`DX` | `game` 열은 있음, `chart_type` 없음 |

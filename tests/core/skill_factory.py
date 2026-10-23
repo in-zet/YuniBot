@@ -15,7 +15,7 @@ description: 테스트용 임시 스킬
 examples:
   - 예시
 category: 메모
-game: common
+games: []
 version: 1
 services: []
 {weight}---

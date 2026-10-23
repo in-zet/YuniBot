@@ -9,7 +9,7 @@ examples:
   - 10월 5일 후기 남길게
 triggers: [세션, 후기]
 category: 세션과 후기
-game: chunithm
+games: [chunithm]
 version: 1
 services: [records, arcades, players, notify, settings, yuni, db]
 tags: [chunithm-synced]

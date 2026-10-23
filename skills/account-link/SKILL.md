@@ -7,7 +7,7 @@ examples:
   - 연결된 계정 보여 줘
 triggers: [부계정, 디코 계정, 디스코드 계정, 연결된 계정, 연결 해제, 연결해]
 category: 계정 연결
-game: common
+games: []
 version: 1
 services: [players, notify, memory, db, player_data]
 emits: [players.linked]

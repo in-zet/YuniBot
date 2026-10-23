@@ -14,7 +14,7 @@ examples:
   - 레이팅 올릴 곡 추천해 줘
   - 민수 크로노 기록 몇 점이야?
 category: 기록과 리포트
-game: chunithm
+games: [chunithm]
 version: 1
 services: [records, songdb, players, chunithm_net]
 tags: [chunithm-synced]

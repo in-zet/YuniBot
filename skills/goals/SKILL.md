@@ -8,7 +8,7 @@ examples:
   - 내 목표 어디까지 왔어?
 triggers: [목표, 투두, todo, to-do, 기한, 순회]
 category: 목표
-game: chunithm
+games: [chunithm]
 version: 1
 services: [records, songdb, notify, players, settings, scheduler, yuni, db]
 listens: [chunithm.sync.completed, chunithm.song.viewed, chunithm.plan.requested, goals.notify_due, goals.final_deadline]

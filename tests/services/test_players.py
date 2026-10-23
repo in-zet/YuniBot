@@ -147,7 +147,7 @@ async def test_grant_tag_rejects_status_tags(conn: aiosqlite.Connection) -> None
     player = await service.create_player()
 
     with pytest.raises(ValueError, match="상태 태그"):
-        await service.grant_tag(player.id, "chunithm-linked", source="admin:111")
+        await service.grant_tag(player.id, "sega-linked", source="admin:111")
 
 
 async def test_players_with_tag_filters_by_source(conn: aiosqlite.Connection) -> None:
@@ -218,9 +218,9 @@ async def test_set_status_tag_allows_only_status_tags(conn: aiosqlite.Connection
     service = PlayersService(conn)
     player = await service.create_player()
 
-    await service.set_status_tag(player.id, "chunithm-linked", source="chunithm_net:login")
-    assert await service.tags_for(player.id) == {"chunithm-linked"}
-    assert await service.tag_source(player.id, "chunithm-linked") == "chunithm_net:login"
+    await service.set_status_tag(player.id, "sega-linked", source="chunithm_net:login")
+    assert await service.tags_for(player.id) == {"sega-linked"}
+    assert await service.tag_source(player.id, "sega-linked") == "chunithm_net:login"
 
     with pytest.raises(ValueError, match="상태 태그가 아니다"):
         await service.set_status_tag(player.id, "admin", source="x")

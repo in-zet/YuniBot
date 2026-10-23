@@ -110,11 +110,11 @@
   - [X] Part 5: 표를 받아 칸을 더하거나 곡 행을 채보로 펼치는 도구(6개) — 구현 완료(2026-10-20). `charts_of`·`add_borders`·`add_remaining`·`add_notes`·`add_links`·`analyze(table)`(`/분석`은 `analyze_slash`로 입구를 나눔). 실기 미확인: 곡 표→`charts_of`→점수/보더/링크 붙이기 연쇄를 모델이 잇는지, 폴더 표에 `analyze(table)`, 곡 표에 `add_notes`
   - [X] Part 6: id 입구 나누기(슬래시 전용 + 표 받는 모델 도구)와 표로 데이터 바꾸기 — Part 1~5 뒤. **6-1 구현 완료(2026-10-20)**: `goals`(`delete_goals`·`update_goal`·`goal_progress`·`complete_todos`)·`yuni-bond`(`close_promises`). 실기 미확인: "2번 목표 지워줘"·"크로노 목표 지워줘"·"투두 다 완료"·"그 약속 지켰어"가 id를 지어내지 않고 표로 가는지. **6-2 구현 완료(2026-10-20)**: `folders`(`add_to_folder`·`remove_from_folder`, 조건 일괄 도구 제거)·`goals`(`add_todos`, `todo_bulk` 제거)·`notes`(`delete_notes`)·`settings`(`add_favorites`). 실기 미확인: 검색→`charts_of`→`add_scores`→`table_query`→`add_todos` 연쇄, 폴더 일괄 추가/삭제, 즐겨찾기 일괄 추가, 메모 일괄 삭제
 - [ ] 17. maimai DX 국제판 확장(게임 매개변수·게임 프로필, 스킬 이름 게임 중립화, aime 쿠키 공유, otoge-db 곡 DB) — `2026-10-23_수정.md` §17
-  - [ ] Part 1: 게임 공통화와 스킬 이름 바꾸기(츄니즘 동작 변화 없음) — §17.3. 네 덩어리로 나눔(2026-10-23)
+  - [X] Part 1: 게임 공통화와 스킬 이름 바꾸기(츄니즘 동작 변화 없음) — §17.3. 네 덩어리로 나눔(2026-10-23), 모두 구현 완료. 실기 미확인은 1-1 줄에 있고, 1-4: 재배포 뒤 로그인 상태(`sega-linked` 태그)가 유지되는지·쿠키 만료 알림이 오는지
     - [X] 1-1 스킬 이름 바꾸기(`chunithm-X` → `X`, `chunithm-account` → `sega-account`, `arcade`·`settings`·`updates` 포함, `chunithm-border`만 그대로) + 코어 마이그레이션 022로 저장된 이름 갱신 — 구현 완료(2026-10-23). 실기 미확인: 재배포 뒤 기존 설정(스킬 끄기·서버별 값)·예약·마이그레이션 기록이 그대로인지, 멘션 라우팅(도구 이름이 `song_…`처럼 바뀜)이 이전과 같은지
     - [X] 1-2 서비스 폴더 정리(공통 모듈 6개를 `services/game/`로)와 게임 프로필 자료형·등록부·builder — 구현 완료(2026-10-23). `core/bot.py`는 builder와 `choose_game`만 안다
     - [X] 1-3 `RecordsService`·`SongDbService`가 `game`/프로필을 받음, 게임 고르기 함수 `choose_game`을 실행기 `invoke`에 연결(`ctx.game`) — 구현 완료(2026-10-23). `TermsService`·NET은 쓰는 곳이 생기는 Part 2~5에서 `game`을 받는다. 주 게임 저장소는 Part 2
-    - [ ] 1-4 코어 이름 정리(상태 태그·`sega.login.expired`·`games:`·슬래시 `게임` 인자)
+    - [X] 1-4 코어 이름 정리(`chunithm-linked` → `sega-linked`, `chunithm.login.expired` → `sega.login.expired`, manifest `game:` → `games:`; 코어 마이그레이션 023이 저장된 태그를 옮김) — 구현 완료(2026-10-23). 슬래시 `게임` 선택 인자는 `game` 인자를 받는 도구가 생기는 Part 6에서 붙인다
   - [ ] Part 2: DB 마이그레이션(`chart_type`, `dx_score`, 쿠키 테이블 이름, 주 게임) — §17.4
   - [ ] Part 3: aime 인증 공통화와 maimai DX NET 어댑터 — §17.5. 시작 조건: SEGA 사이트 복구 후 실측
   - [ ] Part 4: maimai 곡 DB(otoge-db) — §17.6

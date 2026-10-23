@@ -26,7 +26,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, count: int = 1) -> ToolResul
     return ToolResult(data={"chart": chart, "count": count})
 
 
-@tool(slash="보더잠김", tags=["chunithm-linked"])
+@tool(slash="보더잠김", tags=["sega-linked"])
 async def locked(ctx: ToolContext) -> ToolResult:
     """상태 태그가 필요한 도구."""
     return ToolResult(data={})
@@ -84,8 +84,8 @@ def _make_executor() -> tuple[ToolExecutor, InMemoryTagProvider]:
     resolvers.register(ChartRef, _FakeChartResolver())
     tag_provider = InMemoryTagProvider()
     tag_defs = {
-        "chunithm-linked": DefinedTag(
-            name="chunithm-linked", description="연동됨", how_to_get="로그인하면 얻는다", hidden=False
+        "sega-linked": DefinedTag(
+            name="sega-linked", description="연동됨", how_to_get="로그인하면 얻는다", hidden=False
         ),
         "practice-secret": DefinedTag(
             name="practice-secret", description="비밀", how_to_get="관리자 부여", hidden=True
@@ -145,7 +145,7 @@ async def test_invoke_missing_hidden_tag_gives_generic_error() -> None:
 @pytest.mark.asyncio
 async def test_invoke_with_satisfied_tag_succeeds() -> None:
     executor, tag_provider = _make_executor()
-    tag_provider.grant("p1", "chunithm-linked")
+    tag_provider.grant("p1", "sega-linked")
     tags = await tag_provider.tags_for("p1")
     ctx = ToolContext(player_id="p1", tags=frozenset(tags), services={})
 

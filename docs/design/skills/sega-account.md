@@ -15,10 +15,10 @@ examples:
   - 나 로그인 돼 있어?
   - 내 기록 다른 사람도 볼 수 있게 해 줘
 category: 계정 연결
-game: chunithm
+games: [chunithm]
 version: 1
 services: [chunithm_net, secrets, players, notify, records]
-listens: [chunithm.login.expired]
+listens: [sega.login.expired]
 ```
 
 태그 조건은 없다. 로그인하지 않은 사람이 로그인하려고 쓰는 스킬이기 때문이다.
@@ -29,7 +29,7 @@ listens: [chunithm.login.expired]
 
 1. `/로그인`을 실행하면 디스코드 입력창(모달)이 뜬다. 입력창은 SEGA ID와 비밀번호 두 칸이다.
 2. 플레이어가 ID/비밀번호를 넣으면 `chunithm_net` 서비스가 그 값으로 SEGA 공통 인증 게이트웨이에 한 번 로그인해 본다(벤더링된 chuni-penguin 어댑터의 로그인 흐름을 그대로 쓴다).
-3. 성공하면 그 과정에서 받은 clal 쿠키만 뽑아 `secrets` 서비스가 암호화해 저장하고, `chunithm-linked` 태그가 붙는다. 입력했던 ID/비밀번호는 저장하지 않고 그 요청이 끝나면 잊는다. 실패하면 이유를 본인에게만 보이게 알린다(원인 예외나 비밀번호는 절대 보여주지 않는다).
+3. 성공하면 그 과정에서 받은 clal 쿠키만 뽑아 `secrets` 서비스가 암호화해 저장하고, `sega-linked` 태그가 붙는다. 입력했던 ID/비밀번호는 저장하지 않고 그 요청이 끝나면 잊는다. 실패하면 이유를 본인에게만 보이게 알린다(원인 예외나 비밀번호는 절대 보여주지 않는다).
 4. OTP(2단계 인증)가 켜진 계정은 이 방식으로 로그인할 수 없다 — "ID/비밀번호가 틀렸거나 OTP 계정"이라는 일반 안내만 받는다.
 
 - 입력창은 채널에 메시지를 남기지 않아서, ID/비밀번호나 쿠키가 대화 기록이나 로그에 남지 않는다. 멘션이나 DM 메시지로 이 값들을 받는 길은 만들지 않는다.
@@ -39,10 +39,10 @@ listens: [chunithm.login.expired]
 
 **쿠키 만료**
 
-- `chunithm_net` 서비스가 접속에 실패해 만료를 확인하면 `chunithm-linked` 태그를 떼고 `chunithm.login.expired`를 낸다.
+- `chunithm_net` 서비스가 접속에 실패해 만료를 확인하면 `sega-linked` 태그를 떼고 `sega.login.expired`를 낸다.
 - 이 스킬이 그 이벤트를 받아 대표 디스코드 계정에 DM으로 재로그인을 안내한다. 같은 만료에 대해 한 번만 보낸다.
 
-**로그아웃**: 저장된 쿠키를 지우고 `chunithm-linked` 태그를 뗀다. 동기화된 기록은 남는다.
+**로그아웃**: 저장된 쿠키를 지우고 `sega-linked` 태그를 뗀다. 동기화된 기록은 남는다.
 
 **기록 공개 설정**
 
@@ -55,8 +55,8 @@ listens: [chunithm.login.expired]
 | 함수 | 하는 일 | 인자 | 슬래시 | 태그 | display | confirm |
 | --- | --- | --- | --- | --- | --- | --- |
 | `status` | 로그인 여부, CHUNITHM-NET 닉네임, 마지막 동기화 시각, 공개 설정 | 없음 | `/계정` | 없음 | optional | never |
-| `set_privacy` | 기록 공개 설정을 켜거나 끈다 | `public: bool` | `/기록공개` | `chunithm-linked` | optional | never |
-| `logout` | 쿠키 삭제 | 없음 | `/로그아웃` | `chunithm-linked` | required | always |
+| `set_privacy` | 기록 공개 설정을 켜거나 끈다 | `public: bool` | `/기록공개` | `sega-linked` | optional | never |
+| `logout` | 쿠키 삭제 | 없음 | `/로그아웃` | `sega-linked` | required | always |
 
 `/로그인`은 입력창을 여는 슬래시 전용 명령이고 도구가 아니다.
 
@@ -64,7 +64,7 @@ listens: [chunithm.login.expired]
 
 | 방향 | 이름 | 처리 |
 | --- | --- | --- |
-| 받음 | `chunithm.login.expired` (알림) | 대표 계정에 재로그인 안내 DM |
+| 받음 | `sega.login.expired` (알림) | 대표 계정에 재로그인 안내 DM |
 
 ## 데이터
 

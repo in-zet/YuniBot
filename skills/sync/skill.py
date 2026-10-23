@@ -62,7 +62,7 @@ def _render(yuni_line: str, sections: list[Section], footer: str | None) -> str:
     return _SECTION_SEPARATOR.join(parts)
 
 
-@tool(slash="동기화", tags=["chunithm-linked"], cost="network")
+@tool(slash="동기화", tags=["sega-linked"], cost="network")
 async def run(
     ctx: ToolContext, focus: ChartRef | None = None, quiet: bool = False, arcade: ArcadeRef | None = None
 ) -> ToolResult:

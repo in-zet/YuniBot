@@ -14,7 +14,7 @@ examples:
   - 가장 최근 겜플 세션 불러와 줘
   - 10월 5일 후기 남길게
 category: 세션과 후기
-game: chunithm
+games: [chunithm]
 version: 1
 services: [records, arcades, yuni, notify, players]
 tags: [chunithm-synced]

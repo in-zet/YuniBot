@@ -17,7 +17,7 @@ examples:
   - 상수 15.0 폴더에 크로노 마스 추가해줘
   - 레벨 14+ 폴더 이름을 입문용으로 바꿔줘
 category: 폴더
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, db]
 ```

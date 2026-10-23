@@ -13,7 +13,7 @@ examples:
   - 겜플 세팅 알려 줘
   - 게임플라자 설정 바뀐 거 보여 줘
 category: 오락실
-game: chunithm
+games: [chunithm]
 version: 1
 services: [chunithm_net, arcades, records, db]
 listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.viewed]
@@ -78,7 +78,7 @@ listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.view
 | --- | --- | --- | --- | --- | --- |
 | `get_settings` | 그 오락실의 마지막 설정과 지금 계정 설정의 차이 | `arcade: ArcadeRef` | `/오락실 설정` | optional | never |
 | `history` | 그 오락실의 설정 변화 (표 반환) | `arcade: ArcadeRef` | `/오락실 기록` | 표 | never |
-| `record_visit` | 세션에 오락실 방문을 남기고 지금 설정을 저장. 도구 태그 chunithm-linked, cost network | `arcade: ArcadeRef`, 날짜(기본 최근 세션) | `/오락실 방문` | optional | never |
+| `record_visit` | 세션에 오락실 방문을 남기고 지금 설정을 저장. 도구 태그 sega-linked, cost network | `arcade: ArcadeRef`, 날짜(기본 최근 세션) | `/오락실 방문` | optional | never |
 | `register_arcade` | 확인받은 오락실을 등록하고 말한 줄임말을 별칭으로 저장(있으면 별칭만 더함). 서버 공유 데이터라 등록한 사람·시각을 남긴다 | `name`, `alias`(선택) | `/오락실 등록` | optional | never |
 | `set_privacy` | 방문 기록과 설정 공개 여부 | `public: bool` | 없음 | optional | never |
 

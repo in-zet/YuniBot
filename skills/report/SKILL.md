@@ -10,7 +10,7 @@ examples:
   - 최근에 친 거 판정까지 보여 줘
 triggers: [베스트, 신곡, 레이팅, 기록, 점수, 최근, 판정, 추천, 성과, 풀콤, 램프, 클리어, 랭크, 상수표]
 category: 기록과 리포트
-game: chunithm
+games: [chunithm]
 version: 1
 services: [records, songdb, players, chunithm_net, terms]
 tags: [chunithm-synced]

@@ -40,7 +40,7 @@ async def start_demo(ctx: ToolContext) -> ToolResult:
     return ToolResult(data={})
 
 
-@on("chunithm.login.expired", tags=["chunithm-linked"], tags_any=["chunithm-synced", "chunithm-vip"])
+@on("sega.login.expired", tags=["sega-linked"], tags_any=["chunithm-synced", "chunithm-vip"])
 async def on_login_expired_tagged(ctx: ToolContext, payload: dict[str, object]) -> None:
     """태그 조건이 붙은 알림 핸들러."""
 
@@ -54,7 +54,7 @@ def test_on_handler_spec_defaults_to_empty_tags() -> None:
 
 def test_on_handler_spec_carries_tags() -> None:
     spec = on_login_expired_tagged.__yuni_on__  # pyright: ignore[reportFunctionMemberAccess]
-    assert spec.tags == ["chunithm-linked"]
+    assert spec.tags == ["sega-linked"]
     assert spec.tags_any == ["chunithm-synced", "chunithm-vip"]
 
 

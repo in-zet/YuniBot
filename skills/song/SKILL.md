@@ -14,7 +14,7 @@ examples:
   - 링버 해금곡 마스터 상수표 보여 줘
 triggers: [상수, 곡, 채보, 노트 수, 난이도, 마스터, 마스, 울티마, 익스퍼트, 수록, 버전, 작곡, 별칭, 링크]
 category: 곡 정보
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, terms]
 emits: [chunithm.song.viewed]

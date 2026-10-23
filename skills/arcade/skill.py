@@ -171,7 +171,7 @@ async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     return ToolResult(data={"arcade": arcade.name, "entries": entries}, table=builder.build())
 
 
-@tool(slash="오락실 방문", tags=["chunithm-linked"], cost="network", mutates=True)
+@tool(slash="오락실 방문", tags=["sega-linked"], cost="network", mutates=True)
 async def record_visit(ctx: ToolContext, arcade: ArcadeRef, date: str | None = None) -> ToolResult:
     """오락실 방문을 남긴다("오늘 겜플에서 했어"처럼 어디서 쳤는지 말했을 때). 이름이 등록돼 있지 않으면 비슷한 이름을 짐작해 맞는지 사용자에게 먼저 묻고, 확인받으면 register_arcade로 등록한 뒤 다시 부른다. date(ISO 날짜)를 안 주면 가장 최근 세션으로 본다 — 그때만
     CHUNITHM-NET의 지금 설정을 같이 읽어 저장한다. 지난 날짜는 그날 설정을 알 수 없어

@@ -13,7 +13,7 @@ examples:
   - 나에 대해 뭐 기억해?
   - 내가 왼손 약하다는 거 잊어 줘
 category: 메모리
-game: common
+games: []
 version: 1
 services: [memory]
 ```

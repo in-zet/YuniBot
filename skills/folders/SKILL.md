@@ -9,7 +9,7 @@ examples:
   - 레벨 14+ 폴더 이름을 입문용으로 바꿔줘
 triggers: [폴더]
 category: 폴더
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, db]
 ---

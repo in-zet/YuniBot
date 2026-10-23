@@ -60,7 +60,7 @@ async def admin_env():
     # 여기서도 같은 자리에 실제 모양의 스냅샷을 준다.
     snapshot = RegistrySnapshot(
         skills=tuple(
-            SkillSummary(name=name, game="common", version=1, enabled=True)
+            SkillSummary(name=name, games=(), version=1, enabled=True)
             for name in ("admin", "account-link", "web-qa")
         ),
         failures={},
@@ -84,7 +84,7 @@ async def test_grant_tag_rejects_status_tags(admin_env) -> None:
     target = await players.create_player()
     await players.link_account(target.id, "222")
 
-    result = await skill.grant_tag(make_ctx(admin.id), target=target, tag="chunithm-linked")
+    result = await skill.grant_tag(make_ctx(admin.id), target=target, tag="sega-linked")
 
     assert result.error is not None
     assert "상태 태그" in result.error

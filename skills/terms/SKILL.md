@@ -8,7 +8,7 @@ examples:
   - 비비기가 뭐야?
 triggers: [뭐야, 뜻, 용어, 은어, 이론치, 오버파워, 트플플, 비비기]
 category: 질문 답변
-game: chunithm
+games: [chunithm]
 version: 1
 services: [terms, songdb, players, notify, settings]
 ---

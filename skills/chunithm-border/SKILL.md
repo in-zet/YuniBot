@@ -8,7 +8,7 @@ examples:
   - 크로노 마스에서 트플플까지 몇 어택 남았어?
 triggers: [보더, 어택, 허용, 까지 얼마, 남았]
 category: 곡 정보
-game: chunithm
+games: [chunithm]
 version: 1
 services: [songdb, records]
 ---

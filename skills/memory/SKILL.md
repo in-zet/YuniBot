@@ -7,7 +7,7 @@ examples:
   - 내가 왼손 약하다는 거 잊어 줘
 triggers: [기억, 잊어, 메모리]
 category: 메모리
-game: common
+games: []
 version: 1
 services: [memory]
 ---

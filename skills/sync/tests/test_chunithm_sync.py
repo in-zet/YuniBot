@@ -214,7 +214,7 @@ def ctx_with_fake_services(
     notify = _FakeNotify()
     ctx = ToolContext(
         player_id="p1",
-        tags=frozenset({"chunithm-linked"}),
+        tags=frozenset({"sega-linked"}),
         services={
             "chunithm_net": net,
             "records": records,

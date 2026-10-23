@@ -4,7 +4,7 @@ description: 설정 두 개(플레이어/서버 범위)를 선언하는 픽스�
 examples:
   - 설정 테스트
 category: 메모
-game: common
+games: []
 version: 1
 services: []
 settings:

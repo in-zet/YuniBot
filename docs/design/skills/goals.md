@@ -14,7 +14,7 @@ examples:
   - 15.0에서 15.3 마스 중 SSS 안 된 거 전부 투두에 넣어 줘
   - 내 목표 어디까지 왔어?
 category: 목표
-game: chunithm
+games: [chunithm]
 version: 1
 services: [records, songdb, notify, players, yuni]
 listens: [chunithm.sync.completed, chunithm.song.viewed, chunithm.plan.requested]
