@@ -12,6 +12,7 @@ import yaml
 
 from core.resolvers import ResolutionError
 from core.tool_types import DEFAULT_GAME, ToolContext
+from services.game.rating_format import score_text
 
 # 기본 사전은 츄니즘 것이다(옛 호출부 호환). 다른 게임은 프로필의 terms_path를 넘긴다.
 _DATA_PATH = Path(__file__).parent.parent / "chunithm" / "data" / "terms.yaml"
@@ -264,6 +265,10 @@ class TermsService:
         if target is not None:
             target.pop(alias, None)
 
+    def score_text(self, value: int) -> str:
+        """용어 사전의 기준 점수를 그 게임의 점수 모양으로(1,009,000 / 100.5000%)."""
+        return score_text(value, percent=self._percent_scores)
+
     def rank_scores(self) -> dict[str, int]:
         """랭크 정식 이름 -> 기준 점수. 작업 표의 랭크 칸 원래 값을 만들 때 쓴다."""
         return {name: value for name, value in self._rank_values.items() if value is not None}
@@ -305,7 +310,7 @@ class TermsService:
             meaning = entry.meaning
             if meaning is None and entry.category == "rank" and entry.value is not None:
                 meaning = (
-                    f"달성률 {Decimal(entry.value) / 10_000:.4f}% 이상"
+                    f"달성률 {score_text(entry.value, percent=True)} 이상"
                     if self._percent_scores
                     else f"{entry.value:,}점 이상"
                 )

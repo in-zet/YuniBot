@@ -7,10 +7,10 @@ examples:
   - 크로노 마스 내 메모 보여 줘
 triggers: [메모]
 category: 메모
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
 services: [songdb, players, db]
-listens: [chunithm.song.viewed, chunithm.plan.requested]
+listens: [chunithm.song.viewed, maimai.song.viewed, chunithm.plan.requested]
 ---
 
 태그 조건은 없다. 로그인하지 않아도 쓸 수 있다.

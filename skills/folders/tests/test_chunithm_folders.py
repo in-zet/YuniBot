@@ -51,7 +51,7 @@ async def db() -> AsyncGenerator[aiosqlite.Connection]:
 class _Hit:
     def __init__(self, title: str, difficulty: str = "MAS", const: float | None = None) -> None:
         self.song = type("S", (), {"title": title})()
-        self.chart = type("C", (), {"difficulty": difficulty, "const": const})()
+        self.chart = type("C", (), {"difficulty": difficulty, "const": const, "chart_type": ""})()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -64,7 +64,7 @@ class _FakeSongDb:
     def const_for(self, title: str, difficulty: str) -> float | None:
         return self.consts.get((title, difficulty))
 
-    def chart_for(self, title: str, difficulty: str) -> ChartRecord | None:
+    def chart_for(self, title: str, difficulty: str, chart_type: str = "") -> ChartRecord | None:
         if (title, difficulty) not in self.consts:
             return None
         return ChartRecord(difficulty=difficulty, const=self.consts[(title, difficulty)], note_count=None)

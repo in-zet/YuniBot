@@ -4,7 +4,7 @@ from __future__ import annotations
 from core.decorators import tool
 from core.fuzzy import similar_names
 from core.tables import RowRef, TableBuilder, cell
-from core.tool_types import Display, ToolContext, ToolResult
+from core.tool_types import Display, GameRef, ToolContext, ToolResult
 from services.game.terms import ALIAS_KINDS
 
 _TERM = "terms.term"
@@ -13,7 +13,7 @@ _T_CATEGORY = "분류"
 
 
 @tool(slash="용어 뜻")
-async def explain(ctx: ToolContext, term: str) -> ToolResult:
+async def explain(ctx: ToolContext, term: str, game: GameRef | None = None) -> ToolResult:
     """용어의 뜻, 별칭, 값, 출처를 보여준다."""
     explanation = await ctx.terms.explain(term, ctx)
     if explanation is None:
@@ -21,7 +21,7 @@ async def explain(ctx: ToolContext, term: str) -> ToolResult:
 
     lines = [f"{explanation.canonical} ({explanation.category_label})"]
     if explanation.value is not None:
-        lines.append(f"값: {explanation.value:,}")
+        lines.append(f"값: {ctx.terms.score_text(explanation.value)}")
     if explanation.meaning:
         lines.append(explanation.meaning)
     if explanation.aliases:
@@ -39,7 +39,7 @@ async def explain(ctx: ToolContext, term: str) -> ToolResult:
 
 
 @tool(slash="용어 목록")
-async def list(ctx: ToolContext, category: str | None = None) -> ToolResult:
+async def list(ctx: ToolContext, category: str | None = None, game: GameRef | None = None) -> ToolResult:
     """분류별 용어 목록을 표로 보여준다. 분류를 안 주면 전부 보여준다."""
     try:
         items = await ctx.terms.list_terms(category, ctx)
@@ -93,7 +93,9 @@ _ALIAS_KIND_NAMES = "난이도, 랭크, 램프, 작곡가"
 
 
 @tool(slash="용어 별칭 추가", mutates=True)
-async def alias_add(ctx: ToolContext, kind: str, alias: str, canonical: str) -> ToolResult:
+async def alias_add(
+    ctx: ToolContext, kind: str, alias: str, canonical: str, game: GameRef | None = None
+) -> ToolResult:
     """못 알아들은 말이 어떤 난이도·랭크·램프·작곡가인지 짐작해서 사용자에게 물었고, 사용자가 "맞다"고 확인한 뒤에만 부른다.
     kind는 난이도, 랭크, 램프, 작곡가 중 하나, alias는 사용자가 쓴 말, canonical은 그 정식 이름이다(작곡가는 곡 DB의
     표기 그대로). 별칭은 봇 전역으로 저장돼 모든 서버·플레이어에게 적용되고, 다음부터는 묻지 않고 알아듣는다."""
@@ -115,7 +117,7 @@ async def alias_add(ctx: ToolContext, kind: str, alias: str, canonical: str) -> 
 
 
 @tool(slash="용어 별칭 삭제", mutates=True)
-async def alias_remove(ctx: ToolContext, kind: str, alias: str) -> ToolResult:
+async def alias_remove(ctx: ToolContext, kind: str, alias: str, game: GameRef | None = None) -> ToolResult:
     """저장된 난이도·랭크·램프·작곡가 별칭을 지운다. 추가한 사람이나 admin만 할 수 있다."""
     if kind not in ALIAS_KINDS:
         return ToolResult(error=f"별칭 종류는 {_ALIAS_KIND_NAMES} 중 하나여야 해")

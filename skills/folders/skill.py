@@ -11,15 +11,14 @@ from core.tables import RowRef, TableBuilder, TableNeeds, WorkTable, cell
 from core.tool_types import (
     ChartRef,
     Display,
+    GameRef,
     TableRef,
     ToolContext,
     ToolResult,
 )
-from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 
-_GAME = "chunithm"
 _FOLDER = "folders.folder"
 _F_NAME = "이름"
 _F_COUNT = "채보 수"
@@ -34,7 +33,7 @@ async def _fetch_folder(ctx: ToolContext, name: str) -> aiosqlite.Row | None:
     cursor = await ctx.db.execute(
         "SELECT id, name, note, created_at, updated_at FROM folders_folders "
         "WHERE player_id = ? AND game = ? AND LOWER(name) = LOWER(?)",
-        (ctx.player_id, _GAME, name),
+        (ctx.player_id, ctx.game, name),
     )
     return await cursor.fetchone()
 
@@ -43,7 +42,7 @@ async def _folder_names(ctx: ToolContext) -> list[str]:
     assert ctx.db is not None
     cursor = await ctx.db.execute(
         "SELECT name FROM folders_folders WHERE player_id = ? AND game = ? ORDER BY name",
-        (ctx.player_id, _GAME),
+        (ctx.player_id, ctx.game),
     )
     rows: list[aiosqlite.Row] = list(await cursor.fetchall())
     return [r["name"] for r in rows]
@@ -68,22 +67,26 @@ async def _chart_count(ctx: ToolContext, folder_id: int) -> int:
     return int(row["n"])
 
 
-async def _folder_chart_keys(ctx: ToolContext, folder_id: int) -> set[tuple[str, str]]:
+type _ChartKey = tuple[str, str, str]  # (곡, 채보 종류, 난이도 코드). 종류가 없는 게임은 가운데가 ""다.
+
+
+def _label(key: _ChartKey) -> str:
+    title, chart_type, difficulty = key
+    return f"{title} {chart_type} {difficulty}" if chart_type else f"{title} {difficulty}"
+
+
+async def _folder_chart_keys(ctx: ToolContext, folder_id: int) -> set[_ChartKey]:
     assert ctx.db is not None
     cursor = await ctx.db.execute(
-        "SELECT song_title, difficulty FROM folders_charts WHERE folder_id = ?", (folder_id,)
+        "SELECT song_title, chart_type, difficulty FROM folders_charts WHERE folder_id = ?", (folder_id,)
     )
     rows: list[aiosqlite.Row] = list(await cursor.fetchall())
-    return {(r["song_title"], r["difficulty"]) for r in rows}
+    return {(r["song_title"], r["chart_type"], r["difficulty"]) for r in rows}
 
 
-def _table_chart_keys(table: WorkTable) -> list[tuple[str, str]]:
-    """표의 채보 행(곡·난이도 칸이 찬 행)의 (곡, 난이도 코드). 같은 채보는 한 번만."""
-    keys: list[tuple[str, str]] = []
-    for row in table.rows:
-        difficulty = str(row.cell(tc.DIFFICULTY).raw)
-        keys.append((str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)))
-    return list(dict.fromkeys(keys))
+def _table_chart_keys(table: WorkTable) -> list[_ChartKey]:
+    """표의 채보 행(곡·난이도 칸이 찬 행)의 (곡, 채보 종류, 난이도 코드). 같은 채보는 한 번만."""
+    return list(dict.fromkeys(tc.row_chart_key(row) for row in table.rows))
 
 
 def _display_names(names: list[str]) -> str:
@@ -98,7 +101,7 @@ def _display_names(names: list[str]) -> str:
 
 
 @tool(slash="폴더 생성", mutates=True)
-async def create_folder(ctx: ToolContext, name: str) -> ToolResult:
+async def create_folder(ctx: ToolContext, name: str, game: GameRef | None = None) -> ToolResult:
     """새 빈 폴더를 만든다. 이미 있는 이름(대소문자 구분 안 함)이면 에러다. 이름을 사용자가
     직접 말하지 않았으면, 뒤이어 어떤 조건으로 채울지(상수·레벨·버전 등)를 보고 그에 맞는
     이름을 지어 준다(예: "15.0 상수 곡 폴더 만들어줘" → "상수 15.0 폴더"). 맥락이 전혀 없으면
@@ -111,7 +114,7 @@ async def create_folder(ctx: ToolContext, name: str) -> ToolResult:
     await ctx.db.execute(
         "INSERT INTO folders_folders (player_id, game, name, note, created_at, updated_at) "
         "VALUES (?, ?, ?, NULL, ?, ?)",
-        (ctx.player_id, _GAME, name, now, now),
+        (ctx.player_id, ctx.game, name, now, now),
     )
     await ctx.db.commit()
     return ToolResult(
@@ -122,7 +125,7 @@ async def create_folder(ctx: ToolContext, name: str) -> ToolResult:
 
 
 @tool(slash="폴더 삭제", mutates=True, confirm="always")
-async def delete_folder(ctx: ToolContext, name: str) -> ToolResult:
+async def delete_folder(ctx: ToolContext, name: str, game: GameRef | None = None) -> ToolResult:
     """폴더와 그 안의 채보 목록·메모를 통째로 지운다. 되돌릴 수 없다."""
     assert ctx.db is not None
     folder = await _require_folder(ctx, name)
@@ -139,7 +142,7 @@ async def delete_folder(ctx: ToolContext, name: str) -> ToolResult:
 
 
 @tool(slash="폴더 이름변경", mutates=True)
-async def rename_folder(ctx: ToolContext, name: str, new_name: str) -> ToolResult:
+async def rename_folder(ctx: ToolContext, name: str, new_name: str, game: GameRef | None = None) -> ToolResult:
     """폴더 이름을 바꾼다. 새 이름이 이미 다른 폴더가 쓰고 있으면(대소문자 구분 안 함) 에러다."""
     assert ctx.db is not None
     folder = await _require_folder(ctx, name)
@@ -161,12 +164,12 @@ async def rename_folder(ctx: ToolContext, name: str, new_name: str) -> ToolResul
 
 
 @tool(slash="폴더 목록")
-async def list_folders(ctx: ToolContext) -> ToolResult:
+async def list_folders(ctx: ToolContext, game: GameRef | None = None) -> ToolResult:
     """내 폴더 목록(이름, 채보 수, 메모 유무)을 표로 보여준다."""
     assert ctx.db is not None
     cursor = await ctx.db.execute(
         "SELECT id, name, note FROM folders_folders WHERE player_id = ? AND game = ? ORDER BY name",
-        (ctx.player_id, _GAME),
+        (ctx.player_id, ctx.game),
     )
     rows: list[aiosqlite.Row] = list(await cursor.fetchall())
     if not rows:
@@ -189,15 +192,15 @@ async def list_folders(ctx: ToolContext) -> ToolResult:
 
 
 @tool(slash="폴더 보기")
-async def show_folder(ctx: ToolContext, name: str) -> ToolResult:
+async def show_folder(ctx: ToolContext, name: str, game: GameRef | None = None) -> ToolResult:
     """폴더의 메모와 안에 든 채보 전체(곡, 난이도, 상수)를 표로 돌려준다."""
     assert ctx.db is not None
     folder = await _require_folder(ctx, name)
     if isinstance(folder, ToolResult):
         return folder
     cursor = await ctx.db.execute(
-        "SELECT song_title, difficulty FROM folders_charts WHERE folder_id = ? "
-        "ORDER BY song_title, difficulty",
+        "SELECT song_title, chart_type, difficulty FROM folders_charts WHERE folder_id = ? "
+        "ORDER BY song_title, chart_type, difficulty",
         (folder["id"],),
     )
     rows: list[aiosqlite.Row] = list(await cursor.fetchall())
@@ -211,27 +214,28 @@ async def show_folder(ctx: ToolContext, name: str) -> ToolResult:
             display=Display(content="\n".join(lines)),
         )
 
-    columns = (tc.SONG, tc.DIFFICULTY, tc.CONST)
+    identity = tc.identity_columns(ctx.game)
+    columns = (*identity, tc.CONST)
     builder = TableBuilder(subject=ctx.player_id, unit="채보")
-    tc.add_columns(builder, *columns).step(f"{folder['name']} 폴더")
+    tc.add_columns(builder, *columns, game=ctx.game).step(f"{folder['name']} 폴더")
     summary = {"폴더": folder["name"]}
     if folder["note"]:
         summary["메모"] = folder["note"]
     builder.summary(summary)
     for r in rows:
-        title, difficulty = r["song_title"], r["difficulty"]
-        chart = ctx.songdb.chart_for(title, difficulty)
-        builder.row(
-            tc.chart_ref(title, difficulty),
-            {
-                tc.SONG: tc.song_cell(title),
-                tc.DIFFICULTY: tc.difficulty_cell(difficulty),
-                tc.CONST: tc.const_cell(
-                    chart.const if chart is not None else None,
-                    estimated=chart is not None and chart.is_const_unknown,
-                ),
-            },
-        )
+        title, chart_type, difficulty = r["song_title"], r["chart_type"], r["difficulty"]
+        chart = ctx.songdb.chart_for(title, difficulty, chart_type)
+        cells = {
+            tc.SONG: tc.song_cell(title),
+            tc.DIFFICULTY: tc.difficulty_cell(difficulty),
+            tc.CONST: tc.const_cell(
+                chart.const if chart is not None else None,
+                estimated=chart is not None and chart.is_const_unknown,
+            ),
+        }
+        if tc.CHART_TYPE in identity:
+            cells[tc.CHART_TYPE] = tc.text_cell(chart_type)
+        builder.row(tc.chart_ref(title, difficulty, chart_type), cells)
     return ToolResult(
         data={"name": folder["name"], "note": folder["note"], "count": len(rows)}, table=builder.build()
     )
@@ -254,7 +258,7 @@ async def save_table(
         return ToolResult(error=f"'{name}' 폴더가 이미 있어.")
 
     keys = _table_chart_keys(table)
-    labels = [f"{title} {difficulty}" for title, difficulty in keys]
+    labels = [_label(key) for key in keys]
     notes = [step for step in table.steps if "뺌" in step]
 
     if dry_run:
@@ -267,13 +271,14 @@ async def save_table(
     cursor = await ctx.db.execute(
         "INSERT INTO folders_folders (player_id, game, name, note, created_at, updated_at) "
         "VALUES (?, ?, ?, NULL, ?, ?)",
-        (ctx.player_id, _GAME, name, now, now),
+        (ctx.player_id, ctx.game, name, now, now),
     )
     folder_id = cursor.lastrowid
-    for title, difficulty in keys:
+    for title, chart_type, difficulty in keys:
         await ctx.db.execute(
-            "INSERT INTO folders_charts (folder_id, song_title, difficulty, added_at) VALUES (?, ?, ?, ?)",
-            (folder_id, title, difficulty, now),
+            "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (folder_id, title, chart_type, difficulty, now),
         )
     await ctx.db.commit()
     return ToolResult(
@@ -286,14 +291,14 @@ async def save_table(
 
 
 @tool(slash="폴더 채보추가", mutates=True)
-async def add_chart(ctx: ToolContext, name: str, chart: ChartRef) -> ToolResult:
+async def add_chart(ctx: ToolContext, name: str, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
     """폴더에 채보 하나를 추가한다. 이미 있으면 아무것도 안 하고 그 사실만 알려준다."""
     assert isinstance(chart, ResolvedChart)
     assert ctx.db is not None
     folder = await _require_folder(ctx, name)
     if isinstance(folder, ToolResult):
         return folder
-    key = (chart.song.title, chart.chart.difficulty)
+    key = (chart.song.title, chart.chart.chart_type, chart.chart.difficulty)
     if key in await _folder_chart_keys(ctx, folder["id"]):
         return ToolResult(
             data={"name": folder["name"], "added": False},
@@ -302,22 +307,23 @@ async def add_chart(ctx: ToolContext, name: str, chart: ChartRef) -> ToolResult:
         )
     now = datetime.now(UTC).isoformat()
     await ctx.db.execute(
-        "INSERT INTO folders_charts (folder_id, song_title, difficulty, added_at) VALUES (?, ?, ?, ?)",
-        (folder["id"], chart.song.title, chart.chart.difficulty, now),
+        "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (folder["id"], *key, now),
     )
     await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
     await ctx.db.commit()
     return ToolResult(
         data={"name": folder["name"], "added": True},
         display=Display(
-            content=f"'{folder['name']}'에 {chart.song.title} {chart.chart.difficulty}를 추가했어."
+            content=f"'{folder['name']}'에 {_label(key)}를 추가했어."
         ),
         display_mode="optional",
     )
 
 
 @tool(slash="폴더 채보삭제", mutates=True)
-async def remove_chart(ctx: ToolContext, name: str, chart: ChartRef) -> ToolResult:
+async def remove_chart(ctx: ToolContext, name: str, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
     """폴더에서 채보 하나를 뺀다. 없으면 아무것도 안 하고 그 사실만 알려준다."""
     assert isinstance(chart, ResolvedChart)
     assert ctx.db is not None
@@ -325,8 +331,8 @@ async def remove_chart(ctx: ToolContext, name: str, chart: ChartRef) -> ToolResu
     if isinstance(folder, ToolResult):
         return folder
     cursor = await ctx.db.execute(
-        "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND difficulty = ?",
-        (folder["id"], chart.song.title, chart.chart.difficulty),
+        "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
+        (folder["id"], chart.song.title, chart.chart.chart_type, chart.chart.difficulty),
     )
     if cursor.rowcount == 0:
         return ToolResult(
@@ -340,7 +346,7 @@ async def remove_chart(ctx: ToolContext, name: str, chart: ChartRef) -> ToolResu
     return ToolResult(
         data={"name": folder["name"], "removed": True},
         display=Display(
-            content=f"'{folder['name']}'에서 {chart.song.title} {chart.chart.difficulty}를 뺐어."
+            content=f"'{folder['name']}'에서 {_label((chart.song.title, chart.chart.chart_type, chart.chart.difficulty))}를 뺐어."
         ),
         display_mode="optional",
     )
@@ -367,7 +373,7 @@ async def add_to_folder(
     existing = await _folder_chart_keys(ctx, folder["id"])
     targets = [key for key in keys if key not in existing]
     already = len(keys) - len(targets)
-    names = [f"{title} {difficulty}" for title, difficulty in targets]
+    names = [_label(key) for key in targets]
     notes = _skip_notes(table, already, "이미 폴더에 있음")
 
     if not targets:
@@ -386,10 +392,11 @@ async def add_to_folder(
         )
 
     now = datetime.now(UTC).isoformat()
-    for title, difficulty in targets:
+    for title, chart_type, difficulty in targets:
         await ctx.db.execute(
-            "INSERT INTO folders_charts (folder_id, song_title, difficulty, added_at) VALUES (?, ?, ?, ?)",
-            (folder["id"], title, difficulty, now),
+            "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (folder["id"], title, chart_type, difficulty, now),
         )
     await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
     await ctx.db.commit()
@@ -417,7 +424,7 @@ async def remove_from_folder(
     existing = await _folder_chart_keys(ctx, folder["id"])
     targets = [key for key in keys if key in existing]
     missing = len(keys) - len(targets)
-    names = [f"{title} {difficulty}" for title, difficulty in targets]
+    names = [_label(key) for key in targets]
     notes = _skip_notes(table, missing, "폴더에 없음")
 
     if not targets:
@@ -436,10 +443,10 @@ async def remove_from_folder(
         )
 
     now = datetime.now(UTC).isoformat()
-    for title, difficulty in targets:
+    for title, chart_type, difficulty in targets:
         await ctx.db.execute(
-            "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND difficulty = ?",
-            (folder["id"], title, difficulty),
+            "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
+            (folder["id"], title, chart_type, difficulty),
         )
     await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
     await ctx.db.commit()
@@ -468,7 +475,9 @@ def _notes_text(notes: list[str]) -> str:
 
 
 @tool(slash="폴더 메모", mutates=True)
-async def set_note(ctx: ToolContext, name: str, text: str, append: bool = False) -> ToolResult:
+async def set_note(
+    ctx: ToolContext, name: str, text: str, append: bool = False, game: GameRef | None = None
+) -> ToolResult:
     """폴더에 메모를 남긴다. 같은 폴더에 다시 쓰면 덮어쓰고, append=True면 줄바꿈으로
     이어 붙인다. 빈 문자열을 주면 메모를 지운다."""
     assert ctx.db is not None
