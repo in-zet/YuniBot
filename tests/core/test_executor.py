@@ -803,7 +803,7 @@ async def test_invoke_falls_back_to_the_skills_game_when_no_game_was_said() -> N
     unsupported = await executor.invoke(spec, ctx, {}, skill_name="only-chuni")
     game_free = await executor.invoke(spec, ctx, {}, skill_name="free")
 
-    assert unsupported.result is not None and unsupported.result.data == {"game": "chunithm"}
+    assert unsupported.result is not None and unsupported.result.data["game"] == "chunithm"
     assert game_free.result is not None and game_free.result.data == {"game": "maimai"}
 
 
@@ -852,3 +852,29 @@ async def test_invoke_uses_the_players_main_game_when_no_game_was_said() -> None
     assert fan.result is not None and fan.result.data == {"game": "maimai"}
     assert other.result is not None and other.result.data == {"game": "chunithm"}
     assert said.result is not None and said.result.data == {"game": "maimai"}
+
+
+@tool(slash="노트확인")
+async def says_something(ctx: ToolContext) -> ToolResult:
+    """표시 글이 있는 결과를 돌려주는 도구."""
+    from core.tool_types import Display
+
+    return ToolResult(data={"game": ctx.game}, display=Display(content="결과"))
+
+
+@pytest.mark.asyncio
+async def test_invoke_tells_when_it_fell_back_to_the_skills_game() -> None:
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={},
+        game_chooser=lambda requested, preferred: requested or "maimai", skill_games={"only-chuni": ("chunithm",)},
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+    spec = says_something.__yuni_tool__  # pyright: ignore[reportFunctionMemberAccess]
+
+    outcome = await executor.invoke(spec, ctx, {}, skill_name="only-chuni")
+
+    assert outcome.result is not None
+    assert outcome.result.data["game"] == "chunithm"
+    assert outcome.result.data["game_note"] == "maimai는 이 기능이 아직 없어서 chunithm 기준으로 처리했다"
+    assert outcome.result.display is not None
+    assert outcome.result.display.content == "결과\n(maimai는 이 기능이 아직 없어서 chunithm 기준으로 처리했다)"

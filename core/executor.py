@@ -163,6 +163,7 @@ class ToolExecutor:
             return ExecutionOutcome(result=ToolResult(error="모르는 명령이야"))
 
         schema = build_arg_schema(spec.fn)
+        fallback_note: str | None = None
 
         if self._game_chooser is not None:
             # 도구가 `game` 인자를 받으면 사용자가 말한 게임이다. 없으면 받은 표의 게임 → 주 게임 → 기본 게임이다.
@@ -181,6 +182,7 @@ class ToolExecutor:
                 if requested:
                     return ExecutionOutcome(result=ToolResult(error=f"이 기능은 {game}에서는 아직 지원하지 않아"))
                 # 게임을 말하지 않았는데 주 게임이 이 스킬이 다루지 않는 게임이면, 스킬이 다루는 게임으로 간다.
+                fallback_note = f"{game}는 이 기능이 아직 없어서 {games[0]} 기준으로 처리했다"
                 game = games[0]
             overlay = self._game_services.get(game, {})
             ctx = replace(ctx, game=game, services={**ctx.services, **{k: v for k, v in overlay.items() if k in ctx.services}})
@@ -269,7 +271,12 @@ class ToolExecutor:
             if _bulk_count(preview) > 1:
                 return self._hold(spec, ctx, resolved, preview=preview)
 
-        return ExecutionOutcome(result=await self._call(spec, ctx, resolved), stale_input=stale_input)
+        result = await self._call(spec, ctx, resolved)
+        if fallback_note is not None and result.error is None:
+            result.data = {**result.data, "game_note": fallback_note}
+            if result.display is not None and result.display.content:
+                result.display.content = f"{result.display.content}\n({fallback_note})"
+        return ExecutionOutcome(result=result, stale_input=stale_input)
 
     def _hold(
         self,

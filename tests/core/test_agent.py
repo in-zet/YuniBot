@@ -389,7 +389,7 @@ class _FakeMemoryService:
         self.saved[player_id] = content
 
     async def remember(
-        self, player_id: str, *, content: str | None = None, nickname: str | None = None
+        self, player_id: str, *, content: str | None = None, nickname: str | None = None, game: str | None = None
     ) -> RememberResult:
         if content is not None:
             self.saved[player_id] = content

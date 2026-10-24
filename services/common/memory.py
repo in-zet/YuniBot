@@ -41,6 +41,14 @@ def strip_mentions(content: str) -> str:
     return _MENTION_TOKEN.sub("", content).strip()
 
 
+_GAME_TAG = re.compile(r"^\[[a-z0-9_-]+\]\s")
+
+
+def _has_game_tag(line: str) -> bool:
+    """줄 앞에 `[chunithm]`·`[maimai]` 같은 게임 표시가 있나. 표시가 없는 줄은 두 게임 모두에 쓰는 기억이다."""
+    return _GAME_TAG.match(line) is not None
+
+
 def _normalize(text: str) -> str:
     return " ".join(text.split()).casefold()
 
@@ -194,15 +202,18 @@ class MemoryService:
         await self._conn.commit()
 
     async def remember(
-        self, player_id: str, *, content: str | None = None, nickname: str | None = None
+        self, player_id: str, *, content: str | None = None, nickname: str | None = None, game: str | None = None
     ) -> RememberResult:
-        """플레이어가 직접 기억해 달라고 한 것을 바로 저장한다. 지운 항목에 있던 것이면 거기서 뺀다."""
+        """플레이어가 직접 기억해 달라고 한 것을 바로 저장한다. 지운 항목에 있던 것이면 거기서 뺀다.
+        game을 주면 그 게임 이야기에서만 쓰는 기억이라 줄 앞에 `[게임]`을 붙인다(호칭은 늘 공용이다)."""
         state = await self.get_state(player_id)
         forgotten = _lines(state.forgotten)
         new_content: str | None = None
         saved_content: str | None = None
         if content is not None and content.strip():
             line = " ".join(content.split())
+            if game and not _has_game_tag(line):
+                line = f"[{game}] {line}"
             lines = _lines(state.content)
             if all(_normalize(line) != _normalize(existing) for existing in lines):
                 lines.append(line)

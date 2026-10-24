@@ -248,3 +248,8 @@ def test_memory_task_keeps_to_the_design_scope() -> None:
     assert "게임과 무관한 개인사" in _MEMORY_TASK.split("담지 않는다")[0]
     assert "아마도" not in _MEMORY_TASK
     assert "취향" not in _MEMORY_TASK
+
+
+def test_memory_task_tells_the_model_to_tag_single_game_facts() -> None:
+    assert "[chunithm]" in _MEMORY_TASK and "[maimai]" in _MEMORY_TASK
+    assert "그대로 둔다" in _MEMORY_TASK

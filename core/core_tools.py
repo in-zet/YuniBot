@@ -17,6 +17,7 @@ from core.tables import (
 from core.threads import ThreadEndRequest
 from core.tool_types import (
     DifficultyRef,
+    GameRef,
     LampRef,
     RankRef,
     ScoreRef,
@@ -48,12 +49,16 @@ async def open_skill(ctx: ToolContext, skill_name: str) -> ToolResult:
 
 
 @tool()
-async def remember(ctx: ToolContext, content: str | None = None, nickname: str | None = None) -> ToolResult:
+async def remember(
+    ctx: ToolContext, content: str | None = None, nickname: str | None = None, game: GameRef | None = None
+) -> ToolResult:
     """플레이어가 "이거 기억해 줘"라고 직접 요청한 내용을 플레이어 메모리에 바로 저장한다. 한 줄에 사실
-    하나로 짧게 쓴다. 플레이어가 자기를 부를 이름을 정해 주면 content가 아니라 nickname에 그 이름만 넣는다."""
+    하나로 짧게 쓴다. 플레이어가 자기를 부를 이름을 정해 주면 content가 아니라 nickname에 그 이름만 넣는다.
+    기억할 내용이 한 게임 이야기일 때만(예: 마이마이에서 약한 패턴) game에 그 게임을 준다 — 두 게임에 다 해당하거나
+    게임과 무관한 내용은 game을 비운다."""
     if not (content and content.strip()) and not (nickname and nickname.strip()):
         return ToolResult(error="기억할 내용이나 호칭이 필요하다")
-    saved = await ctx.memory.remember(ctx.player_id, content=content, nickname=nickname)
+    saved = await ctx.memory.remember(ctx.player_id, content=content, nickname=nickname, game=game)
     if saved.content_saved is None and saved.nickname_saved is None:
         return ToolResult(error="저장할 수 있는 내용이 없다")
     # 확인 말은 유니가 직접 하므로 고정 문구 Display를 붙이지 않는다(답 뒤에 어색하게 덧붙는다).

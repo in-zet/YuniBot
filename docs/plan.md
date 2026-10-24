@@ -124,9 +124,9 @@
     - [X] 6-2 `GameRef`(표준 인자 타입, `resolve_game_name`이 등록 이름·표시 이름·별칭을 받는다)와 도구별 `games` 제한(`@tool(games=[...])`) — 구현 완료(2026-10-24). 슬래시 옵션은 `GameRef` 인자를 가진 도구에 자동으로 생긴다(옵션 이름은 인자 이름 `game`, 다른 옵션처럼 영문). `game` 인자를 실제 도구에 붙이는 일은 스킬별 작업(6-4·6-5)에서
     - [X] 6-3 주 게임을 `/설정 바꾸기 skill:player setting:주 게임 value:마이마이`로(스킬 설정이 아니라 `players.main_game`에 저장, `/설정 보기`에도 나옴), 실행기가 게임 고르기 ②번으로 읽음 — 구현 완료(2026-10-24)
     - [X] 6-4 `song`·`image`의 maimai 대응 — 구현 완료(2026-10-24). `ChartRefResolver`가 채보 종류 토큰(DX/STD)을 떼고 둘 다 있으면 후보를 돌려 되묻는다. 작업 표가 만든 게임을 달고 다니며(`WorkTable.game`) 표를 받는 도구는 그 게임으로 실행된다. 표 칸이 게임별(`table_columns`: 난이도·버전 순서, `종류` 칸, 달성률 점수, 정수 곡 레이팅, `row_chart_key`). `song` 도구에 `game: GameRef`, `find_linked_verse`·`chart_link`·`add_links`는 츄니즘 전용(`games=["chunithm"]`). `image` 그림은 재킷(otoge-db 주소)·REM/宴 색·종류 칩·maimai 콤보 램프 칩, 색 단계는 츄니즘 표만. 실기 미확인: 멘션이 "마이마이 …"에서 `game`을 넣는지, 슬래시 `game` 옵션, 재킷이 실제로 받아지는지
-    - [ ] 6-5 기록 의존 스킬(`report`·`goals`·`session`·`folders`·`notes`)
-    - [ ] 6-6 플레이어 메모리의 게임별 구획
-    - [ ] 6-7 프롬프트(`persona.md` 소개 문장, `rules.md` 게임 중립 말, 카드 예시)
+    - [~] 6-5 기록 의존 스킬 — **일부 구현(2026-10-24)**: `terms`(용어 설명이 게임별 점수 모양)·`notes`(게임별·채보 종류별 메모, 같은 난이도에 종류가 둘이면 `chart_type`을 받고 하나뿐이면 정해 줌, `maimai.song.viewed` 수신)·`folders`(게임별·종류별 폴더)는 maimai 대응 완료. **미룸**: `report`·`goals`·`session`·`sync`(그리고 `arcade`·`settings`·`updates`)는 maimai 기록이 생기는 Part 3 뒤 — 기록이 없는 동안은 유니가 처리할 데이터가 없고 실기 검증이 불가능해서. 이 스킬을 maimai로 부르면 "이 기능은 maimai에서는 아직 지원하지 않아"이고, 게임을 말하지 않았는데 주 게임이 maimai면 츄니즘으로 처리하며 `game_note`로 알린다
+    - [X] 6-6 플레이어 메모리의 게임별 구획 — 구현 완료(2026-10-24). 줄 앞 `[chunithm]`·`[maimai]` 표시, 요약 프롬프트·`remember(game=)`·프롬프트 주입 문구
+    - [X] 6-7 프롬프트 — 구현 완료(2026-10-24). `persona.md`(A안: 소개 문장에 maimai DX 추가, maimai 설정은 지어내지 않음), `rules.md`(게임 인자·`game_note`·어택/보더는 CHUNITHM 한정·계정 문구), 카드 예시에 마이마이. 실기 미확인: 라우팅이 흔들리지 않는지, 멘션이 "마이마이 …"에서 `game`을 넣는지
 
 고정 원칙: 5단계까지는 LLM 없이 슬래시로 동작한다. `yuni` 서비스는 11단계 전까지 정해진 문구를 돌려주고, 7~10단계 스킬은 이 인터페이스만 쓴다.
 

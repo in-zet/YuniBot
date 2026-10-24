@@ -420,3 +420,36 @@ async def test_on_changed_failure_does_not_undo_the_save(conn: aiosqlite.Connect
 
     count = await service.flush_due(now=10**6, merge=await _merge_to(MemoryMerge(content="저장됨")), on_changed=on_changed)
     assert count == 1 and await service.get("p1") == "저장됨"
+
+
+async def test_remember_with_game_tags_the_line_and_keeps_it_apart_from_common_facts(conn: aiosqlite.Connection) -> None:
+    service = MemoryService(conn)
+
+    await service.remember("p1", content="왼손 연타에 약함", game="maimai")
+    await service.remember("p1", content="답변은 짧게")
+    await service.remember("p1", content="[chunithm] 어택 잘 못 봄", game="maimai")  # 이미 표시가 있으면 그대로 둔다
+
+    assert (await service.get("p1")).splitlines() == [
+        "[maimai] 왼손 연타에 약함",
+        "답변은 짧게",
+        "[chunithm] 어택 잘 못 봄",
+    ]
+
+
+async def test_forget_finds_tagged_lines_by_their_text(conn: aiosqlite.Connection) -> None:
+    service = MemoryService(conn)
+    await service.remember("p1", content="왼손 연타에 약함", game="maimai")
+
+    removed = await service.forget("p1", "왼손 연타")
+
+    assert removed == ["[maimai] 왼손 연타에 약함"]
+    assert await service.get("p1") == ""
+
+
+async def test_nickname_is_never_game_tagged(conn: aiosqlite.Connection) -> None:
+    service = MemoryService(conn)
+
+    await service.remember("p1", nickname="유키", game="maimai")
+
+    assert await service.get_nickname("p1") == "유키"
+    assert await service.get("p1") == ""

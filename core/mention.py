@@ -350,7 +350,10 @@ class MentionEntry:
                 prompt_context_snippets.append(f"이 플레이어를 부를 이름: {address}")
         memory_text = await self._memory.get(player.id)
         if memory_text:
-            prompt_context_snippets.append(f"[참고: 유니가 이 플레이어에 대해 기억하고 있는 내용]\n{memory_text}")
+            prompt_context_snippets.append(
+                "[참고: 유니가 이 플레이어에 대해 기억하고 있는 내용 — 줄 앞에 [게임]이 붙은 것은 그 게임 이야기일 때만 쓴다]"
+                f"\n{memory_text}"
+            )
 
         tags = await self._players.tags_for(player.id)
         ctx = ToolContext(
