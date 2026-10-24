@@ -39,6 +39,8 @@ class Player:
     reviews_public: bool
     sync_report_public: bool
     first_seen_at: str
+    # 게임을 말하지 않았을 때 쓰는 게임. 비어 있으면 기본 게임이다.
+    main_game: str = ""
 
 
 @dataclass(slots=True, kw_only=True)
@@ -60,6 +62,7 @@ def _row_to_player(row: aiosqlite.Row) -> Player:
         reviews_public=bool(row["reviews_public"]),
         sync_report_public=bool(row["sync_report_public"]),
         first_seen_at=row["first_seen_at"],
+        main_game=row["main_game"] if "main_game" in row.keys() else "",  # noqa: SIM118 - aiosqlite.Row는 keys()로 본다
     )
 
 
@@ -86,6 +89,11 @@ class PlayersService:
         cursor = await self._conn.execute("SELECT * FROM players WHERE id = ?", (player_id,))
         row = await cursor.fetchone()
         return _row_to_player(row) if row else None
+
+    async def set_main_game(self, player_id: str, game: str) -> None:
+        """플레이어의 주 게임을 정한다(빈 문자열이면 정하지 않음). 게임 이름이 맞는지는 부르는 쪽이 본다."""
+        await self._conn.execute("UPDATE players SET main_game = ? WHERE id = ?", (game, player_id))
+        await self._conn.commit()
 
     async def player_for_discord(self, discord_id: str) -> Player | None:
         cursor = await self._conn.execute(

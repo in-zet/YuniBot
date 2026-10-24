@@ -22,6 +22,7 @@ VERSION_NAMES: dict[str, str] = {
 MAIMAI = GameProfile(
     game="maimai",
     label="maimai DX",
+    aliases=("마이마이", "마이", "maimai dx"),
     # 宴(UTAGE)은 츄니즘 WE와 같은 취급이다: 상수 없는 채보로 기록·검색은 하고 범위에서는 뺀다.
     chart_codes=("BAS", "ADV", "EXP", "MAS", "REM", "UTA"),
     range_codes=("BAS", "ADV", "EXP", "MAS", "REM"),

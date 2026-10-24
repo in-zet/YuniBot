@@ -5,7 +5,7 @@ from core.declarations import (
     tool_name_problems,
 )
 from core.decorators import tool
-from core.tool_types import ChartRef, RankRef, ToolContext, ToolResult
+from core.tool_types import ChartRef, GameRef, RankRef, ToolContext, ToolResult
 
 
 @tool()
@@ -44,3 +44,18 @@ def test_build_tool_declaration_maps_ref_types_and_defaults() -> None:
     assert schema["properties"]["rank"] == {"type": "string"}
     assert schema["properties"]["count"] == {"type": "integer"}
     assert schema["required"] == ["chart"]  # rank/count는 기본값이 있어 required가 아니다
+
+
+@tool()
+async def _with_game(ctx: ToolContext, game: GameRef | None = None) -> ToolResult:
+    """게임 인자를 받는 예시 도구."""
+    return ToolResult()
+
+
+def test_game_ref_is_a_string_the_model_fills_only_when_the_user_named_a_game() -> None:
+    decl = build_tool_declaration(_with_game.__yuni_tool__, skill_name="song")  # pyright: ignore[reportFunctionMemberAccess]
+
+    prop = decl.parameters_json_schema["properties"]["game"]
+    assert prop["type"] == "string"
+    assert "말하지 않았으면" in prop["description"]
+    assert decl.parameters_json_schema["required"] == []

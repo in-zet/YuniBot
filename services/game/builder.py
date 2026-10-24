@@ -14,6 +14,7 @@ from core.resolvers import ResolverRegistry
 from core.tool_types import (
     ChartRef,
     DifficultyRef,
+    GameRef,
     LampRef,
     RankRef,
     ScoreRef,
@@ -28,7 +29,7 @@ from services.common.secrets import SecretsService
 from services.game.chart_ref import ChartRefResolver
 from services.game.profile import GameProfile
 from services.game.records import RecordsService
-from services.game.registry import GAME_PROFILES, profile_for
+from services.game.registry import GAME_PROFILES, GameResolver, profile_for
 from services.game.songdb import SongDb
 from services.game.terms import TermsService
 from services.maimai.songdb import MaimaiSongDbService
@@ -131,6 +132,7 @@ def register_resolvers(resolvers: ResolverRegistry, games: Mapping[str, GameServ
             by_type.setdefault(ref_type, {})[game] = resolver
     for ref_type, by_game in by_type.items():
         resolvers.register(ref_type, _ByGame(by_game))
+    resolvers.register(GameRef, GameResolver())
 
 
 async def build_game_services(

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -74,7 +74,8 @@ class ToolExecutor:
         scheduler: Scheduler | None = None,
         tables: TableStore | None = None,
         partial_row_hints: Sequence[PartialRowHint] = (),
-        game_chooser: Callable[[str | None], str] | None = None,
+        game_chooser: Callable[[str | None, str | None], str] | None = None,
+        preferred_game: Callable[[str], Awaitable[str | None]] | None = None,
         game_services: Mapping[str, Mapping[str, object]] | None = None,
         skill_games: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
@@ -89,6 +90,8 @@ class ToolExecutor:
         self._tables = tables
         self._partial_row_hints = tuple(partial_row_hints)
         self._game_chooser = game_chooser
+        # 플레이어의 주 게임을 읽는 함수(player_id → 게임 이름 또는 None). 게임 고르기의 ②번이다.
+        self._preferred_game = preferred_game
         # 게임 → {서비스 이름: 그 게임의 서비스}. 고른 게임에 맞춰 스킬이 받은 서비스를 바꿔 끼운다.
         self._game_services = game_services or {}
         # 스킬 이름 → manifest games. 빈 목록(또는 없음)이면 게임과 무관한 스킬이다.
@@ -163,10 +166,13 @@ class ToolExecutor:
             # 도구가 `game` 인자를 받으면 사용자가 말한 게임이다. 없으면 선택은 기본 규칙을 따른다.
             requested = raw_args.get("game")
             try:
-                game = self._game_chooser(requested if isinstance(requested, str) else None)
+                preferred = await self._preferred_game(ctx.player_id) if self._preferred_game is not None else None
+                game = self._game_chooser(requested if isinstance(requested, str) else None, preferred)
             except UserFacingError as exc:
                 return ExecutionOutcome(result=ToolResult(error=str(exc)))
-            games = self._skill_games.get(skill_name, ()) if skill_name is not None else ()
+            games = tuple(getattr(spec, "games", None) or ())
+            if not games and skill_name is not None:
+                games = tuple(self._skill_games.get(skill_name, ()))
             if games and game not in games:
                 if requested:
                     return ExecutionOutcome(result=ToolResult(error=f"이 기능은 {game}에서는 아직 지원하지 않아"))

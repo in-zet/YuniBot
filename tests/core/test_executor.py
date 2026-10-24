@@ -13,6 +13,7 @@ from core.tables import RowRef, TableBuilder, TableNeeds, TableStore, WorkTable,
 from core.tool_types import (
     ArcadeRef,
     ChartRef,
+    GameRef,
     TableRef,
     ToolContext,
     ToolResult,
@@ -698,9 +699,9 @@ async def which_game(ctx: ToolContext, game: str | None = None) -> ToolResult:
     return ToolResult(data={"game": ctx.game})
 
 
-def _game_chooser(requested: str | None) -> str:
+def _game_chooser(requested: str | None, preferred: str | None = None) -> str:
     if requested is None:
-        return "chunithm"
+        return preferred or "chunithm"
     if requested == "maimai":
         return "maimai"
     raise UserFacingError("모르는 게임이야")
@@ -789,7 +790,7 @@ async def test_invoke_rejects_an_explicit_game_the_skill_does_not_support() -> N
 
 @pytest.mark.asyncio
 async def test_invoke_falls_back_to_the_skills_game_when_no_game_was_said() -> None:
-    def chooser(requested: str | None) -> str:
+    def chooser(requested: str | None, preferred: str | None) -> str:
         return requested or "maimai"  # 주 게임이 maimai인 플레이어
 
     executor = ToolExecutor(
@@ -804,3 +805,50 @@ async def test_invoke_falls_back_to_the_skills_game_when_no_game_was_said() -> N
 
     assert unsupported.result is not None and unsupported.result.data == {"game": "chunithm"}
     assert game_free.result is not None and game_free.result.data == {"game": "maimai"}
+
+
+@tool(slash="게임인자")
+async def takes_game(ctx: ToolContext, game: GameRef | None = None) -> ToolResult:
+    """GameRef 인자를 받는 도구."""
+    return ToolResult(data={"ctx_game": ctx.game, "arg": game})
+
+
+@pytest.mark.asyncio
+async def test_game_ref_arg_is_resolved_by_the_registered_resolver() -> None:
+    class _Resolver:
+        async def resolve(self, raw: str, ctx: ToolContext) -> str:
+            return {"마이마이": "maimai"}.get(raw, raw)
+
+    resolvers = ResolverRegistry()
+    resolvers.register(GameRef, _Resolver())
+    executor = ToolExecutor(
+        resolvers=resolvers, tag_provider=InMemoryTagProvider(), tag_definitions={},
+        game_chooser=lambda requested, preferred: {"마이마이": "maimai"}.get(requested or "", "chunithm"),
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(takes_game.__yuni_tool__, ctx, {"game": "마이마이"})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.data == {"ctx_game": "maimai", "arg": "maimai"}
+
+
+@pytest.mark.asyncio
+async def test_invoke_uses_the_players_main_game_when_no_game_was_said() -> None:
+    async def preferred(player_id: str) -> str | None:
+        return {"maimai-fan": "maimai"}.get(player_id)
+
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={},
+        game_chooser=_game_chooser, preferred_game=preferred,
+    )
+    spec = which_game.__yuni_tool__  # pyright: ignore[reportFunctionMemberAccess]
+
+    fan = await executor.invoke(spec, ToolContext(player_id="maimai-fan", tags=frozenset(), services={}), {})
+    other = await executor.invoke(spec, ToolContext(player_id="p1", tags=frozenset(), services={}), {})
+    said = await executor.invoke(
+        spec, ToolContext(player_id="maimai-fan", tags=frozenset(), services={}), {"game": "maimai"}
+    )
+
+    assert fan.result is not None and fan.result.data == {"game": "maimai"}
+    assert other.result is not None and other.result.data == {"game": "chunithm"}
+    assert said.result is not None and said.result.data == {"game": "maimai"}

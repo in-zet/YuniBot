@@ -67,7 +67,7 @@ from services.common.websearch import WebsearchService
 from services.common.yuni import YuniService
 from services.game.builder import build_all_game_services, register_resolvers
 from services.game.image_cache import ImageCache
-from services.game.registry import choose_game
+from services.game.registry import choose_game, resolve_game_name
 from services.game.table_columns import PARTIAL_ROW_HINTS
 
 logger = logging.getLogger(__name__)
@@ -320,6 +320,16 @@ class _BotDiscordGateway:
             await message.add_reaction(emoji)
 
 
+def _main_game_of(players: PlayersService) -> Callable[[str], Awaitable[str | None]]:
+    """실행기가 게임 고르기 ②번(플레이어의 주 게임)을 읽는 함수."""
+
+    async def read(player_id: str) -> str | None:
+        player = await players.get_player(player_id)
+        return (player.main_game or None) if player is not None else None
+
+    return read
+
+
 def _migration_roots(skills: list[LoadedSkill]) -> list[tuple[str, Path]]:
     """run_migrations에 넘길 (owner, 디렉터리) 목록을 "코어 먼저, 스킬은 이름순"으로 만든다.
 
@@ -506,8 +516,8 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         scheduler=scheduler,
         tables=table_store,
         partial_row_hints=PARTIAL_ROW_HINTS,
-        # 플레이어별 주 게임은 아직 저장하지 않는다(17단계 Part 2). 그 전까지는 말한 게임 → 기본 게임이다.
-        game_chooser=lambda requested: choose_game(requested=requested, preferred=None),
+        game_chooser=lambda requested, preferred: choose_game(requested=requested, preferred=preferred),
+        preferred_game=_main_game_of(players),
         game_services={game: bundle.skill_services() for game, bundle in all_games.items()},
         skill_games={skill.manifest.name: tuple(skill.manifest.games) for skill in registry.enabled_skills()},
     )
@@ -703,7 +713,9 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     plan = build_slash_plan(registry.tool_specs())
     attach_to_tree(client.tree, plan, executor=executor, db=conn, registry_snapshot=snapshot)
     client.tree.add_command(
-        build_settings_group(registry=registry, settings=settings_service, players=players)
+        build_settings_group(
+            registry=registry, settings=settings_service, players=players, game_resolver=resolve_game_name
+        )
     )
     client.tree.add_command(build_help_command(registry=registry, players=players))
 

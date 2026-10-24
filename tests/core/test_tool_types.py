@@ -6,6 +6,7 @@ from core.tool_types import (
     STANDARD_REF_TYPES,
     ChartRef,
     Display,
+    GameRef,
     TableRef,
     ToolContext,
     ToolResult,
@@ -45,7 +46,8 @@ def test_display_mode_optional() -> None:
 def test_standard_ref_types_registered() -> None:
     assert ChartRef in STANDARD_REF_TYPES
     assert TableRef in STANDARD_REF_TYPES
-    assert len(STANDARD_REF_TYPES) == 9
+    assert GameRef in STANDARD_REF_TYPES
+    assert len(STANDARD_REF_TYPES) == 10
 
 
 async def test_tool_context_emit_uses_event_bus() -> None:

@@ -9,6 +9,7 @@ import pytest
 
 from core.registry import SkillRegistry
 from core.settings_slash import build_settings_group
+from core.tool_types import UserFacingError
 from services.common.players import PlayersService
 from services.common.settings import SettingsService
 
@@ -16,6 +17,7 @@ _CORE_MIGRATIONS = [
     Path("migrations/core/001_players.sql").read_text(),
     Path("migrations/core/002_player_tags.sql").read_text(),
     Path("migrations/core/003_settings.sql").read_text(),
+    Path("migrations/core/027_players_main_game.sql").read_text(),
 ]
 
 
@@ -148,3 +150,65 @@ async def test_account_link_mention_setting_is_reachable_through_settings_comman
         ) == "all"
     finally:
         await conn.close()
+
+
+def _resolve_game(raw: str) -> str:
+    games = {"마이마이": "maimai", "maimai": "maimai", "츄니즘": "chunithm"}
+    try:
+        return games[raw.strip().lower()]
+    except KeyError:
+        raise UserFacingError(f"모르는 게임이야: {raw}") from None
+
+
+@pytest.fixture
+async def main_game_env():
+    conn = await aiosqlite.connect(":memory:")
+    for migration in _CORE_MIGRATIONS:
+        await conn.executescript(migration)
+    await conn.commit()
+    players = PlayersService(conn)
+    registry = SkillRegistry([Path("tests/fixtures/skills_ok/_with_settings")])
+    registry.load()
+    group = build_settings_group(
+        registry=registry, settings=SettingsService(conn), players=players, game_resolver=_resolve_game
+    )
+    player = await players.create_player()
+    await players.link_account(player.id, "1")
+    try:
+        yield group, players, player
+    finally:
+        await conn.close()
+
+
+async def _say(group, name: str, interaction: _FakeInteraction, **kwargs: str) -> str:
+    command = group.get_command(name)
+    assert isinstance(command, discord.app_commands.Command)
+    await command.callback(interaction, **kwargs)  # pyright: ignore[reportArgumentType, reportCallIssue]
+    return interaction.response.calls[0]["content"]
+
+
+async def test_main_game_is_set_by_name_and_shown_in_the_list(main_game_env) -> None:
+    group, players, player = main_game_env
+
+    before = await _say(group, "보기", _FakeInteraction(1))
+    changed = await _say(group, "바꾸기", _FakeInteraction(1), skill="player", setting="주 게임", value="마이마이")
+    after = await _say(group, "보기", _FakeInteraction(1))
+
+    assert "주 게임" in before and "정하지 않음" in before
+    assert "maimai" in changed
+    assert "'maimai'" in after
+    stored = await players.get_player(player.id)
+    assert stored is not None and stored.main_game == "maimai"
+
+
+async def test_main_game_can_be_cleared_and_rejects_unknown_games(main_game_env) -> None:
+    group, players, player = main_game_env
+    await players.set_main_game(player.id, "maimai")
+
+    unknown = await _say(group, "바꾸기", _FakeInteraction(1), skill="player", setting="주 게임", value="철권")
+    stored = await players.get_player(player.id)
+    assert "모르는 게임" in unknown and stored is not None and stored.main_game == "maimai"
+
+    await _say(group, "바꾸기", _FakeInteraction(1), skill="player", setting="주 게임", value="없음")
+    stored = await players.get_player(player.id)
+    assert stored is not None and stored.main_game == ""

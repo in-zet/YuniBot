@@ -16,6 +16,8 @@ from pathlib import Path
 class GameProfile:
     game: str
     label: str
+    # 사용자가 이 게임을 부르는 말(소문자). `game`·`label`은 따로 적지 않아도 된다.
+    aliases: tuple[str, ...] = ()
 
     # 채보 난이도 코드를 낮은 쪽부터. 상수 없는 채보(WORLD'S END 등)도 기록·검색 대상이라 여기 들어 있다.
     chart_codes: tuple[str, ...]

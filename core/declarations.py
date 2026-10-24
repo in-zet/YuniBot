@@ -8,7 +8,7 @@ from typing import get_args, get_type_hints, is_typeddict
 from core.decorators import ToolSpec
 from core.llm import ToolDeclaration
 from core.schema import ArgSpec, build_arg_schema, is_list_type
-from core.tool_types import STANDARD_REF_TYPES
+from core.tool_types import STANDARD_REF_TYPES, GameRef
 
 # ai.google.dev/api/generate-content의 FunctionDeclaration.name 설명 원문:
 # "Must be a-z, A-Z, 0-9, or contain underscores, colons, dots, and dashes,
@@ -57,6 +57,8 @@ def _property_schema(arg: ArgSpec) -> dict[str, object]:
         (item,) = get_args(arg.py_type)
         return {"type": "array", "items": _item_schema(item)}
     schema: dict[str, object] = {"type": _json_type(arg.py_type)}
+    if arg.py_type is GameRef:
+        schema["description"] = "사용자가 말한 게임 이름 그대로(예: 마이마이, 츄니즘). 게임을 말하지 않았으면 이 인자를 넣지 않는다."
     if isinstance(arg.py_type, type) and issubclass(arg.py_type, enum.Enum) and arg.py_type not in STANDARD_REF_TYPES:
         schema["enum"] = [member.value for member in arg.py_type]
     return schema

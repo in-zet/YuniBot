@@ -149,8 +149,13 @@ class TableRef:
     해석은 서비스가 아니라 실행기가 보관소에서 한다. 필요한 것은 `Annotated[TableRef, TableNeeds(...)]`로 선언한다."""
 
 
+class GameRef:
+    """사용자가 말한 게임 이름("마이마이", "츄니즘")을 등록된 게임으로 바꾸는 자리. 해석은 services/game/registry.py.
+    게임을 다루는 도구가 선택 인자로 받는다. 안 주면 실행기가 주 게임 → 기본 게임 순으로 고른다."""
+
+
 STANDARD_REF_TYPES: frozenset[type] = frozenset(
-    {PlayerRef, SongQuery, ChartRef, ArcadeRef, RankRef, DifficultyRef, LampRef, ScoreRef, TableRef}
+    {PlayerRef, SongQuery, ChartRef, ArcadeRef, RankRef, DifficultyRef, LampRef, ScoreRef, TableRef, GameRef}
 )
 
 

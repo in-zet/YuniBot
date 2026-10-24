@@ -31,6 +31,8 @@ class ToolSpec:
     # 응답(멘션 한 번) 안에서 이 도구만 따로 거는 호출 상한. 전역 max_tool_calls_per_turn보다
     # 좁게 쓴다 — 넘기면 core/agent.py가 그 호출만 에러로 돌리고 턴은 계속 진행한다.
     max_calls_per_turn: int | None = None
+    # 스킬 manifest의 games보다 좁게 쓸 때(한 게임 전용 도구). 비면 스킬 것을 따른다.
+    games: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -42,6 +44,7 @@ class SlashOnlySpec:
     tags_any: list[str] = field(default_factory=list)
     mutates: bool = False
     confirm: ConfirmMode = "never"
+    games: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True, kw_only=True)
@@ -118,6 +121,7 @@ def tool(
     confirm: ConfirmMode = "never",
     cost: CostTier = "light",
     max_calls_per_turn: int | None = None,
+    games: list[str] | None = None,
 ) -> Callable[[F], F]:
     def deco(fn: F) -> F:
         _require_async(fn)
@@ -135,6 +139,7 @@ def tool(
             confirm=confirm,
             cost=cost,
             max_calls_per_turn=max_calls_per_turn,
+            games=games or [],
         )
         return fn
 
@@ -148,6 +153,7 @@ def slash_only(
     tags_any: list[str] | None = None,
     mutates: bool = False,
     confirm: ConfirmMode = "never",
+    games: list[str] | None = None,
 ) -> Callable[[F], F]:
     def deco(fn: F) -> F:
         _require_async(fn)
@@ -162,6 +168,7 @@ def slash_only(
             tags_any=tags_any or [],
             mutates=mutates,
             confirm=confirm,
+            games=games or [],
         )
         return fn
 
