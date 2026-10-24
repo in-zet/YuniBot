@@ -191,3 +191,14 @@ def test_candidate_upside_respects_custom_target_bonus():
     assert candidate_upside(15.0, Decimal("16.50"), target_bonus=Decimal("3.00")) == Decimal(
         "1.50"
     )
+
+
+def test_overall_rating_with_divisor_one_is_a_plain_integer_sum() -> None:
+    best = [Decimal(300), Decimal(290)]
+    new = [Decimal(310)]
+
+    assert overall_rating(best, new, best_size=35, new_size=15, divisor=1, places=0) == Decimal(900)
+
+
+def test_average_rating_divisor_overrides_the_item_count() -> None:
+    assert average_rating([Decimal(10), Decimal(20)], places=0, divisor=1) == Decimal(30)

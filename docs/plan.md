@@ -118,7 +118,7 @@
   - [X] Part 2: DB 마이그레이션 — 구현 완료(2026-10-23). 코어 024(`records_pb` 기본 키에 `chart_type`, `dx_score`)·025(`songdb_aliases` 게임 칸)·026(쿠키 테이블 → `sega_cookies`)·027(`players.main_game`), 스킬 `folders`·`notes`·`yuni-bond`의 002(`chart_type`을 키에 넣음, 2026-10-23 사용자 결정으로 `yuni-bond`도 같이). 운영 DB 사본에 적용해 행 수·외래키 확인. `chart_type`·`dx_score`·`main_game`을 채우고 읽는 코드는 Part 5·6 — §17.4
   - [ ] Part 3: aime 인증 공통화와 maimai DX NET 어댑터 — §17.5. 시작 조건: SEGA 사이트 복구 후 실측
   - [X] Part 4: maimai 곡 DB(otoge-db) — 구현 완료(2026-10-23). `services/game/songdb.py`(곡·채보 자료형·찾기 공통 틀, `chart_type` 조건)에서 츄니즘 `SongDbService`와 `services/maimai/songdb.py`의 `MaimaiSongDbService`가 갈라진다. 봇 부팅·등록부 연결은 아직 없다(Part 6) — §17.6
-  - [ ] Part 5: 기록·레이팅·동기화 — §17.7
+  - [X] Part 5: 기록·레이팅·동기화 — 구현 완료(2026-10-24, NET 없이 가능한 범위). `RecordsService`가 게임 중립 `SyncSnapshot`(`services/game/sync_types.py`)을 받고, 채보 키는 `(제목, 채보 종류, 난이도)`, `records_pb`에 `chart_type`·`dx_score`를 읽고 쓴다. 레이팅 규칙·램프 순서·첫 동기화 태그는 `GameProfile`에서 받고(maimai 레이팅: `services/maimai/rating.py`), 베스트/신곡 목록이 없으면 전체 기록으로 프레임을 짠다. 남은 것: maimai 파서·어댑터가 `SyncSnapshot`을 채우는 일(Part 3), 계산 레이팅과 NET 표시 레이팅 대조(실기), 스킬 쪽 `chart_type` 전달(Part 6) — §17.7
   - [ ] Part 6: 스킬 확장과 프롬프트 — §17.8. 시작 전에 §17.9 1번(유니 인격) 결정
 
 고정 원칙: 5단계까지는 LLM 없이 슬래시로 동작한다. `yuni` 서비스는 11단계 전까지 정해진 문구를 돌려주고, 7~10단계 스킬은 이 인터페이스만 쓴다.

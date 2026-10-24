@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -35,6 +36,19 @@ class GameProfile:
     new_frame_size: int
     # 후보곡 상승폭·남은 점수의 기준점이 되는 점수(츄니즘은 SSS).
     candidate_target_score: int
+
+    # 레이팅 규칙. 곡 레이팅 함수는 (점수, 상수)를 받아 곡 레이팅을 돌려주고, 상수를 모르면 None("계산 불가")이다.
+    chart_rating: Callable[[int, float | None], Decimal | None]
+    # 전체 레이팅 = 프레임 곡 레이팅 합 ÷ rating_divisor, overall_places 자리에서 버림(CHUNITHM 50·4, maimai 1·0).
+    rating_divisor: int
+    overall_places: int
+    # NET이 보여 주는 레이팅의 자리수. 계산값을 이 자리에서 버려 표시값과 대조한다.
+    displayed_places: int
+
+    # 램프 저장 문자열 → 우열(클수록 좋다). 모르는 문자열은 0. 게임에 없는 램프 종류는 비워 둔다.
+    clear_lamp_order: Mapping[str, int]
+    combo_lamp_order: Mapping[str, int]
+    chain_lamp_order: Mapping[str, int]
 
     # 첫 동기화를 마친 플레이어에게 붙는 상태 태그. 게임마다 따로 있다.
     synced_tag: str

@@ -19,7 +19,7 @@ scripts/               sync_upstream.py, eval_agent.py, clear_global_commands.py
 tests/                 코어·서비스 시험(스킬 시험은 각 스킬의 tests/)
 ```
 
-- 코어는 츄니즘을 모른다. 츄니즘 지식은 `services/chunithm/`과 `chunithm-border` 같은 `chunithm-*` 스킬에만 둔다. 게임마다 다른 값은 게임 프로필(`services/game/profile.py`)에 두고, 어떤 게임이 있는지 아는 곳은 등록부(`services/game/registry.py`)와 `builder.py`뿐이다. 17단계 Part 1 동안 `services/game/`의 모듈이 츄니즘 자료형(`SyncFetch`·`SongRecord` 등)을 아직 import한다 — Part 5까지 풀어 나간다.
+- 코어는 츄니즘을 모른다. 츄니즘 지식은 `services/chunithm/`과 `chunithm-border` 같은 `chunithm-*` 스킬에만 둔다. 게임마다 다른 값은 게임 프로필(`services/game/profile.py`)에 두고, 어떤 게임이 있는지 아는 곳은 등록부(`services/game/registry.py`)와 `builder.py`뿐이다. `services/game/`의 `records`·`songdb` 틀은 게임 중립 자료형(`SyncSnapshot`·`SongRecord`)만 받는다. 게임 응답을 그 모양으로 바꾸는 일은 각 게임 폴더 몫이다(CHUNITHM: `sync_snapshot.py`). `chart_ref`·`builder`·`registry`는 아직 츄니즘 서비스를 직접 import한다(Part 6).
 - 스킬은 다른 스킬을 import하지 않는다. 스킬끼리는 서비스와 이벤트로만 주고받는다.
 - 스킬은 manifest의 `services`에 적은 서비스만 `ctx`로 쓴다. 다른 스킬의 테이블과 설정은 읽지 않는다(그 스킬 문서가 다른 스킬의 재사용을 명시한 설정은 예외 — `00-core.md` "데이터, 권한, 비밀 값" 참고).
 - 새 스킬은 `skills/_template/`을 복사해 만든다. 스킬을 더하려고 코어나 다른 스킬을 고쳐야 한다면 규격이 모자라다는 뜻이므로 규격부터 고친다. 서비스에 메서드를 더하는 것은 정상 경로다.

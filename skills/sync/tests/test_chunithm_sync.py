@@ -67,7 +67,7 @@ class _FakeChunithmNet:
         self._error = error
         self.calls: list[str] = []
 
-    async def fetch_for_sync(self, player_id: str, *, ctx: ToolContext | None = None) -> object:
+    async def fetch_snapshot(self, player_id: str, *, ctx: ToolContext | None = None) -> object:
         self.calls.append(player_id)
         if self._error is not None:
             raise self._error

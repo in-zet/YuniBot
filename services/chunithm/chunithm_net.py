@@ -7,7 +7,7 @@ import inspect
 import io
 import logging
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -25,12 +25,15 @@ from services.chunithm.arcade_settings import (
     named_from_settings,
     parse_arcade_settings,
 )
+from services.chunithm.sync_snapshot import SyncFetch, snapshot_from_fetch
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
 
 if TYPE_CHECKING:
     from chuni_penguin.types import PersonalBest, Profile, RecentScore
     from selectolax.lexbor import LexborHTMLParser
+
+    from services.game.sync_types import SyncSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -202,16 +205,6 @@ class LoginStatus:
     last_checked_at: str | None = None
 
 
-@dataclass(slots=True, kw_only=True)
-class SyncFetch:
-    profile: Profile
-    best30: list[PersonalBest]
-    new20: list[PersonalBest]
-    recent_scores: list[RecentScore]
-    # 키는 "BAS"/"ADV"/"EXP"/"MAS"/"ULT"/"WE" (_PERSONAL_BEST_DIFFICULTY_CODES).
-    all_personal_bests: dict[str, list[PersonalBest]] = field(default_factory=dict)
-
-
 class ChunithmNetService:
     """플레이어별로 CHUNITHM-NET 어댑터를 열어 준다. 복호화는 이 서비스 안에서만
     하고, 평문 쿠키는 어댑터를 만드는 그 함수 스코프를 벗어나지 않는다."""
@@ -355,6 +348,11 @@ class ChunithmNetService:
             recent_scores=recent_scores,
             all_personal_bests=all_personal_bests,
         )
+
+    async def fetch_snapshot(self, player_id: str, *, ctx: ToolContext | None = None) -> SyncSnapshot:
+        """`fetch_for_sync`의 결과를 `RecordsService`가 받는 게임 중립 모양으로 바꾼 것. 동기화 스킬은
+        게임을 가리지 않고 이 이름으로 부른다."""
+        return snapshot_from_fetch(await self.fetch_for_sync(player_id, ctx=ctx))
 
     async def get_recent_scores(
         self, player_id: str, *, ctx: ToolContext | None = None

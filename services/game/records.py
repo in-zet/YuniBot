@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
@@ -11,29 +11,25 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 import msgspec
-from chuni_penguin.types.lamp import ChainLamp, ClearLamp, ComboLamp
 
 from core.db import transaction as db_transaction
 from core.tool_types import DEFAULT_GAME, ToolContext
-from services.chunithm.songdb import SongDbService
 from services.common.players import PlayersService
 from services.game.records_calc import (
     allowed_attacks,
     assign_session_date,
     average_rating,
-    candidate_upside,
-    chart_rating,
     frame_changes,
     match_session_for_chart,
     overall_rating,
     remaining_to_target,
 )
 from services.game.registry import profile_for
+from services.game.sync_types import ChartPlay, SyncSnapshot
 
 if TYPE_CHECKING:
-    from chuni_penguin.types import Difficulty, PersonalBest
-
-    from services.chunithm.chunithm_net import SyncFetch
+    from services.game.profile import GameProfile
+    from services.game.songdb import SongDb
 
 # records_pb.rating / records_sync_log.computed_rating은 TEXT NOT NULL이라 None을
 # 그대로 넣을 수 없다 — 상수를 몰라 계산하지 못한 값은 이 표시로 남긴다.
@@ -46,7 +42,8 @@ _DIFF_CACHE_LIMIT = 200
 _CANDIDATE_BAND_FIRST_RANK = 3
 _CANDIDATE_BAND_LAST_RANK = 8
 
-type ChartKey = tuple[str, str]
+# (곡 제목, 채보 종류, 난이도 코드). 채보 종류가 없는 게임은 가운데가 ""이다.
+type ChartKey = tuple[str, str, str]
 _PB_KEYS_PER_QUERY = 400
 
 
@@ -65,8 +62,12 @@ def _rating_from_str(value: str | None) -> Decimal | None:
         return None
 
 
-def _difficulty_code(difficulty: Difficulty) -> str:
-    return _SHORT_CODE.get(difficulty.name, difficulty.name)
+def _key_of(play: ChartPlay) -> ChartKey:
+    return (play.song_title, play.chart_type, play.difficulty)
+
+
+def _row_key(row: PbRow) -> ChartKey:
+    return (row.song_title, row.chart_type, row.difficulty)
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -80,6 +81,7 @@ class SessionInfo:
 class ChartUpdate:
     song_title: str
     difficulty: str
+    chart_type: str = ""
     old_score: int | None
     new_score: int
     old_rank: str | None
@@ -100,6 +102,7 @@ class LampChange:
 
     song_title: str
     difficulty: str
+    chart_type: str = ""
     old_combo_lamp: str
     new_combo_lamp: str
     session_id: str | None
@@ -109,6 +112,7 @@ class LampChange:
 class UnchangedPlay:
     song_title: str
     difficulty: str
+    chart_type: str = ""
     play_count: int
     current_score: int
     session_id: str
@@ -118,6 +122,7 @@ class UnchangedPlay:
 class FrameExit:
     song_title: str
     difficulty: str
+    chart_type: str = ""
     old_rating: Decimal | None
 
 
@@ -167,6 +172,7 @@ class SyncResult:
 class PbRow:
     song_title: str
     difficulty: str
+    chart_type: str = ""
     score: int
     rank: str
     clear_lamp: str
@@ -176,6 +182,7 @@ class PbRow:
     rating: Decimal | None
     session_id: str | None
     updated_at: str
+    dx_score: int | None = None
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -215,15 +222,16 @@ class RatingDeltas:
 class CandidateHit:
     song_title: str
     difficulty: str
+    chart_type: str = ""
     const: float
-    upside: Decimal  # candidate_upside() 결과
+    upside: Decimal  # 기준 점수를 냈을 때 곡 레이팅 − 프레임 최저 레이팅
     current_score: int  # 안 쳤으면 0
     remaining_score: int | None  # SSS 기준, 노트 수 없으면 None
 
 
-def _frame_sort_key(row: PbRow) -> tuple[bool, Decimal, str, str]:
-    # 레이팅 내림차순. 레이팅을 모르는 채보는 맨 뒤로, 동점은 제목·난이도 순으로 고정한다.
-    return (row.rating is None, -(row.rating or Decimal(0)), row.song_title, row.difficulty)
+def _frame_sort_key(row: PbRow) -> tuple[bool, Decimal, str, str, str]:
+    # 레이팅 내림차순. 레이팅을 모르는 채보는 맨 뒤로, 동점은 제목·채보 종류·난이도 순으로 고정한다.
+    return (row.rating is None, -(row.rating or Decimal(0)), row.song_title, row.chart_type, row.difficulty)
 
 
 def _frame_floor(frame: list[PbRow], size: int) -> Decimal:
@@ -249,33 +257,29 @@ def _known_min(ratings: list[Decimal | None]) -> Decimal | None:
     return min(known) if known else None
 
 
-def _merge_personal_bests(fetch: SyncFetch, chart_codes: tuple[str, ...]) -> dict[ChartKey, PersonalBest]:
-    """베스트30·신곡20·전체 PB를 (제목, 난이도)로 합친다. 같은 채보가 여러 목록에 있으면
-    점수가 높은 쪽을 쓴다. 점수가 같으면 전체 PB 쪽을 쓴다 — 베스트30·신곡20(ratingDetail) 페이지에는
-    램프 이미지가 아예 없어 파서가 FAILED/NONE을 기본값으로 채우므로, 램프는 전체 PB 페이지 것이 맞다
-    (2026-10-21: 이걸 몰라 베스트·신곡 50곡의 램프가 전부 틀렸다)."""
-    merged: dict[ChartKey, PersonalBest] = {}
-    for pb in (*fetch.best30, *fetch.new20):
-        key = (pb.song.title, _difficulty_code(pb.chart.difficulty))
+def _merge_plays(snapshot: SyncSnapshot, chart_codes: tuple[str, ...]) -> dict[ChartKey, ChartPlay]:
+    """베스트·신곡·전체 기록을 (제목, 채보 종류, 난이도)로 합친다. 같은 채보가 여러 목록에 있으면
+    점수가 높은 쪽을 쓴다. 점수가 같으면 전체 기록 쪽을 쓴다 — CHUNITHM 베스트30·신곡20(ratingDetail)
+    페이지에는 램프 이미지가 아예 없어 파서가 FAILED/NONE을 기본값으로 채우므로, 램프는 전체 PB 페이지 것이
+    맞다(2026-10-21: 이걸 몰라 베스트·신곡 50곡의 램프가 전부 틀렸다)."""
+    merged: dict[ChartKey, ChartPlay] = {}
+    for play in (*(snapshot.best or ()), *(snapshot.new or ())):
+        key = _key_of(play)
         existing = merged.get(key)
-        if existing is None or pb.score > existing.score:
-            merged[key] = pb
+        if existing is None or play.score > existing.score:
+            merged[key] = play
     for code in chart_codes:
-        for pb in fetch.all_personal_bests.get(code, []):
-            key = (pb.song.title, _difficulty_code(pb.chart.difficulty))
+        for play in snapshot.all_plays:
+            if play.difficulty != code:
+                continue
+            key = _key_of(play)
             existing = merged.get(key)
-            if existing is None or pb.score >= existing.score:
-                merged[key] = pb
+            if existing is None or play.score >= existing.score:
+                merged[key] = play
     return merged
 
 
-# 램프 우열(값이 클수록 좋다). 저장 문자열 → 순위. 모르는 문자열은 0.
-_CLEAR_ORDER = {str(lamp): lamp.value for lamp in ClearLamp}
-_COMBO_ORDER = {str(lamp): lamp.value for lamp in ComboLamp}
-_CHAIN_ORDER = {str(lamp): lamp.value for lamp in ChainLamp}
-
-
-def _better_lamp(old: str, new: str, order: dict[str, int]) -> str:
+def _better_lamp(old: str, new: str, order: Mapping[str, int]) -> str:
     return new if order.get(new, 0) > order.get(old, 0) else old
 
 
@@ -285,13 +289,19 @@ def _as_aware(value: datetime) -> datetime:
 
 
 class RecordsService:
-    """기록 스냅샷, 베스트, 세션 id, 레이팅 계산과 CHUNITHM-NET 대조."""
+    """기록 스냅샷, 베스트, 세션 id, 레이팅 계산과 NET 표시 레이팅 대조."""
 
     def __init__(
-        self, *, conn: aiosqlite.Connection, songdb: SongDbService, players: PlayersService, game: str = DEFAULT_GAME
+        self,
+        *,
+        conn: aiosqlite.Connection,
+        songdb: SongDb,
+        players: PlayersService,
+        game: str = DEFAULT_GAME,
+        profile: GameProfile | None = None,
     ) -> None:
         self._game = game
-        self._profile = profile_for(game)
+        self._profile = profile if profile is not None else profile_for(game)
         self._conn = conn
         self._conn.row_factory = aiosqlite.Row
         self._songdb = songdb
@@ -302,20 +312,20 @@ class RecordsService:
         # 위에서 한쪽의 rollback이 다른 쪽의 커밋 안 된 쓰기까지 지울 수 있다.
         self._sync_locks: dict[str, asyncio.Lock] = {}
 
-    async def save_sync(self, player_id: str, fetch: SyncFetch, ctx: ToolContext) -> SyncResult:
+    async def save_sync(self, player_id: str, snapshot: SyncSnapshot, ctx: ToolContext) -> SyncResult:
         """동기화 결과를 저장한다. 같은 플레이어의 동시 호출은 직렬화된다(아래 참고)."""
         lock = self._sync_locks.setdefault(player_id, asyncio.Lock())
         # 같은 플레이어끼리는 위 락으로, 다른 플레이어의 커밋·롤백과는 연결 잠금으로 막는다.
         async with lock, db_transaction(self._conn):
-            return await self._save_sync_locked(player_id, fetch, ctx)
+            return await self._save_sync_locked(player_id, snapshot, ctx)
 
-    async def _save_sync_locked(self, player_id: str, fetch: SyncFetch, ctx: ToolContext) -> SyncResult:
+    async def _save_sync_locked(self, player_id: str, snapshot: SyncSnapshot, ctx: ToolContext) -> SyncResult:
         """동기화 결과를 저장한다. 베스트30·신곡20·전체 PB를 records_pb에 합쳐 넣고
         (점수가 오른 채보만 행 전체를 바꾼다), 첫 동기화가 아니면 직전 상태와 비교한
         diff를 계산해 메모리 캐시에 둔다(sync_diff로 읽는다, sync.md "구현 결정").
 
         첫 동기화는 기준점만 만든다 — 세션도 diff도 만들지 않는다(리포트를 내지 않는다).
-        세션 날짜는 동기화 시각이 아니라 최근 플레이 이력의 achieved_at(CHUNITHM-NET이
+        세션 날짜는 동기화 시각이 아니라 최근 플레이 이력의 achieved_at(NET이
         붙여 주는 +09:00 벽시계)으로 정한다."""
         cursor = await self._conn.execute(
             "SELECT synced_at, computed_rating FROM records_sync_log WHERE player_id = ? AND game = ? "
@@ -327,44 +337,48 @@ class RecordsService:
 
         sync_id = str(uuid.uuid4())
         synced_at = datetime.now(UTC)
-        merged = _merge_personal_bests(fetch, self._profile.chart_codes)
+        merged = _merge_plays(snapshot, self._profile.chart_codes)
+        # NET이 베스트/신곡 목록을 주면 그걸 믿고, 안 주면 전체 기록으로 프레임을 직접 짠다.
+        best_plays, new_plays = (
+            (snapshot.best, snapshot.new)
+            if snapshot.best is not None and snapshot.new is not None
+            else self._derive_frames(merged)
+        )
 
         # "베스트 평균"(통과 기준)은 베스트30과 신곡20을 각각 따로 평균한 값이다 — 둘을
         # 합쳐 50으로 나눈 전체 레이팅과는 다른 숫자다. 평균을 공식대로(30곡/20곡 가중)
         # 다시 합치면 이미 저장본으로 검산된 computed_rating과 정확히 같아야 한다.
-        best30_ratings = [self._rating_of(pb) for pb in fetch.best30]
-        new20_ratings = [self._rating_of(pb) for pb in fetch.new20]
-        # 베스트30/신곡20 평균·전체 레이팅 모두 넷째 자리에서 버린다(average_rating 기본값,
-        # 사용자 확인 2026-10-18 — records_calc.average_rating 참고).
+        best30_ratings = [self._rating_of(play) for play in best_plays]
+        new20_ratings = [self._rating_of(play) for play in new_plays]
+        # 베스트30/신곡20 평균은 넷째 자리에서 버린다(average_rating 기본값, 사용자 확인 2026-10-18 —
+        # records_calc.average_rating 참고). 전체 레이팅은 프로필의 규칙을 따른다.
         best30_average = average_rating(best30_ratings)
         new20_average = average_rating(new20_ratings)
-        computed_rating = overall_rating(best30_ratings, new20_ratings)
+        computed_rating = self._overall(best30_ratings, new20_ratings)
 
-        displayed_rating = None
-        if fetch.profile.rating_systems:
-            displayed_rating = Decimal(str(fetch.profile.rating_systems[0].value))
-        # 계산 불가(None)인데 표시값이 있으면 대조할 수 없으므로 불일치로 남긴다. CHUNITHM-NET이
-        # 실제로 보여주는 자리수는 둘째 자리뿐이라, computed_rating(넷째 자리까지 유지)을 그
-        # 자리에서 버려 맞춰 비교한다 — 그대로 비교하면 셋째·넷째 자리 때문에 거의 항상
-        # 어긋난 것처럼 보인다.
+        displayed_rating = snapshot.profile.displayed_rating
+        # 계산 불가(None)인데 표시값이 있으면 대조할 수 없으므로 불일치로 남긴다. NET이 실제로
+        # 보여주는 자리수보다 computed_rating이 더 정밀하므로(CHUNITHM은 넷째 자리까지 유지), 그 자리에서
+        # 버려 맞춰 비교한다 — 그대로 비교하면 셋째·넷째 자리 때문에 거의 항상 어긋난 것처럼 보인다.
         comparable_computed = (
-            computed_rating.quantize(Decimal("0.01"), rounding=ROUND_DOWN) if computed_rating is not None else None
+            computed_rating.quantize(Decimal(1).scaleb(-self._profile.displayed_places), rounding=ROUND_DOWN)
+            if computed_rating is not None
+            else None
         )
         rating_mismatch = displayed_rating is not None and comparable_computed != displayed_rating
 
-        over_power = fetch.profile.over_power
-        overpower_value = over_power.value if over_power is not None else None
-        overpower_percentage = over_power.percentage if over_power is not None else None
+        overpower_value = snapshot.profile.overpower_value
+        overpower_percentage = snapshot.profile.overpower_percentage
 
         diff: SyncDiff | None = None
         has_new_plays = False
         try:
             if previous_log is None:
-                for pb in merged.values():
-                    await self._upsert_pb(player_id, pb, session_id=None, synced_at=synced_at)
+                for play in merged.values():
+                    await self._upsert_pb(player_id, play, session_id=None, synced_at=synced_at)
             else:
                 diff, has_new_plays = await self._apply_with_diff(
-                    player_id, fetch, merged, sync_id=sync_id, synced_at=synced_at,
+                    player_id, snapshot, merged, (best_plays, new_plays), sync_id=sync_id, synced_at=synced_at,
                     previous_synced_at=datetime.fromisoformat(previous_log["synced_at"]),
                     previous_computed_rating=_rating_from_str(previous_log["computed_rating"]),
                 )
@@ -377,7 +391,7 @@ class RecordsService:
                 "overpower_value, overpower_percentage, best30_average_snapshot, new20_average_snapshot) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    sync_id, player_id, self._game, synced_at.isoformat(), fetch.profile.username,
+                    sync_id, player_id, self._game, synced_at.isoformat(), snapshot.profile.username,
                     str(displayed_rating) if displayed_rating is not None else None,
                     _rating_str(computed_rating), int(rating_mismatch), int(is_first_sync),
                     overpower_value, overpower_percentage,
@@ -394,8 +408,8 @@ class RecordsService:
                 "character_image_url = excluded.character_image_url, "
                 "character_frame_url = excluded.character_frame_url, updated_at = excluded.updated_at",
                 (
-                    player_id, self._game, fetch.profile.level, fetch.profile.reincarnation_stars,
-                    fetch.profile.profile_picture, fetch.profile.profile_picture_frame,
+                    player_id, self._game, snapshot.profile.level, snapshot.profile.reincarnation_stars,
+                    snapshot.profile.character_image_url, snapshot.profile.character_frame_url,
                     synced_at.isoformat(),
                 ),
             )
@@ -406,7 +420,7 @@ class RecordsService:
             raise
 
         if is_first_sync:
-            await self._players.set_status_tag(player_id, "chunithm-synced", source="records:first_sync")
+            await self._players.set_status_tag(player_id, self._profile.synced_tag, source="records:first_sync")
 
         if diff is not None:
             self._diff_cache[sync_id] = diff
@@ -429,8 +443,9 @@ class RecordsService:
     async def _apply_with_diff(
         self,
         player_id: str,
-        fetch: SyncFetch,
-        merged: dict[ChartKey, PersonalBest],
+        snapshot: SyncSnapshot,
+        merged: dict[ChartKey, ChartPlay],
+        frame_plays: tuple[list[ChartPlay], list[ChartPlay]],
         *,
         sync_id: str,
         synced_at: datetime,
@@ -442,13 +457,13 @@ class RecordsService:
         # 1) 직전 동기화 이후의 최근 플레이만 "이번에 새로 생긴 플레이"로 본다.
         recent_times: dict[ChartKey, list[datetime]] = {}
         recent_scores: dict[ChartKey, list[int]] = {}
-        for recent in fetch.recent_scores:
+        for recent in snapshot.recent:
             if recent.achieved_at is None:
                 continue
             achieved_at = _as_aware(recent.achieved_at)
             if achieved_at <= previous_synced_at:
                 continue
-            key = (recent.song.title, _difficulty_code(recent.chart.difficulty))
+            key = _key_of(recent)
             recent_times.setdefault(key, []).append(achieved_at)
             recent_scores.setdefault(key, []).append(recent.score)
 
@@ -468,12 +483,11 @@ class RecordsService:
 
         # 3) 동기화 적용 전 records_pb로 "이전 프레임"을 다시 계산한다.
         previous_rows = await self.all_pb_rows(player_id)
-        previous_by_key = {(r.song_title, r.difficulty): r for r in previous_rows}
+        previous_by_key = {_row_key(r): r for r in previous_rows}
         previous_best, previous_new = self._frames(previous_rows)
-        previous_frame = {(r.song_title, r.difficulty) for r in (*previous_best, *previous_new)}
-        current_frame = {
-            (pb.song.title, _difficulty_code(pb.chart.difficulty)) for pb in (*fetch.best30, *fetch.new20)
-        }
+        previous_frame = {_row_key(r) for r in (*previous_best, *previous_new)}
+        best_plays, new_plays = frame_plays
+        current_frame = {_key_of(play) for play in (*best_plays, *new_plays)}
         entered, exited = frame_changes(previous_frame, current_frame)
 
         # 4) 채보별로 갱신 여부를 판단해 저장하고 ChartUpdate를 모은다.
@@ -491,8 +505,8 @@ class RecordsService:
                         )
                         lamp_changes.append(
                             LampChange(
-                                song_title=key[0], difficulty=key[1], old_combo_lamp=raised[0],
-                                new_combo_lamp=raised[1], session_id=lamp_session,
+                                song_title=key[0], chart_type=key[1], difficulty=key[2],
+                                old_combo_lamp=raised[0], new_combo_lamp=raised[1], session_id=lamp_session,
                             )
                         )
                 continue
@@ -515,18 +529,19 @@ class RecordsService:
             chart_updates.append(
                 ChartUpdate(
                     song_title=key[0],
-                    difficulty=key[1],
+                    chart_type=key[1],
+                    difficulty=key[2],
                     old_score=existing.score if existing is not None else None,
                     new_score=pb.score,
                     old_rank=existing.rank if existing is not None else None,
-                    new_rank=str(pb.rank),
+                    new_rank=pb.rank,
                     old_rating=existing.rating if existing is not None else None,
                     new_rating=rating,
                     session_id=session_id,
                     estimated_session=estimated,
                     entered_frame=key in entered,
                     old_combo_lamp=existing.combo_lamp if existing is not None else None,
-                    new_combo_lamp=str(pb.combo_lamp),
+                    new_combo_lamp=pb.combo_lamp,
                 )
             )
 
@@ -544,7 +559,8 @@ class RecordsService:
             unchanged_plays.append(
                 UnchangedPlay(
                     song_title=key[0],
-                    difficulty=key[1],
+                    chart_type=key[1],
+                    difficulty=key[2],
                     play_count=len(recent_times[key]),
                     current_score=max(known_scores) if known_scores else max(recent_scores[key]),
                     session_id=session_id,
@@ -552,19 +568,19 @@ class RecordsService:
             )
 
         # 이탈 오탐 거르기: "이전 프레임"은 records_pb를 다시 정렬해 만든 것이라, 레이팅이 같은
-        # 채보 사이의 순서가 CHUNITHM-NET의 실제 동점 처리와 다를 수 있다. 그래서 저장된 레이팅이
-        # 이번 프레임(CHUNITHM-NET이 준 베스트30/신곡20)의 최저 레이팅보다 엄격히 낮을 때만
+        # 채보 사이의 순서가 NET의 실제 동점 처리와 다를 수 있다. 그래서 저장된 레이팅이
+        # 이번 프레임(NET이 준 베스트/신곡 목록)의 최저 레이팅보다 엄격히 낮을 때만
         # 진짜 이탈로 본다. 같거나 높으면 정렬 차이로 생긴 오탐으로 보고 뺀다. 진입은
         # 이번 프레임을 그대로 믿으므로 손대지 않는다.
-        best_floor = _known_min([self._rating_of(pb) for pb in fetch.best30])
-        new_floor = _known_min([self._rating_of(pb) for pb in fetch.new20])
+        best_floor = _known_min([self._rating_of(play) for play in best_plays])
+        new_floor = _known_min([self._rating_of(play) for play in new_plays])
         frame_exits: list[FrameExit] = []
         for key in sorted(exited):
             old_rating = previous_by_key[key].rating
             floor = new_floor if self._songdb.is_new_for(key[0]) else best_floor
             if old_rating is not None and floor is not None and old_rating >= floor:
                 continue
-            frame_exits.append(FrameExit(song_title=key[0], difficulty=key[1], old_rating=old_rating))
+            frame_exits.append(FrameExit(song_title=key[0], chart_type=key[1], difficulty=key[2], old_rating=old_rating))
         accumulated = await self._accumulate_session_states(
             sessions,
             SessionState(
@@ -622,7 +638,7 @@ class RecordsService:
             previous_new20_average=first_previous.previous_new20_average,
             chart_updates=sorted(
                 (u for part in parts for u in part.chart_updates),
-                key=lambda u: (u.new_rating is None, -(u.new_rating or Decimal(0)), u.song_title, u.difficulty),
+                key=lambda u: (u.new_rating is None, -(u.new_rating or Decimal(0)), u.song_title, u.chart_type, u.difficulty),
             ),
             unchanged_plays=[u for part in parts for u in part.unchanged_plays],
             frame_exits=[x for part in parts for x in part.frame_exits],
@@ -678,7 +694,7 @@ class RecordsService:
         # 버전이 바뀌어 신곡 프레임이 비어도 그대로이기 때문이다(2026-10-22).
         return SyncLogSummary(
             nickname=row["nickname"],
-            computed_rating=overall_rating([r.rating for r in best], [r.rating for r in new]),
+            computed_rating=self._overall([r.rating for r in best], [r.rating for r in new]),
             best30_average=average_rating([r.rating for r in best]),
             new20_average=average_rating([r.rating for r in new]),
             last_synced_at=row["synced_at"],
@@ -708,38 +724,46 @@ class RecordsService:
             previous_new20_average=_rating_from_str(previous["new20_average_snapshot"]) if previous else None,
         )
 
-    async def pb_row(self, player_id: str, *, song_title: str, difficulty: str) -> PbRow | None:
+    async def pb_row(
+        self, player_id: str, *, song_title: str, difficulty: str, chart_type: str = ""
+    ) -> PbRow | None:
         cursor = await self._conn.execute(
             f"SELECT {_PB_COLUMNS} FROM records_pb "
-            "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
-            (player_id, self._game, song_title, difficulty),
+            "WHERE player_id = ? AND game = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
+            (player_id, self._game, song_title, chart_type, difficulty),
         )
         row = await cursor.fetchone()
         return self._current(_pb_row_from(row)) if row is not None else None
 
-    async def pb_rows_for(self, player_id: str, keys: Sequence[ChartKey]) -> dict[ChartKey, PbRow]:
-        """주어진 채보들의 PB를 한 번에 가져온다(기록 없는 채보는 결과에 없다). 변수 개수 상한을
+    async def pb_rows_for[K: tuple[str, ...]](self, player_id: str, keys: Sequence[K]) -> dict[K, PbRow]:
+        """주어진 채보들의 PB를 한 번에 가져온다(기록 없는 채보는 결과에 없다). 키는 (제목, 난이도)이거나
+        채보 종류까지 든 (제목, 채보 종류, 난이도)이고, 결과는 넘긴 키 모양 그대로 매긴다. 변수 개수 상한을
         넘지 않게 키를 나눠 묻는다."""
-        found: dict[ChartKey, PbRow] = {}
-        unique = list(dict.fromkeys(keys))
+        full_of = {key: key if len(key) == 3 else (key[0], "", key[1]) for key in dict.fromkeys(keys)}
+        keys_by_full: dict[ChartKey, list[K]] = {}
+        for key, full in full_of.items():
+            keys_by_full.setdefault(full, []).append(key)
+        found: dict[K, PbRow] = {}
+        unique = list(keys_by_full)
         for start in range(0, len(unique), _PB_KEYS_PER_QUERY):
             chunk = unique[start : start + _PB_KEYS_PER_QUERY]
-            pairs = ", ".join("(?, ?)" for _ in chunk)
+            triples = ", ".join("(?, ?, ?)" for _ in chunk)
             cursor = await self._conn.execute(
                 f"SELECT {_PB_COLUMNS} FROM records_pb "
-                f"WHERE player_id = ? AND game = ? AND (song_title, difficulty) IN (VALUES {pairs})",
+                f"WHERE player_id = ? AND game = ? AND (song_title, chart_type, difficulty) IN (VALUES {triples})",
                 (player_id, self._game, *(value for key in chunk for value in key)),
             )
             for row in await cursor.fetchall():
                 pb = self._current(_pb_row_from(row))
-                found[(pb.song_title, pb.difficulty)] = pb
+                for key in keys_by_full[_row_key(pb)]:
+                    found[key] = pb
         return found
 
     async def all_pb_rows(self, player_id: str) -> list[PbRow]:
-        """그 플레이어의 모든 PB(제목·난이도 순). 레이팅 순 정렬은 부르는 쪽이 한다."""
+        """그 플레이어의 모든 PB(제목·채보 종류·난이도 순). 레이팅 순 정렬은 부르는 쪽이 한다."""
         cursor = await self._conn.execute(
             f"SELECT {_PB_COLUMNS} FROM records_pb "
-            "WHERE player_id = ? AND game = ? ORDER BY song_title, difficulty",
+            "WHERE player_id = ? AND game = ? ORDER BY song_title, chart_type, difficulty",
             (player_id, self._game),
         )
         return [self._current(_pb_row_from(row)) for row in await cursor.fetchall()]
@@ -753,36 +777,37 @@ class RecordsService:
         self, player_id: str, *, min_const: float | None, max_const: float | None, count: int
     ) -> list[CandidateHit]:
         """레이팅을 올릴 후보곡. 상수 범위 안에서 지금 프레임(베스트30/신곡20, records_pb
-        기준) 밖에 있는 채보 중, SSS를 냈을 때의 곡 레이팅(상수+2.00)이 그 채보가 속할 프레임의
-        3~8위 레이팅 사이(`_candidate_band`)인 것만, SSS를 냈을 때 프레임 최저점을 얼마나
-        넘는지(candidate_upside) 내림차순으로 count개까지 돌려준다. 상승폭이 0 이하인
-        채보는 뺀다. 안 친 채보는 현재 점수 0으로 본다."""
+        기준) 밖에 있는 채보 중, 기준 점수(프로필의 candidate_target_score: CHUNITHM SSS, maimai
+        SSS+)를 냈을 때의 곡 레이팅이 그 채보가 속할 프레임의 3~8위 레이팅 사이(`_candidate_band`)인
+        것만, 그 점수를 냈을 때 프레임 최저점을 얼마나 넘는지 내림차순으로 count개까지 돌려준다.
+        상승폭이 0 이하인 채보는 뺀다. 안 친 채보는 현재 점수 0으로 본다."""
         rows = await self.all_pb_rows(player_id)
         best, new = self._frames(rows)
-        frame_keys = {(r.song_title, r.difficulty) for r in (*best, *new)}
+        frame_keys = {_row_key(r) for r in (*best, *new)}
         best_floor = _frame_floor(best, self._profile.best_frame_size)
         new_floor = _frame_floor(new, self._profile.new_frame_size)
         best_band = _candidate_band(best)
         new_band = _candidate_band(new)
-        rows_by_key = {(r.song_title, r.difficulty): r for r in rows}
+        rows_by_key = {_row_key(r): r for r in rows}
         low = min_const if min_const is not None else 0.0
         high = max_const if max_const is not None else 99.0
 
         hits: list[CandidateHit] = []
         for code in self._profile.chart_codes:
             for hit in self._songdb.find_by_const(min_const=low, max_const=high, difficulty=code):
-                key = (hit.song.title, code)
+                key = (hit.song.title, hit.chart.chart_type, code)
                 const = hit.chart.const
                 if key in frame_keys or const is None:
                     continue
                 is_new = self._songdb.is_new_for(hit.song.title)
                 floor = new_floor if is_new else best_floor
                 band = new_band if is_new else best_band
-                upside = candidate_upside(const, floor)
-                if band is None or upside <= 0:
+                # 기준 점수(CHUNITHM SSS, maimai SSS+)를 냈을 때의 곡 레이팅. CHUNITHM은 상수 + 2.00이다.
+                target_rating = self._profile.chart_rating(self._profile.candidate_target_score, const)
+                if target_rating is None or band is None:
                     continue
-                sss_rating = upside + floor  # = 상수 + 2.00
-                if not band[0] <= sss_rating <= band[1]:
+                upside = target_rating - floor
+                if upside <= 0 or not band[0] <= target_rating <= band[1]:
                     continue
                 current_score = rows_by_key[key].score if key in rows_by_key else 0
                 remaining = remaining_to_target(
@@ -792,19 +817,23 @@ class RecordsService:
                     CandidateHit(
                         song_title=hit.song.title,
                         difficulty=code,
+                        chart_type=hit.chart.chart_type,
                         const=const,
                         upside=upside,
                         current_score=current_score,
                         remaining_score=remaining[0] if remaining is not None else None,
                     )
                 )
-        hits.sort(key=lambda h: (-h.upside, -h.const, h.song_title, h.difficulty))
+        hits.sort(key=lambda h: (-h.upside, -h.const, h.song_title, h.chart_type, h.difficulty))
         return hits[:count]
 
-    async def best_score(self, player_id: str, *, song_title: str, difficulty: str) -> int | None:
+    async def best_score(
+        self, player_id: str, *, song_title: str, difficulty: str, chart_type: str = ""
+    ) -> int | None:
         cursor = await self._conn.execute(
-            "SELECT score FROM records_pb WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
-            (player_id, self._game, song_title, difficulty),
+            "SELECT score FROM records_pb "
+            "WHERE player_id = ? AND game = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
+            (player_id, self._game, song_title, chart_type, difficulty),
         )
         row = await cursor.fetchone()
         return row["score"] if row is not None else None
@@ -868,37 +897,62 @@ class RecordsService:
     ) -> tuple[int, Decimal] | None:
         return remaining_to_target(note_count, current_score, target_score)
 
-    def _rating_of(self, pb: PersonalBest) -> Decimal | None:
-        return chart_rating(pb.score, self._songdb.const_for(pb.song.title, _difficulty_code(pb.chart.difficulty)))
+    def _rating_of(self, play: ChartPlay) -> Decimal | None:
+        const = self._songdb.const_for(play.song_title, play.difficulty, play.chart_type)
+        return self._profile.chart_rating(play.score, const)
+
+    def _overall(self, best: Sequence[Decimal | None], new: Sequence[Decimal | None]) -> Decimal | None:
+        """전체 레이팅. 합산·나눗셈·자리수는 게임 프로필의 규칙이다."""
+        return overall_rating(
+            best, new,
+            best_size=self._profile.best_frame_size, new_size=self._profile.new_frame_size,
+            divisor=self._profile.rating_divisor, places=self._profile.overall_places,
+        )
+
+    def _derive_frames(self, merged: dict[ChartKey, ChartPlay]) -> tuple[list[ChartPlay], list[ChartPlay]]:
+        """NET이 베스트/신곡 목록을 주지 않을 때, 전체 기록으로 (베스트, 신곡) 프레임을 짠다. 규칙은 저장된
+        기록으로 프레임을 짜는 `_frames`와 같다."""
+        rows = [
+            PbRow(
+                song_title=play.song_title, chart_type=play.chart_type, difficulty=play.difficulty,
+                score=play.score, rank=play.rank, clear_lamp=play.clear_lamp, combo_lamp=play.combo_lamp,
+                chain_lamp=play.chain_lamp, const=self._songdb.const_for(play.song_title, play.difficulty, play.chart_type),
+                rating=self._rating_of(play), session_id=None, updated_at="",
+            )
+            for play in merged.values()
+        ]
+        best, new = self._frames(rows)
+        return [merged[_row_key(r)] for r in best], [merged[_row_key(r)] for r in new]
 
     def _current(self, row: PbRow) -> PbRow:
         """저장된 PB 행의 상수·곡 레이팅을 지금 곡 DB 상수로 다시 계산한 행. 저장값은 동기화 때의 상수라서,
         Chunimaru 갱신으로 상수가 바뀌면 곡 DB와 어긋난다(2026-10-22 HERA 15.0→15.1). 점수는 저장된 그대로다.
         곡 DB가 상수를 모르면 저장값을 쓴다."""
-        const = self._songdb.const_for(row.song_title, row.difficulty)
+        const = self._songdb.const_for(row.song_title, row.difficulty, row.chart_type)
         if const is None:
             return row
-        return replace(row, const=const, rating=chart_rating(row.score, const))
+        return replace(row, const=const, rating=self._profile.chart_rating(row.score, const))
 
     async def _refresh_stored_ratings(self, player_id: str) -> None:
         """저장된 상수·곡 레이팅을 지금 곡 DB 기준으로 맞춘다. `_upsert_pb`는 점수가 오른 채보만 쓰므로,
         점수가 그대로인 채보의 상수가 바뀌어도 저장값은 옛것으로 남는다. 읽을 때 `_current`가 다시 계산하니
         숫자는 어긋나지 않고, 이 갱신은 저장값을 정직하게 두려는 것이다. 커밋은 부르는 쪽이 한다."""
         cursor = await self._conn.execute(
-            "SELECT song_title, difficulty, score, const, rating FROM records_pb WHERE player_id = ? AND game = ?",
+            "SELECT song_title, chart_type, difficulty, score, const, rating FROM records_pb "
+            "WHERE player_id = ? AND game = ?",
             (player_id, self._game),
         )
         for row in await cursor.fetchall():
-            const = self._songdb.const_for(row["song_title"], row["difficulty"])
+            const = self._songdb.const_for(row["song_title"], row["difficulty"], row["chart_type"])
             if const is None:
                 continue
-            rating = _rating_str(chart_rating(row["score"], const))
+            rating = _rating_str(self._profile.chart_rating(row["score"], const))
             if row["const"] == const and row["rating"] == rating:
                 continue
             await self._conn.execute(
                 "UPDATE records_pb SET const = ?, rating = ? "
-                "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
-                (const, rating, player_id, self._game, row["song_title"], row["difficulty"]),
+                "WHERE player_id = ? AND game = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
+                (const, rating, player_id, self._game, row["song_title"], row["chart_type"], row["difficulty"]),
             )
 
     def _frames(self, rows: list[PbRow]) -> tuple[list[PbRow], list[PbRow]]:
@@ -915,46 +969,51 @@ class RecordsService:
         return best, new
 
     async def _upsert_pb(
-        self, player_id: str, pb: PersonalBest, *, session_id: str | None, synced_at: datetime
+        self, player_id: str, play: ChartPlay, *, session_id: str | None, synced_at: datetime
     ) -> tuple[float | None, Decimal | None]:
         """PB 한 행을 넣는다. 점수가 실제로 올랐을 때만 행 전체(점수·랭크·램프·상수·레이팅·
         세션·시각)를 한 단위로 바꾼다 — "이 기록을 언제 세웠나"(session_id/updated_at)는
         세션·리포트 스킬이 쓰는 정보다. (상수, 레이팅)을 돌려준다."""
-        title = pb.song.title
-        difficulty = _difficulty_code(pb.chart.difficulty)
-        const = self._songdb.const_for(title, difficulty)
-        rating = chart_rating(pb.score, const)
+        const = self._songdb.const_for(play.song_title, play.difficulty, play.chart_type)
+        rating = self._profile.chart_rating(play.score, const)
         await self._conn.execute(
-            "INSERT INTO records_pb (player_id, game, song_title, difficulty, score, rank, "
-            "clear_lamp, combo_lamp, chain_lamp, const, rating, session_id, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO records_pb (player_id, game, song_title, chart_type, difficulty, score, rank, "
+            "clear_lamp, combo_lamp, chain_lamp, dx_score, const, rating, session_id, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT (player_id, game, song_title, chart_type, difficulty) DO UPDATE SET "
             "score = excluded.score, rank = excluded.rank, clear_lamp = excluded.clear_lamp, "
-            "combo_lamp = excluded.combo_lamp, chain_lamp = excluded.chain_lamp, "
+            "combo_lamp = excluded.combo_lamp, chain_lamp = excluded.chain_lamp, dx_score = excluded.dx_score, "
             "const = excluded.const, rating = excluded.rating, session_id = excluded.session_id, "
             "updated_at = excluded.updated_at "
             "WHERE excluded.score > records_pb.score",
             (
-                player_id, self._game, title, difficulty, pb.score, str(pb.rank),
-                str(pb.clear_lamp), str(pb.combo_lamp), str(pb.chain_lamp),
+                player_id, self._game, play.song_title, play.chart_type, play.difficulty, play.score, play.rank,
+                play.clear_lamp, play.combo_lamp, play.chain_lamp, play.dx_score,
                 const, _rating_str(rating), session_id, synced_at.isoformat(),
             ),
         )
         return const, rating
 
-    async def _raise_lamps(self, player_id: str, existing: PbRow, pb: PersonalBest) -> tuple[str, str] | None:
-        """점수가 같은 채보의 램프를 더 좋은 쪽으로만 고친다(내리지 않는다). 점수·세션·시각은 그대로다.
-        예전에 램프 없이 저장된 행(위 `_merge_personal_bests`의 옛 버그)을 다음 동기화가 고친다.
+    async def _raise_lamps(self, player_id: str, existing: PbRow, play: ChartPlay) -> tuple[str, str] | None:
+        """점수가 같은 채보의 램프와 DX 스코어를 더 좋은 쪽으로만 고친다(내리지 않는다). 점수·세션·시각은
+        그대로다. 예전에 램프 없이 저장된 행(위 `_merge_plays`의 옛 버그)을 다음 동기화가 고친다.
         콤보 램프가 올랐으면 (이전, 이후)를 돌려준다."""
-        clear = _better_lamp(existing.clear_lamp, str(pb.clear_lamp), _CLEAR_ORDER)
-        combo = _better_lamp(existing.combo_lamp, str(pb.combo_lamp), _COMBO_ORDER)
-        chain = _better_lamp(existing.chain_lamp, str(pb.chain_lamp), _CHAIN_ORDER)
-        if (clear, combo, chain) == (existing.clear_lamp, existing.combo_lamp, existing.chain_lamp):
+        profile = self._profile
+        clear = _better_lamp(existing.clear_lamp, play.clear_lamp, profile.clear_lamp_order)
+        combo = _better_lamp(existing.combo_lamp, play.combo_lamp, profile.combo_lamp_order)
+        chain = _better_lamp(existing.chain_lamp, play.chain_lamp, profile.chain_lamp_order)
+        dx_score = max(filter(None, (existing.dx_score, play.dx_score)), default=None)
+        if (clear, combo, chain, dx_score) == (
+            existing.clear_lamp, existing.combo_lamp, existing.chain_lamp, existing.dx_score
+        ):
             return None
         await self._conn.execute(
-            "UPDATE records_pb SET clear_lamp = ?, combo_lamp = ?, chain_lamp = ? "
-            "WHERE player_id = ? AND game = ? AND song_title = ? AND difficulty = ?",
-            (clear, combo, chain, player_id, self._game, existing.song_title, existing.difficulty),
+            "UPDATE records_pb SET clear_lamp = ?, combo_lamp = ?, chain_lamp = ?, dx_score = ? "
+            "WHERE player_id = ? AND game = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
+            (
+                clear, combo, chain, dx_score,
+                player_id, self._game, existing.song_title, existing.chart_type, existing.difficulty,
+            ),
         )
         return (existing.combo_lamp, combo) if combo != existing.combo_lamp else None
 
@@ -980,9 +1039,9 @@ def merge_session_state(prior: SessionState, part: SessionState) -> SessionState
     """같은 세션의 앞선 누적(prior) 위에 이번 동기화의 조각(part)을 더한다. 시작 시점 값(previous_*)은
     앞선 것을 지킨다. 같은 채보가 또 갱신되면 이전 값은 앞선 것, 새 값은 이번 것이다. 갱신된 채보는 미갱신
     목록에서 뺀다. 미갱신 플레이는 횟수를 더하고 점수는 높은 쪽을 쓴다."""
-    updates: dict[ChartKey, ChartUpdate] = {(u.song_title, u.difficulty): u for u in prior.chart_updates}
+    updates: dict[ChartKey, ChartUpdate] = {(u.song_title, u.chart_type, u.difficulty): u for u in prior.chart_updates}
     for update in part.chart_updates:
-        key = (update.song_title, update.difficulty)
+        key = (update.song_title, update.chart_type, update.difficulty)
         earlier = updates.get(key)
         updates[key] = update if earlier is None else replace(
             update,
@@ -994,7 +1053,7 @@ def merge_session_state(prior: SessionState, part: SessionState) -> SessionState
 
     unchanged: dict[ChartKey, UnchangedPlay] = {}
     for play in (*prior.unchanged_plays, *part.unchanged_plays):
-        key = (play.song_title, play.difficulty)
+        key = (play.song_title, play.chart_type, play.difficulty)
         if key in updates:
             continue
         earlier_play = unchanged.get(key)
@@ -1004,7 +1063,7 @@ def merge_session_state(prior: SessionState, part: SessionState) -> SessionState
             current_score=max(earlier_play.current_score, play.current_score),
         )
 
-    exits = {(x.song_title, x.difficulty): x for x in (*prior.frame_exits, *part.frame_exits)}
+    exits = {(x.song_title, x.chart_type, x.difficulty): x for x in (*prior.frame_exits, *part.frame_exits)}
     return SessionState(
         previous_computed_rating=prior.previous_computed_rating,
         previous_best30_average=prior.previous_best30_average,
@@ -1016,15 +1075,17 @@ def merge_session_state(prior: SessionState, part: SessionState) -> SessionState
 
 
 _PB_COLUMNS = (
-    "song_title, difficulty, score, rank, clear_lamp, combo_lamp, chain_lamp, const, rating, "
-    "session_id, updated_at"
+    "song_title, chart_type, difficulty, score, rank, clear_lamp, combo_lamp, chain_lamp, dx_score, const, "
+    "rating, session_id, updated_at"
 )
 
 
 def _pb_row_from(row: aiosqlite.Row) -> PbRow:
     return PbRow(
         song_title=row["song_title"],
+        chart_type=row["chart_type"],
         difficulty=row["difficulty"],
+        dx_score=row["dx_score"],
         score=row["score"],
         rank=row["rank"],
         clear_lamp=row["clear_lamp"],
@@ -1036,8 +1097,3 @@ def _pb_row_from(row: aiosqlite.Row) -> PbRow:
         updated_at=row["updated_at"],
     )
 
-
-_SHORT_CODE = {
-    "basic": "BAS", "advanced": "ADV", "expert": "EXP",
-    "master": "MAS", "ultima": "ULT", "worlds_end": "WE",
-}

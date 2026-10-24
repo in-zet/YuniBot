@@ -80,13 +80,13 @@ async def run(
         )
 
     try:
-        fetch = await ctx.chunithm_net.fetch_for_sync(ctx.player_id, ctx=ctx)
+        snapshot = await ctx.chunithm_net.fetch_snapshot(ctx.player_id, ctx=ctx)
     except MaintenanceError:
         return ToolResult(error="CHUNITHM-NET이 점검 중이야. 점검이 끝나면 다시 동기화해 줘.")
     except (AuthenticationError, ConnectionError):
         return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
 
-    result = await ctx.records.save_sync(ctx.player_id, fetch, ctx)
+    result = await ctx.records.save_sync(ctx.player_id, snapshot, ctx)
     # 저장이 일어났으니(기준점만 만든 첫 동기화도) 이 플레이어의 점수가 담긴 작업 표는 옛 값이다.
     if ctx.tables is not None:
         ctx.tables.mark_stale(ctx.player_id)

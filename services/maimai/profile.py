@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from services.game.profile import GameProfile
+from services.maimai.rating import chart_rating
 
 # otoge-db 버전 코드의 앞 세 자리 → 버전 이름(출시 순서). 5로 끝나는 코드는 PLUS다(예: 26500 = CiRCLE PLUS).
 # 뒤 두 자리는 그 버전 안의 업데이트 차수다. 2026-10-23 music-ex-intl.json의 버전 27가지 전부와 대조했다.
@@ -34,5 +35,14 @@ MAIMAI = GameProfile(
     new_frame_size=15,
     # 후보곡 기준점은 SSS+(달성률 100.5%)다. 점수는 달성률 ×10000으로 저장한다. Part 5에서 레이팅 공식과 함께 다시 본다.
     candidate_target_score=1_005_000,
+    # 레이팅은 구곡 35 + 신곡 15의 곡 레이팅(정수) 합이다. 나누지 않는다.
+    chart_rating=chart_rating,
+    rating_divisor=1,
+    overall_places=0,
+    displayed_places=0,
+    # 램프 문자열은 어댑터(Part 3)가 이 이름으로 맞춰 넘긴다. 클리어는 달성률 랭크가 대신해 램프가 없다.
+    clear_lamp_order={},
+    combo_lamp_order={"NONE": 0, "FC": 1, "FC+": 2, "AP": 3, "AP+": 4},
+    chain_lamp_order={"NONE": 0, "SYNC": 1, "FS": 2, "FS+": 3, "FDX": 4, "FDX+": 5},
     synced_tag="maimai-synced",
 )

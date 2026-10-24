@@ -31,7 +31,9 @@ def chart_rating(score: int, const: float | None) -> Decimal | None:
     return calculate_rating(score, const)
 
 
-def average_rating(ratings: Sequence[Decimal | None], *, places: int = 4) -> Decimal | None:
+def average_rating(
+    ratings: Sequence[Decimal | None], *, places: int = 4, divisor: int | None = None
+) -> Decimal | None:
     """베스트30 평균, 신곡20 평균, 전체 레이팅(50으로 나눔)에 공통으로 쓴다. 입력은 이미
     chart_rating()으로 둘째 자리까지 버려진 값들이다.
 
@@ -41,27 +43,34 @@ def average_rating(ratings: Sequence[Decimal | None], *, places: int = 4) -> Dec
     맞추기 위해 똑같이 넷째 자리에서 버린다.
 
     하나라도 "계산 불가"(None)면 평균도 None이다 — 일부만 계산해 그럴듯한 숫자를
-    내지 않는다."""
+    내지 않는다. divisor를 주면 곡 수 대신 그 수로 나눈다(maimai 전체 레이팅은 합이라 1)."""
     if not ratings:
         return Decimal(0).quantize(Decimal(1).scaleb(-places))
     known = [r for r in ratings if r is not None]
     if len(known) != len(ratings):
         return None
     total = sum(known, Decimal(0))
-    return (total / len(ratings)).quantize(Decimal(1).scaleb(-places), rounding=ROUND_DOWN)
+    return (total / (divisor or len(ratings))).quantize(Decimal(1).scaleb(-places), rounding=ROUND_DOWN)
 
 
 def overall_rating(
-    best30: Sequence[Decimal | None], new20: Sequence[Decimal | None], *, best_size: int = 30, new_size: int = 20
+    best30: Sequence[Decimal | None],
+    new20: Sequence[Decimal | None],
+    *,
+    best_size: int = 30,
+    new_size: int = 20,
+    divisor: int | None = None,
+    places: int = 4,
 ) -> Decimal | None:
-    """전체 레이팅 — 베스트30·신곡20의 곡 레이팅 합을 50으로 나눈다. 프레임이 덜 찼으면(버전이 바뀌어
-    신곡이 아직 없을 때 등) 빈 칸은 0으로 센다. 그래서 신곡20이 비면 레이팅이 크게 떨어진다. 하나라도
-    "계산 불가"(None)면 None이다."""
+    """전체 레이팅 — 베스트30·신곡20의 곡 레이팅 합을 50으로 나눈다(divisor를 안 주면 프레임 크기 합).
+    프레임이 덜 찼으면(버전이 바뀌어 신곡이 아직 없을 때 등) 빈 칸은 0으로 센다. 그래서 신곡20이 비면
+    레이팅이 크게 떨어진다. 하나라도 "계산 불가"(None)면 None이다. maimai는 나누지 않고(divisor=1)
+    정수로 버린다(places=0)."""
     padded = [
         *best30, *[Decimal(0)] * max(0, best_size - len(best30)),
         *new20, *[Decimal(0)] * max(0, new_size - len(new20)),
     ]
-    return average_rating(padded)
+    return average_rating(padded, places=places, divisor=divisor)
 
 
 def allowed_attacks(note_count: int | None, target_score: int) -> Decimal | None:
@@ -99,9 +108,9 @@ def assign_session_date(played_at: datetime, *, boundary_hour: int = 4) -> date:
     return played_at.date()
 
 
-def match_session_for_chart(
-    chart_key: tuple[str, str],
-    recent_by_chart: dict[tuple[str, str], list[datetime]],
+def match_session_for_chart[K](
+    chart_key: K,
+    recent_by_chart: dict[K, list[datetime]],
     sessions_by_date: dict[date, str],
     latest_session_id: str | None,
 ) -> tuple[str | None, bool]:
@@ -121,9 +130,7 @@ def match_session_for_chart(
     return latest_session_id, True
 
 
-def frame_changes(
-    previous: set[tuple[str, str]], current: set[tuple[str, str]]
-) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+def frame_changes[K](previous: set[K], current: set[K]) -> tuple[set[K], set[K]]:
     """프레임(베스트30/신곡20 등) 진입과 이탈 집합. (진입, 이탈) =
     (`current - previous`, `previous - current`)."""
     return current - previous, previous - current
