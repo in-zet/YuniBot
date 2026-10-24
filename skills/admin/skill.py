@@ -125,3 +125,24 @@ async def set_report_channel(ctx: ToolContext, channel: str) -> ToolResult:
         value=channel_id, updated_by=ctx.player_id,
     )
     return ToolResult(data={"channel_id": channel_id or None}, display=Display(ephemeral=True))
+
+
+@tool(slash="관리 곡버전", mutates=True, confirm="always")
+async def set_song_version(ctx: ToolContext, game: str, version: str = "") -> ToolResult:
+    """곡 DB가 지금 가동 중인 버전으로 보는 버전을 덮어쓴다. 신곡 판정에 쓰이고 재시작해도 남는다. maimai만 된다.
+    version을 비우면 곡 DB에서 뽑은 값으로 돌아간다."""
+    songdb = ctx.songdbs.get(game)
+    if songdb is None:
+        return ToolResult(error=f"'{game}'이라는 게임이 없어: {', '.join(sorted(ctx.songdbs))}")
+    set_version = getattr(songdb, "set_current_version", None)
+    if set_version is None:
+        return ToolResult(error=f"{game}는 현재 버전을 직접 정하지 않아. 곡 DB에서 알아서 뽑아")
+    try:
+        set_version(version or None)
+    except ValueError as exc:
+        names = ", ".join(songdb.version_names()[-5:])
+        return ToolResult(error=f"{exc} (최근 버전: {names})")
+    return ToolResult(
+        data={"game": game, "override": version or None, "current_version": songdb.current_version()},
+        display=Display(ephemeral=True),
+    )

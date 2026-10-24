@@ -11,9 +11,10 @@ import aiosqlite
 import yaml
 
 from core.resolvers import ResolutionError
-from core.tool_types import ToolContext
+from core.tool_types import DEFAULT_GAME, ToolContext
 
-_DATA_PATH = Path(__file__).parent / "data" / "terms.yaml"
+# 기본 사전은 츄니즘 것이다(옛 호출부 호환). 다른 게임은 프로필의 terms_path를 넘긴다.
+_DATA_PATH = Path(__file__).parent.parent / "chunithm" / "data" / "terms.yaml"
 
 _HANGUL_SCALE: dict[str, int] = {"만": 10_000, "천": 1_000, "백": 100, "십": 10}
 
@@ -151,7 +152,17 @@ class TermsService:
     terms.yaml에 데이터로 있다 — 이 파일이 유일한 출처고, 여기서 다시 계산하거나
     vendored 코드로 되비추지 않는다(테스트가 교차 검증은 따로 한다)."""
 
-    def __init__(self, data_path: Path = _DATA_PATH, *, conn: aiosqlite.Connection | None = None) -> None:
+    def __init__(
+        self,
+        data_path: Path = _DATA_PATH,
+        *,
+        conn: aiosqlite.Connection | None = None,
+        game: str = DEFAULT_GAME,
+        percent_scores: bool = False,
+    ) -> None:
+        self._game = game
+        # 점수를 달성률(%)로 말하는 게임(maimai)이면 "99.5%" 같은 말을 ×10000 정수 점수로 읽는다.
+        self._percent_scores = percent_scores
         entries = _load_entries(data_path)
         self._entries = entries
         self._rank_aliases = _alias_map(entries, "rank")
@@ -179,7 +190,9 @@ class TermsService:
         """부팅 때 저장된 별칭을 메모리 지도에 넣는다(별칭을 바꿀 때마다 같이 갱신한다)."""
         if self._conn is None:
             return
-        cursor = await self._conn.execute("SELECT kind, alias, canonical FROM terms_aliases")
+        cursor = await self._conn.execute(
+            "SELECT kind, alias, canonical FROM terms_aliases WHERE game = ?", (self._game,)
+        )
         for row in await cursor.fetchall():
             if row["kind"] in self._db_aliases:
                 self._apply_alias(row["kind"], row["alias"], row["canonical"])
@@ -218,8 +231,9 @@ class TermsService:
         if alias in self._db_aliases[key]:
             return canonical  # 같은 뜻으로 다시 저장 — 처음 등록한 사람·시각을 지킨다
         await self._conn.execute(
-            "INSERT INTO terms_aliases (kind, alias, canonical, added_by, created_at) VALUES (?, ?, ?, ?, ?)",
-            (key, alias, canonical, added_by, datetime.now(UTC).isoformat()),
+            "INSERT INTO terms_aliases (game, kind, alias, canonical, added_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (self._game, key, alias, canonical, added_by, datetime.now(UTC).isoformat()),
         )
         await self._conn.commit()
         self._apply_alias(key, alias, canonical)
@@ -229,8 +243,8 @@ class TermsService:
         assert self._conn is not None
         key = ALIAS_KINDS.get(kind, kind)
         cursor = await self._conn.execute(
-            "SELECT kind, alias, canonical, added_by FROM terms_aliases WHERE kind = ? AND alias = ?",
-            (key, alias.strip().lower()),
+            "SELECT kind, alias, canonical, added_by FROM terms_aliases WHERE game = ? AND kind = ? AND alias = ?",
+            (self._game, key, alias.strip().lower()),
         )
         row = await cursor.fetchone()
         if row is None:
@@ -241,7 +255,9 @@ class TermsService:
         assert self._conn is not None
         key = ALIAS_KINDS.get(kind, kind)
         alias = alias.strip().lower()
-        await self._conn.execute("DELETE FROM terms_aliases WHERE kind = ? AND alias = ?", (key, alias))
+        await self._conn.execute(
+            "DELETE FROM terms_aliases WHERE game = ? AND kind = ? AND alias = ?", (self._game, key, alias)
+        )
         await self._conn.commit()
         self._db_aliases.get(key, {}).pop(alias, None)
         target = self._alias_map_for(key)
@@ -288,7 +304,11 @@ class TermsService:
                 continue
             meaning = entry.meaning
             if meaning is None and entry.category == "rank" and entry.value is not None:
-                meaning = f"{entry.value:,}점 이상"
+                meaning = (
+                    f"달성률 {Decimal(entry.value) / 10_000:.4f}% 이상"
+                    if self._percent_scores
+                    else f"{entry.value:,}점 이상"
+                )
             return TermExplanation(
                 canonical=entry.canonical,
                 category_label=CATEGORY_LABELS.get(entry.category, entry.category),
@@ -340,6 +360,11 @@ class TermsService:
 
     async def resolve_score(self, raw: str, ctx: ToolContext) -> int:
         text = raw.strip()
+
+        if self._percent_scores:
+            percent = _parse_percent_score(text)
+            if percent is not None:
+                return percent
 
         numeric = _parse_numeric_score(text)
         if numeric is not None:
@@ -421,6 +446,18 @@ def _normalize_category(raw: str) -> str:
     if text in _LABEL_TO_CATEGORY:
         return _LABEL_TO_CATEGORY[text]
     raise ValueError(f"모르는 분류: {text}")
+
+
+def _parse_percent_score(text: str) -> int | None:
+    """"99.5%", "100.5", "99"처럼 달성률로 말한 점수를 ×10000 정수로. 101 이하만 달성률로 본다(maimai 최대는 101%)."""
+    stripped = text.replace(",", "").removesuffix("%").strip()
+    try:
+        value = Decimal(stripped)
+    except InvalidOperation:
+        return None
+    if not Decimal(0) <= value <= Decimal(101):
+        return None
+    return int(value * 10_000)
 
 
 def _parse_numeric_score(text: str) -> int | None:

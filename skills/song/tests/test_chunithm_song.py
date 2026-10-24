@@ -10,8 +10,8 @@ from core.events import EventBus, Section
 from core.tables import WorkTable
 from core.tool_types import Display, ToolContext
 from services.chunithm.songdb import VERSION_ORDER, SongDbService
-from services.chunithm.terms import TermsService
 from services.game import table_columns as tc
+from services.game.terms import TermsService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CTX_NO_GUILD = ToolContext(player_id="p1", tags=frozenset(), services={}, event_bus=EventBus())
@@ -456,7 +456,7 @@ async def test_alias_remove_allows_admin() -> None:
 
 
 def _resolved_difficulty(canonical: str):
-    from services.chunithm.terms import ResolvedDifficulty
+    from services.game.terms import ResolvedDifficulty
 
     return ResolvedDifficulty(canonical=canonical)
 
@@ -563,7 +563,7 @@ async def test_charts_of_leaves_chart_rows_alone() -> None:
 
 
 async def _resolve_difficulty(name: str) -> object:
-    from services.chunithm.terms import TermsService
+    from services.game.terms import TermsService
 
     return await TermsService().resolve_difficulty(name, _CTX_NO_GUILD)
 

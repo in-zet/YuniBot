@@ -302,3 +302,18 @@ def test_broken_cache_starts_empty_instead_of_crashing(tmp_path: Path) -> None:
     path.write_text("not json")
     db = MaimaiSongDbService(path)
     assert db.find_songs() == []
+
+
+async def test_refresh_if_due_waits_a_day_after_success_and_an_hour_after_failure(db: MaimaiSongDbService) -> None:
+    broken = _Http(error=RuntimeError("down"))
+    assert await db.refresh_if_due(broken, now=1000.0) is False
+    assert len(broken.urls) == 1
+    assert await db.refresh_if_due(broken, now=1000.0 + 3599) is False
+    assert len(broken.urls) == 1  # 한 시간 안에는 다시 두드리지 않는다
+
+    good = _Http(data=_sample())
+    assert await db.refresh_if_due(good, now=1000.0 + 3600) is True
+    assert await db.refresh_if_due(good, now=1000.0 + 3600 + 86_399) is False
+    assert len(good.urls) == 1
+    assert await db.refresh_if_due(good, now=1000.0 + 3600 + 86_400) is True
+    assert len(good.urls) == 2

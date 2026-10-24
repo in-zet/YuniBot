@@ -1,6 +1,8 @@
 # services/chunithm/profile.py
 from __future__ import annotations
 
+from pathlib import Path
+
 from chuni_penguin.types.lamp import ChainLamp, ClearLamp, ComboLamp
 
 from services.game.profile import GameProfile
@@ -28,6 +30,7 @@ CHUNITHM = GameProfile(
     new_frame_size=20,
     # 후보곡 상승폭·남은 점수의 기준점은 SSS다(report.md "후보곡").
     candidate_target_score=1_007_500,
+    terms_path=Path(__file__).parent / "data" / "terms.yaml",
     chart_rating=chart_rating,
     rating_divisor=50,
     overall_places=4,

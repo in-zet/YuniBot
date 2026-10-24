@@ -5,7 +5,7 @@ from core.decorators import tool
 from core.fuzzy import similar_names
 from core.tables import RowRef, TableBuilder, cell
 from core.tool_types import Display, ToolContext, ToolResult
-from services.chunithm.terms import ALIAS_KINDS
+from services.game.terms import ALIAS_KINDS
 
 _TERM = "terms.term"
 _T_NAME = "용어"

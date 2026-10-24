@@ -284,6 +284,9 @@ class SongDbService(SongDb):
         self._by_id.update({song.id: song for song in new_songs.values()})
         self._available_intl = new_available
 
+    async def refresh_on_startup(self, http: _HttpGetJson) -> None:
+        await self.refresh_from_chunimaru(http)
+
     async def refresh_from_chunimaru(self, http: _HttpGetJson) -> None:
         """기동 시 한 번(또는 이후 단계의 @schedule이) 부른다. 실패해도 예외를 밖으로
         내지 않는다 — 네트워크가 끊겨도 봇 기동 자체는 막지 않고 시드 기준 availability로

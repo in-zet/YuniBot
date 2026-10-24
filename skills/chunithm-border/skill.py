@@ -14,9 +14,9 @@ from core.tool_types import (
     ToolResult,
 )
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
-from services.chunithm.terms import ResolvedRank
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
+from services.game.terms import ResolvedRank
 
 # chunithm-border.md "계산" 표가 명시한 기준 점수 — terms 서비스를 또 부르지 않고
 # 설계서가 고정값으로 제시한 숫자를 그대로 쓴다(chunithm-border.md "구현 결정").

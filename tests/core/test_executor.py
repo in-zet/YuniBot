@@ -733,3 +733,74 @@ async def test_invoke_without_a_chooser_leaves_ctx_game_alone() -> None:
     outcome = await executor.invoke(which_game.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
 
     assert outcome.result is not None and outcome.result.data == {"game": "chunithm"}
+
+
+@tool(slash="서비스확인")
+async def which_songdb(ctx: ToolContext, game: str | None = None) -> ToolResult:
+    """선언한 songdb 서비스가 어느 게임 것인지 돌려주는 도구."""
+    return ToolResult(data={"game": ctx.game, "songdb": ctx.songdb})
+
+
+def _per_game_executor(*, skill_games: dict[str, tuple[str, ...]] | None = None) -> ToolExecutor:
+    return ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={},
+        game_chooser=_game_chooser,
+        game_services={"chunithm": {"songdb": "chuni-db"}, "maimai": {"songdb": "mai-db", "terms": "mai-terms"}},
+        skill_games=skill_games,
+    )
+
+
+@pytest.mark.asyncio
+async def test_invoke_swaps_declared_services_for_the_chosen_game() -> None:
+    executor = _per_game_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={"songdb": "chuni-db"})
+    spec = which_songdb.__yuni_tool__  # pyright: ignore[reportFunctionMemberAccess]
+
+    default = await executor.invoke(spec, ctx, {})
+    said = await executor.invoke(spec, ctx, {"game": "maimai"})
+
+    assert default.result is not None and default.result.data == {"game": "chunithm", "songdb": "chuni-db"}
+    assert said.result is not None and said.result.data == {"game": "maimai", "songdb": "mai-db"}
+    assert ctx.services == {"songdb": "chuni-db"}  # 원래 ctx는 건드리지 않는다
+
+
+@pytest.mark.asyncio
+async def test_invoke_does_not_hand_out_game_services_the_skill_did_not_declare() -> None:
+    executor = _per_game_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={"songdb": "chuni-db"})
+
+    outcome = await executor.invoke(which_songdb.__yuni_tool__, ctx, {"game": "maimai"})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None
+    scoped = {"songdb": outcome.result.data["songdb"]}
+    assert scoped == {"songdb": "mai-db"}  # terms는 선언하지 않았으니 끼워지지 않는다(접근하면 UndeclaredServiceError)
+
+
+@pytest.mark.asyncio
+async def test_invoke_rejects_an_explicit_game_the_skill_does_not_support() -> None:
+    executor = _per_game_executor(skill_games={"only-chuni": ("chunithm",)})
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+    spec = which_game.__yuni_tool__  # pyright: ignore[reportFunctionMemberAccess]
+
+    outcome = await executor.invoke(spec, ctx, {"game": "maimai"}, skill_name="only-chuni")
+
+    assert outcome.result is not None and outcome.result.error == "이 기능은 maimai에서는 아직 지원하지 않아"
+
+
+@pytest.mark.asyncio
+async def test_invoke_falls_back_to_the_skills_game_when_no_game_was_said() -> None:
+    def chooser(requested: str | None) -> str:
+        return requested or "maimai"  # 주 게임이 maimai인 플레이어
+
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=InMemoryTagProvider(), tag_definitions={},
+        game_chooser=chooser, skill_games={"only-chuni": ("chunithm",), "free": ()},
+    )
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+    spec = which_game.__yuni_tool__  # pyright: ignore[reportFunctionMemberAccess]
+
+    unsupported = await executor.invoke(spec, ctx, {}, skill_name="only-chuni")
+    game_free = await executor.invoke(spec, ctx, {}, skill_name="free")
+
+    assert unsupported.result is not None and unsupported.result.data == {"game": "chunithm"}
+    assert game_free.result is not None and game_free.result.data == {"game": "maimai"}

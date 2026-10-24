@@ -11,8 +11,9 @@ from collections.abc import Mapping
 from core.tool_types import DEFAULT_GAME, UserFacingError
 from services.chunithm.profile import CHUNITHM
 from services.game.profile import GameProfile
+from services.maimai.profile import MAIMAI
 
-GAME_PROFILES: Mapping[str, GameProfile] = {CHUNITHM.game: CHUNITHM}
+GAME_PROFILES: Mapping[str, GameProfile] = {CHUNITHM.game: CHUNITHM, MAIMAI.game: MAIMAI}
 
 
 class UnknownGameError(UserFacingError):

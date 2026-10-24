@@ -13,7 +13,7 @@ import pytest
 
 from core.tables import RowRef, render_text
 from core.tool_types import ToolContext
-from services.chunithm.terms import TermsService
+from services.game.terms import TermsService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _PLAYERS_MIGRATION = (
@@ -22,6 +22,7 @@ _PLAYERS_MIGRATION = (
 )
 _TERMS_SERVER_MIGRATION = (
     Path("migrations/core/009_terms_server.sql").read_text() + Path("migrations/core/021_terms_aliases.sql").read_text()
+    + Path("migrations/core/028_terms_aliases_game.sql").read_text()
 )
 
 

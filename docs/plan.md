@@ -119,7 +119,14 @@
   - [ ] Part 3: aime 인증 공통화와 maimai DX NET 어댑터 — §17.5. 시작 조건: SEGA 사이트 복구 후 실측
   - [X] Part 4: maimai 곡 DB(otoge-db) — 구현 완료(2026-10-23). `services/game/songdb.py`(곡·채보 자료형·찾기 공통 틀, `chart_type` 조건)에서 츄니즘 `SongDbService`와 `services/maimai/songdb.py`의 `MaimaiSongDbService`가 갈라진다. 봇 부팅·등록부 연결은 아직 없다(Part 6) — §17.6
   - [X] Part 5: 기록·레이팅·동기화 — 구현 완료(2026-10-24, NET 없이 가능한 범위). `RecordsService`가 게임 중립 `SyncSnapshot`(`services/game/sync_types.py`)을 받고, 채보 키는 `(제목, 채보 종류, 난이도)`, `records_pb`에 `chart_type`·`dx_score`를 읽고 쓴다. 레이팅 규칙·램프 순서·첫 동기화 태그는 `GameProfile`에서 받고(maimai 레이팅: `services/maimai/rating.py`), 베스트/신곡 목록이 없으면 전체 기록으로 프레임을 짠다. 남은 것: maimai 파서·어댑터가 `SyncSnapshot`을 채우는 일(Part 3), 계산 레이팅과 NET 표시 레이팅 대조(실기), 스킬 쪽 `chart_type` 전달(Part 6) — §17.7
-  - [ ] Part 6: 스킬 확장과 프롬프트 — §17.8. 시작 전에 §17.9 1번(유니 인격) 결정
+  - [ ] Part 6: 스킬 확장과 프롬프트 — §17.8. 결정은 2026-10-24에 끝냈다(§17.8 "정리한 범위와 순서", §17.9 1번 = A안)
+    - [X] 6-1 서비스 배선 — 구현 완료(2026-10-24). 용어 사전을 게임별로(`TermsService`가 `services/game/terms.py`로, 마이그레이션 028, `services/maimai/data/terms.yaml`), 게임별 서비스 한 벌(`build_all_game_services`)과 해석기 분배(`_ByGame`), 실행기가 고른 게임에 맞춰 서비스를 바꿔 끼움·스킬이 안 다루는 게임이면 스킬의 게임으로, maimai 곡 DB 부팅·주기 갱신, `admin`의 `set_song_version`, 등록부에 maimai 등록
+    - [ ] 6-2 `GameRef`와 슬래시 `게임` 선택 인자
+    - [ ] 6-3 주 게임을 `/설정 바꾸기`로
+    - [ ] 6-4 `song`·`image`의 maimai 대응(`ChartRef`의 채보 종류 포함)
+    - [ ] 6-5 기록 의존 스킬(`report`·`goals`·`session`·`folders`·`notes`)
+    - [ ] 6-6 플레이어 메모리의 게임별 구획
+    - [ ] 6-7 프롬프트(`persona.md` 소개 문장, `rules.md` 게임 중립 말, 카드 예시)
 
 고정 원칙: 5단계까지는 LLM 없이 슬래시로 동작한다. `yuni` 서비스는 11단계 전까지 정해진 문구를 돌려주고, 7~10단계 스킬은 이 인터페이스만 쓴다.
 

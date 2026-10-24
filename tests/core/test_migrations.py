@@ -171,8 +171,10 @@ async def test_024_to_027_add_chart_type_game_columns_and_rename_cookies_keeping
                 (target / sql.name).write_text(sql.read_text())
         return target
 
+    # 028(용어 별칭 게임 칸)은 아래 테스트가 따로 본다 — 이 테스트는 024~027만 다룬다.
     old_roots = [("core", copy_before(real_core, tmp_path / "core", "024"))]
     old_roots += [(name, copy_before(path, tmp_path / name, "002")) for name, path in skill_dirs.items()]
+    real_core_to_027 = copy_before(real_core, tmp_path / "core_to_027", "028")
 
     async with aiosqlite.connect(":memory:") as conn:
         await run_migrations(conn, roots=old_roots)
@@ -196,7 +198,7 @@ async def test_024_to_027_add_chart_type_game_columns_and_rename_cookies_keeping
         )
         await conn.commit()
 
-        real_roots = [("core", real_core)] + list(skill_dirs.items())
+        real_roots = [("core", real_core_to_027)] + list(skill_dirs.items())
         applied = await run_migrations(conn, roots=real_roots)
         assert applied == [
             "core/024_records_chart_type.sql",
@@ -234,3 +236,31 @@ async def test_024_to_027_add_chart_type_game_columns_and_rename_cookies_keeping
             "VALUES ('maimai', 'sg', 'Other', 'p1', 't')"
         )
         assert await row("SELECT COUNT(*) FROM songdb_aliases") == (2,)
+
+
+async def test_028_terms_aliases_get_a_game_column_keeping_rows(tmp_path: Path) -> None:
+    real_core = Path("migrations/core")
+    before = tmp_path / "before"
+    before.mkdir()
+    for sql in sorted(real_core.glob("*.sql")):
+        if sql.name < "028":
+            (before / sql.name).write_text(sql.read_text())
+
+    async with aiosqlite.connect(":memory:") as conn:
+        await run_migrations(conn, roots=[("core", before)])
+        await conn.execute(
+            "INSERT INTO terms_aliases (kind, alias, canonical, added_by, created_at) "
+            "VALUES ('rank', '트플', 'SSS', 'p1', 't')"
+        )
+        await conn.commit()
+
+        applied = await run_migrations(conn, roots=[("core", real_core)])
+        assert applied == ["core/028_terms_aliases_game.sql"]
+
+        cursor = await conn.execute("SELECT game, kind, alias, canonical FROM terms_aliases")
+        assert [tuple(r) for r in await cursor.fetchall()] == [("chunithm", "rank", "트플", "SSS")]
+        # 같은 별칭이 게임마다 다른 뜻일 수 있다.
+        await conn.execute(
+            "INSERT INTO terms_aliases (game, kind, alias, canonical, added_by, created_at) "
+            "VALUES ('maimai', 'rank', '트플', 'SSS+', 'p1', 't')"
+        )

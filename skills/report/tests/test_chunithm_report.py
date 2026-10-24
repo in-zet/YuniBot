@@ -19,7 +19,6 @@ from chuni_penguin.types.score import Judgements, RecentScore
 from core.events import Section
 from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import Display, ToolContext, ToolResult
-from services.chunithm.terms import TermsService
 from services.common.players import Player
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
@@ -36,6 +35,7 @@ from services.game.records import (
     UnchangedPlay,
 )
 from services.game.songdb import ChartRecord, SongRecord
+from services.game.terms import TermsService
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _JST = ZoneInfo("Asia/Tokyo")
@@ -1056,7 +1056,7 @@ def _real_songdb() -> Any:
 
 
 def _diff(canonical: str) -> Any:
-    from services.chunithm.terms import ResolvedDifficulty
+    from services.game.terms import ResolvedDifficulty
 
     return ResolvedDifficulty(canonical=canonical)
 

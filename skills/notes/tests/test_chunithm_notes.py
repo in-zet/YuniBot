@@ -14,7 +14,7 @@ from core.events import EventBus
 from core.tables import render_text
 from core.tool_types import ToolContext
 from services.chunithm.songdb import SongDbService
-from services.chunithm.terms import ResolvedDifficulty
+from services.game.terms import ResolvedDifficulty
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _NOTES_SQL = Path(__file__).parent.parent / "migrations" / "001_init.sql"

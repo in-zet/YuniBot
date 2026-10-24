@@ -75,6 +75,8 @@ class ToolExecutor:
         tables: TableStore | None = None,
         partial_row_hints: Sequence[PartialRowHint] = (),
         game_chooser: Callable[[str | None], str] | None = None,
+        game_services: Mapping[str, Mapping[str, object]] | None = None,
+        skill_games: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         self._resolvers = resolvers
         self._tag_provider = tag_provider
@@ -87,6 +89,10 @@ class ToolExecutor:
         self._tables = tables
         self._partial_row_hints = tuple(partial_row_hints)
         self._game_chooser = game_chooser
+        # 게임 → {서비스 이름: 그 게임의 서비스}. 고른 게임에 맞춰 스킬이 받은 서비스를 바꿔 끼운다.
+        self._game_services = game_services or {}
+        # 스킬 이름 → manifest games. 빈 목록(또는 없음)이면 게임과 무관한 스킬이다.
+        self._skill_games = skill_games or {}
         self._pending: dict[str, _PendingConfirm] = {}
 
     @property
@@ -160,7 +166,14 @@ class ToolExecutor:
                 game = self._game_chooser(requested if isinstance(requested, str) else None)
             except UserFacingError as exc:
                 return ExecutionOutcome(result=ToolResult(error=str(exc)))
-            ctx = replace(ctx, game=game)
+            games = self._skill_games.get(skill_name, ()) if skill_name is not None else ()
+            if games and game not in games:
+                if requested:
+                    return ExecutionOutcome(result=ToolResult(error=f"이 기능은 {game}에서는 아직 지원하지 않아"))
+                # 게임을 말하지 않았는데 주 게임이 이 스킬이 다루지 않는 게임이면, 스킬이 다루는 게임으로 간다.
+                game = games[0]
+            overlay = self._game_services.get(game, {})
+            ctx = replace(ctx, game=game, services={**ctx.services, **{k: v for k, v in overlay.items() if k in ctx.services}})
 
         schema = build_arg_schema(spec.fn)
 

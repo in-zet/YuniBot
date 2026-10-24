@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 import aiosqlite
 
@@ -248,6 +249,12 @@ class SongDb:
     def note_count_for(self, title: str, difficulty: str, chart_type: str = "") -> int | None:
         chart = self.chart_for(title, difficulty, chart_type)
         return chart.note_count if chart else None
+
+    async def refresh_on_startup(self, http: Any) -> None:
+        """켜진 직후 한 번 외부 소스로 곡 DB를 새로 한다. 소스가 없는 곡 DB는 아무것도 안 한다."""
+
+    async def refresh_periodic(self, http: Any, *, now: float) -> None:
+        """폴링 때마다 불린다. 주기가 되었을 때만 외부 소스로 곡 DB를 새로 한다."""
 
     def is_new_for(self, title: str) -> bool:
         """그 곡이 신곡(신곡20 프레임 대상)인가. 모르는 곡은 False — Chunimaru 덧씌우기가

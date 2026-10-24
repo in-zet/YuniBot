@@ -14,10 +14,10 @@ import pytest
 from core.events import EventBus
 from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import ToolContext
-from services.chunithm.terms import ResolvedDifficulty
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.songdb import ChartRecord, SongRecord
+from services.game.terms import ResolvedDifficulty
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _FOLDERS_SQL = Path(__file__).parent.parent / "migrations" / "001_init.sql"

@@ -4,9 +4,8 @@ from dataclasses import dataclass
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
-from services.chunithm.songdb import SongDbService
-from services.chunithm.terms import TermsService
-from services.game.songdb import ChartRecord, SongRecord
+from services.game.songdb import ChartRecord, SongDb, SongRecord
+from services.game.terms import TermsService
 
 
 @dataclass(slots=True, kw_only=True)
@@ -18,7 +17,7 @@ class ResolvedChart:
 class ChartRefResolver:
     """SongQuery + 난이도가 합쳐진 원문 하나(예: "크로노 마스")를 채보로 바꾼다."""
 
-    def __init__(self, *, songdb: SongDbService, terms: TermsService) -> None:
+    def __init__(self, *, songdb: SongDb, terms: TermsService) -> None:
         self._songdb = songdb
         self._terms = terms
         self._profile = songdb.profile

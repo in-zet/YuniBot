@@ -1,6 +1,8 @@
 # services/maimai/profile.py
 from __future__ import annotations
 
+from pathlib import Path
+
 from services.game.profile import GameProfile
 from services.maimai.rating import chart_rating
 
@@ -35,6 +37,8 @@ MAIMAI = GameProfile(
     new_frame_size=15,
     # 후보곡 기준점은 SSS+(달성률 100.5%)다. 점수는 달성률 ×10000으로 저장한다. Part 5에서 레이팅 공식과 함께 다시 본다.
     candidate_target_score=1_005_000,
+    terms_path=Path(__file__).parent / "data" / "terms.yaml",
+    score_is_percent=True,
     # 레이팅은 구곡 35 + 신곡 15의 곡 레이팅(정수) 합이다. 나누지 않는다.
     chart_rating=chart_rating,
     rating_divisor=1,

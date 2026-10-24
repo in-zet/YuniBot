@@ -8,10 +8,10 @@ from types import ModuleType
 
 from core.tables import TableBuilder, WorkTable
 from core.tool_types import ToolContext
-from services.chunithm.terms import ResolvedRank
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.songdb import ChartRecord, SongRecord
+from services.game.terms import ResolvedRank
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 

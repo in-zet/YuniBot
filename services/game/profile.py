@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -36,6 +37,10 @@ class GameProfile:
     new_frame_size: int
     # 후보곡 상승폭·남은 점수의 기준점이 되는 점수(츄니즘은 SSS).
     candidate_target_score: int
+
+    # 값 용어(랭크·난이도·램프) 사전 파일과, 점수를 달성률(%)로 말하는 게임인지(maimai).
+    terms_path: Path
+    score_is_percent: bool = False
 
     # 레이팅 규칙. 곡 레이팅 함수는 (점수, 상수)를 받아 곡 레이팅을 돌려주고, 상수를 모르면 None("계산 불가")이다.
     chart_rating: Callable[[int, float | None], Decimal | None]

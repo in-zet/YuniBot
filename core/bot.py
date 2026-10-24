@@ -65,7 +65,7 @@ from services.common.secrets import SecretsService
 from services.common.settings import SettingsService
 from services.common.websearch import WebsearchService
 from services.common.yuni import YuniService
-from services.game.builder import build_game_services
+from services.game.builder import build_all_game_services, register_resolvers
 from services.game.image_cache import ImageCache
 from services.game.registry import choose_game
 from services.game.table_columns import PARTIAL_ROW_HINTS
@@ -473,18 +473,23 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     arcades_service = ArcadesService(conn)
     secrets_service = SecretsService(config.cookie_encryption_key) if config.cookie_encryption_key else None
 
-    games = await build_game_services(DEFAULT_GAME, conn=conn, players=players, secrets=secrets_service)
+    all_games = await build_all_game_services(
+        conn=conn, players=players, secrets=secrets_service, data_dir=config.db_path.parent
+    )
+    games = all_games[DEFAULT_GAME]
 
     resolvers = ResolverRegistry()
     resolvers.register(PlayerRef, players)
     resolvers.register(ArcadeRef, arcades_service)
-    games.register_resolvers(resolvers)
+    register_resolvers(resolvers, all_games)
 
     services: dict[str, object] = {
         "players": players,
         "settings": settings_service,
         "memory": memory_service,
         "arcades": arcades_service,
+        # 게임 → 곡 DB. 게임과 무관한 admin이 게임별 곡 DB를 다룰 때 쓴다.
+        "songdbs": {game: bundle.songdb for game, bundle in all_games.items()},
         **games.skill_services(),
     }
     if secrets_service is not None:
@@ -503,6 +508,8 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         partial_row_hints=PARTIAL_ROW_HINTS,
         # 플레이어별 주 게임은 아직 저장하지 않는다(17단계 Part 2). 그 전까지는 말한 게임 → 기본 게임이다.
         game_chooser=lambda requested: choose_game(requested=requested, preferred=None),
+        game_services={game: bundle.skill_services() for game, bundle in all_games.items()},
+        skill_games={skill.manifest.name: tuple(skill.manifest.games) for skill in registry.enabled_skills()},
     )
     # services는 이 시점에 아직 notify/yuni/usage/http가 없지만, 같은 dict 객체를 그대로
     # 들고 있는다 — build_client()가 뒤에서 그 dict를 더 채우면(아래) EventBus도 같은
@@ -518,8 +525,10 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     # 켜진 직후: 국제판 수록 여부·신곡 플래그를 Chunimaru songdb로 한 번 덧씌운다.
     # refresh_from_chunimaru는 실패를 삼키고 로그만 남기므로, 네트워크가 안 되는
     # 기동에서도 build_client() 전체가 죽지 않는다.
+    # maimai는 부팅 때 받은 뒤 housekeeping이 하루에 한 번 받는다(실패하면 한 시간 뒤 다시).
     if config.fetch_chunimaru_on_startup:
-        await games.songdb.refresh_from_chunimaru(http_service)
+        for bundle in all_games.values():
+            await bundle.songdb.refresh_on_startup(http_service)
 
     # client → mention_entry → notify_service → _BotDiscordGateway → client로 이어지는
     # 순환을 끊으려고, notify_service의 게이트웨이는 client를 바로 쥐지 않고 아래
@@ -645,6 +654,9 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
 
     async def housekeeping(now: float) -> None:
         await conversation_skills.purge(now=now)
+        if config.fetch_chunimaru_on_startup:
+            for bundle in all_games.values():
+                await bundle.songdb.refresh_periodic(http_service, now=time.time())
 
     async def flush_memory(now: float) -> None:
         _ = await memory_service.flush_due(now=now, merge=yuni_service.merge_memory, on_changed=_react_memory_saved)

@@ -6,12 +6,14 @@ import pytest
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
-from services.chunithm.terms import TermsService
+from services.game.terms import TermsService
+from services.maimai.profile import MAIMAI
 
 _CTX = ToolContext(player_id="p1", tags=frozenset(), services={})
 
 _TERMS_SERVER_MIGRATION = (
     Path("migrations/core/009_terms_server.sql").read_text() + Path("migrations/core/021_terms_aliases.sql").read_text()
+    + Path("migrations/core/028_terms_aliases_game.sql").read_text()
 )
 _PLAYERS_MIGRATION = (
     Path("migrations/core/001_players.sql").read_text()
@@ -323,3 +325,65 @@ async def test_remove_alias_stops_resolving(terms_with_conn: TermsService) -> No
     with pytest.raises(ResolutionError):
         await terms_with_conn.resolve_rank("삼에스", _CTX)
     assert await terms_with_conn.get_alias(kind="랭크", alias="삼에스") is None
+
+
+# --- maimai DX ---------------------------------------------------------------
+
+
+@pytest.fixture
+def maimai_terms() -> TermsService:
+    return TermsService(MAIMAI.terms_path, game="maimai", percent_scores=MAIMAI.score_is_percent)
+
+
+async def test_maimai_same_rank_name_has_its_own_value(terms: TermsService, maimai_terms: TermsService) -> None:
+    assert (await terms.resolve_rank("SSS", _CTX)).min_score == 1_007_500
+    assert (await maimai_terms.resolve_rank("SSS", _CTX)).min_score == 1_000_000
+    assert (await maimai_terms.resolve_rank("sss+", _CTX)).min_score == 1_005_000
+
+
+async def test_maimai_ranks_cover_14_steps_in_descending_order(maimai_terms: TermsService) -> None:
+    scores = list(maimai_terms.rank_scores().values())
+    assert len(scores) == 14
+    assert scores == sorted(scores, reverse=True)
+
+
+async def test_maimai_difficulty_codes_match_profile(maimai_terms: TermsService) -> None:
+    for long_name, code in MAIMAI.long_to_short.items():
+        assert (await maimai_terms.resolve_difficulty(code, _CTX)).canonical == long_name
+        assert (await maimai_terms.resolve_difficulty(long_name, _CTX)).canonical == long_name
+
+
+async def test_maimai_lamps_cover_profile_orders(maimai_terms: TermsService) -> None:
+    for name in (*MAIMAI.combo_lamp_order, *MAIMAI.chain_lamp_order):
+        if name == "NONE":
+            continue
+        assert (await maimai_terms.resolve_lamp(name, _CTX)).canonical == name
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("99.5%", 995_000), ("100.5", 1_005_000), ("99", 990_000), ("100.4999%", 1_004_999), ("SSS+", 1_005_000)],
+)
+async def test_maimai_scores_are_read_as_achievement(maimai_terms: TermsService, text: str, expected: int) -> None:
+    assert await maimai_terms.resolve_score(text, _CTX) == expected
+
+
+async def test_maimai_explain_rank_uses_percent(maimai_terms: TermsService) -> None:
+    explanation = await maimai_terms.explain("SS+", _CTX)
+    assert explanation is not None and explanation.meaning == "달성률 99.5000% 이상"
+
+
+async def test_aliases_are_saved_per_game(terms_with_conn: TermsService) -> None:
+    conn = terms_with_conn._conn
+    assert conn is not None
+    maimai = TermsService(MAIMAI.terms_path, conn=conn, game="maimai", percent_scores=True)
+    await terms_with_conn.add_alias(kind="rank", alias="트플", canonical="SSS", added_by="p1")
+    await maimai.add_alias(kind="rank", alias="트플", canonical="SSS+", added_by="p1")
+
+    reloaded_chunithm = TermsService(conn=conn)
+    reloaded_maimai = TermsService(MAIMAI.terms_path, conn=conn, game="maimai", percent_scores=True)
+    await reloaded_chunithm.load_aliases()
+    await reloaded_maimai.load_aliases()
+
+    assert (await reloaded_chunithm.resolve_rank("트플", _CTX)).canonical == "SSS"
+    assert (await reloaded_maimai.resolve_rank("트플", _CTX)).canonical == "SSS+"

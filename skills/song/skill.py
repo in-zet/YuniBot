@@ -30,10 +30,10 @@ from core.tool_types import (
     ToolResult,
 )
 from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
-from services.chunithm.terms import ResolvedDifficulty
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.songdb import ConstRangeHit, SongRecord
+from services.game.terms import ResolvedDifficulty
 
 _DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 

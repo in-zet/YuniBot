@@ -295,3 +295,58 @@ async def test_admin_skill_blocked_without_admin_tag() -> None:
     assert outcome2.result.error is None
 
     await conn.close()
+
+
+async def test_set_song_version_overrides_and_resets_the_maimai_songdb(admin_env, tmp_path) -> None:
+    import json
+
+    from services.chunithm.songdb import SongDbService
+    from services.maimai.songdb import MaimaiSongDbService
+
+    skill, players, _, make_ctx = admin_env
+    admin = await players.create_player()
+    cache = tmp_path / "music-ex-intl.json"
+    entries = [
+        {"title": "Old", "artist": "A", "version": "26000", "image_url": "o.png", "intl": "1",
+         "dx_lev_mas": "13", "dx_lev_mas_i": "13.0", "dx_lev_mas_notes": "700"},
+        {"title": "Newer", "artist": "A", "version": "26511", "image_url": "n.png", "intl": "1",
+         "dx_lev_mas": "14", "dx_lev_mas_i": "14.0", "dx_lev_mas_notes": "800"},
+    ]
+    cache.write_text(json.dumps(entries), encoding="utf-8")
+    maimai = MaimaiSongDbService(cache)
+    base = make_ctx(admin.id)
+    ctx = ToolContext(
+        player_id=base.player_id, tags=base.tags, guild_id=base.guild_id,
+        services={**base.services, "songdbs": {"maimai": maimai, "chunithm": SongDbService()}},
+    )
+
+    assert maimai.current_version() == "CiRCLE PLUS"
+    result = await skill.set_song_version(ctx, game="maimai", version="CiRCLE")
+    assert result.error is None and maimai.current_version() == "CiRCLE"
+    assert maimai.is_new_for("Old") and not maimai.is_new_for("Newer")
+    assert MaimaiSongDbService(cache).current_version() == "CiRCLE"  # 재시작해도 남는다
+
+    reset = await skill.set_song_version(ctx, game="maimai")
+    assert reset.error is None and maimai.current_version() == "CiRCLE PLUS"
+    assert MaimaiSongDbService(cache).current_version() == "CiRCLE PLUS"
+
+
+async def test_set_song_version_rejects_unknown_version_and_games_without_override(admin_env, tmp_path) -> None:
+    from services.chunithm.songdb import SongDbService
+    from services.maimai.songdb import MaimaiSongDbService
+
+    skill, players, _, make_ctx = admin_env
+    admin = await players.create_player()
+    base = make_ctx(admin.id)
+    ctx = ToolContext(
+        player_id=base.player_id, tags=base.tags, guild_id=base.guild_id,
+        services={**base.services, "songdbs": {"maimai": MaimaiSongDbService(tmp_path / "x.json"), "chunithm": SongDbService()}},
+    )
+
+    unknown = await skill.set_song_version(ctx, game="maimai", version="없는버전")
+    chunithm = await skill.set_song_version(ctx, game="chunithm", version="X-VERSE")
+    nobody = await skill.set_song_version(ctx, game="tekken", version="1")
+
+    assert unknown.error is not None and "모르는 maimai 버전" in unknown.error
+    assert chunithm.error is not None and "직접 정하지 않아" in chunithm.error
+    assert nobody.error is not None and "게임이 없어" in nobody.error

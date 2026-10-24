@@ -60,7 +60,7 @@ def test_parse_manifest_bad_category() -> None:
 
 
 def test_parse_manifest_bad_game() -> None:
-    text = BORDER_EXAMPLE.replace("games: [chunithm]", "games: [chunithm, maimai]")
+    text = BORDER_EXAMPLE.replace("games: [chunithm]", "games: [chunithm, tekken]")
     with pytest.raises(ManifestError, match="game"):
         parse_manifest(text)
 

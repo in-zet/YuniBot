@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -35,6 +36,10 @@ _CHART_TYPES = (("lev_", "STD"), ("dx_lev_", "DX"))
 
 _PREFIX_TO_NAME = VERSION_NAMES
 _NAME_TO_PREFIX = {name: prefix for prefix, name in VERSION_NAMES.items()}
+
+
+_REFRESH_INTERVAL_SECONDS = 24 * 3600
+_RETRY_INTERVAL_SECONDS = 3600
 
 
 class _HttpGetJson(Protocol):
@@ -171,10 +176,12 @@ class MaimaiSongDbService(SongDb):
     ) -> None:
         super().__init__(conn=conn, profile=MAIMAI, songs={}, available=set())
         self._cache_path = cache_path
+        self._override_path = cache_path.with_name("current_version.txt")
+        self._next_refresh_at = 0.0
         self._prefix_of: dict[str, str] = {}
         self._latest_prefix: str | None = None
         self._override_prefix: str | None = None
-        self.set_current_version(current_version)
+        self.set_current_version(current_version if current_version is not None else self._saved_override())
         if cache_path.is_file():
             try:
                 entries = _entries_from(json.loads(cache_path.read_text(encoding="utf-8")))
@@ -194,14 +201,51 @@ class MaimaiSongDbService(SongDb):
         if name is not None and name not in _NAME_TO_PREFIX:
             raise ValueError(f"모르는 maimai 버전이다: {name}")
         self._override_prefix = _NAME_TO_PREFIX[name] if name is not None else None
+        self._save_override(name)
         current = self._override_prefix or self._latest_prefix
         for title, song in self._songs.items():
             song.is_new = current is not None and self._prefix_of[title] == current
+
+    def _saved_override(self) -> str | None:
+        """재시작해도 남도록 파일에 둔 덮어쓴 버전. 없거나 모르는 이름이면 None."""
+        try:
+            name = self._override_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return name if name in _NAME_TO_PREFIX else None
+
+    def _save_override(self, name: str | None) -> None:
+        try:
+            if name is None:
+                self._override_path.unlink(missing_ok=True)
+            elif self._override_path.parent.is_dir():
+                self._override_path.write_text(name, encoding="utf-8")
+        except OSError:
+            logger.warning("maimai 현재 버전 덮어쓰기를 저장하지 못했다", exc_info=True)
+
+    def version_names(self) -> list[str]:
+        """덮어쓸 수 있는 버전 이름(출시 순서)."""
+        return list(_NAME_TO_PREFIX)
 
     def current_version(self) -> str | None:
         """지금 가동 중인 버전 이름. 덮어쓴 값이 있으면 그것, 없으면 국제판 수록곡 중 가장 큰 버전. 곡이 없으면 None."""
         prefix = self._override_prefix or self._latest_prefix
         return None if prefix is None else _PREFIX_TO_NAME.get(prefix, prefix)
+
+    async def refresh_on_startup(self, http: _HttpGetJson) -> None:
+        _ = await self.refresh_if_due(http, now=time.time())
+
+    async def refresh_periodic(self, http: _HttpGetJson, *, now: float) -> None:
+        _ = await self.refresh_if_due(http, now=now)
+
+    async def refresh_if_due(self, http: _HttpGetJson, *, now: float) -> bool:
+        """주기 갱신. 받은 지 하루가 안 됐으면 아무것도 안 한다. 실패하면 한 시간 뒤에 다시 시도한다
+        (otoge-db는 개인이 운영하는 사이트라 자주 두드리지 않는다). 받았으면 True."""
+        if now < self._next_refresh_at:
+            return False
+        refreshed = await self.refresh_from_otoge(http)
+        self._next_refresh_at = now + (_REFRESH_INTERVAL_SECONDS if refreshed else _RETRY_INTERVAL_SECONDS)
+        return refreshed
 
     async def refresh_from_otoge(self, http: _HttpGetJson) -> bool:
         """otoge-db를 받아 메모리와 캐시 파일을 바꾼다. 실패하면(네트워크, 형식 깨짐) 아무것도 바꾸지 않고
