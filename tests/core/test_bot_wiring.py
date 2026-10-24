@@ -72,7 +72,7 @@ async def test_build_client_registers_practice_commands(tmp_path: Path) -> None:
     # usage는 admin.usage 등이 ctx.usage로 쓴다.
     assert set(executor.services) == {
         "players", "settings", "memory", "arcades", "http", "notify", "yuni",
-        "songdb", "terms", "records", "usage", "websearch", "image_cache",
+        "songdb", "songdbs", "terms", "records", "usage", "websearch", "image_cache",
     }
 
     await client.close()
