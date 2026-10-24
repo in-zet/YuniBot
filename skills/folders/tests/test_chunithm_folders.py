@@ -194,7 +194,7 @@ async def test_show_folder_includes_note_and_charts_with_const(skill: ModuleType
     assert table.summary == {"폴더": "F1", "메모": "메모"}
     assert [c.name for c in table.columns] == [tc.SONG, tc.DIFFICULTY, tc.CONST]
     (row,) = table.rows
-    assert tc.chart_key(row.ref) == ("크로노 마기아", "MAS")
+    assert tc.chart_key(row.ref) == ("크로노 마기아", "", "MAS")
     assert row.cell(tc.CONST).raw == 15.0 and row.cell(tc.CONST).text == "15.0"
     assert render_text(table).content.endswith("1. 크로노 마기아  MAS  상수 15.0")
 
@@ -288,7 +288,7 @@ async def test_save_table_creates_new_folder_with_the_chart_rows(skill: ModuleTy
     assert result.data["count"] == 2  # 같은 채보가 두 번 있어도 한 번만 담는다
     shown = await skill.show_folder(ctx, "새 폴더")
     assert shown.table is not None
-    assert [tc.chart_key(r.ref) for r in shown.table.rows] == [("A", "MAS"), ("B", "EXP")]
+    assert [tc.chart_key(r.ref) for r in shown.table.rows] == [("A", "", "MAS"), ("B", "", "EXP")]
 
 
 async def test_save_table_rejects_existing_folder_name_case_insensitively(
@@ -416,7 +416,7 @@ async def test_remove_from_folder_only_removes_present_ones(skill: ModuleType, d
     assert result.data["count"] == 1 and result.data["charts"] == ["곡A MAS"]
     assert result.data["missing"] == 1
     shown = await skill.show_folder(ctx, "F1")
-    assert [tc.chart_key(r.ref) for r in shown.table.rows] == [("곡C", "MAS")]
+    assert [tc.chart_key(r.ref) for r in shown.table.rows] == [("곡C", "", "MAS")]
 
 
 async def test_remove_from_folder_nothing_present_changes_nothing(skill: ModuleType, db: aiosqlite.Connection) -> None:

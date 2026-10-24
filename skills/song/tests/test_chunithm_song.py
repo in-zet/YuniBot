@@ -94,7 +94,7 @@ async def test_chart_emits_song_viewed_with_real_difficulty_and_renders_sections
     result = await skill.chart(_ctx_with_bus(songdb, bus), chart=ResolvedChart(song=song, chart=song.charts["MAS"]))
 
     assert bus.calls == [
-        ("chunithm.song.viewed", {"player_id": "p1", "song_title": song.title, "difficulty": "MAS"})
+        ("chunithm.song.viewed", {"player_id": "p1", "song_title": song.title, "difficulty": "MAS", "chart_type": ""})
     ]
     content = result.display.content if result.display is not None else ""
     assert "투두 목표 1,007,500점" in content
@@ -111,7 +111,7 @@ async def test_info_emits_whole_song_view_and_renders_sections() -> None:
     bus = _RecordingBus([Section(order=20, display=Display(content="내 메모\n곡 전체 메모"), data={})])
     result = await skill.info(_ctx_with_bus(songdb, bus), song=song)
 
-    assert bus.calls == [("chunithm.song.viewed", {"player_id": "p1", "song_title": song.title, "difficulty": None})]
+    assert bus.calls == [("chunithm.song.viewed", {"player_id": "p1", "song_title": song.title, "difficulty": None, "chart_type": None})]
     content = result.display.content if result.display is not None else ""
     assert content.startswith("B.B.K.K.B.K.K.")
     assert "곡 전체 메모" in content

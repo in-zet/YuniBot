@@ -33,6 +33,7 @@ CHUNITHM = GameProfile(
     candidate_target_score=1_007_500,
     terms_path=Path(__file__).parent / "data" / "terms.yaml",
     chart_rating=chart_rating,
+    song_rating_places=2,
     rating_divisor=50,
     overall_places=4,
     displayed_places=2,

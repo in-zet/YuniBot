@@ -80,3 +80,70 @@ async def test_chunimaru_reported_chart_becomes_available() -> None:
     resolver = ChartRefResolver(songdb=songdb, terms=TermsService())
     resolved = await resolver.resolve("DRAGONLADY 월엔", _CTX)
     assert resolved.chart.difficulty == "WE"
+
+
+# --- maimai: 채보 종류(STD/DX) -------------------------------------------------
+
+
+@pytest.fixture
+def maimai_resolver(tmp_path) -> ChartRefResolver:
+    import json
+
+    from services.maimai.profile import MAIMAI
+    from services.maimai.songdb import MaimaiSongDbService
+
+    entries = [
+        {
+            "title": "Both", "artist": "A", "version": "20000", "image_url": "b.png", "intl": "1",
+            "lev_mas": "12+", "lev_mas_i": "12.6", "lev_mas_notes": "346",
+            "dx_lev_mas": "13+", "dx_lev_mas_i": "13.7", "dx_lev_mas_notes": "631",
+            "dx_lev_remas": "14", "dx_lev_remas_i": "14.2", "dx_lev_remas_notes": "700",
+        },
+        {
+            "title": "DX Only", "artist": "A", "version": "26000", "image_url": "d.png", "intl": "1",
+            "dx_lev_mas": "14", "dx_lev_mas_i": "14.0", "dx_lev_mas_notes": "800",
+        },
+        {
+            "title": "[宴]Party", "artist": "A", "version": "24010", "image_url": "p.png", "intl": "1",
+            "lev_utage": "13+?", "lev_utage_notes": "950",
+        },
+    ]
+    path = tmp_path / "music-ex-intl.json"
+    path.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
+    songdb = MaimaiSongDbService(path)
+    terms = TermsService(MAIMAI.terms_path, game="maimai", percent_scores=True)
+    return ChartRefResolver(songdb=songdb, terms=terms)
+
+
+async def test_maimai_single_chart_type_is_picked_without_asking(maimai_resolver: ChartRefResolver) -> None:
+    resolved = await maimai_resolver.resolve("DX Only", _CTX)
+
+    assert (resolved.chart.chart_type, resolved.chart.difficulty) == ("DX", "MAS")
+
+
+async def test_maimai_both_chart_types_ask_which_one(maimai_resolver: ChartRefResolver) -> None:
+    with pytest.raises(ResolutionError) as exc:
+        await maimai_resolver.resolve("Both MAS", _CTX)
+
+    assert exc.value.candidates == ["Both STD MAS", "Both DX MAS"]
+
+
+@pytest.mark.parametrize("text", ["Both DX MAS", "MAS DX Both", "Both mas dx"])
+async def test_maimai_chart_type_and_difficulty_tokens_are_peeled_in_any_order(
+    maimai_resolver: ChartRefResolver, text: str
+) -> None:
+    resolved = await maimai_resolver.resolve(text, _CTX)
+
+    assert (resolved.song.title, resolved.chart.chart_type, resolved.chart.difficulty) == ("Both", "DX", "MAS")
+
+
+async def test_maimai_remaster_exists_only_as_dx(maimai_resolver: ChartRefResolver) -> None:
+    resolved = await maimai_resolver.resolve("Both REM", _CTX)
+
+    assert (resolved.chart.chart_type, resolved.chart.const) == ("DX", 14.2)
+
+
+async def test_maimai_utage_song_without_difficulty_gets_its_only_chart(maimai_resolver: ChartRefResolver) -> None:
+    resolved = await maimai_resolver.resolve("[宴]Party", _CTX)
+
+    assert resolved.chart.difficulty == "UTA"

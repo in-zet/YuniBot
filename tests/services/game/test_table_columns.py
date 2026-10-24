@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import MappingProxyType
 
 import pytest
 
@@ -32,7 +33,7 @@ def _pb() -> PbRow:
 def test_chart_ref_key_round_trips() -> None:
     ref = tc.chart_ref("a \"quoted\" 곡", "MAS")
     assert ref.kind == tc.CHART
-    assert tc.chart_key(ref) == ("a \"quoted\" 곡", "MAS")
+    assert tc.chart_key(ref) == ("a \"quoted\" 곡", "", "MAS")
 
 
 def test_chart_key_rejects_song_row() -> None:
@@ -138,3 +139,55 @@ def test_partial_hint_gives_charts_of_advice_when_song_rows_are_dropped() -> Non
 
     assert arg.table.row_count == 1
     assert "곡 단위 행(난이도 없음) 1개 뺌 — charts_of로 난이도를 정할 수 있다" in arg.table.steps
+
+
+def test_typed_chart_ref_key_round_trips_and_has_its_own_kind() -> None:
+    ref = tc.chart_ref("Link", "MAS", "DX")
+    assert ref.kind == tc.TYPED_CHART
+    assert tc.chart_key(ref) == ("Link", "DX", "MAS")
+    assert tc.chart_ref("Link", "MAS", "DX") != tc.chart_ref("Link", "MAS", "STD")
+
+
+def test_difficulty_name_tables_of_the_games_do_not_conflict() -> None:
+    from services.game.registry import GAME_PROFILES
+
+    seen: dict[str, str] = {}
+    for profile in GAME_PROFILES.values():
+        for long_name, short in profile.long_to_short.items():
+            assert seen.setdefault(long_name, short) == short
+    assert tc.LONG_TO_SHORT_DIFFICULTY["Re:MASTER"] == "REM"
+    assert tc.SHORT_TO_LONG_DIFFICULTY["ULT"] == "ULTIMA"
+
+
+def test_identity_columns_follow_the_games_chart_types() -> None:
+    assert tc.identity_columns("chunithm") == (tc.SONG, tc.DIFFICULTY)
+    assert tc.identity_columns("maimai") == (tc.SONG, tc.CHART_TYPE, tc.DIFFICULTY)
+
+
+def test_difficulty_and_version_orders_are_per_game() -> None:
+    chuni = tc.common_columns(tc.DIFFICULTY, tc.VERSION, game="chunithm")
+    mai = tc.common_columns(tc.DIFFICULTY, tc.VERSION, game="maimai")
+
+    assert chuni[0].order is not None and "ULTIMA" in chuni[0].order
+    assert mai[0].order is not None and mai[0].order[-2:] == ("Re:MASTER", "UTAGE")
+    assert mai[1].order is not None and mai[1].order[-1] == "CiRCLE PLUS"
+
+
+def test_row_chart_key_reads_the_type_cell_when_present() -> None:
+    from core.tables import Row
+
+    cells = {tc.SONG: tc.song_cell("Link"), tc.CHART_TYPE: tc.text_cell("DX"), tc.DIFFICULTY: tc.difficulty_cell("REM")}
+    typed = Row(tc.chart_ref("Link", "REM", "DX"), MappingProxyType(cells))
+    plain = Row(tc.chart_ref("곡", "MAS"), MappingProxyType({tc.SONG: tc.song_cell("곡"), tc.DIFFICULTY: tc.difficulty_cell("MAS")}))
+
+    assert tc.row_chart_key(typed) == ("Link", "DX", "REM")
+    assert tc.row_chart_key(plain) == ("곡", "", "MAS")
+
+
+def test_maimai_score_and_rating_cells_use_percent_and_integers() -> None:
+    from decimal import Decimal
+
+    assert tc.score_cell(1_005_000, percent=True).text == "100.5000%"
+    assert tc.score_cell(995_000, percent=True).raw == 995_000
+    assert tc.rating_cell(Decimal(315), places=0).text == "315"
+    assert tc.rating_cell(Decimal("16.65")).text == "16.65"

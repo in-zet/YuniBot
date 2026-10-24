@@ -46,6 +46,8 @@ class GameProfile:
 
     # 레이팅 규칙. 곡 레이팅 함수는 (점수, 상수)를 받아 곡 레이팅을 돌려주고, 상수를 모르면 None("계산 불가")이다.
     chart_rating: Callable[[int, float | None], Decimal | None]
+    # 곡 레이팅을 보일 때 소수 자리수(CHUNITHM 2, maimai 0).
+    song_rating_places: int
     # 전체 레이팅 = 프레임 곡 레이팅 합 ÷ rating_divisor, overall_places 자리에서 버림(CHUNITHM 50·4, maimai 1·0).
     rating_divisor: int
     overall_places: int

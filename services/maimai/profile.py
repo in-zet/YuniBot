@@ -42,6 +42,7 @@ MAIMAI = GameProfile(
     score_is_percent=True,
     # 레이팅은 구곡 35 + 신곡 15의 곡 레이팅(정수) 합이다. 나누지 않는다.
     chart_rating=chart_rating,
+    song_rating_places=0,
     rating_divisor=1,
     overall_places=0,
     displayed_places=0,

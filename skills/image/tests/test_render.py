@@ -831,3 +831,51 @@ def test_artist_label_is_shortened_only_in_the_picture() -> None:
     assert render._short_label(column) == "作"
     assert column.label == "작곡가"
     assert render.drawn_labels(table)[-1] == "작곡가"  # 도구 결과·글자 출력의 이름은 그대로
+
+
+def _maimai_table(*, chart_types: bool = True) -> WorkTable:
+    names = [*tc.identity_columns("maimai"), tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING]
+    if not chart_types:
+        names.remove(tc.CHART_TYPE)
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, *names, game="maimai")
+    builder.step("maimai 표")
+    for index, (kind, code) in enumerate([("STD", "MAS"), ("DX", "REM"), ("STD", "UTA")]):
+        cells: dict[str, Cell] = {
+            tc.SONG: tc.song_cell(f"곡 {index}"),
+            tc.CHART_TYPE: tc.text_cell(kind),
+            tc.DIFFICULTY: tc.difficulty_cell(code),
+            tc.CONST: tc.const_cell(13.7),
+            tc.SCORE: tc.score_cell(1_005_000, percent=True),
+            tc.RANK: tc.rank_cell("SSS+", {"SSS+": 1_005_000}),
+            tc.LAMP: tc.lamp_cell("AP+"),
+            tc.RATING: cell(315.0, "315"),
+        }
+        if not chart_types:
+            del cells[tc.CHART_TYPE]
+        builder.row(tc.chart_ref(f"곡 {index}", code, kind), cells)
+    return builder.build()
+
+
+@pytest.mark.parametrize("layout", ["card", "list"])
+def test_maimai_table_renders_with_type_chips_and_new_codes(layout: str) -> None:
+    table = _maimai_table()
+    jackets = {f"곡 {i}": _png() for i in range(3)}
+
+    files = render.render_pages(table, layout=layout, jackets=jackets)
+
+    assert len(files) == 1 and files[0][1].startswith(b"\x89PNG")
+
+
+def test_difficulty_label_adds_the_chart_type_only_when_the_column_is_shown() -> None:
+    table = _maimai_table()
+    row = table.rows[1]
+
+    assert render._difficulty_label(row, frozenset({tc.SONG, tc.CHART_TYPE, tc.DIFFICULTY})) == "DX REM"
+    assert render._difficulty_label(row, frozenset({tc.SONG, tc.DIFFICULTY})) == "REM"
+
+
+def test_chart_type_column_is_a_slot_column_not_an_extra() -> None:
+    shown = render.shown_columns(_maimai_table())
+
+    assert tc.CHART_TYPE not in {column.name for column in shown.extras}

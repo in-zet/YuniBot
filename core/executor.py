@@ -20,7 +20,7 @@ from core.permissions import (
 from core.player_data import PlayerDataScanner
 from core.resolvers import ResolutionError, ResolverRegistry
 from core.scheduler import Scheduler
-from core.schema import build_arg_schema
+from core.schema import ArgSpec, build_arg_schema
 from core.tables import PartialRowHint, TableError, TableStore, resolve_table_arg
 from core.tool_types import TableRef, ToolContext, ToolResult, UserFacingError
 
@@ -162,11 +162,15 @@ class ToolExecutor:
         ):
             return ExecutionOutcome(result=ToolResult(error="모르는 명령이야"))
 
+        schema = build_arg_schema(spec.fn)
+
         if self._game_chooser is not None:
-            # 도구가 `game` 인자를 받으면 사용자가 말한 게임이다. 없으면 선택은 기본 규칙을 따른다.
+            # 도구가 `game` 인자를 받으면 사용자가 말한 게임이다. 없으면 받은 표의 게임 → 주 게임 → 기본 게임이다.
             requested = raw_args.get("game")
             try:
-                preferred = await self._preferred_game(ctx.player_id) if self._preferred_game is not None else None
+                preferred = self._table_game(spec, schema.args, ctx, raw_args, turn_table_ids)
+                if preferred is None and self._preferred_game is not None:
+                    preferred = await self._preferred_game(ctx.player_id)
                 game = self._game_chooser(requested if isinstance(requested, str) else None, preferred)
             except UserFacingError as exc:
                 return ExecutionOutcome(result=ToolResult(error=str(exc)))
@@ -180,8 +184,6 @@ class ToolExecutor:
                 game = games[0]
             overlay = self._game_services.get(game, {})
             ctx = replace(ctx, game=game, services={**ctx.services, **{k: v for k, v in overlay.items() if k in ctx.services}})
-
-        schema = build_arg_schema(spec.fn)
 
         resolved: dict[str, Any] = {}
         stale_input = False
@@ -304,11 +306,39 @@ class ToolExecutor:
             return ToolResult(error="취소했어")
         return await self._call(pending.spec, pending.ctx, pending.resolved_args)
 
+    def _table_game(
+        self,
+        spec: ToolSpec | SlashOnlySpec,
+        args: list[ArgSpec],
+        ctx: ToolContext,
+        raw_args: dict[str, Any],
+        turn_table_ids: Collection[str],
+    ) -> str | None:
+        """도구가 받은 표가 어느 게임 것인지. 표를 못 풀면(없는 id 등) None — 오류는 인자 해석 단계가 낸다."""
+        for arg in args:
+            if arg.py_type is not TableRef or arg.name not in raw_args:
+                continue
+            try:
+                resolved = resolve_table_arg(
+                    raw_args[arg.name], store=self._tables, player_id=ctx.player_id, channel_id=ctx.channel_id,
+                    needs=arg.table_needs, mutates=spec.mutates, turn_table_ids=turn_table_ids,
+                    partial_row_hints=self._partial_row_hints,
+                )
+            except TableError:
+                continue
+            if resolved.table.game:
+                return resolved.table.game
+        return None
+
     async def _call(
         self, spec: ToolSpec | SlashOnlySpec, ctx: ToolContext, resolved_args: dict[str, Any]
     ) -> ToolResult:
         try:
-            return await spec.fn(ctx, **resolved_args)
+            result = await spec.fn(ctx, **resolved_args)
+            # 표는 만든 도구가 불린 게임을 달고 다닌다 — 이어지는 도구(table_query 등)가 같은 게임으로 읽는다.
+            if result.table is not None and not result.table.game:
+                result.table = replace(result.table, game=ctx.game)
+            return result
         except UserFacingError as exc:
             logger.warning("tool '%s' failed: %s", spec.name, exc)
             return ToolResult(error=str(exc))

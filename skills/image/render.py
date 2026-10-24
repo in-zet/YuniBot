@@ -28,6 +28,7 @@ from core.tables import (
     table_file_name,
     visible_columns,
 )
+from core.tool_types import DEFAULT_GAME
 from services.chunithm.rating_tier import tier_for
 from services.game import table_columns as tc
 
@@ -72,9 +73,18 @@ _DIFFICULTY_COLORS = {
     "MAS": (150, 80, 200),
     "ULT": (60, 60, 70),
     "WE": (210, 100, 170),
+    # maimai: Re:MASTER는 MASTER보다 옅은 보라, 宴은 WE와 같은 취급이라 같은 색.
+    "REM": (190, 170, 225),
+    "UTA": (210, 100, 170),
 }
-_LAMP_LABELS = {"AJC": "AJC", "ALL JUSTICE": "AJ", "FULL COMBO": "FC"}
-_LAMP_COLORS = {"AJC": (255, 215, 70), "AJ": (255, 140, 60), "FC": (70, 200, 110)}
+_LAMP_LABELS = {
+    "AJC": "AJC", "ALL JUSTICE": "AJ", "FULL COMBO": "FC",
+    "AP+": "AP+", "AP": "AP", "FC+": "FC+",  # maimai 콤보 램프(FC는 위와 같은 글자)
+}
+_LAMP_COLORS = {
+    "AJC": (255, 215, 70), "AJ": (255, 140, 60), "FC": (70, 200, 110),
+    "AP+": (255, 215, 70), "AP": (255, 140, 60), "FC+": (70, 200, 110),
+}
 
 # 난이도별 카드 바탕색(2026-10-21): 섞지 않고 채도 있는 짙은 색을 그대로 쓴다. ULT는 검붉은색.
 _DIFFICULTY_PANELS = {
@@ -84,6 +94,8 @@ _DIFFICULTY_PANELS = {
     "MAS": (66, 34, 108),
     "ULT": (40, 10, 14),
     "WE": (104, 42, 86),
+    "REM": (92, 80, 128),
+    "UTA": (104, 42, 86),
 }
 _CARD_SUBTEXT = (177, 183, 196)  # 카드 위 보조 글자(상수·점수 없음)
 _CARD_DIVIDER = (255, 255, 255, 80)  # 재킷이 끝나는 곳에 긋는 얇은 선(양쪽을 글자 여백만큼 비운다)
@@ -417,10 +429,13 @@ def _highlight_top(fill: Image.Image, box: tuple[int, int, int, int]) -> Image.I
     return Image.composite(Image.new("RGB", fill.size, (255, 255, 255)), fill, ramp)
 
 
-def _draw_rating_value(canvas: Image.Image, xy: tuple[int, int], text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> None:
+def _draw_rating_value(
+    canvas: Image.Image, xy: tuple[int, int], text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    *, tiered: bool = True,
+) -> None:
     """레이팅 숫자를 단계 색으로 그린다. 모든 단계에 어두운 테두리, 무지개는 파스텔 사선 그라데이션 글자,
     극무지개는 짙은 수직 그라데이션에 윗부분을 살짝 밝힌 글자(번짐 없음)."""
-    tier = rating_tier(text)
+    tier = rating_tier(text) if tiered else None
     x, y = xy
     if tier is None:
         ImageDraw.Draw(canvas).text(xy, text, font=font, fill=_TEXT)
@@ -458,7 +473,9 @@ def _ascent(font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> int:
     return font.getmetrics()[0] if isinstance(font, ImageFont.FreeTypeFont) else 0
 
 
-def _draw_final_rating(canvas: Image.Image, width: int, rating: str, y: int) -> tuple[int, int]:
+def _draw_final_rating(
+    canvas: Image.Image, width: int, rating: str, y: int, *, tiered: bool = True
+) -> tuple[int, int]:
     """머리말 오른쪽 끝에 최종 레이팅을 크게 그린다. 소수점 아래 셋째·넷째 자리는 밝은 회색으로 작게 붙인다.
     (왼쪽 끝 x, 아래 끝 y)를 돌려준다."""
     draw = ImageDraw.Draw(canvas)
@@ -470,7 +487,7 @@ def _draw_final_rating(canvas: Image.Image, width: int, rating: str, y: int) -> 
     right = width - _MARGIN
     draw.text((right - _width(label_font, "RATING"), y), "RATING", font=label_font, fill=_MUTED)
     value_y = y + _fs(13) + 4
-    _draw_rating_value(canvas, (right - value_width, value_y), main, font)
+    _draw_rating_value(canvas, (right - value_width, value_y), main, font, tiered=tiered)
     if tail:  # 큰 글자와 바닥선을 맞춘다
         draw.text(
             (right - tail_width, value_y + _ascent(font) - _ascent(tail_font)), tail, font=tail_font, fill=_RATING_TAIL_COLOR
@@ -504,7 +521,10 @@ def _draw_header(
         reserved = 0  # 오른쪽 끝에 크게 그린 레이팅이 차지하는 폭 — 왼쪽 글줄은 이 안으로 안 들어간다.
         rating_bottom = y
         if rating is not None:
-            left, rating_bottom = _draw_final_rating(canvas, width, rating, notes_bottom)
+            # 색 단계(무지개 등)는 CHUNITHM 레이팅 표다. 다른 게임은 단계 기준을 확인하기 전까지 단색으로 그린다.
+            left, rating_bottom = _draw_final_rating(
+                canvas, width, rating, notes_bottom, tiered=table.game in ("", DEFAULT_GAME)
+            )
             reserved = width - left + 16
         has_icon = profile is not None and (profile.character is not None or profile.frame is not None)
         if has_icon:
@@ -548,7 +568,7 @@ def _draw_band(draw: ImageDraw.ImageDraw, width: int, y: int, segment: Segment, 
 # ---------------------------------------------------------------- 그릴 칸
 
 # 전용 자리와 서식이 있는 칸. 이 밖에 보이는 칸은 범용 칸이다.
-_SLOT_COLUMNS = frozenset({tc.SONG, tc.DIFFICULTY, tc.LAMP, tc.CONST, tc.RATING, tc.SCORE, tc.RANK})
+_SLOT_COLUMNS = frozenset({tc.SONG, tc.CHART_TYPE, tc.DIFFICULTY, tc.LAMP, tc.CONST, tc.RATING, tc.SCORE, tc.RANK})
 CARD_EXTRA_MAX = 4  # 카드 한 장에 더할 수 있는 범용 칸 줄 수(2026-10-22 결정)
 LIST_EXTRA_MAX = 4  # 목록 한 줄에 더할 수 있는 범용 칸 수. 정해진 칸이 자리를 차지하면 이보다 적다
 # 그림에서만 줄여 쓰는 범용 칸 라벨(2026-10-22). 글자 출력과 `table_query columns`의 칸 이름은 그대로다.
@@ -644,10 +664,22 @@ def _card_lines(table: WorkTable) -> _CardLines:
     return _CardLines(shown_columns(table))
 
 
-def _draw_difficulty(draw: ImageDraw.ImageDraw, right_top: tuple[int, int], row: Row) -> None:
+def _difficulty_label(row: Row, names: frozenset[str]) -> str:
+    """난이도 칩에 쓰는 글자: "MAS", 채보 종류 칸이 보이면 "DX MAS"."""
+    code = row.cell(tc.DIFFICULTY).text
+    kind = row.cell(tc.CHART_TYPE) if tc.CHART_TYPE in names and tc.CHART_TYPE in row.cells else None
+    return f"{kind.text} {code}" if kind is not None and kind.filled else code
+
+
+def _draw_difficulty(
+    draw: ImageDraw.ImageDraw, right_top: tuple[int, int], row: Row, names: frozenset[str]
+) -> None:
     code = row.cell(tc.DIFFICULTY)
     if code.filled:
-        _chip(draw, right_top, code.text, _DIFFICULTY_COLORS.get(code.text, (90, 90, 110)), right_aligned=True)
+        _chip(
+            draw, right_top, _difficulty_label(row, names), _DIFFICULTY_COLORS.get(code.text, (90, 90, 110)),
+            right_aligned=True,
+        )
 
 
 def _draw_lamp(draw: ImageDraw.ImageDraw, xy: tuple[int, int], row: Row) -> int | None:
@@ -779,7 +811,7 @@ def _draw_card(
     if tc.LAMP in names:
         _draw_lamp(draw, (badge_end + 4, y + _CHIP_INSET), row)
     if tc.DIFFICULTY in names:
-        _draw_difficulty(draw, (x + _CARD_W - _CHIP_INSET, y + _CHIP_INSET), row)
+        _draw_difficulty(draw, (x + _CARD_W - _CHIP_INSET, y + _CHIP_INSET), row, names)
 
     left, right = x + _CARD_PAD, x + _CARD_W - _CARD_PAD
     cy = y + _INFO_TOP
@@ -945,7 +977,9 @@ def _draw_list_row(
     cursor = text_x
     code = row.cell(tc.DIFFICULTY)
     if tc.DIFFICULTY in names and code.filled:
-        cursor = _chip(draw, (cursor, y + 48), code.text, _DIFFICULTY_COLORS.get(code.text, (90, 90, 110))) + 10
+        cursor = _chip(
+            draw, (cursor, y + 48), _difficulty_label(row, names), _DIFFICULTY_COLORS.get(code.text, (90, 90, 110))
+        ) + 10
     if tc.CONST in names and row.cell(tc.CONST).text:
         draw.text((cursor, y + 51), f"상수 {row.cell(tc.CONST).text}", font=_font(13, False), fill=_MUTED)
 

@@ -24,18 +24,17 @@ from core.tool_types import (
     ChartRef,
     DifficultyRef,
     Display,
+    GameRef,
     SongQuery,
     TableRef,
     ToolContext,
     ToolResult,
 )
-from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
-from services.game.songdb import ConstRangeHit, SongRecord
+from services.game.registry import profile_for
+from services.game.songdb import ChartRecord, ConstRangeHit, SongRecord
 from services.game.terms import ResolvedDifficulty
-
-_DISPLAY_ORDER = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
 
 
 def _difficulty_range_text(low: str | None, high: str | None) -> str | None:
@@ -53,7 +52,21 @@ def _difficulty_code(difficulty: DifficultyRef | None) -> str | None:
     if difficulty is None:
         return None
     assert isinstance(difficulty, ResolvedDifficulty)
-    return LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
+    return tc.LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
+
+
+def _charts_in_display_order(song: SongRecord, game: str) -> list[ChartRecord]:
+    """곡의 채보를 보여 줄 순서로: 채보 종류(프로필 순) 안에서 쉬운 난이도부터. 삭제·미수록 채보는 뺀다."""
+    profile = profile_for(game)
+    return sorted(
+        (chart for chart in song.charts.values() if chart.is_available),
+        key=lambda c: (profile.chart_types.index(c.chart_type), profile.chart_codes.index(c.difficulty)),
+    )
+
+
+def _chart_label(chart: ChartRecord) -> str:
+    """"MAS"(종류 없는 게임) 또는 "DX MAS"."""
+    return f"{chart.chart_type} {chart.difficulty}" if chart.chart_type else chart.difficulty
 
 
 def _with_sections(head: str, sections: list[Section]) -> str:
@@ -64,7 +77,7 @@ def _with_sections(head: str, sections: list[Section]) -> str:
 
 
 @tool(slash="곡")
-async def info(ctx: ToolContext, song: SongQuery) -> ToolResult:
+async def info(ctx: ToolContext, song: SongQuery, game: GameRef | None = None) -> ToolResult:
     """곡 정보와 난이도별 채보(상수, 노트 수)를 보여준다."""
     assert isinstance(song, SongRecord)
     lines = [f"{song.title} — {song.artist}".rstrip(" —")]
@@ -72,17 +85,15 @@ async def info(ctx: ToolContext, song: SongQuery) -> ToolResult:
         lines.append(f"BPM {song.bpm}")
     if song.version is not None:
         lines.append(f"수록 버전: {song.version}")
-    for code in _DISPLAY_ORDER:
-        chart = song.charts.get(code)
-        if chart is None or not chart.is_available:
-            continue
+    for chart in _charts_in_display_order(song, ctx.game):
         const_suffix = "(추정)" if chart.is_const_unknown else ""
         note_text = f"{chart.note_count}노트" if chart.note_count is not None else "노트 수 알 수 없음"
-        lines.append(f"{code} Lv.{chart.level or '?'} 상수 {chart.const}{const_suffix} — {note_text}")
+        lines.append(f"{_chart_label(chart)} Lv.{chart.level or '?'} 상수 {chart.const}{const_suffix} — {note_text}")
 
     # difficulty None = 곡 전체 보기. 받는 스킬은 그 곡의 모든 난이도에 걸친 것을 보여준다.
     sections = await ctx.emit_gather(
-        "chunithm.song.viewed", {"player_id": ctx.player_id, "song_title": song.title, "difficulty": None}
+        f"{ctx.game}.song.viewed",
+        {"player_id": ctx.player_id, "song_title": song.title, "difficulty": None, "chart_type": None},
     )
 
     return ToolResult(
@@ -92,18 +103,21 @@ async def info(ctx: ToolContext, song: SongQuery) -> ToolResult:
 
 
 @tool()
-async def chart(ctx: ToolContext, chart: ChartRef) -> ToolResult:
+async def chart(ctx: ToolContext, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
     """채보 하나의 상수와 노트 수를 돌려준다(내 To-Do·메모가 있으면 함께 보여준다)."""
     assert isinstance(chart, ResolvedChart)
     note_text = f"{chart.chart.note_count}노트" if chart.chart.note_count is not None else "계산 불가"
     sections = await ctx.emit_gather(
-        "chunithm.song.viewed",
-        {"player_id": ctx.player_id, "song_title": chart.song.title, "difficulty": chart.chart.difficulty},
+        f"{ctx.game}.song.viewed",
+        {
+            "player_id": ctx.player_id, "song_title": chart.song.title, "difficulty": chart.chart.difficulty,
+            "chart_type": chart.chart.chart_type,
+        },
     )
-    head = f"{chart.song.title} {chart.chart.difficulty} 상수 {chart.chart.const} ({note_text})"
+    head = f"{chart.song.title} {_chart_label(chart.chart)} 상수 {chart.chart.const} ({note_text})"
     return ToolResult(
         data={
-            "song": chart.song.title, "difficulty": chart.chart.difficulty,
+            "song": chart.song.title, "difficulty": chart.chart.difficulty, "chart_type": chart.chart.chart_type,
             "const": chart.chart.const, "note_count": chart.chart.note_count,
             "is_const_unknown": chart.chart.is_const_unknown,
         },
@@ -112,7 +126,10 @@ async def chart(ctx: ToolContext, chart: ChartRef) -> ToolResult:
     )
 
 
-_SEARCH_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION)
+def _search_columns(game: str) -> tuple[str, ...]:
+    return (*tc.identity_columns(game), tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION)
+
+
 # 검색 결과 표의 기본 칸은 곡·난이도·상수다. 나머지는 표에 있어도 글자 출력과 그림에서 숨기고, 물었을 때만
 # `table_query`의 `columns`로 보인다(2026-10-22 결정).
 _SEARCH_HIDDEN = (tc.LEVEL, tc.NOTE_COUNT, tc.VERSION, tc.ARTIST)
@@ -129,15 +146,16 @@ def _note_range_text(min_notes: int | None, max_notes: int | None) -> str | None
     return f"노트 {min_notes}~{max_notes}개"
 
 
-def _chart_table(hits: list[ConstRangeHit], conditions: list[str | None]) -> WorkTable:
+def _chart_table(hits: list[ConstRangeHit], conditions: list[str | None], game: str) -> WorkTable:
     """채보 검색 결과를 표로. 순서는 서비스가 정한 그대로(상수 내림차순)다."""
+    columns = _search_columns(game)
     builder = TableBuilder(unit="채보")
-    tc.add_columns(builder, *_SEARCH_COLUMNS, hidden_in_text=_SEARCH_HIDDEN)
+    tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=game)
     builder.step(" ".join(c for c in conditions if c))
     for hit in hits:
         builder.row(
-            tc.chart_ref(hit.song.title, hit.chart.difficulty),
-            tc.chart_cells(hit.song, hit.chart, _SEARCH_COLUMNS),
+            tc.chart_ref(hit.song.title, hit.chart.difficulty, hit.chart.chart_type),
+            tc.chart_cells(hit.song, hit.chart, columns),
         )
     return builder.build()
 
@@ -145,7 +163,7 @@ def _chart_table(hits: list[ConstRangeHit], conditions: list[str | None]) -> Wor
 @tool(slash="상수")
 async def find_by_const(
     ctx: ToolContext, min_const: float, difficulty: DifficultyRef,
-    max_const: float | None = None, new_only: bool = False,
+    max_const: float | None = None, new_only: bool = False, game: GameRef | None = None,
 ) -> ToolResult:
     """상수 범위와 난이도로 채보 목록을 상수순으로 찾는다. "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
     max_const를 비운다(지어내지 않는다). 플레이어가 신곡만 말했으면 new_only를 켠다."""
@@ -156,12 +174,12 @@ async def find_by_const(
     if not hits:
         return ToolResult(data={"count": 0}, display=Display(content="해당 범위의 채보가 없어."))
     conditions = [tc.const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
-    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions))
+    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions, ctx.game))
 
 
 @tool(slash="버전")
 async def find_by_version(
-    ctx: ToolContext, version: str, difficulty: DifficultyRef | None = None
+    ctx: ToolContext, version: str, difficulty: DifficultyRef | None = None, game: GameRef | None = None
 ) -> ToolResult:
     """수록 버전으로 채보 목록을 상수순으로 찾는다. 난이도를 안 주면 그 버전의 모든 채보를
     난이도 가리지 않고 찾는다. version은 곡 DB의 버전 이름(VERSE, X-VERSE, X-VERSE-X 등)이어야 한다.
@@ -169,11 +187,16 @@ async def find_by_version(
     short_code = _difficulty_code(difficulty)
     hits = ctx.songdb.find_by_version(version=version, difficulty=short_code)
     if not hits:
+        versions = profile_for(ctx.game).version_order
+        if version not in versions:
+            return ToolResult(error=f"'{version}'은 곡 DB의 버전 이름이 아니야. 버전 이름: {', '.join(versions)}")
         return ToolResult(data={"count": 0}, display=Display(content="해당 버전의 채보가 없어."))
-    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code]))
+    return ToolResult(
+        data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code], ctx.game)
+    )
 
 
-@tool()
+@tool(games=["chunithm"])
 async def find_linked_verse(
     ctx: ToolContext, gate: str | None = None, difficulty: DifficultyRef | None = None
 ) -> ToolResult:
@@ -189,7 +212,8 @@ async def find_linked_verse(
     if not hits:
         return ToolResult(data={"count": 0}, display=Display(content="해당하는 해금곡 채보가 없어."))
     builder = TableBuilder(unit="채보")
-    tc.add_columns(builder, *_SEARCH_COLUMNS, hidden_in_text=_SEARCH_HIDDEN)
+    columns = _search_columns(ctx.game)
+    tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game)
     builder.step(" ".join(c for c in ["Linked VERSE", gate, short_code] if c))
     current: str | None = None
     for hit in hits:
@@ -198,7 +222,7 @@ async def find_linked_verse(
             current = hit.gate
         builder.row(
             tc.chart_ref(hit.song.title, hit.chart.difficulty),
-            tc.chart_cells(hit.song, hit.chart, _SEARCH_COLUMNS),
+            tc.chart_cells(hit.song, hit.chart, columns),
         )
     return ToolResult(data={"count": len(hits), "songs": len({h.song.title for h in hits})}, table=builder.build())
 
@@ -217,6 +241,7 @@ async def find_songs(
     min_note_count: int | None = None,
     max_note_count: int | None = None,
     new_only: bool = False,
+    game: GameRef | None = None,
 ) -> ToolResult:
     """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 조합해 채보를 찾는다.
     `/상수`·`/버전`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
@@ -254,12 +279,12 @@ async def find_songs(
         _note_range_text(min_note_count, max_note_count),
         "신곡만" if new_only else None,
     ]
-    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions))
+    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions, ctx.game))
 
 
 @tool(slash="작곡가")
 async def find_by_artist(
-    ctx: ToolContext, artist: str, difficulty: DifficultyRef | None = None
+    ctx: ToolContext, artist: str, difficulty: DifficultyRef | None = None, game: GameRef | None = None
 ) -> ToolResult:
     """작곡가(아티스트) 이름으로 국제판 수록곡을 찾는다. 사용자가 난이도를 말했을 때만 difficulty를 주고,
     말하지 않았으면 비운다(곡 단위 행으로 나온다)."""
@@ -275,32 +300,39 @@ async def find_by_artist(
                 display=Display(content=f"{_NO_ARTIST_SONGS} 비슷한 작곡가: {', '.join(similar)}"),
             )
 
+    identity = tc.identity_columns(ctx.game)
     if short_code is None:
-        columns = (tc.SONG, tc.DIFFICULTY, tc.ARTIST, tc.VERSION)
+        columns = (*identity, tc.ARTIST, tc.VERSION)
         if not songs:
             return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS))
         builder = TableBuilder(unit="곡")
-        tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN).step(condition)
+        tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game).step(condition)
         for song in songs:
             builder.row(tc.song_ref(song.title), tc.song_cells(song, columns))
         return ToolResult(data={"count": len(songs)}, table=builder.build())
 
-    columns = (tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.ARTIST, tc.VERSION)
+    columns = (*identity, tc.LEVEL, tc.CONST, tc.ARTIST, tc.VERSION)
     charts = [
-        (song, song.charts[short_code])
+        (song, chart_record)
         for song in songs
-        if short_code in song.charts and song.charts[short_code].is_available
+        for chart_record in _charts_in_display_order(song, ctx.game)
+        if chart_record.difficulty == short_code
     ]
     if not charts:
         return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS))
     builder = TableBuilder(unit="채보")
-    tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN).step(f"{condition} {short_code}")
+    tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game).step(f"{condition} {short_code}")
     for song, chart_record in charts:
-        builder.row(tc.chart_ref(song.title, short_code), tc.chart_cells(song, chart_record, columns))
+        builder.row(
+            tc.chart_ref(song.title, short_code, chart_record.chart_type), tc.chart_cells(song, chart_record, columns)
+        )
     return ToolResult(data={"count": len(charts)}, table=builder.build())
 
 
-_EXPAND_COLUMNS = (tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT)
+def _expand_columns(game: str) -> tuple[str, ...]:
+    return (*tc.identity_columns(game)[1:], tc.LEVEL, tc.CONST, tc.NOTE_COUNT)
+
+
 _DEFAULT_EXPAND = "MAS"
 
 
@@ -315,6 +347,7 @@ async def charts_of(
     점수·보더·채보 링크처럼 난이도가 필요한 도구에 곡 표를 넘기기 전에 쓴다."""
     assert isinstance(table, WorkTable)
     code = _difficulty_code(difficulty) or _DEFAULT_EXPAND
+    columns = _expand_columns(ctx.game)
     missing = 0
     expanded = 0
 
@@ -323,15 +356,23 @@ async def charts_of(
         if row.cell(tc.DIFFICULTY).filled:
             return None
         song = ctx.songdb.song_by_title(str(row.cell(tc.SONG).raw))
-        chart_record = None if song is None else song.charts.get(code)
-        if song is None or chart_record is None or not chart_record.is_available:
+        # 채보 종류가 둘이면(maimai STD/DX) 그 난이도의 채보가 둘 다 행이 된다.
+        found = [] if song is None else [c for c in _charts_in_display_order(song, ctx.game) if c.difficulty == code]
+        if song is None or not found:
             missing += 1
             return []
         expanded += 1
-        cells = {**row.cells, **tc.chart_cells(song, chart_record, _EXPAND_COLUMNS)}
-        return [Row(tc.chart_ref(song.title, code), MappingProxyType(cells))]
+        return [
+            Row(
+                tc.chart_ref(song.title, code, chart_record.chart_type),
+                MappingProxyType({**row.cells, **tc.chart_cells(song, chart_record, columns)}),
+            )
+            for chart_record in found
+        ]
 
-    result = expand_rows(table, expand, tc.common_columns(*_EXPAND_COLUMNS, hidden_in_text=_SEARCH_HIDDEN))
+    result = expand_rows(
+        table, expand, tc.common_columns(*columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game)
+    )
     steps = [f"{code}로 펼침"] if expanded else ["펼칠 곡 단위 행 없음"]
     if missing:
         steps.append(f"{code} 없는 곡 {missing}개 뺌")
@@ -370,7 +411,7 @@ async def songs_of(ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonem
     return ToolResult(data={"count": result.row_count, "merged": merged}, table=result)
 
 
-@tool()
+@tool(games=["chunithm"])
 async def chart_link(ctx: ToolContext, chart: ChartRef) -> ToolResult:
     """채보 뷰어 링크(sdvx.in, 없으면 유튜브 검색)를 돌려준다."""
     assert isinstance(chart, ResolvedChart)
@@ -385,7 +426,7 @@ async def chart_link(ctx: ToolContext, chart: ChartRef) -> ToolResult:
 _LINK = "채보 링크"
 
 
-@tool()
+@tool(games=["chunithm"])
 async def add_links(
     ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])]
 ) -> ToolResult:
@@ -409,12 +450,12 @@ async def add_links(
 
 
 def _row_key(row: Row) -> tuple[str, str]:
-    difficulty = str(row.cell(tc.DIFFICULTY).raw)
-    return str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)
+    title, _chart_type, code = tc.row_chart_key(row)
+    return title, code
 
 
 @tool(slash="별칭 추가", mutates=True)
-async def alias_add(ctx: ToolContext, song: SongQuery, alias: str) -> ToolResult:
+async def alias_add(ctx: ToolContext, song: SongQuery, alias: str, game: GameRef | None = None) -> ToolResult:
     """곡 별칭을 봇 전역으로 등록한다(모든 서버·모든 플레이어에게 적용). 사용자가 그 곡이 맞다고 확인한 뒤에만 부른다."""
     assert isinstance(song, SongRecord)
     try:
@@ -429,7 +470,7 @@ async def alias_add(ctx: ToolContext, song: SongQuery, alias: str) -> ToolResult
 
 
 @tool(slash="별칭 삭제", mutates=True)
-async def alias_remove(ctx: ToolContext, alias: str) -> ToolResult:
+async def alias_remove(ctx: ToolContext, alias: str, game: GameRef | None = None) -> ToolResult:
     """별칭을 지운다. 추가한 사람이나 admin만 할 수 있다."""
     row = await ctx.songdb.get_alias(alias=alias)
     if row is None:

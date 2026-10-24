@@ -100,6 +100,8 @@ class WorkTable:
     unit: str = "개"
     # 한 줄 서식. 자리는 `{칸 보이는 이름}`.
     row_formats: tuple[str, ...] = ()
+    # 이 표의 값이 어느 게임 것인지. 보관소에 넣을 때 도구가 불린 게임으로 붙는다(`TableStore.put`).
+    game: str = ""
 
     @property
     def rows(self) -> tuple[Row, ...]:
@@ -958,16 +960,24 @@ class TableStore:
         self._bind_seq = 0
 
     def put(
-        self, player_id: str, channel_id: str, table: WorkTable, *, now: float | None = None, stale: bool = False
+        self,
+        player_id: str,
+        channel_id: str,
+        table: WorkTable,
+        *,
+        now: float | None = None,
+        stale: bool = False,
+        game: str = "",
     ) -> str:
-        """표를 보관하고 id(`t1`부터 그 플레이어+채널에서 늘어난다)를 붙여 돌려준다."""
+        """표를 보관하고 id(`t1`부터 그 플레이어+채널에서 늘어난다)를 붙여 돌려준다. game은 표를 만든 도구가 불린
+        게임이다(이미 게임이 붙은 표는 그대로 둔다)."""
         key = (player_id, channel_id)
         number = self._next_number.get(key, 0) + 1
         self._next_number[key] = number
         table_id = f"t{number}"
         created_at = time.time() if now is None else now
         self._tables.setdefault(key, {})[table_id] = _StoredTable(
-            replace(table, id=table_id), created_at, stale=stale
+            replace(table, id=table_id, game=table.game or game), created_at, stale=stale
         )
         return table_id
 

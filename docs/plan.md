@@ -123,7 +123,7 @@
     - [X] 6-1 서비스 배선 — 구현 완료(2026-10-24). 용어 사전을 게임별로(`TermsService`가 `services/game/terms.py`로, 마이그레이션 028, `services/maimai/data/terms.yaml`), 게임별 서비스 한 벌(`build_all_game_services`)과 해석기 분배(`_ByGame`), 실행기가 고른 게임에 맞춰 서비스를 바꿔 끼움·스킬이 안 다루는 게임이면 스킬의 게임으로, maimai 곡 DB 부팅·주기 갱신, `admin`의 `set_song_version`, 등록부에 maimai 등록
     - [X] 6-2 `GameRef`(표준 인자 타입, `resolve_game_name`이 등록 이름·표시 이름·별칭을 받는다)와 도구별 `games` 제한(`@tool(games=[...])`) — 구현 완료(2026-10-24). 슬래시 옵션은 `GameRef` 인자를 가진 도구에 자동으로 생긴다(옵션 이름은 인자 이름 `game`, 다른 옵션처럼 영문). `game` 인자를 실제 도구에 붙이는 일은 스킬별 작업(6-4·6-5)에서
     - [X] 6-3 주 게임을 `/설정 바꾸기 skill:player setting:주 게임 value:마이마이`로(스킬 설정이 아니라 `players.main_game`에 저장, `/설정 보기`에도 나옴), 실행기가 게임 고르기 ②번으로 읽음 — 구현 완료(2026-10-24)
-    - [ ] 6-4 `song`·`image`의 maimai 대응(`ChartRef`의 채보 종류 포함)
+    - [X] 6-4 `song`·`image`의 maimai 대응 — 구현 완료(2026-10-24). `ChartRefResolver`가 채보 종류 토큰(DX/STD)을 떼고 둘 다 있으면 후보를 돌려 되묻는다. 작업 표가 만든 게임을 달고 다니며(`WorkTable.game`) 표를 받는 도구는 그 게임으로 실행된다. 표 칸이 게임별(`table_columns`: 난이도·버전 순서, `종류` 칸, 달성률 점수, 정수 곡 레이팅, `row_chart_key`). `song` 도구에 `game: GameRef`, `find_linked_verse`·`chart_link`·`add_links`는 츄니즘 전용(`games=["chunithm"]`). `image` 그림은 재킷(otoge-db 주소)·REM/宴 색·종류 칩·maimai 콤보 램프 칩, 색 단계는 츄니즘 표만. 실기 미확인: 멘션이 "마이마이 …"에서 `game`을 넣는지, 슬래시 `game` 옵션, 재킷이 실제로 받아지는지
     - [ ] 6-5 기록 의존 스킬(`report`·`goals`·`session`·`folders`·`notes`)
     - [ ] 6-6 플레이어 메모리의 게임별 구획
     - [ ] 6-7 프롬프트(`persona.md` 소개 문장, `rules.md` 게임 중립 말, 카드 예시)

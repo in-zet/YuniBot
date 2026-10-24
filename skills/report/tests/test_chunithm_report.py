@@ -342,7 +342,7 @@ async def test_best_both_returns_table_with_groups_and_contribution(skill: Modul
     assert table.summary["닉네임"] == "펭귄" and table.summary["레이팅"] == "16.9400"
     assert "레벨" not in table.summary
     first = table.rows[0]
-    assert first.ref.kind == tc.CHART and tc.chart_key(first.ref) == ("곡 A", "MAS")
+    assert first.ref.kind == tc.CHART and tc.chart_key(first.ref) == ("곡 A", "", "MAS")
     assert first.cell("기여").text == "0.3462"
     assert first.cell(tc.SCORE).raw == 1_007_620
     assert first.cell(tc.RANK).raw == 1_007_500  # 랭크 칸의 원래 값은 기준 점수
