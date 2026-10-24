@@ -187,6 +187,18 @@ async def test_table_image_splits_many_rows_into_several_files(skill: ModuleType
     assert result.data["images"] == 2
 
 
+async def test_table_image_refuses_more_than_nine_pages_before_fetching_jackets(skill: ModuleType) -> None:
+    titles = tuple(f"곡 {i}" for i in range(271))
+    cache = _FakeImageCache()
+    ctx = _ctx(songdb=_FakeSongDb(), cache=cache, records=_FakeRecords())
+
+    result = await skill.table_image(ctx, _table(subject=None, titles=titles), layout=skill.Layout.LIST)
+
+    assert result.display is None and result.error is not None
+    assert "10장" in result.error and "9장" in result.error
+    assert cache.requested == []
+
+
 def test_table_image_declares_table_needs(skill: ModuleType) -> None:
     from core.schema import build_arg_schema
 

@@ -20,6 +20,7 @@ from typing import Literal
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
+from core.message_split import MAX_ATTACHMENTS
 from core.tables import (
     Column,
     Row,
@@ -615,6 +616,22 @@ def check_extras(table: WorkTable, layout: Layout) -> None:
     )
 
 
+def _split(table: WorkTable, layout: Layout) -> list[list[Segment]]:
+    return split_pages(table, CARD_PAGE_ROWS, card_columns(table)) if layout == "card" else split_pages(table, LIST_PAGE_LIMIT)
+
+
+def check_pages(table: WorkTable, layout: Layout) -> None:
+    """그림이 한 메시지에 붙일 수 있는 장 수(`MAX_ATTACHMENTS`)를 넘으면 그리기 전에 오류로 돌려준다.
+    넘는 채로 보내면 디스코드가 답을 통째로 거절한다(실기 2026-10-24: 402행 목록 14장)."""
+    count = len(_split(table, layout))
+    if count <= MAX_ATTACHMENTS:
+        return
+    raise TableError(
+        f"{'카드' if layout == 'card' else '목록'} 그림이 {count}장 나온다. 한 번에 {MAX_ATTACHMENTS}장까지만 보낼 수 있다. "
+        "`table_query`로 표를 거르거나 나눠서 불러라. 모두 보여 달라는 말이면 그림 대신 글자 표(첨부 파일)로 주겠다고 말해라."
+    )
+
+
 # ---------------------------------------------------------------- 카드
 
 _CARD_W = 206
@@ -1024,7 +1041,8 @@ def render_pages(
     """표를 그림으로 그려 (파일 이름, PNG 바이트) 목록으로 돌려준다. 쪽 상한을 넘으면 여러 장이다.
     `jackets`는 곡 제목 → 재킷 그림 바이트(받기 실패·없음은 None 또는 빠짐 → 빈 사각형)."""
     check_extras(table, layout)
-    pages = split_pages(table, CARD_PAGE_ROWS, card_columns(table)) if layout == "card" else split_pages(table, LIST_PAGE_LIMIT)
+    check_pages(table, layout)
+    pages = _split(table, layout)
     opened = {title: _open(data) for title, data in jackets.items()}
     draw_page = _draw_cards if layout == "card" else _draw_list
     stem = table_file_name(table).removesuffix(".txt")

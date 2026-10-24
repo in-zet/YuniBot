@@ -392,6 +392,27 @@ async def test_respond_edit_path_sends_files_as_attachments() -> None:
     assert "files" not in interaction.calls[0]
 
 
+async def test_respond_sends_files_over_the_limit_in_later_followups() -> None:
+    interaction = _fake(1)
+    files = [discord.File(io.BytesIO(b"x"), filename=f"{i}.png") for i in range(12)]
+    await respond(interaction, content="안녕", files=files)
+
+    first, second = interaction.calls
+    assert first["files"] == files[:9] and first["content"] == "안녕"
+    assert second["files"] == files[9:]
+
+
+async def test_respond_edit_path_sends_files_over_the_limit_in_followups() -> None:
+    interaction = _fake(1)
+    await interaction.response.defer()
+    files = [discord.File(io.BytesIO(b"x"), filename=f"{i}.png") for i in range(10)]
+    await respond(interaction, content="안녕", files=files)
+
+    first, second = interaction.calls
+    assert first["attachments"] == files[:9]
+    assert second["files"] == files[9:]
+
+
 def test_render_result_error_is_ephemeral() -> None:
     kwargs = render_result(ToolResult(error="안 돼요"))
 

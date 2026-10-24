@@ -170,6 +170,14 @@ def test_render_list_splits_at_30() -> None:
     assert len(render.render_pages(_chart_table(31), layout="list", jackets={})) == 2
 
 
+def test_picture_over_nine_pages_is_an_error_before_drawing() -> None:
+    render.check_pages(_chart_table(270), "list")  # 30행 × 9장 = 한 번에 보낼 수 있는 끝
+    with pytest.raises(TableError, match="10장"):
+        render.check_pages(_chart_table(271), "list")
+    with pytest.raises(TableError, match="한 번에 9장"):
+        render.render_pages(_chart_table(271), layout="list", jackets={})
+
+
 def test_card_jacket_fills_the_card_width() -> None:
     assert render._JACKET == render._CARD_W
 

@@ -63,6 +63,7 @@ async def table_image(
     assert isinstance(table, WorkTable)
     try:
         render.check_extras(table, Layout(layout).value)
+        render.check_pages(table, Layout(layout).value)
     except TableError as exc:
         return ToolResult(error=str(exc))
     titles = list(dict.fromkeys(row.cell(tc.SONG).text for row in table.rows))

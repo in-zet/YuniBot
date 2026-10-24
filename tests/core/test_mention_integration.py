@@ -15,6 +15,7 @@ from core.executor import ToolExecutor
 from core.fallback_messages import (
     COOLDOWN_ACTIVE_MESSAGES,
     PRIVATE_DM_FAILED_MESSAGES,
+    REPLY_SEND_FAILED_MESSAGES,
     RETRY_WAIT_MESSAGES,
     WORKING_MESSAGES,
 )
@@ -640,6 +641,36 @@ async def test_private_display_tells_the_player_when_the_dm_cannot_be_sent(tmp_p
 
     [(text, displays)] = sent
     assert any(m in text for m in PRIVATE_DM_FAILED_MESSAGES) and displays == []
+
+
+@pytest.mark.asyncio
+async def test_reply_that_discord_rejects_is_followed_by_a_short_notice() -> None:
+    answer = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="표야.")]), text="표야.")
+    entry, _usage = _mention_entry([answer])
+    sent: list[str] = []
+
+    async def _reject_first(text: str, displays: list[Display]) -> None:
+        if not sent:
+            sent.append("거절")
+            raise RuntimeError("400 Bad Request: Must be 10 or fewer in length")
+        sent.append(text)
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="표", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_reject_first, typing=_NoopTyping())
+
+    assert sent[0] == "거절" and sent[1] in REPLY_SEND_FAILED_MESSAGES and len(sent) == 2
+
+
+@pytest.mark.asyncio
+async def test_notice_failure_after_a_rejected_reply_does_not_raise() -> None:
+    answer = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="표야.")]), text="표야.")
+    entry, _usage = _mention_entry([answer])
+
+    async def _always_reject(text: str, displays: list[Display]) -> None:
+        raise RuntimeError("discord down")
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="표", mentions_bot=True)
+    await entry.handle(trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, tzinfo=UTC), send=_always_reject, typing=_NoopTyping())
 
 
 _EMIT_TOOL_BODY = (

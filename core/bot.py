@@ -31,7 +31,7 @@ from core.llm_claude import ClaudeLlmAdapter
 from core.llm_gemini import GeminiLlmAdapter
 from core.log_setup import configure_logging
 from core.mention import ChannelMessage, MentionEntry, is_mention_eligible
-from core.message_split import split_message
+from core.message_split import split_files, split_message
 from core.migrations import run_migrations
 from core.player_data import PlayerDataScanner, discover_skill_tables
 from core.prompt import PromptAssembler
@@ -228,13 +228,16 @@ class YuniClient(discord.Client):
             files = [
                 discord.File(io.BytesIO(file.data), filename=file.name) for display in displays for file in display.files
             ]
-            # 첨부 파일은 첫 조각에만 붙는다.
+            # 첨부 파일은 `MAX_ATTACHMENTS`개까지만 첫 조각에 붙고, 남은 것은 글 조각 뒤에 따로 보낸다.
+            first_files, *later_files = split_files(files) or [[]]
             reply_kwargs: dict[str, Any] = {"embeds": embeds, "mention_author": False}
-            if files:
-                reply_kwargs["files"] = files
+            if first_files:
+                reply_kwargs["files"] = first_files
             sent = await message.reply(chunks[0], **reply_kwargs)
             for extra in chunks[1:]:
                 await message.channel.send(extra)
+            for batch in later_files:
+                await message.channel.send(files=batch)
             return str(sent.id)
 
         await self._mention_entry.handle(

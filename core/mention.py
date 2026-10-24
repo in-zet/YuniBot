@@ -18,6 +18,7 @@ from core.fallback_messages import (
     LLM_FAILURE_MESSAGES,
     MONTHLY_CAP_REACHED_MESSAGES,
     PRIVATE_DM_FAILED_MESSAGES,
+    REPLY_SEND_FAILED_MESSAGES,
     RETRY_WAIT_MESSAGES,
     TOOL_CALL_CAP_MESSAGES,
     WORKING_MESSAGES,
@@ -454,11 +455,23 @@ class MentionEntry:
             else:
                 public_displays.append(display)
         text = assembled.text or pick(LLM_FAILURE_MESSAGES)
-        sent_id = await reply(f"{text}\n{pick(PRIVATE_DM_FAILED_MESSAGES)}" if dm_failed else text, public_displays)
+        try:
+            sent_id = await reply(f"{text}\n{pick(PRIVATE_DM_FAILED_MESSAGES)}" if dm_failed else text, public_displays)
+        except Exception:
+            # 답장이 디스코드에서 거절되면(첨부·글 한도 등) 사용자는 "찾아보는 중" 말 뒤로 아무것도 못 받는다 — 짧게라도 알린다.
+            logger.exception("플레이어 %s에게 답장을 보내지 못했다", player.id)
+            sent_id = await self._send_reply_failed_notice(reply)
         self._settle_tables(player_id=player.id, trigger=trigger, result=result, sent_id=sent_id)
         # 모델이 끝내자고 한 대화는 마무리 말을 보낸 뒤 닫는다(닫힘 훅이 전문을 저장한다).
         if thread is not None and thread_end is not None and thread_end.requested and self._threads is not None:
             await self._threads.close(thread.thread_id, reason="explicit")
+
+    async def _send_reply_failed_notice(self, reply: Callable[[str, list[Display]], Awaitable[str | None]]) -> str | None:
+        try:
+            return await reply(pick(REPLY_SEND_FAILED_MESSAGES), [])
+        except Exception:
+            logger.warning("답장 실패 안내도 보내지 못했다", exc_info=True)
+            return None
 
     async def _send_private(self, player_id: str, content: str) -> bool:
         try:

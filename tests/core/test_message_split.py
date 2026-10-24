@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.message_split import split_message
+from core.message_split import MAX_ATTACHMENTS, split_files, split_message
 
 
 def test_short_text_stays_one_chunk() -> None:
@@ -20,3 +20,14 @@ def test_single_overlong_line_is_cut_by_characters() -> None:
     chunks = split_message("가" * 1050, limit=500)
 
     assert [len(c) for c in chunks] == [500, 500, 50]
+
+
+def test_attachment_limit_is_nine() -> None:
+    assert MAX_ATTACHMENTS == 9
+
+
+def test_split_files_cuts_into_groups_of_nine() -> None:
+    assert split_files([]) == []
+    assert split_files(list(range(9))) == [list(range(9))]
+    assert [len(batch) for batch in split_files(list(range(14)))] == [9, 5]
+    assert split_files(list(range(5)), size=2) == [[0, 1], [2, 3], [4]]

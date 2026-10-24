@@ -14,7 +14,7 @@ from discord import app_commands
 
 from core.decorators import SlashOnlySpec, ToolSpec
 from core.executor import ToolExecutor
-from core.message_split import split_message
+from core.message_split import split_files, split_message
 from core.permissions import TagRequirement, check_tags
 from core.registry_snapshot import RegistrySnapshot
 from core.schema import ArgSpec, build_arg_schema
@@ -277,7 +277,9 @@ async def respond(interaction: discord.Interaction, **kwargs: Any) -> None:
     비공개 팔로업으로 보낸다. 본문이 2000자를 넘으면 디스코드가 통째로 거절하므로 줄 경계에서 나눠
     첫 조각만 이 경로로 보내고(embeds·view도 여기 붙는다) 나머지는 팔로업으로 이어 보낸다."""
     ephemeral = kwargs.pop("ephemeral", False)
-    files: list[discord.File] = kwargs.pop("files", [])
+    all_files: list[discord.File] = kwargs.pop("files", [])
+    # 첨부 파일은 `MAX_ATTACHMENTS`개까지만 첫 응답에 붙고, 남은 것은 팔로업으로 이어 보낸다.
+    files, *later_files = split_files(all_files) or [[]]
     rest: list[str] = []
     content = kwargs.get("content")
     if content:
@@ -298,6 +300,8 @@ async def respond(interaction: discord.Interaction, **kwargs: Any) -> None:
         await interaction.edit_original_response(**kwargs)
     for chunk in rest:
         await interaction.followup.send(chunk, ephemeral=ephemeral)
+    for batch in later_files:
+        await interaction.followup.send(files=batch, ephemeral=ephemeral)
 
 
 async def _send_result(interaction: discord.Interaction, result: ToolResult) -> None:
