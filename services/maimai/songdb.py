@@ -38,6 +38,7 @@ _PREFIX_TO_NAME = VERSION_NAMES
 _NAME_TO_PREFIX = {name: prefix for prefix, name in VERSION_NAMES.items()}
 
 
+_FIRST_DX_PREFIX = "200"
 _REFRESH_INTERVAL_SECONDS = 24 * 3600
 _RETRY_INTERVAL_SECONDS = 3600
 
@@ -107,6 +108,16 @@ def _charts_of(entry: dict[str, Any], *, available: bool) -> dict[str, ChartReco
     return charts
 
 
+def _same_generation(prefix: str, current: str | None) -> bool:
+    """신곡 판정. maimai DX부터는 PLUS가 같은 세대(예: 260 CiRCLE와 265 CiRCLE PLUS)로 묶여 둘 다 신곡이다 —
+    2026-10-30 NET의 "Songs for Rating(New)"가 CiRCLE 곡으로 채워져 있었고 곡 DB의 최신은 CiRCLE PLUS였다."""
+    if current is None:
+        return False
+    if prefix >= _FIRST_DX_PREFIX and current >= _FIRST_DX_PREFIX:
+        return prefix[:2] == current[:2]
+    return prefix == current
+
+
 def _load(entries: list[dict[str, Any]], *, override_prefix: str | None = None) -> _Loaded:
     """otoge-db 항목들을 곡 목록으로 바꾼다. 같은 제목이 여러 항목이면(`Link` 두 곡, 宴 한 곡의 난이도별 항목)
     츄니즘 시드처럼 처음 본 항목의 곡 정보를 쓰고 채보만 보탠다. 같은 칸이 겹치면 먼저 나온 것이 남는다."""
@@ -140,7 +151,7 @@ def _load(entries: list[dict[str, Any]], *, override_prefix: str | None = None) 
     latest = max((prefix_of[title] for title in available), default=None)
     current = override_prefix or latest
     for title, song in songs.items():
-        song.is_new = current is not None and prefix_of[title] == current
+        song.is_new = _same_generation(prefix_of[title], current)
     return _Loaded(songs=songs, available=available, prefix_of=prefix_of, latest_prefix=latest)
 
 
@@ -204,7 +215,7 @@ class MaimaiSongDbService(SongDb):
         self._save_override(name)
         current = self._override_prefix or self._latest_prefix
         for title, song in self._songs.items():
-            song.is_new = current is not None and self._prefix_of[title] == current
+            song.is_new = _same_generation(self._prefix_of[title], current)
 
     def _saved_override(self) -> str | None:
         """재시작해도 남도록 파일에 둔 덮어쓴 버전. 없거나 모르는 이름이면 None."""

@@ -20,7 +20,6 @@ from core.tool_types import (
     ScoreRef,
     SongQuery,
     ToolContext,
-    UserFacingError,
 )
 from services.chunithm.chunithm_net import ChunithmNetService
 from services.chunithm.songdb import SongDbService
@@ -32,6 +31,7 @@ from services.game.records import RecordsService
 from services.game.registry import GAME_PROFILES, GameResolver, profile_for
 from services.game.songdb import SongDb
 from services.game.terms import TermsService
+from services.maimai.maimai_net import MaimaiNetService
 from services.maimai.songdb import MaimaiSongDbService
 
 
@@ -71,16 +71,6 @@ class _ScoreRefAdapter:
         return await self.terms.resolve_score(raw, ctx)
 
 
-class _NoNet:
-    """NET 연결이 아직 없는 게임이 `chunithm_net` 자리에 끼우는 자리표시자. 무엇을 부르든 사용자에게 이유를 말한다."""
-
-    def __init__(self, label: str) -> None:
-        self._label = label
-
-    def __getattr__(self, name: str) -> Any:
-        raise UserFacingError(f"{self._label}는 아직 SEGA 사이트 연결이 없어서 기록을 가져올 수 없어")
-
-
 class _ByGame:
     """표준 인자 해석기를 게임마다 하나씩 두고, `ctx.game`에 맞는 것에게 넘긴다."""
 
@@ -100,17 +90,13 @@ class GameServices:
     terms: TermsService
     records: RecordsService
     chart_ref: ChartRefResolver
-    net: ChunithmNetService | None
-    # NET 어댑터가 아직 없는 게임이면 `chunithm_net` 자리에 사정을 말해 주는 자리표시자를 준다.
-    net_unavailable: bool = False
+    net: ChunithmNetService | MaimaiNetService | None
 
     def skill_services(self) -> dict[str, object]:
         """manifest `services`로 스킬에게 주는 이름 → 서비스."""
         services: dict[str, object] = {"songdb": self.songdb, "terms": self.terms, "records": self.records}
         if self.net is not None:
-            services["chunithm_net"] = self.net
-        elif self.net_unavailable:
-            services["chunithm_net"] = _NoNet(self.profile.label)
+            services["chunithm_net"] = self.net  # 스킬에는 게임과 상관없이 이 이름이다. 게임별 서비스가 이 자리에 낀다.
         return services
 
     def resolvers(self) -> dict[type, Any]:
@@ -145,11 +131,10 @@ async def build_game_services(
 ) -> GameServices:
     profile = profile_for(game)
     songdb: SongDb
-    net_unavailable = False
+    net: ChunithmNetService | MaimaiNetService | None
     if game == "maimai":
         songdb = MaimaiSongDbService(data_dir / "maimai" / "music-ex-intl.json", conn=conn)
-        net = None  # maimai NET 어댑터는 17단계 Part 3
-        net_unavailable = True
+        net = MaimaiNetService(conn=conn, secrets=secrets, players=players) if secrets is not None else None
     else:
         songdb = SongDbService(conn=conn, profile=profile)
         net = ChunithmNetService(conn=conn, secrets=secrets, players=players) if secrets is not None else None
@@ -162,7 +147,6 @@ async def build_game_services(
         records=RecordsService(conn=conn, songdb=songdb, players=players, game=game),
         chart_ref=ChartRefResolver(songdb=songdb, terms=terms),
         net=net,
-        net_unavailable=net_unavailable,
     )
 
 

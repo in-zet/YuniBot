@@ -311,6 +311,8 @@ async def test_set_song_version_overrides_and_resets_the_maimai_songdb(admin_env
          "dx_lev_mas": "13", "dx_lev_mas_i": "13.0", "dx_lev_mas_notes": "700"},
         {"title": "Newer", "artist": "A", "version": "26511", "image_url": "n.png", "intl": "1",
          "dx_lev_mas": "14", "dx_lev_mas_i": "14.0", "dx_lev_mas_notes": "800"},
+        {"title": "Ancient", "artist": "A", "version": "23000", "image_url": "a.png", "intl": "1",
+         "dx_lev_mas": "12", "dx_lev_mas_i": "12.0", "dx_lev_mas_notes": "600"},
     ]
     cache.write_text(json.dumps(entries), encoding="utf-8")
     maimai = MaimaiSongDbService(cache)
@@ -321,10 +323,10 @@ async def test_set_song_version_overrides_and_resets_the_maimai_songdb(admin_env
     )
 
     assert maimai.current_version() == "CiRCLE PLUS"
-    result = await skill.set_song_version(ctx, game="maimai", version="CiRCLE")
-    assert result.error is None and maimai.current_version() == "CiRCLE"
-    assert maimai.is_new_for("Old") and not maimai.is_new_for("Newer")
-    assert MaimaiSongDbService(cache).current_version() == "CiRCLE"  # 재시작해도 남는다
+    result = await skill.set_song_version(ctx, game="maimai", version="FESTiVAL")
+    assert result.error is None and maimai.current_version() == "FESTiVAL"
+    assert maimai.is_new_for("Ancient") and not maimai.is_new_for("Newer") and not maimai.is_new_for("Old")
+    assert MaimaiSongDbService(cache).current_version() == "FESTiVAL"  # 재시작해도 남는다
 
     reset = await skill.set_song_version(ctx, game="maimai")
     assert reset.error is None and maimai.current_version() == "CiRCLE PLUS"

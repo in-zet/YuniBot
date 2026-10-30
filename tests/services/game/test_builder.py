@@ -4,12 +4,16 @@ from pathlib import Path
 
 import aiosqlite
 import pytest
+from cryptography.fernet import Fernet
 
 from core.resolvers import ResolverRegistry
-from core.tool_types import RankRef, ToolContext, UserFacingError
+from core.tool_types import RankRef, ToolContext
+from services.chunithm.chunithm_net import ChunithmNetService
 from services.common.players import PlayersService
+from services.common.secrets import SecretsService
 from services.game.builder import build_all_game_services, register_resolvers
 from services.game.registry import GAME_PROFILES
+from services.maimai.maimai_net import MaimaiNetService
 from services.maimai.songdb import MaimaiSongDbService
 
 _MIGRATIONS = "".join(
@@ -46,15 +50,21 @@ async def test_builds_one_service_set_per_registered_game(conn, tmp_path: Path) 
     assert games["maimai"].records.__class__ is games["chunithm"].records.__class__
 
 
-async def test_maimai_has_no_net_and_says_so(conn, tmp_path: Path) -> None:
+async def test_each_game_gets_its_own_net_service_in_the_chunithm_net_slot(conn, tmp_path: Path) -> None:
+    games = await build_all_game_services(
+        conn=conn, players=PlayersService(conn), secrets=SecretsService(Fernet.generate_key()), data_dir=tmp_path
+    )
+
+    assert isinstance(games["chunithm"].skill_services()["chunithm_net"], ChunithmNetService)
+    assert isinstance(games["maimai"].skill_services()["chunithm_net"], MaimaiNetService)
+
+
+async def test_without_a_secrets_key_no_game_has_a_net_service(conn, tmp_path: Path) -> None:
     games = await build_all_game_services(
         conn=conn, players=PlayersService(conn), secrets=None, data_dir=tmp_path
     )
 
-    assert "chunithm_net" not in games["chunithm"].skill_services()  # 시험은 비밀 키 없이 만든다
-    net = games["maimai"].skill_services()["chunithm_net"]
-    with pytest.raises(UserFacingError, match="maimai DX는 아직 SEGA 사이트 연결이 없어서"):
-        _ = getattr(net, "fetch_snapshot", None)
+    assert all("chunithm_net" not in game.skill_services() for game in games.values())
 
 
 async def test_maimai_reads_the_cache_under_data_dir(conn, tmp_path: Path) -> None:

@@ -28,6 +28,7 @@ from services.chunithm.arcade_settings import (
 from services.chunithm.sync_snapshot import SyncFetch, snapshot_from_fetch
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
+from services.common.sega_cookies import SegaCookieStore
 
 if TYPE_CHECKING:
     from chuni_penguin.types import PersonalBest, Profile, RecentScore
@@ -222,6 +223,7 @@ class ChunithmNetService:
         self._conn.row_factory = aiosqlite.Row
         self._secrets = secrets
         self._players = players
+        self._cookies = SegaCookieStore(conn=conn, secrets=secrets, players=players)
         self._adapter_factory = adapter_factory or _default_adapter_factory
         self._credential_adapter_factory = credential_adapter_factory or _default_credential_adapter_factory
 
@@ -490,25 +492,10 @@ class ChunithmNetService:
         return detailed + scores[limit:]
 
     async def _expire_login(self, player_id: str, ctx: ToolContext | None) -> None:
-        """인증 실패(쿠키 만료) 처리: sega-linked를 떼고 sega.login.expired를 낸다.
-        이벤트의 대상은 쿠키 주인(player_id)이다 — /최근처럼 요청한 사람과 쿠키 주인이 다를
-        수 있으므로 ctx.emit(요청한 사람 기준) 대신 버스에 대상 플레이어를 직접 넘긴다."""
-        await self._players.revoke_status_tag(player_id, "sega-linked")
-        if ctx is not None:
-            await ctx.event_bus.emit_notify(
-                "sega.login.expired", {"player_id": player_id},
-                player_id=player_id, guild_id=ctx.guild_id,
-            )
+        await self._cookies.expire(player_id, ctx)
 
     async def _decrypted_cookie(self, player_id: str) -> str | None:
         """평문은 이 메서드를 부른 호출자 스코프에만 잠깐 존재한다 — 반환값을
         로그나 LLM 입력에 넣지 않는 것은 호출하는 쪽의 책임이다(CLAUDE.md)."""
-        row = await (
-            await self._conn.execute(
-                "SELECT encrypted_cookie FROM sega_cookies WHERE player_id = ?", (player_id,)
-            )
-        ).fetchone()
-        if row is None:
-            return None
-        decrypted = self._secrets.decrypt(row["encrypted_cookie"])
-        return _build_lwp_cookie_jar(decrypted)
+        clal = await self._cookies.clal(player_id)
+        return None if clal is None else _build_lwp_cookie_jar(clal)

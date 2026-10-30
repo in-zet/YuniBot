@@ -56,6 +56,7 @@ from core.tool_types import (
     ToolContext,
 )
 from core.usage import UsageService
+from services.chunithm.chunithm_net import ChunithmNetService
 from services.common.arcades import ArcadesService
 from services.common.http import HttpService, build_http_service
 from services.common.memory import SUMMARY_DELAY_SECONDS, MemoryService, PendingSummary
@@ -595,7 +596,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
 
     # 호칭: 메모리의 호칭 칸 → CHUNITHM-NET 닉네임 → (멘션이면) 디스코드 서버 닉네임. 게임 쪽 닉네임은 소스로 받는다.
     address_sources: list[NicknameSource] = []
-    if games.net is not None:
+    if isinstance(games.net, ChunithmNetService):  # 닉네임은 기본 게임(CHUNITHM)의 NET 상태에서 읽는다
         net_service = games.net
 
         async def _net_nickname(player_id: str) -> str | None:

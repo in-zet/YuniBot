@@ -317,3 +317,16 @@ async def test_refresh_if_due_waits_a_day_after_success_and_an_hour_after_failur
     assert len(good.urls) == 1
     assert await db.refresh_if_due(good, now=1000.0 + 3600 + 86_400) is True
     assert len(good.urls) == 2
+
+
+def test_plus_version_songs_share_the_new_song_set_with_their_base_version(tmp_path: Path) -> None:
+    # 2026-10-30 실측: NET 신곡 15곡이 CiRCLE(260) 곡으로 채워져 있었고 곡 DB의 최신은 CiRCLE PLUS(265)였다.
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps(_sample() + [_entry("Base Release", "26000", **_chart("dx_lev_", "mas", "13", "13.0", "700"))]))
+    db = MaimaiSongDbService(path)
+
+    assert db.current_version() == "CiRCLE PLUS"
+    assert db.is_new_for("Base Release") and db.is_new_for("Newest")
+    assert not db.is_new_for("Both Charts")  # 다른 세대(maimai DX)는 신곡이 아니다
+    db.set_current_version("maimai DX")
+    assert db.is_new_for("Both Charts") and not db.is_new_for("Base Release")
