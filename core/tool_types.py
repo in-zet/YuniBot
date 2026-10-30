@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import aiosqlite
@@ -52,6 +52,14 @@ class ToolContext:
     channel_id: str | None = None
     # 이 호출이 다루는 게임. 실행기가 도구를 부르기 전에 정한다(services/game/registry.py의 choose_game).
     game: str = DEFAULT_GAME
+    # 게임 이름 → 그 게임의 서비스(스킬이 선언한 이름만 바뀐다). `for_game`이 쓴다.
+    game_services: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
+
+    def for_game(self, game: str) -> ToolContext:
+        """다른 게임의 맥락. 스킬이 선언한 서비스 중 게임별인 것(records·songdb·terms·chunithm_net)이 그 게임 것으로 바뀐다.
+        저장된 데이터가 자기 게임을 들고 있는 스킬(goals의 목표 등)이 그 게임으로 계산할 때 쓴다."""
+        overlay = self.game_services.get(game, {})
+        return replace(self, game=game, services={**self.services, **{k: v for k, v in overlay.items() if k in self.services}})
 
     def __getattr__(self, name: str) -> Any:
         # dataclass가 정의한 필드(player_id, tags, services)는 정상 __getattribute__로 먼저 해석되므로

@@ -174,18 +174,11 @@ class EventBus:
         scoped_services = {
             name: self._services[name] for name in handler.skill_services if name in self._services
         }
-        # 이벤트를 낸 쪽이 다루는 게임이 있으면, 핸들러가 선언한 서비스 중 게임별인 것은 그 게임 것으로 바꾼다
-        # (도구 실행기가 `ctx.game`에 맞춰 서비스를 바꾸는 것과 같다).
-        game_kwargs: dict[str, Any] = {}
-        if game is not None:
-            overlay = self._game_services.get(game, {})
-            scoped_services.update({name: value for name, value in overlay.items() if name in scoped_services})
-            game_kwargs["game"] = game
         from core.tool_types import (
             ToolContext,  # 지연 import — 위 TYPE_CHECKING 주석 참고
         )
 
-        return ToolContext(
+        ctx = ToolContext(
             player_id=player_id,
             tags=frozenset(player_tags),
             services=scoped_services,
@@ -194,8 +187,11 @@ class EventBus:
             db=self._db if "db" in handler.skill_services else None,
             scheduler=self._scheduler if "scheduler" in handler.skill_services else None,
             tables=self._tables if "tables" in handler.skill_services else None,
-            **game_kwargs,
+            game_services=self._game_services,
         )
+        # 이벤트를 낸 쪽이 다루는 게임이 있으면, 핸들러가 선언한 서비스 중 게임별인 것은 그 게임 것으로 바꾼다
+        # (도구 실행기가 `ctx.game`에 맞춰 서비스를 바꾸는 것과 같다).
+        return ctx if game is None else ctx.for_game(game)
 
     async def emit_notify(
         self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None, game: str | None = None

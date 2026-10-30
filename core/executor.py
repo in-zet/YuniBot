@@ -184,8 +184,7 @@ class ToolExecutor:
                 # 게임을 말하지 않았는데 주 게임이 이 스킬이 다루지 않는 게임이면, 스킬이 다루는 게임으로 간다.
                 fallback_note = f"{game}는 이 기능이 아직 없어서 {games[0]} 기준으로 처리했다"
                 game = games[0]
-            overlay = self._game_services.get(game, {})
-            ctx = replace(ctx, game=game, services={**ctx.services, **{k: v for k, v in overlay.items() if k in ctx.services}})
+            ctx = replace(ctx, game_services=self._game_services).for_game(game)
 
         resolved: dict[str, Any] = {}
         stale_input = False

@@ -399,17 +399,12 @@ async def const_table(
     )
 
 
-def _pb_key(title: str, chart_type: str, difficulty: str) -> tuple[str, ...]:
-    """`pb_rows_for`에 넘기는 채보 키. 채보 종류가 없는 게임은 (제목, 난이도), 있는 게임은 (제목, 종류, 난이도)."""
-    return (title, chart_type, difficulty) if chart_type else (title, difficulty)
-
-
 def _hit_key(hit: ConstRangeHit) -> tuple[str, ...]:
-    return _pb_key(hit.song.title, hit.chart.chart_type, hit.chart.difficulty)
+    return tc.pb_key(hit.song.title, hit.chart.chart_type, hit.chart.difficulty)
 
 
 def _row_key(row: Row) -> tuple[str, ...]:
-    return _pb_key(*tc.row_chart_key(row))
+    return tc.pb_key(*tc.row_chart_key(row))
 
 
 _CONST_BAND = "report.const_band"

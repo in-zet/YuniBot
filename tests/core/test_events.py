@@ -352,3 +352,42 @@ async def test_skill_level_tags_any_checked_separately_from_handler_tags_any() -
     bus.bind_dispatch(services={}, tag_provider=_FakeTagProvider({"p1": {"vip", "mod"}}), settings=None)
     sections = await bus.emit_gather("evt", {}, player_id="p1", guild_id=None)
     assert [s.data["from"] for s in sections] == ["gated"]
+
+
+@pytest.mark.asyncio
+async def test_handler_gets_the_emitting_games_services_only_for_declared_names() -> None:
+    chunithm_records, maimai_records, maimai_secrets = object(), object(), object()
+    bus = EventBus()
+    bus.bind_dispatch(
+        services={"records": chunithm_records, "secrets": object()},
+        tag_provider=_FakeTagProvider(),
+        settings=None,
+        game_services={"maimai": {"records": maimai_records, "secrets": maimai_secrets}},
+    )
+    seen: list[tuple[str, object, set[str]]] = []
+
+    async def handler(ctx: ToolContext, payload: object) -> Section | None:
+        seen.append((ctx.game, ctx.records, set(ctx.services)))
+        return None
+
+    bus.register_gather("evt", owner_skill="s", fn=handler, skill_services=["records"])
+    await bus.emit_gather("evt", {}, player_id="p1", guild_id=None, game="maimai")
+    await bus.emit_gather("evt", {}, player_id="p1", guild_id=None)
+
+    # 선언한 서비스(records)만 maimai 것으로 바뀌고, 게임을 안 주면 기본 게임 서비스 그대로다.
+    assert seen == [("maimai", maimai_records, {"records"}), ("chunithm", chunithm_records, {"records"})]
+
+
+def test_for_game_swaps_only_the_services_the_context_already_has() -> None:
+    chunithm_records, maimai_records = object(), object()
+    ctx = ToolContext(
+        player_id="p1", tags=frozenset(), services={"records": chunithm_records},
+        game_services={"maimai": {"records": maimai_records, "songdb": object()}},
+    )
+
+    swapped = ctx.for_game("maimai")
+
+    assert swapped.game == "maimai" and swapped.records is maimai_records
+    assert set(swapped.services) == {"records"}  # 선언하지 않은 서비스는 따라오지 않는다
+    assert ctx.records is chunithm_records  # 원래 맥락은 그대로
+    assert ctx.for_game("unknown").records is chunithm_records

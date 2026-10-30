@@ -42,6 +42,7 @@ from services.game.records import (
     UnchangedPlay,
 )
 from services.game.records_calc import remaining_to_target
+from services.game.registry import profile_for
 from services.game.songdb import ChartRecord, SongRecord
 from services.game.terms import ResolvedDifficulty, ResolvedRank, TermsService
 
@@ -107,7 +108,7 @@ class _FakeRecords:
     async def all_pb_rows(self, player_id: str) -> list[PbRow]:
         return list(self.pbs.get(player_id, []))
 
-    async def pb_row(self, player_id: str, *, song_title: str, difficulty: str) -> PbRow | None:
+    async def pb_row(self, player_id: str, *, song_title: str, difficulty: str, chart_type: str = "") -> PbRow | None:
         for row in self.pbs.get(player_id, []):
             if (row.song_title, row.difficulty) == (song_title, difficulty):
                 return row
@@ -137,7 +138,7 @@ class _FakeRecords:
 class _Hit:
     def __init__(self, title: str, difficulty: str = "MAS") -> None:
         self.song = type("S", (), {"title": title})()
-        self.chart = type("C", (), {"difficulty": difficulty})()
+        self.chart = type("C", (), {"difficulty": difficulty, "chart_type": ""})()
 
 
 @dataclass(slots=True, kw_only=True)
@@ -152,7 +153,7 @@ class _FakeSongDb:
     # 레벨에 맞는 모든 난이도의 채보를 돌려주므로, 여러 난이도가 섞인 경우를 흉내 낸다.
     const_range_hits_any_difficulty: list[tuple[str, str]] = field(default_factory=list)
 
-    def const_for(self, title: str, difficulty: str) -> float | None:
+    def const_for(self, title: str, difficulty: str, chart_type: str = "") -> float | None:
         return self.consts.get((title, difficulty))
 
     def note_count_for(self, title: str, difficulty: str) -> int | None:
@@ -701,9 +702,10 @@ def test_all_justice_condition_checks_combo_lamp_not_chain_lamp(skill: ModuleTyp
     aj = _pb("곡B", "MAS", 1_009_000, "SSS+", 15.0, "15.0", combo="ALL JUSTICE")
     ajc = _pb("곡C", "MAS", 1_010_000, "SSS+", 15.0, "15.0", combo="AJC")
     cond = skill.FolderCondition.ALL_JUSTICE
-    assert skill._row_matches_condition(full_chain_only, cond, None) is False
-    assert skill._row_matches_condition(aj, cond, None) is True
-    assert skill._row_matches_condition(ajc, cond, None) is True
+    profile = profile_for("chunithm")
+    assert skill._row_matches_condition(full_chain_only, cond, None, profile) is False
+    assert skill._row_matches_condition(aj, cond, None, profile) is True
+    assert skill._row_matches_condition(ajc, cond, None, profile) is True
 
 
 async def test_set_goal_via_executor_with_raw_string_enum_args(

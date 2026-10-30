@@ -153,6 +153,11 @@ def identity_cells(title: str, chart_type: str, difficulty: str, game: str = DEF
     return cells
 
 
+def pb_key(title: str, chart_type: str, difficulty: str) -> tuple[str, ...]:
+    """`RecordsService.pb_rows_for`에 넘기는 채보 키. 채보 종류가 없는 게임은 (제목, 난이도), 있는 게임은 (제목, 종류, 난이도)."""
+    return (title, chart_type, difficulty) if chart_type else (title, difficulty)
+
+
 def song_ref(title: str) -> RowRef:
     return RowRef(SONG_KIND, title)
 

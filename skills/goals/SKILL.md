@@ -8,11 +8,11 @@ examples:
   - 내 목표 어디까지 왔어?
 triggers: [목표, 투두, todo, to-do, 기한, 순회]
 category: 목표
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
 services: [records, songdb, notify, players, settings, scheduler, yuni, db]
-listens: [chunithm.sync.completed, chunithm.song.viewed, chunithm.plan.requested, goals.notify_due, goals.final_deadline]
-emits: [chunithm.goal.completed, goals.notify_due, goals.final_deadline]
+listens: [chunithm.sync.completed, maimai.sync.completed, chunithm.song.viewed, maimai.song.viewed, chunithm.plan.requested, goals.notify_due, goals.final_deadline]
+emits: [chunithm.goal.completed, maimai.goal.completed, goals.notify_due, goals.final_deadline]
 settings:
   - name: 알림 채널
     kind: str
@@ -28,7 +28,7 @@ settings:
 
 스킬 자체의 태그 조건은 없다. 로그인하지 않아도 곡별 목표(`todo_*`)와 자유 목표
 (`set_goal(kind="freeform")`)는 쓸 수 있다. 레이팅·오버파워·폴더 목표(`set_goal`의 해당 kind)는
-`chunithm-synced`가 있어야 한다.
+`chunithm-synced`(마이마이는 `maimai-synced`)가 있어야 한다. 목표는 게임마다 따로 있고, 게임을 말했으면("마이마이", "츄니즘") 그 말 그대로 `game`에 준다(말하지 않았으면 비운다).
 
 - 목표를 만들어 달라고 분명히 말한 때만 `set_goal`·`todo_add`·`add_todos`를 부른다. "17까지 얼마나
   남았어?"처럼 남은 양만 묻는 말은 목표 설정이 아니다 — 목표를 만들지 말고, 이미 있는 목표의 진행
@@ -56,6 +56,7 @@ settings:
   `folder_max_const`, `folder_level`, `folder_version` 중 정확히 하나와 `folder_difficulty`(선택)를
   받는다. `folder_difficulty`를 비우면 난이도를 가리지 않고 그 상수/레벨/버전에 맞는 채보를 전부
   묶는다.
+- 마이마이의 레이팅 목표는 구곡 35 + 신곡 15 곡 레이팅 합(정수), 점수 목표는 달성률(%)이다. 램프 목표의 `all_justice`는 마이마이에서 올 퍼펙트(AP)이고, 클리어 램프가 없어 폴더의 `cleared` 조건은 못 쓴다. 오버파워 목표는 마이마이에 없다.
 - 오버파워 목표는 전체(overall)만 지원한다. 폴더별 오버파워 퍼센트는 이번 단계 범위 밖이다 —
   요청받으면 아직 안 된다고 분명히 말한다.
 - `due_at`은 YYYY-MM-DD 날짜만 받고, 꼬리표를 안 주면 기한으로 단기/중기/장기를 정한다.

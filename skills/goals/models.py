@@ -125,10 +125,15 @@ async def list_goals_for_player(
     *,
     kind: str | None = None,
     statuses: list[str] | None = None,
+    game: str | None = None,
 ) -> list[GoalRow]:
+    """플레이어의 목표. `game`을 주면 그 게임의 목표만 본다."""
     conn.row_factory = aiosqlite.Row
     query = f"SELECT {_GOAL_COLUMNS} FROM goals_goals WHERE player_id = ?"
     params: list[Any] = [player_id]
+    if game is not None:
+        query += " AND game = ?"
+        params.append(game)
     if kind is not None:
         query += " AND kind = ?"
         params.append(kind)
@@ -140,16 +145,27 @@ async def list_goals_for_player(
     return [_goal_from_row(row) for row in await cursor.fetchall()]
 
 
-async def find_rating_goal(conn: aiosqlite.Connection, player_id: str) -> GoalRow | None:
-    rows = await list_goals_for_player(conn, player_id, kind="rating", statuses=["in_progress"])
+async def find_rating_goal(conn: aiosqlite.Connection, player_id: str, *, game: str | None = None) -> GoalRow | None:
+    rows = await list_goals_for_player(conn, player_id, kind="rating", statuses=["in_progress"], game=game)
     return rows[0] if rows else None
 
 
 async def find_song_goal(
-    conn: aiosqlite.Connection, player_id: str, *, song_title: str, difficulty: str
+    conn: aiosqlite.Connection,
+    player_id: str,
+    *,
+    song_title: str,
+    difficulty: str,
+    chart_type: str = "",
+    game: str | None = None,
 ) -> GoalRow | None:
-    for row in await list_goals_for_player(conn, player_id, kind="song", statuses=["in_progress"]):
-        if row.target_ref.get("song_title") == song_title and row.target_ref.get("difficulty") == difficulty:
+    for row in await list_goals_for_player(conn, player_id, kind="song", statuses=["in_progress"], game=game):
+        ref = row.target_ref
+        if (
+            ref.get("song_title") == song_title
+            and ref.get("difficulty") == difficulty
+            and ref.get("chart_type", "") == chart_type
+        ):
             return row
     return None
 

@@ -4,16 +4,16 @@ from datetime import date
 from decimal import ROUND_DOWN, Decimal
 from typing import Literal
 
-_BEST_FRAME = 30
-_NEW_FRAME = 20
-_RATING_DIVISOR = Decimal(50)
+_DEFAULT_BEST_FRAME = 30
+_DEFAULT_NEW_FRAME = 20
+_DEFAULT_RATING_DIVISOR = 50
 _HUNDREDTH = Decimal("0.01")
 _TEN_THOUSANDTH = Decimal("0.0001")
 # 설계서 "기간과 묶음": 2주 이내는 단기, 3개월 이내는 중기, 그보다 길면 장기.
 _SHORT_DAYS = 14
 _MID_DAYS = 90
 
-ChartKey = tuple[str, str]  # (곡 제목, 난이도 코드)
+ChartKey = tuple[str, ...]  # (곡 제목, 난이도 코드) 또는 채보 종류가 있는 게임은 (곡 제목, 채보 종류, 난이도 코드)
 
 
 def achievement_ratio(current: Decimal, baseline: Decimal, target: Decimal) -> Decimal:
@@ -44,8 +44,8 @@ def elapsed_ratio(created: date, due: date, today: date) -> Decimal:
     return min(Decimal(1), max(Decimal(0), Decimal(elapsed) / Decimal(total)))
 
 
-def rating_gap_to_song_rating_sum(remaining_rating: Decimal) -> Decimal:
-    return remaining_rating * _RATING_DIVISOR
+def rating_gap_to_song_rating_sum(remaining_rating: Decimal, divisor: int = _DEFAULT_RATING_DIVISOR) -> Decimal:
+    return remaining_rating * divisor
 
 
 def rating_remaining(current: Decimal, target: Decimal) -> Decimal:
@@ -63,6 +63,11 @@ def value_change(current: Decimal, previous: Decimal | None) -> Decimal | None:
 def truncate2(value: Decimal) -> Decimal:
     """표시용으로 소수 둘째 자리까지 남기고 셋째 자리에서 버린다(오버파워·퍼센트용)."""
     return value.quantize(_HUNDREDTH, rounding=ROUND_DOWN)
+
+
+def truncate_places(value: Decimal, places: int) -> Decimal:
+    """표시용으로 주어진 소수 자리까지 남기고 버린다(maimai 전체 레이팅은 정수라 0)."""
+    return value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_DOWN)
 
 
 def truncate4(value: Decimal) -> Decimal:
@@ -90,19 +95,23 @@ def project_rating_with_todos(
     current_best30: list[tuple[ChartKey, Decimal]],
     current_new20: list[tuple[ChartKey, Decimal]],
     todo_targets: list[tuple[ChartKey, bool, Decimal]],
+    *,
+    best_size: int = _DEFAULT_BEST_FRAME,
+    new_size: int = _DEFAULT_NEW_FRAME,
+    divisor: int = _DEFAULT_RATING_DIVISOR,
 ) -> Decimal:
     """곡별 목표를 모두 달성했을 때의 예상 레이팅. 투두 채보가 이미 프레임에 있으면 그
-    항목의 레이팅을 바꾸고(더 높을 때만), 없으면 후보로 더한 뒤 각 프레임 상위 30/20을
-    다시 고른다."""
+    항목의 레이팅을 바꾸고(더 높을 때만), 없으면 후보로 더한 뒤 각 프레임 상위 best_size/new_size개를
+    다시 고른다(기본은 CHUNITHM의 30/20, 합을 divisor로 나눈다)."""
     best: dict[ChartKey, Decimal] = dict(current_best30)
     new: dict[ChartKey, Decimal] = dict(current_new20)
     for key, is_new, rating in todo_targets:
         frame = new if is_new else best
         existing = frame.get(key)
         frame[key] = rating if existing is None else max(existing, rating)
-    best_top = sorted(best.values(), reverse=True)[:_BEST_FRAME]
-    new_top = sorted(new.values(), reverse=True)[:_NEW_FRAME]
-    return (sum(best_top, Decimal(0)) + sum(new_top, Decimal(0))) / _RATING_DIVISOR
+    best_top = sorted(best.values(), reverse=True)[:best_size]
+    new_top = sorted(new.values(), reverse=True)[:new_size]
+    return (sum(best_top, Decimal(0)) + sum(new_top, Decimal(0))) / divisor
 
 
 def folder_progress(total: int, matched: int) -> Decimal | None:

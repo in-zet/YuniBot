@@ -44,6 +44,12 @@ class GameProfile:
     candidate_target_label: str = "SSS"
     # 기록을 가져오는 사이트 이름. 오류 문구에 쓴다.
     net_name: str = "CHUNITHM-NET"
+    # 풀콤보·올 저스티스(maimai는 올 퍼펙트)에 해당하는 콤보 램프 이름과 사용자에게 보일 이름. 램프 우열표의 키다.
+    full_combo_lamp: str = "FULL COMBO"
+    all_justice_lamp: str = "ALL JUSTICE"
+    all_justice_label: str = "올 저스티스"
+    # 오버파워가 있는 게임인가(maimai는 없다).
+    has_overpower: bool = True
     # 후보곡 상승폭·남은 점수의 기준점이 되는 점수(츄니즘은 SSS).
     candidate_target_score: int
 
