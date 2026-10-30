@@ -19,6 +19,9 @@ defines_tags:
   - name: chunithm-synced
     description: CHUNITHM-NET 기록을 한 번 동기화했다.
     how_to_get: "로그인한 뒤 `/동기화`로 기록을 한 번 가져오면 레이팅, 베스트, 세션 같은 기록 기능을 쓸 수 있어."
+  - name: maimai-synced
+    description: maimai DX NET 기록을 한 번 동기화했다.
+    how_to_get: "로그인한 뒤 `/동기화 game:마이마이`로 기록을 한 번 가져오면 레이팅, 베스트(구곡·신곡) 같은 기록 기능을 쓸 수 있어."
 ---
 
 - 로그인 요청에는 `/로그인`을 안내한다. SEGA ID나 비밀번호를 채팅으로 보내지 말라고 함께 말한다.

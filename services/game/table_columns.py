@@ -145,6 +145,14 @@ def chart_ref(title: str, difficulty: str, chart_type: str = "") -> RowRef:
     return RowRef(CHART, json.dumps([title, difficulty], ensure_ascii=False))
 
 
+def identity_cells(title: str, chart_type: str, difficulty: str, game: str = DEFAULT_GAME) -> dict[str, Cell]:
+    """채보 하나를 가리키는 칸(곡·(종류)·난이도)의 셀. 종류 칸이 없는 게임은 종류를 싣지 않는다."""
+    cells = {SONG: song_cell(title), DIFFICULTY: difficulty_cell(difficulty)}
+    if CHART_TYPE in identity_columns(game):
+        cells[CHART_TYPE] = text_cell(chart_type)
+    return cells
+
+
 def song_ref(title: str) -> RowRef:
     return RowRef(SONG_KIND, title)
 

@@ -14,12 +14,19 @@ from core.decorators import on, tool
 from core.events import Section
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.threads import ThreadTranscript
-from core.tool_types import ArcadeRef, Display, PlayerRef, ToolContext, ToolResult
+from core.tool_types import (
+    ArcadeRef,
+    Display,
+    GameRef,
+    PlayerRef,
+    ToolContext,
+    ToolResult,
+)
 from services.common.arcades import Arcade
 from services.common.players import Player
 from services.game.rating_format import rating_text, song_rating_text
+from services.game.registry import profile_for
 
-_GAME = "chunithm"
 _SESSION = "session.session"
 _S_DATE = "날짜"
 _S_ESTIMATED = "추정"
@@ -72,7 +79,7 @@ async def _all_report_rows(ctx: ToolContext, *, player_id: str) -> list[aiosqlit
     cursor = await ctx.db.execute(
         "SELECT session_id, play_date, estimated, rendered_text, sections_data, yuni_line "
         "FROM session_reports WHERE player_id = ? AND game = ? ORDER BY play_date DESC",
-        (player_id, _GAME),
+        (player_id, ctx.game),
     )
     return list(await cursor.fetchall())
 
@@ -82,7 +89,7 @@ async def _visits_by_date(ctx: ToolContext, *, player_id: str) -> dict[str, str]
     것이 이긴다(visits_for는 visited_at 오름차순). visited_at은 동기화 시각(UTC) 기준이라
     플레이 날짜(새벽 4시 경계, 로컬)와 어긋날 수 있다 — 오락실 스킬이 생기기 전까지의
     근사값이다."""
-    visits = await ctx.arcades.visits_for(player_id=player_id, game=_GAME)
+    visits = await ctx.arcades.visits_for(player_id=player_id, game=ctx.game)
     return {v.visited_at[:10]: v.arcade_id for v in visits}
 
 
@@ -124,7 +131,10 @@ async def _changes_block(
     """저장된 리포트 시점의 채보·레이팅과 지금 값을 나란히 비교한다(design "그 뒤의 변화")."""
     sync_section = _sync_section(sections_data)
     summary = await ctx.records.latest_sync_summary(player_id)
-    now_rating = rating_text(summary.computed_rating if summary else None, unknown=_UNKNOWN)
+    profile = profile_for(ctx.game)
+    now_rating = rating_text(
+        summary.computed_rating if summary else None, unknown=_UNKNOWN, places=profile.overall_places
+    )
     then_rating = sync_section.get("current", {}).get("computed_rating") if sync_section else None
 
     lines: list[str] = []
@@ -132,21 +142,26 @@ async def _changes_block(
     for u in (sync_section.get("chart_updates", []) if sync_section else []):
         if u.get("session_id") != session_id:
             continue
-        current = await ctx.records.pb_row(player_id, song_title=u["song_title"], difficulty=u["difficulty"])
+        chart_type: str = u.get("chart_type", "")
+        current = await ctx.records.pb_row(
+            player_id, song_title=u["song_title"], difficulty=u["difficulty"], chart_type=chart_type
+        )
         if current is None:
             continue
-        current_rating = song_rating_text(current.rating, unknown=_UNKNOWN)
+        current_rating = song_rating_text(current.rating, unknown=_UNKNOWN, places=profile.song_rating_places)
         if current.rank == u["new_rank"] and current.score == u["new_score"]:
             continue
         chart_changes.append(
             {
                 "song_title": u["song_title"], "difficulty": u["difficulty"],
+                **({"chart_type": chart_type} if chart_type else {}),
                 "then_rank": u["new_rank"], "now_rank": current.rank,
                 "then_score": u["new_score"], "now_score": current.score,
                 "then_rating": u["new_rating"], "now_rating": current_rating,
             }
         )
-        lines.append(f"{u['song_title']} {u['difficulty']}  그때 {u['new_rank']} → 지금 {current.rank}")
+        chart_name = " ".join(part for part in (u["song_title"], chart_type, u["difficulty"]) if part)
+        lines.append(f"{chart_name}  그때 {u['new_rank']} → 지금 {current.rank}")
 
     if then_rating is not None and then_rating != now_rating:
         lines.insert(0, f"레이팅  그때 {then_rating} → 지금 {now_rating}")
@@ -166,6 +181,7 @@ async def list_sessions(
     start: str | None = None,
     end: str | None = None,
     arcade: ArcadeRef | None = None,
+    game: GameRef | None = None,
 ) -> ToolResult:
     """세션(플레이 날짜) 목록을 날짜순으로 보여준다. start/end(ISO 날짜, YYYY-MM-DD)로 기간을 좁히고, arcade로 그 오락실에서 플레이한 세션만 본다. player를 비우면 본인이다."""
     assert arcade is None or isinstance(arcade, Arcade)
@@ -175,7 +191,7 @@ async def list_sessions(
     assert ctx.db is not None
 
     conditions = ["player_id = ?", "game = ?"]
-    params: list[Any] = [target.id, _GAME]
+    params: list[Any] = [target.id, ctx.game]
     if start is not None:
         conditions.append("play_date >= ?")
         params.append(start)
@@ -247,6 +263,7 @@ async def get_session(
     player: PlayerRef | None = None,
     date: str | None = None,
     arcade: ArcadeRef | None = None,
+    game: GameRef | None = None,
 ) -> ToolResult:
     """"세션 보고서/리포트 써 줘·보여 줘" 요청에 쓴다(후기를 여는 게 아니다). 세션 하나를 저장된 리포트 그대로 불러오고, 그 뒤 바뀐 채보·레이팅을 지금 값과 나란히 보여준다. date(ISO 날짜, YYYY-MM-DD)를 주면 그 날짜, 안 주면 가장 최근이다. arcade를 주면 그 오락실에서의 세션만 찾는다. player를 비우면 본인이다."""
     assert arcade is None or isinstance(arcade, Arcade)
@@ -293,7 +310,7 @@ async def get_session(
         arcade_name = found.name if found is not None else None
 
     sections = await ctx.emit_gather(
-        "chunithm.session.viewed",
+        f"{ctx.game}.session.viewed",
         {"player_id": target.id, "session_id": row["session_id"], "play_date": row["play_date"]},
     )
     extra_lines = [s.display.content for s in sections if s.display is not None and s.display.content]
@@ -324,7 +341,11 @@ async def get_session(
 
 @tool(slash="세션 삭제", mutates=True, confirm="always")
 async def delete_session(
-    ctx: ToolContext, date: str | None = None, start: str | None = None, end: str | None = None
+    ctx: ToolContext,
+    date: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    game: GameRef | None = None,
 ) -> ToolResult:
     """내 세션 요약을 지운다(실제 플레이 기록은 지우지 않는다). date 하나 또는 start/end 기간을 줘야 한다."""
     assert ctx.db is not None
@@ -332,7 +353,7 @@ async def delete_session(
         return ToolResult(error="지울 날짜나 기간을 알려줘.")
 
     conditions = ["player_id = ?", "game = ?"]
-    params: list[Any] = [ctx.player_id, _GAME]
+    params: list[Any] = [ctx.player_id, ctx.game]
     if date is not None:
         conditions.append("play_date = ?")
         params.append(date)
@@ -448,7 +469,7 @@ def _closed_handler(ctx: ToolContext, *, session_id: str) -> Callable[[ThreadTra
                 ctx.db, session_id=session_id, player_id=transcript.player_id, transcript=transcript, status=status
             )
             await ctx.emit(
-                "chunithm.session.closed",
+                f"{ctx.game}.session.closed",
                 {
                     "player_id": transcript.player_id, "session_id": session_id, "saved": status != _REVIEW_SKIPPED,
                     "status": status, "reason": transcript.closed_reason, "review": _review_text(messages),
@@ -480,7 +501,7 @@ async def _open_review(ctx: ToolContext, *, row: aiosqlite.Row) -> bool:
 
 
 @tool(slash="후기")
-async def review_open(ctx: ToolContext, date: str | None = None) -> ToolResult:
+async def review_open(ctx: ToolContext, date: str | None = None, game: GameRef | None = None) -> ToolResult:
     """사용자가 직접 후기를 쓰자고 했을 때만 부른다("후기 남길게", "후기 쓰자"). "세션 보고서/리포트 써 줘·보여 줘"는 후기가 아니라 get_session이다. 세션 후기 대화를 DM으로 연다. date(ISO 날짜, YYYY-MM-DD)를 주면 그 날짜의 세션, 안 주면 가장 최근 세션이다. 이미 남긴 후기가 있으면 그 뒤에 이어서 남긴다."""
     rows = await _all_report_rows(ctx, player_id=ctx.player_id)
     if not rows:
@@ -524,6 +545,16 @@ async def _review_block(ctx: ToolContext, *, session_id: str) -> tuple[str | Non
 async def on_sync_reported(ctx: ToolContext, payload: dict[str, Any]) -> None:
     """리포트를 세션별로 고정해 저장한다. 새 플레이가 없는 동기화는 저장하지 않는다. 같은
     세션(날짜)에 다시 동기화하면 세션당 저장본이 하나뿐이라 최신 리포트로 바뀐다."""
+    await _store_report(ctx, payload)
+
+
+@on("maimai.sync.reported")
+async def on_maimai_sync_reported(ctx: ToolContext, payload: dict[str, Any]) -> None:
+    """`on_sync_reported`의 maimai 판. 저장하는 게임은 이벤트 버스가 정해 준 `ctx.game`이다."""
+    await _store_report(ctx, payload)
+
+
+async def _store_report(ctx: ToolContext, payload: dict[str, Any]) -> None:
     if not payload.get("has_new_plays"):
         return
     assert ctx.db is not None
@@ -542,7 +573,7 @@ async def on_sync_reported(ctx: ToolContext, payload: dict[str, Any]) -> None:
             "sections_data = excluded.sections_data, yuni_line = excluded.yuni_line, "
             "created_at = excluded.created_at",
             (
-                session["id"], player_id, _GAME, session["play_date"], int(session["estimated"]),
+                session["id"], player_id, ctx.game, session["play_date"], int(session["estimated"]),
                 rendered_text, sections_json, yuni_line, now,
             ),
         )

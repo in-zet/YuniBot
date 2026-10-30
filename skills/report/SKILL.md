@@ -10,13 +10,15 @@ examples:
   - 최근에 친 거 판정까지 보여 줘
 triggers: [베스트, 신곡, 레이팅, 기록, 점수, 최근, 판정, 추천, 성과, 풀콤, 램프, 클리어, 랭크, 상수표]
 category: 기록과 리포트
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
 services: [records, songdb, players, chunithm_net, terms]
-tags: [chunithm-synced]
-listens: [chunithm.sync.completed]
+tags_any: [chunithm-synced, maimai-synced]
+listens: [chunithm.sync.completed, maimai.sync.completed]
 ---
 
+- 게임: 사용자가 게임을 말했으면("마이마이", "츄니즘") 그 말 그대로 `game`에 준다. 말하지 않았으면 비운다(코드가 주 게임 → 츄니즘 순으로 고른다). 표를 이어받는 도구(`add_scores`·`analyze`의 `table`)는 그 표의 게임을 따른다.
+- 마이마이의 레이팅은 구곡 35 + 신곡 15의 곡 레이팅(정수) 합이고 베스트 30·신곡 20이 아니다. 점수는 달성률(%)이다. `recent`(최근 플레이)는 츄니즘만 된다.
 - 레이팅과 평균은 지금 값을 말한다. 직전 동기화 대비 변화량은 동기화 리포트에만 나오고, 프로필·베스트 조회에는 안 붙는다.
 - 레이팅 하나만 물으면 말로 답하고, 목록과 분석은 표시물로 보여 준다.
 - `best`의 `kind`는 사용자가 "베스트만"·"신곡만"처럼 한쪽을 명시했을 때만 `best`/`new`로 준다. "레이팅표"·"레이팅 대상"·그냥 "베스트"는 `kind`를 비워 둘 다(베스트 30 + 신곡 20) 낸다.

@@ -37,6 +37,13 @@ class GameProfile:
     # 레이팅 프레임: 베스트와 신곡 각각 몇 곡을 세는가.
     best_frame_size: int
     new_frame_size: int
+    # 프레임을 사용자에게 부르는 이름("베스트 30", "구곡 35"). 평균 줄과 표 묶음 머리글에 쓴다.
+    best_label: str = "베스트 30"
+    new_label: str = "신곡 20"
+    # 후보곡 기준 점수를 부르는 이름(CHUNITHM SSS, maimai SSS+).
+    candidate_target_label: str = "SSS"
+    # 기록을 가져오는 사이트 이름. 오류 문구에 쓴다.
+    net_name: str = "CHUNITHM-NET"
     # 후보곡 상승폭·남은 점수의 기준점이 되는 점수(츄니즘은 SSS).
     candidate_target_score: int
 

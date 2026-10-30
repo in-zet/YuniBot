@@ -127,7 +127,7 @@ class _FakeRecords:
     async def rating_deltas(self, player_id: str) -> RatingDeltas | None:
         return self.deltas.get(player_id)
 
-    async def pb_row(self, player_id: str, *, song_title: str, difficulty: str) -> PbRow | None:
+    async def pb_row(self, player_id: str, *, song_title: str, difficulty: str, chart_type: str = "") -> PbRow | None:
         for row in self.pbs.get(player_id, []):
             if (row.song_title, row.difficulty) == (song_title, difficulty):
                 return row
@@ -155,7 +155,7 @@ class _FakeSongDb:
     def __init__(self, consts: dict[tuple[str, str], float] | None = None) -> None:
         self._consts = consts or {}
 
-    def const_for(self, title: str, difficulty: str) -> float | None:
+    def const_for(self, title: str, difficulty: str, chart_type: str = "") -> float | None:
         return self._consts.get((title, difficulty))
 
 

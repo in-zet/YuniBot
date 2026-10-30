@@ -30,9 +30,11 @@ def rating_text(
     return unknown if value is None else f"{_fixed(value, places):f}"
 
 
-def rating_delta_text(current: Decimal | float | str, previous: Decimal | float | str) -> str:
-    """레이팅 변화량: 부호를 붙여 소수 넷째 자리까지 항상(+0.0000)."""
-    difference = _fixed(current, RATING_PLACES) - _fixed(previous, RATING_PLACES)
+def rating_delta_text(
+    current: Decimal | float | str, previous: Decimal | float | str, *, places: int = RATING_PLACES
+) -> str:
+    """레이팅 변화량: 부호를 붙여 소수 넷째 자리까지 항상(+0.0000). maimai 전체 레이팅은 정수라 places=0."""
+    difference = _fixed(current, places) - _fixed(previous, places)
     return f"{difference:+f}"
 
 

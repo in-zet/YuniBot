@@ -71,7 +71,7 @@ class _RecordingBus(EventBus):
         self.calls: list[tuple[str, Any]] = []
         self._sections = sections
 
-    async def emit_gather(self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None) -> list[Section]:
+    async def emit_gather(self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None, game: str | None = None) -> list[Section]:
         self.calls.append((event_name, payload))
         return list(self._sections)
 

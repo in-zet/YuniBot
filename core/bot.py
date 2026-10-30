@@ -528,6 +528,7 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     event_bus.bind_dispatch(
         services=services, tag_provider=players, settings=settings_service, db=conn, scheduler=scheduler,
         tables=table_store,
+        game_services={game: bundle.skill_services() for game, bundle in all_games.items()},
     )
 
     # http_service는 client보다 먼저 만든다 — client 생성자가 shutdown용으로 쥐고 있어야

@@ -63,7 +63,7 @@ class _FakeRecords:
     pbs: dict[tuple[str, str, str], PbRow] = field(default_factory=dict)
     summaries: dict[str, SyncLogSummary] = field(default_factory=dict)
 
-    async def pb_row(self, player_id: str, *, song_title: str, difficulty: str) -> PbRow | None:
+    async def pb_row(self, player_id: str, *, song_title: str, difficulty: str, chart_type: str = "") -> PbRow | None:
         return self.pbs.get((player_id, song_title, difficulty))
 
     async def latest_sync_summary(self, player_id: str) -> SyncLogSummary | None:
@@ -450,7 +450,7 @@ class _RecordingBus(EventBus):
         super().__init__()
         self.emitted: list[tuple[str, Any]] = []
 
-    async def emit_notify(self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None) -> None:
+    async def emit_notify(self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None, game: str | None = None) -> None:
         self.emitted.append((event_name, payload))
 
 

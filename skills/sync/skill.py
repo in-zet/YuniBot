@@ -11,9 +11,17 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 
 from core.decorators import tool
 from core.events import Section
-from core.tool_types import ArcadeRef, ChartRef, Display, ToolContext, ToolResult
+from core.tool_types import (
+    ArcadeRef,
+    ChartRef,
+    Display,
+    GameRef,
+    ToolContext,
+    ToolResult,
+)
 from services.common.arcades import Arcade
 from services.game.chart_ref import ResolvedChart
+from services.game.registry import profile_for
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +57,14 @@ async def _cooldown_remaining(ctx: ToolContext, last_sync_at: str | None) -> int
     return max(0, math.ceil(cooldown - elapsed))
 
 
+def _focus_item(focus: ResolvedChart) -> dict[str, str]:
+    """리포트가 볼 채보. 채보 종류가 있는 게임(maimai)만 종류를 싣는다."""
+    item = {"song_title": focus.song.title, "difficulty": focus.chart.difficulty}
+    if focus.chart.chart_type:
+        item["chart_type"] = focus.chart.chart_type
+    return item
+
+
 def _render(yuni_line: str, sections: list[Section], footer: str | None) -> str:
     """유니 한마디(맨 위) + 표시물이 있는 조각의 content(이미 order 순) + 꼬리말을 잇는다.
     display가 None인 조각(귀띔만 주는 조각)은 표시하지 않는다."""
@@ -64,11 +80,16 @@ def _render(yuni_line: str, sections: list[Section], footer: str | None) -> str:
 
 @tool(slash="동기화", tags=["sega-linked"], cost="network")
 async def run(
-    ctx: ToolContext, focus: ChartRef | None = None, quiet: bool = False, arcade: ArcadeRef | None = None
+    ctx: ToolContext,
+    focus: ChartRef | None = None,
+    quiet: bool = False,
+    arcade: ArcadeRef | None = None,
+    game: GameRef | None = None,
 ) -> ToolResult:
-    """CHUNITHM-NET에서 최신 기록을 가져와 저장하고, 지난 동기화와의 차이를 리포트로 낸다. focus로 볼 채보 하나, arcade로 친 오락실을 넘길 수 있다."""
+    """CHUNITHM-NET이나 maimai DX NET에서 최신 기록을 가져와 저장하고, 지난 동기화와의 차이를 리포트로 낸다. focus로 볼 채보 하나, arcade로 친 오락실, game으로 게임(츄니즘·마이마이)을 넘길 수 있다."""
     assert focus is None or isinstance(focus, ResolvedChart)
     assert arcade is None or isinstance(arcade, Arcade)
+    net_name = profile_for(ctx.game).net_name
 
     # save_sync가 이번 시각으로 덮어쓰기 전에 "직전" 동기화 시각을 읽어 둔다.
     previous_synced_at: str | None = await ctx.records.last_sync_at(ctx.player_id)
@@ -82,7 +103,7 @@ async def run(
     try:
         snapshot = await ctx.chunithm_net.fetch_snapshot(ctx.player_id, ctx=ctx)
     except MaintenanceError:
-        return ToolResult(error="CHUNITHM-NET이 점검 중이야. 점검이 끝나면 다시 동기화해 줘.")
+        return ToolResult(error=f"{net_name}이 점검 중이야. 점검이 끝나면 다시 동기화해 줘.")
     except (AuthenticationError, ConnectionError):
         return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
 
@@ -115,14 +136,14 @@ async def run(
         "is_first_sync": False,
         # 지금은 채보 하나만 받지만, 여러 개를 받게 될 자리를 위해 리스트 모양을 유지한다.
         "focus": (
-            [{"song_title": focus.song.title, "difficulty": focus.chart.difficulty}] if focus is not None else None
+            [_focus_item(focus)] if focus is not None else None
         ),
         "previous_synced_at": previous_synced_at,
         "arcade_id": arcade.id if arcade is not None else None,
     }
 
     # 변화가 없어도 모은다 — 받는 쪽이 has_new_plays를 보고 현재값만 돌려준다.
-    sections = await ctx.emit_gather("chunithm.sync.completed", completed)
+    sections = await ctx.emit_gather(f"{ctx.game}.sync.completed", completed)
     yuni_line = "" if quiet else await ctx.yuni.line(sections, player_id=ctx.player_id, guild_id=ctx.guild_id)
 
     footer: str | None = None
@@ -133,7 +154,7 @@ async def run(
         )
         footer = (
             f"※ 계산한 레이팅({rating_data['computed_rating']})이 "
-            f"CHUNITHM-NET 표시값({rating_data['displayed_rating']})과 어긋나."
+            f"{net_name} 표시값({rating_data['displayed_rating']})과 어긋나."
         )
     rendered_text = _render(yuni_line, sections, footer) or "동기화를 마쳤어."
 
@@ -152,7 +173,7 @@ async def run(
 
     sections_data = [section.data for section in sections]
     await ctx.emit(
-        "chunithm.sync.reported",
+        f"{ctx.game}.sync.reported",
         {
             **completed,
             "rendered_text": rendered_text,

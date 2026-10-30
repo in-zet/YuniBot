@@ -88,7 +88,7 @@ async def test_chart_names_the_chart_type_and_emits_the_games_event(songdb) -> N
     seen: list[tuple[str, object]] = []
 
     class _Bus(EventBus):
-        async def emit_gather(self, event_name, payload, *, player_id, guild_id):  # type: ignore[override]
+        async def emit_gather(self, event_name, payload, *, player_id, guild_id, game=None):  # type: ignore[override]
             seen.append((event_name, payload))
             return []
 

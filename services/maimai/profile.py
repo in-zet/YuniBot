@@ -36,6 +36,10 @@ MAIMAI = GameProfile(
     version_order=tuple(VERSION_NAMES.values()),
     best_frame_size=35,
     new_frame_size=15,
+    best_label="구곡 35",
+    new_label="신곡 15",
+    candidate_target_label="SSS+",
+    net_name="maimai DX NET",
     # 후보곡 기준점은 SSS+(달성률 100.5%)다. 점수는 달성률 ×10000으로 저장한다. Part 5에서 레이팅 공식과 함께 다시 본다.
     candidate_target_score=1_005_000,
     terms_path=Path(__file__).parent / "data" / "terms.yaml",

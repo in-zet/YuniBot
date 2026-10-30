@@ -77,6 +77,7 @@ class EventBus:
         self._db: Any = None
         self._scheduler: Any = None
         self._tables: Any = None
+        self._game_services: Mapping[str, Mapping[str, object]] = {}
 
     def bind_dispatch(
         self,
@@ -87,6 +88,7 @@ class EventBus:
         db: Any = None,
         scheduler: Any = None,
         tables: Any = None,
+        game_services: Mapping[str, Mapping[str, object]] | None = None,
     ) -> None:
         """build_client()가 services/players/settings_service를 다 만든 뒤 한 번 부른다.
 
@@ -107,6 +109,7 @@ class EventBus:
         self._db = db
         self._scheduler = scheduler
         self._tables = tables
+        self._game_services = game_services or {}
 
     def register_notify(
         self,
@@ -153,7 +156,7 @@ class EventBus:
         )
 
     async def _build_handler_ctx(
-        self, handler: _Handler, *, player_id: str, guild_id: str | None
+        self, handler: _Handler, *, player_id: str, guild_id: str | None, game: str | None = None
     ) -> ToolContext | None:
         if (
             guild_id is not None
@@ -171,6 +174,13 @@ class EventBus:
         scoped_services = {
             name: self._services[name] for name in handler.skill_services if name in self._services
         }
+        # 이벤트를 낸 쪽이 다루는 게임이 있으면, 핸들러가 선언한 서비스 중 게임별인 것은 그 게임 것으로 바꾼다
+        # (도구 실행기가 `ctx.game`에 맞춰 서비스를 바꾸는 것과 같다).
+        game_kwargs: dict[str, Any] = {}
+        if game is not None:
+            overlay = self._game_services.get(game, {})
+            scoped_services.update({name: value for name, value in overlay.items() if name in scoped_services})
+            game_kwargs["game"] = game
         from core.tool_types import (
             ToolContext,  # 지연 import — 위 TYPE_CHECKING 주석 참고
         )
@@ -184,10 +194,11 @@ class EventBus:
             db=self._db if "db" in handler.skill_services else None,
             scheduler=self._scheduler if "scheduler" in handler.skill_services else None,
             tables=self._tables if "tables" in handler.skill_services else None,
+            **game_kwargs,
         )
 
     async def emit_notify(
-        self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None
+        self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None, game: str | None = None
     ) -> None:
         if _chain_depth.get() > self._max_chain_depth:
             logger.warning("event chain depth exceeded, dropping %s", event_name)
@@ -195,17 +206,17 @@ class EventBus:
 
         for handler in self._notify_handlers.get(event_name, []):
             task = asyncio.create_task(
-                self._run_notify_handler(handler, payload, player_id=player_id, guild_id=guild_id)
+                self._run_notify_handler(handler, payload, player_id=player_id, guild_id=guild_id, game=game)
             )
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
 
     async def _run_notify_handler(
-        self, handler: _Handler, payload: Any, *, player_id: str, guild_id: str | None
+        self, handler: _Handler, payload: Any, *, player_id: str, guild_id: str | None, game: str | None
     ) -> None:
         token = _chain_depth.set(_chain_depth.get() + 1)
         try:
-            ctx = await self._build_handler_ctx(handler, player_id=player_id, guild_id=guild_id)
+            ctx = await self._build_handler_ctx(handler, player_id=player_id, guild_id=guild_id, game=game)
             if ctx is None:
                 return
             await handler.fn(ctx, payload)
@@ -215,7 +226,7 @@ class EventBus:
             _chain_depth.reset(token)
 
     async def emit_gather(
-        self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None
+        self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None, game: str | None = None
     ) -> list[Section]:
         handlers = self._gather_handlers.get(event_name, [])
         if not handlers:
@@ -225,7 +236,7 @@ class EventBus:
         try:
             results = await asyncio.gather(
                 *(
-                    self._run_gather_handler(h, payload, player_id=player_id, guild_id=guild_id)
+                    self._run_gather_handler(h, payload, player_id=player_id, guild_id=guild_id, game=game)
                     for h in handlers
                 ),
                 return_exceptions=False,
@@ -238,10 +249,10 @@ class EventBus:
         return [section for _, section in sections]
 
     async def _run_gather_handler(
-        self, handler: _Handler, payload: Any, *, player_id: str, guild_id: str | None
+        self, handler: _Handler, payload: Any, *, player_id: str, guild_id: str | None, game: str | None
     ) -> tuple[str, Section | None]:
         try:
-            ctx = await self._build_handler_ctx(handler, player_id=player_id, guild_id=guild_id)
+            ctx = await self._build_handler_ctx(handler, player_id=player_id, guild_id=guild_id, game=game)
             if ctx is None:
                 return handler.owner_skill, None
             section = await asyncio.wait_for(handler.fn(ctx, payload), timeout=self._gather_timeout)

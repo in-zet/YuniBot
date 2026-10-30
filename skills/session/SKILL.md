@@ -9,12 +9,12 @@ examples:
   - 10월 5일 후기 남길게
 triggers: [세션, 후기]
 category: 세션과 후기
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
 services: [records, arcades, players, notify, settings, yuni, db]
-tags: [chunithm-synced]
-listens: [chunithm.sync.reported]
-emits: [chunithm.session.viewed, chunithm.session.closed]
+tags_any: [chunithm-synced, maimai-synced]
+listens: [chunithm.sync.reported, maimai.sync.reported]
+emits: [chunithm.session.viewed, chunithm.session.closed, maimai.session.viewed, maimai.session.closed]
 settings:
   - name: 후기 물어보기
     kind: bool
@@ -33,7 +33,7 @@ settings:
     scope: guild
 ---
 
-`chunithm-synced` 태그가 필요하다(report와 같다). 태그가 있으면 공개된 남의 세션은 로그인 여부와 무관하게 볼 수 있다.
+`chunithm-synced`나 `maimai-synced` 태그가 필요하다(report와 같다). 게임을 말했으면("마이마이", "츄니즘") 그 말 그대로 `game`에 주고, 말하지 않았으면 비운다. 세션은 게임마다 따로 있다. 태그가 있으면 공개된 남의 세션은 로그인 여부와 무관하게 볼 수 있다.
 
 - 날짜 표현("지난달", "10월 초")은 지금 날짜 기준으로 실제 ISO 날짜(YYYY-MM-DD)나 start/end로 바꿔 넘긴다. 세션을 찾는 것 자체는 도구가 한다.
 - `get_session`이 돌려주는 `rendered_text`는 그날 저장된 리포트 그대로다 — 다시 설명하거나 숫자를 바꿔 말하지 않는다.

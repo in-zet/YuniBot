@@ -28,18 +28,20 @@ from core.tool_types import (
     ChartRef,
     DifficultyRef,
     Display,
+    GameRef,
     PlayerRef,
     TableRef,
     ToolContext,
     ToolResult,
 )
-from services.chunithm.songdb import LONG_TO_SHORT_DIFFICULTY
 from services.common.players import Player
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
+from services.game.profile import GameProfile
 from services.game.rating_format import (
     rating_delta_text,
     rating_text,
+    score_text,
     song_rating_text,
 )
 from services.game.records import (
@@ -48,6 +50,7 @@ from services.game.records import (
     RatingDeltas,
     SyncDiff,
 )
+from services.game.registry import profile_for
 from services.game.songdb import ConstRangeHit
 from services.game.terms import ResolvedDifficulty
 
@@ -88,22 +91,32 @@ async def _target_player(ctx: ToolContext, player: PlayerRef | None) -> Player |
     return player
 
 
-def _song_rating(value: Decimal | None) -> str:
-    return song_rating_text(value, unknown=_UNKNOWN)
+def _profile(ctx: ToolContext) -> GameProfile:
+    return profile_for(ctx.game)
 
 
-def _rating(value: Decimal | None) -> str:
+def _song_rating(value: Decimal | None, profile: GameProfile) -> str:
+    return song_rating_text(value, unknown=_UNKNOWN, places=profile.song_rating_places)
+
+
+def _overall(value: Decimal | None, profile: GameProfile) -> str:
+    """플레이어 전체 레이팅(CHUNITHM 소수 넷째 자리, maimai 정수)."""
+    return rating_text(value, unknown=_UNKNOWN, places=profile.overall_places)
+
+
+def _average(value: Decimal | None) -> str:
+    """프레임 평균(곡 레이팅의 평균이라 두 게임 모두 소수 넷째 자리)."""
     return rating_text(value, unknown=_UNKNOWN)
 
 
-def _delta(current: Decimal | None, previous: Decimal | None) -> str:
+def _delta(current: Decimal | None, previous: Decimal | None, *, places: int | None = None) -> str:
     if current is None or previous is None:
         return _UNKNOWN
-    return rating_delta_text(current, previous)
+    return rating_delta_text(current, previous) if places is None else rating_delta_text(current, previous, places=places)
 
 
-def _score(value: int) -> str:
-    return f"{value:,}"
+def _score(value: int, profile: GameProfile) -> str:
+    return score_text(value, percent=profile.score_is_percent)
 
 
 def _const_text(const: float | None) -> str:
@@ -115,10 +128,10 @@ def _short_date(iso_date: str) -> str:
     return f"{iso_date[5:7]}/{iso_date[8:10]}"
 
 
-def _contribution(rating: Decimal | None) -> str:
-    # 전체 레이팅 = (베스트30 + 신곡20 곡 레이팅 합) / 50. 곡 레이팅이 둘째 자리 값이라 /50은
-    # 넷째 자리에서 정확히 끝난다(반올림이 필요 없다).
-    return _UNKNOWN if rating is None else str(rating / 50)
+def _contribution(rating: Decimal | None, profile: GameProfile) -> str:
+    # 전체 레이팅 = 프레임 곡 레이팅 합 / rating_divisor(CHUNITHM 50). 곡 레이팅이 둘째 자리 값이라 /50은
+    # 넷째 자리에서 정확히 끝난다(반올림이 필요 없다). maimai는 나누지 않아 곡 레이팅 그대로다.
+    return _UNKNOWN if rating is None else str(rating / profile.rating_divisor)
 
 
 def _const_range_texts(min_const: float | None, max_const: float | None) -> list[str]:
@@ -130,73 +143,104 @@ def _const_range_texts(min_const: float | None, max_const: float | None) -> list
     return [f"상수 {low}~{high}"]
 
 
-def _pb_data(row: PbRow) -> dict[str, Any]:
-    return {
+def _pb_data(row: PbRow, profile: GameProfile) -> dict[str, Any]:
+    data: dict[str, Any] = {
         "song_title": row.song_title, "difficulty": row.difficulty, "score": row.score, "rank": row.rank,
         "clear_lamp": row.clear_lamp, "combo_lamp": row.combo_lamp, "chain_lamp": row.chain_lamp,
-        "const": row.const, "rating": _song_rating(row.rating),
+        "const": row.const, "rating": _song_rating(row.rating, profile),
+    }
+    if row.chart_type:
+        data["chart_type"] = row.chart_type
+    if row.dx_score is not None:
+        data["dx_score"] = row.dx_score
+    return data
+
+
+def _metric_labels(profile: GameProfile) -> dict[str, str]:
+    return {
+        "computed_rating": "레이팅".ljust(8),
+        "best30_average": profile.best_label.ljust(8),
+        "new20_average": profile.new_label.ljust(8),
     }
 
 
-_METRIC_LABELS = {"computed_rating": "레이팅    ", "best30_average": "베스트 30 ", "new20_average": "신곡 20   "}
+def _metric_text(key: str, value: Decimal | None, profile: GameProfile) -> str:
+    return _overall(value, profile) if key == "computed_rating" else _average(value)
 
 
 # ---------------------------------------------------------------- 도구
 
 
 @tool(slash="프로필")
-async def profile(ctx: ToolContext, player: PlayerRef | None = None) -> ToolResult:
-    """닉네임, 레이팅·베스트 30 평균·신곡 20 평균(지금 값), 마지막 동기화 시각을 보여준다. player를 비우면 본인이다."""
+async def profile(ctx: ToolContext, player: PlayerRef | None = None, game: GameRef | None = None) -> ToolResult:
+    """닉네임, 레이팅·베스트 평균·신곡 평균(CHUNITHM은 베스트 30·신곡 20, maimai는 구곡 35·신곡 15)의 지금 값과 마지막 동기화 시각을 보여준다. player를 비우면 본인이다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
     summary = await ctx.records.latest_sync_summary(target.id)
     if summary is None:
         return ToolResult(error=_NOT_SYNCED_ERROR)
+    game_profile = _profile(ctx)
+    labels = _metric_labels(game_profile)
 
     # 직전 동기화 대비 변화량은 여기서 안 보여준다 — 동기화 리포트(세션 맥락) 전용이다
     # (사용자 확인 2026-10-18: 단순 조회에 변화량을 같이 보여줄 근거가 없었다).
     data: dict[str, Any] = {
         "player_id": target.id,
         "nickname": summary.nickname,
-        "computed_rating": _rating(summary.computed_rating),
-        "best30_average": _rating(summary.best30_average),
-        "new20_average": _rating(summary.new20_average),
+        "computed_rating": _overall(summary.computed_rating, game_profile),
+        "best30_average": _average(summary.best30_average),
+        "new20_average": _average(summary.new20_average),
         "last_synced_at": summary.last_synced_at,
     }
     lines = [
         f"{summary.nickname or '(닉네임 없음)'}",
-        f"{_METRIC_LABELS['computed_rating']}  {_rating(summary.computed_rating)}",
-        f"{_METRIC_LABELS['best30_average']}  {_rating(summary.best30_average)}",
-        f"{_METRIC_LABELS['new20_average']}  {_rating(summary.new20_average)}",
+        f"{labels['computed_rating']}  {data['computed_rating']}",
+        f"{labels['best30_average']}  {data['best30_average']}",
+        f"{labels['new20_average']}  {data['new20_average']}",
         f"마지막 동기화  {summary.last_synced_at}",
     ]
     return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
 
 
 _CONTRIBUTION = "기여"
-_BEST_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
-# 한 줄 서식(램프는 글자 출력에서 숨긴다 — 줄 모양은 지금 베스트 줄 그대로).
-_BEST_ROW_FORMAT = "{곡} {난이도} {상수}  {점수} {랭크}  곡 레이팅 {곡 레이팅}"
+_SCORE_TAIL = (tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
 
 
-def _pb_row_cells(row: PbRow, rank_scores: dict[str, int]) -> dict[str, Cell]:
+def _identity_format(game: str) -> str:
+    """채보를 가리키는 칸을 한 줄에 늘어놓는 서식 머리("{곡} {난이도}", maimai는 "{곡} {종류} {난이도}")."""
+    return " ".join("{" + name + "}" for name in tc.identity_columns(game))
+
+
+def _best_columns(game: str) -> tuple[str, ...]:
+    return (*tc.identity_columns(game), *_SCORE_TAIL)
+
+
+def _best_row_format(game: str) -> str:
+    # 한 줄 서식(램프는 글자 출력에서 숨긴다 — 줄 모양은 지금 베스트 줄 그대로).
+    return f"{_identity_format(game)} {{상수}}  {{점수}} {{랭크}}  곡 레이팅 {{곡 레이팅}}"
+
+
+def _pb_row_cells(row: PbRow, rank_scores: dict[str, int], game: str) -> dict[str, Cell]:
+    profile = profile_for(game)
     cells = {
-        tc.SONG: tc.song_cell(row.song_title),
-        tc.DIFFICULTY: tc.difficulty_cell(row.difficulty),
+        **tc.identity_cells(row.song_title, row.chart_type, row.difficulty, game),
         tc.CONST: tc.const_cell(row.const),
-        **tc.pb_cells(row, rank_scores),
+        **tc.pb_cells(row, rank_scores, game=game),
     }
     cells[_CONTRIBUTION] = (
-        cell(float(row.rating / 50), _contribution(row.rating)) if row.rating is not None
+        cell(float(row.rating / profile.rating_divisor), _contribution(row.rating, profile))
+        if row.rating is not None
         else cell(None, _UNKNOWN)
     )
     return cells
 
 
 @tool(slash="베스트")
-async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind = BestKind.BOTH) -> ToolResult:
-    """베스트 30과 신곡 20 표(채보, 점수, 곡 레이팅, 전체 레이팅 기여도)를 돌려준다. kind는 best(베스트 30), new(신곡 20), both(둘 다)."""
+async def best(
+    ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind = BestKind.BOTH, game: GameRef | None = None
+) -> ToolResult:
+    """베스트 30과 신곡 20 표(maimai는 구곡 35와 신곡 15)에 채보, 점수, 곡 레이팅, 전체 레이팅 기여도를 담아 돌려준다. kind는 best(베스트·구곡), new(신곡), both(둘 다)."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
@@ -211,32 +255,33 @@ async def best(ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind
     if summary is None:
         return ToolResult(error=_NOT_SYNCED_ERROR)
     profile_row = await ctx.records.player_profile(target.id)
+    game_profile = _profile(ctx)
 
     # 변화량은 여기서 안 보여준다 — profile()과 같은 이유(동기화 리포트 전용).
     frames: list[tuple[str, list[PbRow], Decimal | None]] = []
     if kind in (BestKind.BEST, BestKind.BOTH):
-        frames.append(("베스트 30", best_rows, summary.best30_average))
+        frames.append((game_profile.best_label, best_rows, summary.best30_average))
     if kind in (BestKind.NEW, BestKind.BOTH):
-        frames.append(("신곡 20", new_rows, summary.new20_average))
+        frames.append((game_profile.new_label, new_rows, summary.new20_average))
 
     builder = TableBuilder(subject=target.id, unit="채보")
-    tc.add_columns(builder, *_BEST_COLUMNS)
+    tc.add_columns(builder, *_best_columns(ctx.game), game=ctx.game)
     builder.column(_CONTRIBUTION, value_type="number", hidden_in_text=True)  # 물을 때만 `columns`로 보인다
-    builder.row_formats([_BEST_ROW_FORMAT])
+    builder.row_formats([_best_row_format(ctx.game)])
     builder.step(" · ".join(title for title, _, _ in frames))
     header: dict[str, str] = {"닉네임": summary.nickname or "(닉네임 없음)"}
     if profile_row is not None and profile_row.level is not None:
         header["레벨"] = str(profile_row.level)
-    header["레이팅"] = _rating(summary.computed_rating)
+    header["레이팅"] = _overall(summary.computed_rating, game_profile)
     builder.summary(header)
 
     rank_scores = ctx.terms.rank_scores()
     for title, rows, average in frames:
-        builder.group(title, {"평균": _rating(average)})
+        builder.group(title, {"평균": _average(average)})
         for r in rows:
-            builder.row(tc.chart_ref(r.song_title, r.difficulty), _pb_row_cells(r, rank_scores))
+            builder.row(tc.chart_ref(r.song_title, r.difficulty, r.chart_type), _pb_row_cells(r, rank_scores, ctx.game))
     return ToolResult(
-        data={"player_id": target.id, "kind": kind.value, "computed_rating": _rating(summary.computed_rating)},
+        data={"player_id": target.id, "kind": kind.value, "computed_rating": _overall(summary.computed_rating, game_profile)},
         table=builder.build(),
     )
 
@@ -264,15 +309,15 @@ async def add_scores(
     if isinstance(target, ToolResult):
         return target
 
-    key_of = _table_chart_key
+    key_of = _row_key
     pbs = await ctx.records.pb_rows_for(target.id, [key_of(row) for row in table.rows])
     rank_scores = ctx.terms.rank_scores()
 
     owner = await _owner_label(ctx, target)
     extended = extend_table(
         table,
-        tc.common_columns(*_SCORE_COLUMNS),
-        lambda row: tc.pb_cells(pbs.get(key_of(row)), rank_scores),
+        tc.common_columns(*_SCORE_COLUMNS, game=ctx.game),
+        lambda row: tc.pb_cells(pbs.get(key_of(row)), rank_scores, game=ctx.game),
         steps=[owner],
     )
     return ToolResult(
@@ -281,8 +326,7 @@ async def add_scores(
     )
 
 
-_CONST_TABLE_COLUMNS = (tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
-_DIFFICULTY_RANK = {name: index for index, name in enumerate(tc.DIFFICULTY_ORDER)}
+_CONST_TABLE_TAIL = (tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
 
 
 @tool()
@@ -293,6 +337,7 @@ async def const_table(
     difficulty: DifficultyRef | None = None,
     only_played: bool = False,
     player: PlayerRef | None = None,
+    game: GameRef | None = None,
 ) -> ToolResult:
     """상수표: 상수 범위의 채보를 상수별로 묶고(큰 상수부터), 묶음 안은 난이도가 높은 순, 같은 난이도는 점수 높은 순으로
     늘어놓은 표에 점수·랭크·램프·곡 레이팅을 붙여 준다. 상수를 모르는 채보는 빠진다. 위쪽 한계를 말하지 않았으면 max_const를
@@ -305,27 +350,33 @@ async def const_table(
     code = None
     if difficulty is not None:
         assert isinstance(difficulty, ResolvedDifficulty)
-        code = LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
+        code = tc.LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
     hits = ctx.songdb.find_songs(min_const=min_const, max_const=max_const, difficulty=code)
-    pbs = await ctx.records.pb_rows_for(target.id, [(hit.song.title, hit.chart.difficulty) for hit in hits])
+    pbs = await ctx.records.pb_rows_for(target.id, [_hit_key(hit) for hit in hits])
     if only_played:
-        hits = [hit for hit in hits if (hit.song.title, hit.chart.difficulty) in pbs]
+        hits = [hit for hit in hits if _hit_key(hit) in pbs]
     if not hits:
         return ToolResult(
             data={"count": 0},
             display=Display(content="점수가 있는 채보가 없어." if only_played else "해당 범위의 채보가 없어."),
         )
 
-    def order(hit: ConstRangeHit) -> tuple[float, int, int, str]:
+    difficulty_rank = {name: index for index, name in enumerate(_profile(ctx).long_to_short)}
+
+    def order(hit: ConstRangeHit) -> tuple[float, int, int, str, str]:
         assert hit.chart.const is not None  # min_const를 줬으니 상수를 아는 채보만 온다
-        pb = pbs.get((hit.song.title, hit.chart.difficulty))
+        pb = pbs.get(_hit_key(hit))
         long_name = tc.SHORT_TO_LONG_DIFFICULTY.get(hit.chart.difficulty, hit.chart.difficulty)
         # 상수 → 난이도 → 점수가 모두 높은 쪽이 먼저. 기록 없는 채보는 점수 -1이라 같은 난이도 맨 뒤.
-        return (-hit.chart.const, -_DIFFICULTY_RANK.get(long_name, -1), -(pb.score if pb else -1), hit.song.title)
+        return (
+            -hit.chart.const, -difficulty_rank.get(long_name, -1), -(pb.score if pb else -1), hit.song.title,
+            hit.chart.chart_type,
+        )
 
     rank_scores = ctx.terms.rank_scores()
+    identity = tc.identity_columns(ctx.game)
     builder = TableBuilder(subject=target.id, unit="채보")
-    tc.add_columns(builder, *_CONST_TABLE_COLUMNS)
+    tc.add_columns(builder, *identity, *_CONST_TABLE_TAIL, game=ctx.game)
     builder.step(" ".join(part for part in (tc.const_range_text(min_const, max_const), code) if part))
     builder.step(await _owner_label(ctx, target))
     if only_played:
@@ -336,16 +387,29 @@ async def const_table(
             current = hit.chart.const
             builder.group(f"{current:.1f}")
         builder.row(
-            tc.chart_ref(hit.song.title, hit.chart.difficulty),
+            tc.chart_ref(hit.song.title, hit.chart.difficulty, hit.chart.chart_type),
             {
-                **tc.chart_cells(hit.song, hit.chart, (tc.SONG, tc.DIFFICULTY, tc.CONST)),
-                **tc.pb_cells(pbs.get((hit.song.title, hit.chart.difficulty)), rank_scores),
+                **tc.chart_cells(hit.song, hit.chart, (*identity, tc.CONST)),
+                **tc.pb_cells(pbs.get(_hit_key(hit)), rank_scores, game=ctx.game),
             },
         )
     return ToolResult(
-        data={"player_id": target.id, "count": len(hits), "with_record": sum(1 for h in hits if (h.song.title, h.chart.difficulty) in pbs)},
+        data={"player_id": target.id, "count": len(hits), "with_record": sum(1 for h in hits if _hit_key(h) in pbs)},
         table=builder.build(),
     )
+
+
+def _pb_key(title: str, chart_type: str, difficulty: str) -> tuple[str, ...]:
+    """`pb_rows_for`에 넘기는 채보 키. 채보 종류가 없는 게임은 (제목, 난이도), 있는 게임은 (제목, 종류, 난이도)."""
+    return (title, chart_type, difficulty) if chart_type else (title, difficulty)
+
+
+def _hit_key(hit: ConstRangeHit) -> tuple[str, ...]:
+    return _pb_key(hit.song.title, hit.chart.chart_type, hit.chart.difficulty)
+
+
+def _row_key(row: Row) -> tuple[str, ...]:
+    return _pb_key(*tc.row_chart_key(row))
 
 
 _CONST_BAND = "report.const_band"
@@ -354,12 +418,7 @@ _BAND_COUNT = "채보 수"
 _BAND_AVERAGE = "평균 점수"
 _BAND_RANKS = "랭크 분포"
 _ANALYZE_FORMAT = "{상수대}대  {채보 수}채보  평균 {평균 점수}  ({랭크 분포})"
-_REMAINING = "SSS까지 남은 점수"
 _UPSIDE = "상승폭"
-_CANDIDATE_FORMATS = (
-    "{곡} {난이도} {상수}  현재 {점수}  SSS까지 {SSS까지 남은 점수}점  상승폭 +{상승폭}",
-    "{곡} {난이도} {상수}  현재 {점수}  상승폭 +{상승폭}",
-)
 _PLAY = "report.play"
 _PLAY_TIME = "플레이 시각"
 _JUDGEMENT_COLUMNS = ("JC", "J", "A", "M")
@@ -378,7 +437,7 @@ def _judgement_cells(score: RecentScore) -> dict[str, Cell]:
     return {name: cell(value) for name, value in zip(_JUDGEMENT_COLUMNS, values, strict=True)}
 
 
-@tool(slash="최근", cost="network")
+@tool(slash="최근", cost="network", games=["chunithm"])
 async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int = 10) -> ToolResult:
     """CHUNITHM-NET 최근 플레이 이력을 count개 표로 보여준다. 판정 수는 앞 20개에만 붙는다."""
     target = await _target_player(ctx, player)
@@ -432,23 +491,33 @@ async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int =
 
 
 @tool(slash="기록")
-async def record(ctx: ToolContext, chart: ChartRef, player: PlayerRef | None = None) -> ToolResult:
+async def record(
+    ctx: ToolContext, chart: ChartRef, player: PlayerRef | None = None, game: GameRef | None = None
+) -> ToolResult:
     """채보 하나의 최고 기록(점수, 랭크, 램프, 곡 레이팅)을 보여준다. player를 비우면 본인이다."""
     assert isinstance(chart, ResolvedChart)
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
-    row = await ctx.records.pb_row(target.id, song_title=chart.song.title, difficulty=chart.chart.difficulty)
+    row = await ctx.records.pb_row(
+        target.id, song_title=chart.song.title, difficulty=chart.chart.difficulty, chart_type=chart.chart.chart_type
+    )
+    chart_name = " ".join(part for part in (chart.song.title, chart.chart.chart_type, chart.chart.difficulty) if part)
     if row is None:
-        return ToolResult(error=f"{chart.song.title} {chart.chart.difficulty}는 플레이한 기록이 없어.")
+        return ToolResult(error=f"{chart_name}는 플레이한 기록이 없어.")
 
+    game_profile = _profile(ctx)
+    # 클리어 램프가 없는 게임(maimai)은 콤보·싱크 램프를 보인다.
+    lamps = (row.clear_lamp, row.combo_lamp) if game_profile.clear_lamp_order else (row.combo_lamp, row.chain_lamp)
+    head = " ".join(part for part in (row.song_title, row.chart_type, row.difficulty) if part)
+    dx_line = "" if row.dx_score is None else f"\nDX 점수 {row.dx_score:,}"
     content = (
-        f"{row.song_title} {row.difficulty}{_const_text(row.const)}\n"
-        f"{_score(row.score)} {row.rank}  {row.clear_lamp} / {row.combo_lamp}\n"
-        f"곡 레이팅 {_song_rating(row.rating)}"
+        f"{head}{_const_text(row.const)}\n"
+        f"{_score(row.score, game_profile)} {row.rank}  {lamps[0]} / {lamps[1]}{dx_line}\n"
+        f"곡 레이팅 {_song_rating(row.rating, game_profile)}"
     )
     return ToolResult(
-        data={"player_id": target.id, **_pb_data(row)},
+        data={"player_id": target.id, **_pb_data(row, game_profile)},
         display=Display(content=content),
         display_mode="optional",
     )
@@ -500,6 +569,7 @@ async def analyze(
     min_const: float | None = None,
     max_const: float | None = None,
     table: Annotated[TableRef | None, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])] = None,
+    game: GameRef | None = None,
 ) -> ToolResult:
     """플레이한 채보를 상수대(정수 단위)로 묶어 평균 점수와 랭크 분포를 보여준다. 상수 범위로 거를 수 있다.
     표를 주면 그 표의 채보만으로 통계를 낸다("이 폴더 랭크 분포"). 기록이 없는 채보는 세지 않는다."""
@@ -513,6 +583,7 @@ async def analyze_slash(
     player: PlayerRef | None = None,
     min_const: float | None = None,
     max_const: float | None = None,
+    game: GameRef | None = None,
 ) -> ToolResult:
     """플레이한 채보를 상수대(정수 단위)로 묶어 평균 점수와 랭크 분포를 보여준다. 상수 범위로 거를 수 있다."""
     return await _analyze(ctx, player, min_const, max_const, None)
@@ -530,7 +601,7 @@ async def _analyze(
         if not rows:
             return ToolResult(error=_NOT_SYNCED_ERROR)
     else:
-        found = await ctx.records.pb_rows_for(target.id, [_table_chart_key(row) for row in table.rows])
+        found = await ctx.records.pb_rows_for(target.id, [_row_key(row) for row in table.rows])
         rows = list(found.values())
         if not rows:
             return ToolResult(error="그 표의 채보에 플레이 기록이 없어.")
@@ -562,7 +633,7 @@ async def _analyze(
             {
                 _BAND: cell(b.band),
                 _BAND_COUNT: cell(b.chart_count),
-                _BAND_AVERAGE: tc.score_cell(b.average_score),
+                _BAND_AVERAGE: tc.score_cell(b.average_score, percent=_profile(ctx).score_is_percent),
                 _BAND_RANKS: cell(", ".join(f"{rank} {n}" for rank, n in b.ranks.items())),
             },
         )
@@ -572,47 +643,55 @@ async def _analyze(
     )
 
 
-def _table_chart_key(row: Row) -> tuple[str, str]:
-    difficulty = str(row.cell(tc.DIFFICULTY).raw)
-    return str(row.cell(tc.SONG).raw), LONG_TO_SHORT_DIFFICULTY.get(difficulty, difficulty)
-
-
 @tool(slash="후보곡")
 async def candidates(
-    ctx: ToolContext, min_const: float | None = None, max_const: float | None = None, count: int = 10
+    ctx: ToolContext,
+    min_const: float | None = None,
+    max_const: float | None = None,
+    count: int = 10,
+    game: GameRef | None = None,
 ) -> ToolResult:
-    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 표로 보여준다. SSS를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. SSS까지 남은 점수를 붙인다. 상수 범위로 거를 수 있다."""
+    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 표로 보여준다. 기준 점수(CHUNITHM SSS, maimai SSS+)를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. CHUNITHM은 SSS까지 남은 점수를 붙인다. 상수 범위로 거를 수 있다."""
     hits = await ctx.records.candidates(ctx.player_id, min_const=min_const, max_const=max_const, count=max(1, count))
     if not hits:
         return ToolResult(
             data={"min_const": min_const, "max_const": max_const, "count": 0},
             display=Display(content="지금 조건으로는 레이팅을 올릴 후보곡이 없어."),
         )
+    game_profile = _profile(ctx)
+    # 달성률로 말하는 게임(maimai)은 "남은 점수"가 점수 차이가 아니라 노트 가중치에 달려 있어 이 칸을 두지 않는다.
+    with_remaining = not game_profile.score_is_percent
+    remaining_name = f"{game_profile.candidate_target_label}까지 남은 점수"
+    head = _identity_format(ctx.game)
+    formats = (
+        (f"{head} {{상수}}  현재 {{점수}}  {game_profile.candidate_target_label}까지 {{{remaining_name}}}점  상승폭 +{{상승폭}}",)
+        if with_remaining
+        else ()
+    ) + (f"{head} {{상수}}  현재 {{점수}}  상승폭 +{{상승폭}}",)
     builder = TableBuilder(subject=ctx.player_id, unit="채보")
-    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE)
-    builder.column(_REMAINING, value_type="number")
+    tc.add_columns(builder, *tc.identity_columns(ctx.game), tc.CONST, tc.SCORE, game=ctx.game)
+    if with_remaining:
+        builder.column(remaining_name, value_type="number")
     builder.column(_UPSIDE, value_type="number")
-    builder.row_formats(_CANDIDATE_FORMATS)
+    builder.row_formats(formats)
     builder.step(" ".join(["레이팅 후보곡 (상승폭 큰 순)", *_const_range_texts(min_const, max_const)]))
     unknown = sum(1 for h in hits if h.remaining_score is None)
-    if unknown:
+    if with_remaining and unknown:
         # 노트 수를 몰라 남은 점수를 못 구한 채보는 그 칸이 비어 줄에서 빠진다. 빠졌다는 사실은 여기서 알린다.
-        builder.summary({"SSS까지 남은 점수": f"{unknown}채보는 {_UNKNOWN}"})
+        builder.summary({remaining_name: f"{unknown}채보는 {_UNKNOWN}"})
     for h in hits:
-        builder.row(
-            tc.chart_ref(h.song_title, h.difficulty),
-            {
-                tc.SONG: tc.song_cell(h.song_title),
-                tc.DIFFICULTY: tc.difficulty_cell(h.difficulty),
-                tc.CONST: tc.const_cell(h.const),
-                tc.SCORE: tc.score_cell(h.current_score),
-                _REMAINING: (
-                    cell(h.remaining_score, _score(h.remaining_score))
-                    if h.remaining_score is not None else cell(None, _UNKNOWN)
-                ),
-                _UPSIDE: cell(float(h.upside), str(h.upside)),
-            },
-        )
+        cells = {
+            **tc.identity_cells(h.song_title, h.chart_type, h.difficulty, ctx.game),
+            tc.CONST: tc.const_cell(h.const),
+            tc.SCORE: tc.score_cell(h.current_score, percent=game_profile.score_is_percent),
+            _UPSIDE: cell(float(h.upside), str(h.upside)),
+        }
+        if with_remaining:
+            cells[remaining_name] = (
+                cell(h.remaining_score, _score(h.remaining_score, game_profile))
+                if h.remaining_score is not None else cell(None, _UNKNOWN)
+            )
+        builder.row(tc.chart_ref(h.song_title, h.difficulty, h.chart_type), cells)
     return ToolResult(
         data={"min_const": min_const, "max_const": max_const, "count": len(hits)},
         table=builder.build(),
@@ -622,7 +701,7 @@ async def candidates(
 # ---------------------------------------------------------------- 동기화 리포트 조각
 
 
-def _metric_lines(deltas: RatingDeltas | None) -> tuple[list[str], dict[str, Any]]:
+def _metric_lines(deltas: RatingDeltas | None, profile: GameProfile) -> tuple[list[str], dict[str, Any]]:
     """레이팅·베스트30 평균·신곡20 평균의 (직전 →) 현재 (변화량) 줄과 data. 숫자 출처는
     /프로필·/베스트와 같은 records.rating_deltas(동기화 시점 스냅샷)다 — 같은 시점에 리포트와
     프로필이 다른 숫자를 보이지 않게 한다. 세션별로 나누지 않는다."""
@@ -641,31 +720,40 @@ def _metric_lines(deltas: RatingDeltas | None) -> tuple[list[str], dict[str, Any
         else None
     )
     lines: list[str] = []
-    for key, label in _METRIC_LABELS.items():
+
+    def change(key: str) -> str:
+        assert previous is not None
+        return _delta(
+            current[key], previous[key], places=profile.overall_places if key == "computed_rating" else None
+        )
+
+    for key, label in _metric_labels(profile).items():
         if previous is None:
-            lines.append(f"{label}  {_rating(current[key])}")
+            lines.append(f"{label}  {_metric_text(key, current[key], profile)}")
         else:
             lines.append(
-                f"{label}  {_rating(previous[key])} → {_rating(current[key])}  ({_delta(current[key], previous[key])})"
+                f"{label}  {_metric_text(key, previous[key], profile)} → {_metric_text(key, current[key], profile)}"
+                f"  ({change(key)})"
             )
-    data: dict[str, Any] = {"current": {k: _rating(v) for k, v in current.items()}}
+    data: dict[str, Any] = {"current": {k: _metric_text(k, v, profile) for k, v in current.items()}}
     if previous is not None:
-        data["previous"] = {k: _rating(v) for k, v in previous.items()}
-        data["change"] = {k: _delta(current[k], previous[k]) for k in current}
+        data["previous"] = {k: _metric_text(k, v, profile) for k, v in previous.items()}
+        data["change"] = {k: change(k) for k in current}
     return lines, data
 
 
 def _update_line(ctx: ToolContext, u: ChartUpdate, *, session_estimated: bool) -> str:
-    const = ctx.songdb.const_for(u.song_title, u.difficulty)
-    head = f"{u.song_title} {u.difficulty}{_const_text(const)}"
+    profile = _profile(ctx)
+    const = ctx.songdb.const_for(u.song_title, u.difficulty, u.chart_type)
+    head = " ".join(part for part in (u.song_title, u.chart_type, u.difficulty) if part) + _const_text(const)
     if u.old_score is None:
-        score = f"신규 {_score(u.new_score)}"
+        score = f"신규 {_score(u.new_score, profile)}"
         rank = u.new_rank
-        rating = f"곡 레이팅 {_song_rating(u.new_rating)}"
+        rating = f"곡 레이팅 {_song_rating(u.new_rating, profile)}"
     else:
-        score = f"{_score(u.old_score)} → {_score(u.new_score)}"
+        score = f"{_score(u.old_score, profile)} → {_score(u.new_score, profile)}"
         rank = f"{u.new_rank} 유지" if u.old_rank == u.new_rank else f"{u.old_rank} → {u.new_rank}"
-        rating = f"곡 레이팅 {_song_rating(u.old_rating)} → {_song_rating(u.new_rating)}"
+        rating = f"곡 레이팅 {_song_rating(u.old_rating, profile)} → {_song_rating(u.new_rating, profile)}"
     line = f"{head}  {score}  {rank}  {rating}"
     if u.entered_frame:
         line += "  프레임 진입"
@@ -674,13 +762,17 @@ def _update_line(ctx: ToolContext, u: ChartUpdate, *, session_estimated: bool) -
     return line
 
 
-def _update_data(u: ChartUpdate) -> dict[str, Any]:
-    return {
+def _update_data(u: ChartUpdate, profile: GameProfile) -> dict[str, Any]:
+    data: dict[str, Any] = {
         "song_title": u.song_title, "difficulty": u.difficulty,
         "old_score": u.old_score, "new_score": u.new_score, "old_rank": u.old_rank, "new_rank": u.new_rank,
-        "old_rating": None if u.old_rating is None else _song_rating(u.old_rating), "new_rating": _song_rating(u.new_rating),
+        "old_rating": None if u.old_rating is None else _song_rating(u.old_rating, profile),
+        "new_rating": _song_rating(u.new_rating, profile),
         "session_id": u.session_id, "estimated_session": u.estimated_session, "entered_frame": u.entered_frame,
     }
+    if u.chart_type:
+        data["chart_type"] = u.chart_type
+    return data
 
 
 def _stage(diff: SyncDiff) -> Stage | None:
@@ -701,6 +793,11 @@ def _hint(diff: SyncDiff) -> str | None:
     return ", ".join(parts) or None
 
 
+def _chart_name(item: Any) -> str:
+    """"곡 (종류) 난이도". 채보 종류가 없는 게임은 종류가 빠진다."""
+    return " ".join(part for part in (item.song_title, item.chart_type, item.difficulty) if part)
+
+
 def _focus_keys(payload: dict[str, Any]) -> set[tuple[str, str]] | None:
     focus = payload.get("focus")
     if not focus:
@@ -711,20 +808,31 @@ def _focus_keys(payload: dict[str, Any]) -> set[tuple[str, str]] | None:
 @on("chunithm.sync.completed")
 async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section:
     """동기화 리포트의 본문 조각(order 10): 세션 요약, 갱신 목록, 반응 단계."""
+    return await _sync_section(ctx, payload)
+
+
+@on("maimai.sync.completed")
+async def on_maimai_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section:
+    """`on_sync_completed`의 maimai 판. 이벤트 버스가 핸들러의 `records`·`songdb`를 maimai 것으로 바꿔 준다."""
+    return await _sync_section(ctx, payload)
+
+
+async def _sync_section(ctx: ToolContext, payload: dict[str, Any]) -> Section:
+    profile = _profile(ctx)
     player_id: str = payload["player_id"]
     deltas: RatingDeltas | None = await ctx.records.rating_deltas(player_id)
     if payload.get("is_first_sync"):
         # sync는 첫 동기화에 이 이벤트를 내지 않는다. 오면 기준점만 알린다.
         return Section(
             order=_REPORT_ORDER,
-            display=Display(content=f"기준점을 잡았어. 현재 레이팅 {_rating(deltas.computed_rating if deltas else None)}"),
+            display=Display(content=f"기준점을 잡았어. 현재 레이팅 {_overall(deltas.computed_rating if deltas else None, profile)}"),
             data={"kind": "sync_report", "is_first_sync": True},
         )
 
     diff = await ctx.records.sync_diff(payload["sync_id"])
     if diff is None or not payload.get("has_new_plays"):
         # 변화 없음, 또는 비교 데이터가 캐시에서 밀려난 경우: 현재값(+있으면 변화량)만.
-        metric_lines, metric_data = _metric_lines(deltas)
+        metric_lines, metric_data = _metric_lines(deltas, profile)
         heading = "변화 없음" if not payload.get("has_new_plays") else "현재 기록"
         return Section(
             order=_REPORT_ORDER,
@@ -743,7 +851,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         s = session_by_id[s_id]
         return _short_date(s.play_date) + (" (추정)" if s.estimated else "")
 
-    metric_lines, metric_data = _metric_lines(deltas)
+    metric_lines, metric_data = _metric_lines(deltas, profile)
     dates = ", ".join(session_label(s.id) for s in sessions) or "날짜 미상"
     blocks: list[str] = [
         "\n".join([f"세션 요약  {dates}", *metric_lines, f"갱신 {len(diff.chart_updates)}채보"])
@@ -768,7 +876,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         blocks.append(
             "\n".join(
                 ["프레임 이탈"]
-                + [f"{e.song_title} {e.difficulty}  곡 레이팅 {_song_rating(e.old_rating)}" for e in diff.frame_exits]
+                + [f"{_chart_name(e)}  곡 레이팅 {_song_rating(e.old_rating, profile)}" for e in diff.frame_exits]
             )
         )
 
@@ -789,7 +897,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
                 for s in sessions
             ],
             "focus": payload.get("focus"),
-            "chart_updates": [_update_data(u) for u in shown_updates],
+            "chart_updates": [_update_data(u, profile) for u in shown_updates],
             "chart_updates_total": len(diff.chart_updates),
             "unchanged_plays": [
                 {"song_title": p.song_title, "difficulty": p.difficulty, "play_count": p.play_count,
@@ -797,7 +905,11 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
                 for p in diff.unchanged_plays
             ],
             "frame_exits": [
-                {"song_title": e.song_title, "difficulty": e.difficulty, "old_rating": _song_rating(e.old_rating)}
+                {
+                    "song_title": e.song_title, "difficulty": e.difficulty,
+                    **({"chart_type": e.chart_type} if e.chart_type else {}),
+                    "old_rating": _song_rating(e.old_rating, profile),
+                }
                 for e in diff.frame_exits
             ],
             "stage": stage,

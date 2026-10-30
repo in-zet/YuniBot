@@ -53,12 +53,12 @@ class _FakeEventBus(EventBus):
         self.notify_calls: list[tuple[str, dict[str, Any]]] = []
 
     async def emit_gather(
-        self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None
+        self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None, game: str | None = None
     ) -> list[Section]:
         self.gather_calls.append((event_name, payload))
         return list(self._sections)
 
-    async def emit_notify(self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None) -> None:
+    async def emit_notify(self, event_name: str, payload: Any, *, player_id: str, guild_id: str | None, game: str | None = None) -> None:
         self.notify_calls.append((event_name, payload))
 
 
