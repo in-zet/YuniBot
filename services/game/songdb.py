@@ -13,6 +13,7 @@ import aiosqlite
 
 from core.fuzzy import similar_names
 from core.resolvers import ResolutionError
+from core.text_match import text_contains
 from core.tool_types import ToolContext
 from services.game.profile import GameProfile
 
@@ -333,8 +334,11 @@ class SongDb:
         max_note_count: int | None = None,
         new_only: bool = False,
         chart_type: str | None = None,
+        title: str | None = None,
+        exclude_title: str | None = None,
     ) -> list[ConstRangeHit]:
-        """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 AND로 겹쳐 찾는다. difficulty는
+        """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부·곡명 글자를 한 번에 AND로 겹쳐 찾는다. title은 곡명에 들어
+        있어야 하는 글자, exclude_title은 없어야 하는 글자다(둘 다 `core/text_match.py`의 느슨한 부분 일치). difficulty는
         짧은 코드 하나거나 여러 개("MAS"와 "ULT")이고, 여러 개면 그중 어느 난이도든 맞는 채보를 찾는다.
         min_difficulty/max_difficulty는 BAS<ADV<EXP<MAS<ULT 순서의 범위("익스퍼트 이상")다. WORLD'S END는
         범위에 들지 않고, 범위 밖 코드를 주면 ValueError다. difficulty와 같이 주면 둘 다 맞아야 한다. chart_type은 채보 종류(maimai STD/DX)로 거르고, 안 주면 가리지 않는다.
@@ -352,10 +356,14 @@ class SongDb:
             raise ValueError(f"{self._profile.label}에는 채보 종류 {chart_type!r}가 없다: {self._profile.chart_types}")
         in_range = _difficulty_range(min_difficulty, max_difficulty, self._profile.range_codes)
         hits: list[ConstRangeHit] = []
-        for title, song in self._songs.items():
-            if title not in self._available_intl or (new_only and not song.is_new):
+        for song_title, song in self._songs.items():
+            if song_title not in self._available_intl or (new_only and not song.is_new):
                 continue
             if version is not None and song.version != version:
+                continue
+            if title is not None and not text_contains(song.title, title):
+                continue
+            if exclude_title is not None and text_contains(song.title, exclude_title):
                 continue
             for chart in _select_charts(song, wanted, chart_type):
                 if not chart.is_available:

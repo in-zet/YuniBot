@@ -258,7 +258,8 @@ async def test_find_by_artist_no_match_shows_empty_message() -> None:
 
     assert result.error is None
     assert result.data["count"] == 0
-    assert result.display is not None and "없어" in (result.display.content or "")
+    # 멘션 답 뒤에 붙지 않게 안내는 슬래시 본문에만 둔다(실기 2026-10-30)
+    assert result.display is not None and result.display.content is None and "없어" in (result.display.slash_content or "")
 
 
 async def test_find_songs_combines_const_and_note_count() -> None:
@@ -294,7 +295,44 @@ async def test_find_songs_no_match_shows_empty_message() -> None:
 
     assert result.error is None
     assert result.data["count"] == 0
-    assert result.display is not None and "없어" in (result.display.content or "")
+    # 멘션 답 뒤에 붙지 않게 안내는 슬래시 본문에만 둔다(실기 2026-10-30)
+    assert result.display is not None and result.display.content is None and "없어" in (result.display.slash_content or "")
+
+
+async def test_find_songs_by_title_part_ignores_width_case_and_dots() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    result = await skill.find_songs(_ctx_with_songdb(songdb), title="b b k k b k k")
+
+    assert result.error is None
+    titles = set(_titles(result.table))
+    assert "B.B.K.K.B.K.K." in titles
+    assert all("bbkkbkk" in "".join(ch for ch in t.casefold() if ch.isalnum()) for t in titles)
+    assert result.table is not None and result.table.steps[0].endswith("곡에 b b k k b k k 포함")
+
+
+async def test_find_songs_excludes_titles_and_combines_with_other_conditions() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    everything = await skill.find_songs(_ctx_with_songdb(songdb), min_const=12.5, max_const=12.5)
+    without = await skill.find_songs(
+        _ctx_with_songdb(songdb), min_const=12.5, max_const=12.5, exclude_title="b.b.k.k.b.k.k.",
+    )
+
+    assert "B.B.K.K.B.K.K." in _titles(everything.table)
+    assert "B.B.K.K.B.K.K." not in _titles(without.table)
+    assert without.table is not None and without.table.steps[0].endswith("곡에 b.b.k.k.b.k.k. 없음")
+
+
+async def test_find_songs_title_alone_counts_as_a_condition_and_no_hit_is_empty() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+
+    nothing = await skill.find_songs(_ctx_with_songdb(songdb), title="존재하지않는곡명zzz")
+
+    assert nothing.error is None and nothing.data["count"] == 0
 
 
 async def test_find_songs_orders_by_const_then_title_with_unknown_last() -> None:

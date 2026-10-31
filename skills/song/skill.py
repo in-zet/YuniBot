@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 from types import MappingProxyType
-from typing import Annotated
+from typing import Annotated, Any
 
 from core.decorators import tool
 from core.events import Section
@@ -136,6 +136,12 @@ _SEARCH_HIDDEN = (tc.LEVEL, tc.NOTE_COUNT, tc.VERSION, tc.ARTIST)
 _NO_ARTIST_SONGS = "해당 작곡가의 곡이 없어."
 
 
+def _none_found(message: str, **data: Any) -> ToolResult:
+    """결과가 없을 때. 안내는 슬래시에만 보이고, 멘션에서는 유니가 `count: 0`을 보고 직접 말한다.
+    표시물로 붙이면 유니의 말 뒤에 엉뚱한 문장이 덧붙는다(실기 2026-10-30)."""
+    return ToolResult(data={"count": 0, **data}, display=Display(slash_content=message))
+
+
 def _note_range_text(min_notes: int | None, max_notes: int | None) -> str | None:
     if min_notes is None and max_notes is None:
         return None
@@ -172,7 +178,7 @@ async def find_by_const(
         min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
     )
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="해당 범위의 채보가 없어."))
+        return _none_found("해당 범위의 채보가 없어.")
     conditions = [tc.const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions, ctx.game))
 
@@ -190,7 +196,7 @@ async def find_by_version(
         versions = profile_for(ctx.game).version_order
         if version not in versions:
             return ToolResult(error=f"'{version}'은 곡 DB의 버전 이름이 아니야. 버전 이름: {', '.join(versions)}")
-        return ToolResult(data={"count": 0}, display=Display(content="해당 버전의 채보가 없어."))
+        return _none_found("해당 버전의 채보가 없어.")
     return ToolResult(
         data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code], ctx.game)
     )
@@ -210,7 +216,7 @@ async def find_linked_verse(
     except ValueError:
         return ToolResult(error=f"그런 게이트는 없어. 게이트: {', '.join(ctx.songdb.linked_verse_gates())}")
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="해당하는 해금곡 채보가 없어."))
+        return _none_found("해당하는 해금곡 채보가 없어.")
     builder = TableBuilder(unit="채보")
     columns = _search_columns(ctx.game)
     tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game)
@@ -241,9 +247,14 @@ async def find_songs(
     min_note_count: int | None = None,
     max_note_count: int | None = None,
     new_only: bool = False,
+    title: str | None = None,
+    exclude_title: str | None = None,
     game: GameRef | None = None,
 ) -> ToolResult:
-    """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부를 한 번에 조합해 채보를 찾는다.
+    """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부·곡명 글자를 한 번에 조합해 채보를 찾는다.
+    title은 곡명에 들어 있는 글자(부분 일치), exclude_title은 곡명에 없어야 하는 글자다. 둘 다 전각·반각, 대소문자, 공백, 가운뎃점(・) 차이를
+    무시한다. 곡 DB의 제목은 원제(일본어·영어)라서 한글로는 안 맞는다 — 한글로 들은 이름은 아는 원제 글자로 바꿔 준다("플랑드르"면 "フランドール").
+    "최종귀축" 같은 한글 표기는 "最終鬼畜"처럼 한자로 바꿔 준다. 못 바꾸겠으면 되묻기 전에 아는 글자로 먼저 찾아 본다.
     `/상수`·`/버전`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
     "마스터나 울티마"처럼 난이도를 둘 말했으면 difficulty와 other_difficulty에 하나씩 준다(둘 중 어느 쪽이든 맞는 채보).
     난이도가 셋 이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 min_difficulty/max_difficulty를 준다(BASIC<ADVANCED<EXPERT<MASTER<ULTIMA).
@@ -253,10 +264,10 @@ async def find_songs(
         v is None
         for v in (
             min_const, max_const, level, version, difficulty, other_difficulty, min_difficulty, max_difficulty,
-            min_note_count, max_note_count,
+            min_note_count, max_note_count, title, exclude_title,
         )
     ):
-        return ToolResult(error="조건을 하나는 줘야 해(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡 중)")
+        return ToolResult(error="조건을 하나는 줘야 해(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡, 곡명 글자 중)")
 
     codes = [code for code in (_difficulty_code(difficulty), _difficulty_code(other_difficulty)) if code is not None]
     low, high = _difficulty_code(min_difficulty), _difficulty_code(max_difficulty)
@@ -265,11 +276,12 @@ async def find_songs(
             min_const=min_const, max_const=max_const, level=level, version=version,
             difficulty=codes or None, min_difficulty=low, max_difficulty=high,
             min_note_count=min_note_count, max_note_count=max_note_count, new_only=new_only,
+            title=title, exclude_title=exclude_title,
         )
     except ValueError as exc:
         return ToolResult(error=str(exc))
     if not hits:
-        return ToolResult(data={"count": 0}, display=Display(content="조건에 맞는 채보가 없어."))
+        return _none_found("조건에 맞는 채보가 없어.")
     conditions = [
         tc.const_range_text(min_const, max_const),
         f"레벨 {level}" if level else None,
@@ -278,6 +290,8 @@ async def find_songs(
         _difficulty_range_text(low, high),
         _note_range_text(min_note_count, max_note_count),
         "신곡만" if new_only else None,
+        f"곡에 {title} 포함" if title else None,
+        f"곡에 {exclude_title} 없음" if exclude_title else None,
     ]
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions, ctx.game))
 
@@ -295,16 +309,13 @@ async def find_by_artist(
     if not songs:
         similar = similar_names(artist, ctx.songdb.all_artists(), limit=3, cutoff=0.6)
         if similar:
-            return ToolResult(
-                data={"count": 0, "similar_artists": similar},
-                display=Display(content=f"{_NO_ARTIST_SONGS} 비슷한 작곡가: {', '.join(similar)}"),
-            )
+            return _none_found(f"{_NO_ARTIST_SONGS} 비슷한 작곡가: {', '.join(similar)}", similar_artists=similar)
 
     identity = tc.identity_columns(ctx.game)
     if short_code is None:
         columns = (*identity, tc.ARTIST, tc.VERSION)
         if not songs:
-            return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS))
+            return _none_found(_NO_ARTIST_SONGS)
         builder = TableBuilder(unit="곡")
         tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game).step(condition)
         for song in songs:
@@ -319,7 +330,7 @@ async def find_by_artist(
         if chart_record.difficulty == short_code
     ]
     if not charts:
-        return ToolResult(data={"count": 0}, display=Display(content=_NO_ARTIST_SONGS))
+        return _none_found(_NO_ARTIST_SONGS)
     builder = TableBuilder(unit="채보")
     tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game).step(f"{condition} {short_code}")
     for song, chart_record in charts:

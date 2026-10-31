@@ -556,6 +556,51 @@ def test_where_conditions_are_anded_and_contains_works_on_text() -> None:
     assert _songs(select_rows(table, where=[_where("램프", "==", "FULL COMBO")])) == ["A", "D"]
 
 
+def _title_table() -> WorkTable:
+    builder = TableBuilder(subject=None, unit="곡")
+    builder.column("song", "곡", bare=True).column("version", "버전")
+    builder.step("원본")
+    for index, title in enumerate(
+        ["最終鬼畜妹フランドール・Ｓ", "超最終鬼畜妹フランドール・S", "Chrono Magia", "U.N.オーエンは彼女なのか？"]
+    ):
+        builder.row(RowRef("chunithm.song", str(index)), {"song": cell(title), "version": cell("NEW" if index < 2 else None)})
+    return builder.build()
+
+
+def test_text_ops_ignore_width_case_spaces_and_the_middle_dot() -> None:
+    table = _title_table()
+    assert _songs(select_rows(table, where=[_where("곡", "contains", "フランドールs")])) == [
+        "最終鬼畜妹フランドール・Ｓ", "超最終鬼畜妹フランドール・S",
+    ]
+    assert _songs(select_rows(table, where=[_where("곡", "contains", "chrono magia")])) == ["Chrono Magia"]
+    assert _songs(select_rows(table, where=[_where("곡", "==", "最終鬼畜妹フランドールＳ")])) == ["最終鬼畜妹フランドール・Ｓ"]
+    assert len(_songs(select_rows(table, where=[_where("곡", "!=", "最終鬼畜妹フランドールＳ")]))) == 3
+
+
+def test_not_contains_starts_with_and_ends_with() -> None:
+    table = _title_table()
+    out = select_rows(table, where=[_where("곡", "contains", "フランドール"), _where("곡", "not_contains", "超")])
+    assert _songs(out) == ["最終鬼畜妹フランドール・Ｓ"]
+    assert out.steps == ("원본", "곡에 フランドール 포함", "곡에 超 없음")
+    assert _songs(select_rows(table, where=[_where("곡", "starts_with", "超最終")])) == ["超最終鬼畜妹フランドール・S"]
+    assert _songs(select_rows(table, where=[_where("곡", "ends_with", "なのか")])) == ["U.N.オーエンは彼女なのか？"]
+    assert select_rows(table, where=[_where("곡", "ends_with", "なのか")]).steps[-1] == "곡이(가) なのか(으)로 끝남"
+
+
+def test_not_contains_keeps_rows_without_a_value() -> None:
+    table = _title_table()  # 버전이 비어 있는 곡
+    assert _songs(select_rows(table, where=[_where("버전", "not_contains", "NEW")])) == ["Chrono Magia", "U.N.オーエンは彼女なのか？"]
+    assert _songs(select_rows(table, where=[_where("버전", "contains", "NEW")])) == [
+        "最終鬼畜妹フランドール・Ｓ", "超最終鬼畜妹フランドール・S",
+    ]
+
+
+def test_text_ops_on_a_number_column_are_an_error() -> None:
+    for op in ("not_contains", "starts_with", "ends_with"):
+        with pytest.raises(TableError, match="비교할 수 없다"):
+            select_rows(_score_table(), where=[_where("점수", op, "1")])
+
+
 def test_where_errors() -> None:
     table = _score_table()
     with pytest.raises(TableError, match="'없음' 칸이 없다"):

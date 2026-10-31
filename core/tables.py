@@ -9,6 +9,8 @@ from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Any, Literal, Self, TypedDict
 
+from core.text_match import text_contains, text_ends_with, text_equals, text_starts_with
+
 ValueType = Literal["text", "number", "ScoreRef", "RankRef", "LampRef", "DifficultyRef"]
 VALUE_TYPES: frozenset[str] = frozenset(
     {"text", "number", "ScoreRef", "RankRef", "LampRef", "DifficultyRef"}
@@ -236,10 +238,12 @@ def _numbers_step(numbers: Collection[int]) -> str:
     return "·".join(str(n) for n in sorted(numbers)) + "번"
 
 
-COMPARE_OPS: frozenset[str] = frozenset({"==", "!=", "<", "<=", ">", ">=", "contains"})
+# 글자를 보는 비교(2026-10-31 결정). 값을 표 칸의 값 종류로 해석하지 않고 원문 그대로 비교한다.
+TEXT_OPS: frozenset[str] = frozenset({"contains", "not_contains", "starts_with", "ends_with"})
+COMPARE_OPS: frozenset[str] = frozenset({"==", "!=", "<", "<=", ">", ">="}) | TEXT_OPS
 _ORDERING_OPS: frozenset[str] = frozenset({"<", "<=", ">", ">="})
 # 값이 없는 행이 통과하는 비교(2026-10-21 결정, 그전엔 모든 조건을 통과시키는 임시 결정이었다).
-_MISSING_PASSES: frozenset[str] = frozenset({"!=", "<", "<="})
+_MISSING_PASSES: frozenset[str] = frozenset({"!=", "<", "<=", "not_contains"})
 # 크기 비교(<, <=, >, >=)를 할 수 없는 칸 종류. 이름이 같은지만 본다(순서 목록을 가진 칸은 예외).
 _UNORDERED_TYPES: frozenset[str] = frozenset({"LampRef", "DifficultyRef"})
 # 값의 크기가 뜻을 가지는 칸 종류. 이 칸으로 묶으면 묶음을 큰 값부터 늘어놓는다(그 밖의 칸은 나온 순서).
@@ -318,6 +322,22 @@ def _is_ordered(column: Column) -> bool:
     return bool(column.order) or column.value_type in _ORDERED_TYPES
 
 
+def _text_passes(raw: str, op: str, value: str, *, loose: bool) -> bool:
+    """글자 비교 하나. 글 칸(`loose`)은 `core/text_match.py`처럼 느슨하게, 그 밖의 칸은 대소문자만 무시한다."""
+    if loose:
+        if op == "contains":
+            return text_contains(raw, value)
+        if op == "not_contains":
+            return not text_contains(raw, value)
+        return text_starts_with(raw, value) if op == "starts_with" else text_ends_with(raw, value)
+    hay, needle = raw.casefold(), value.casefold()
+    if op == "contains":
+        return needle in hay
+    if op == "not_contains":
+        return needle not in hay
+    return hay.startswith(needle) if op == "starts_with" else hay.endswith(needle)
+
+
 def _passes(raw: Any, op: str, value: Any, column: Column) -> bool:
     if raw is None:
         # 값이 없는 행(안 친 채보의 점수·곡 레이팅 등)은 "아니다"·"더 작다"는 조건만 통과한다 — "SSS 못 한 것"에
@@ -328,10 +348,13 @@ def _passes(raw: Any, op: str, value: Any, column: Column) -> bool:
         if raw is None or value is None:
             return False  # 순서를 모르는 값은 크기를 비교할 수 없다
     try:
-        if op == "contains":
+        if op in TEXT_OPS:
             if not isinstance(raw, str):
                 raise TypeError
-            return str(value).casefold() in raw.casefold()
+            return _text_passes(raw, op, str(value), loose=column.value_type == "text")
+        # 글 칸의 같다·다르다는 전각·반각·대소문자·공백·가운뎃점 차이를 무시한다(`core/text_match.py`).
+        if column.value_type == "text" and isinstance(raw, str) and isinstance(value, str) and op in {"==", "!="}:
+            return text_equals(raw, value) == (op == "==")
         if op == "==":
             return bool(raw == value)
         if op == "!=":
@@ -352,6 +375,12 @@ def _passes(raw: Any, op: str, value: Any, column: Column) -> bool:
 def _condition_step(condition: Condition) -> str:
     if condition.op == "contains":
         return f"{condition.column}에 {condition.text} 포함"
+    if condition.op == "not_contains":
+        return f"{condition.column}에 {condition.text} 없음"
+    if condition.op == "starts_with":
+        return f"{condition.column}이(가) {condition.text}(으)로 시작"
+    if condition.op == "ends_with":
+        return f"{condition.column}이(가) {condition.text}(으)로 끝남"
     return f"{condition.column}{condition.op}{condition.text}"
 
 

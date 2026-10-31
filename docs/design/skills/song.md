@@ -92,7 +92,7 @@ emits: [chunithm.song.viewed]
 | `find_by_version` | 수록 버전(+선택적 난이도)으로 채보 목록 | `version`, `difficulty: DifficultyRef \| None` | `/버전` | 없음 | required | never |
 | `find_linked_verse` | Linked VERSE 해금곡 채보를 게이트별 묶음 표로(게이트·난이도로 좁힘) | `gate: str \| None`, `difficulty: DifficultyRef \| None` | 없음 | required | never |
 | `find_by_artist` | 작곡가로 수록곡 목록 | `artist`, `difficulty: DifficultyRef \| None`(선택) | `/작곡가` | 없음 | required | never |
-| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `other_difficulty: DifficultyRef \| None`, `min_difficulty: DifficultyRef \| None`, `max_difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only` | `/검색` | 없음 | required | never |
+| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부·곡명 글자를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `other_difficulty: DifficultyRef \| None`, `min_difficulty: DifficultyRef \| None`, `max_difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only`, `title`, `exclude_title` | `/검색` | 없음 | required | never |
 | `charts_of` | 표의 곡 단위 행을 채보 행으로 펼친 새 표 | `table: TableRef`(곡 칸 필요), `difficulty: DifficultyRef \| None`(선택, 없으면 MAS) | 없음 | 없음 | 표 | never |
 | `songs_of` | 표의 채보 행을 곡 단위 행으로 합친 새 표(`charts_of`의 반대) | `table: TableRef`(곡 칸 필요) | 없음 | 없음 | 표 | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | 없음 | optional | never |
@@ -217,3 +217,10 @@ emits: [chunithm.song.viewed]
 - 검색 도구 네 개(`find_by_const`·`find_by_level`·`find_by_version`·`find_songs`)의 고정 순서를 **상수 내림차순**(모르면 뒤, 같으면 제목순)으로 바꿨다(`songdb._const_descending`). 사용자가 상수·난이도·레이팅을 방향 말이 없으면 큰 쪽부터 본다(`table_query`의 기본 방향과 맞춘 것). 이전 "상수 오름차순" 결정(2026-10-20)을 대체한다.
 - `VERSION_ORDER`에서 Mate를 맨 끝(X-VERSE-X 뒤)으로 옮겼다. 처음엔 PARADISE LOST와 NEW 사이에 잘못 들어 있어 `버전 >= VERSE`에서 Mate가 빠지고 "최신순"에서 신곡 29곡이 중간에 끼었다.
 - 버전 범위("버스부터 엑스버스엑스까지")는 `find_songs`에 인자를 만들지 않고 `table_query`의 `where 버전 >= … / <= …`로 거른다. 검색 도구를 버전마다 따로 불러 표를 나누면 합칠 수 없어 마지막 표만 그려진다(2026-10-22 20:38 실기). 규칙(`rules.md`)과 이 스킬 `SKILL.md`에 예시 흐름을 적었다.
+
+## 제목 검색과 결과 없음 (2026-10-31)
+- 실기(2026-10-30): "플랑드르랑 관계있는 곡 모두 나열"에 유니가 곡명 일부로 찾는 방법이 없어 원제를 되묻고, 곡명을 받은 뒤에도 후보를 되물었다. 안 찾아진 작곡가 검색의 안내 문구("해당 작곡가의 곡이 없어.")는 유니의 말 뒤에 그대로 붙었고, "곡"을 달라고 했는데 채보 21개가 그림으로 나갔다.
+- `find_songs`에 `title`(곡명에 들어 있는 글자)·`exclude_title`(없어야 하는 글자)을 더했다. 비교는 `core/text_match.py`의 느슨한 부분 일치(전각·반각, 대소문자, 공백, 가운뎃점·구두점 무시)이고, 곡 DB 제목(원제)만 본다. 한글 별칭은 보지 않는다. 한글로 들은 이름은 유니가 아는 원제 글자로 바꿔 넣는다(`SKILL.md`). 슬래시 `/검색`도 두 칸을 옵션으로 받는다.
+- 표에 이미 있는 곡을 글자로 거르는 일은 코어 `table_query`의 `where`가 한다(`contains`·`not_contains`·`starts_with`·`ends_with`, `docs/design/00-core.md`). 정규식은 모델이 틀리게 쓰거나 느려지는 패턴(ReDoS)이 위험해 쓰지 않기로 했다(2026-10-31 사용자 결정).
+- **결과 없음 안내**: `find_by_const`·`find_by_version`·`find_linked_verse`·`find_songs`·`find_by_artist`의 "없어" 문구는 `Display.slash_content`에만 두고 멘션에는 붙이지 않는다(`count: 0`을 보고 유니가 직접 말한다). 다른 스킬(`report`·`notes`·`folders` 등)의 같은 문구는 그대로다.
+- **곡 단위**: 사용자가 "곡"을 달라고 하면 채보 표를 `songs_of`로 곡 단위로 합친 뒤 보여 주거나 그린다(`SKILL.md`).

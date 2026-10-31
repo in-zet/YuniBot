@@ -6,6 +6,7 @@ from core.decorators import tool
 from core.resolvers import ResolutionError, ResolverRegistry
 from core.skill_loading import SkillLoadState
 from core.tables import (
+    TEXT_OPS,
     Condition,
     TableError,
     WhereClause,
@@ -108,7 +109,7 @@ async def _parse_where(ctx: ToolContext, table: WorkTable, where: list[WhereClau
                 value = float(text.replace(",", ""))
             except ValueError:
                 raise TableError(f"'{column.label}' 칸 값 '{text}'은 숫자가 아니다") from None
-        elif column.value_type in _VALUE_REF_TYPES and clause["op"] != "contains":
+        elif column.value_type in _VALUE_REF_TYPES and clause["op"] not in TEXT_OPS:
             if not isinstance(resolvers, ResolverRegistry) or not resolvers.is_registered(_VALUE_REF_TYPES[column.value_type]):
                 raise TableError(f"'{column.label}' 칸 값을 해석할 수 없다")
             try:
@@ -116,7 +117,7 @@ async def _parse_where(ctx: ToolContext, table: WorkTable, where: list[WhereClau
             except ResolutionError:
                 raise TableError(f"'{column.label}' 칸 값 '{text}'을(를) 해석하지 못했다") from None
             value = _comparable(column.value_type, resolved)
-        elif column.order and clause["op"] != "contains":
+        elif column.order and clause["op"] not in TEXT_OPS:
             value = canonical_order_value(column, text)
         conditions.append(Condition(column=clause["column"], op=clause["op"], value=value, text=text))
     return conditions
@@ -147,7 +148,8 @@ async def table_query(
     rows/exclude_rows는 사람이 표에서 본 번호(1부터, 묶음을 넘어 이어짐)를 그대로 넣는다("3번부터 5번"이면 [3,4,5]).
     sort는 칸 하나다. 기준이 둘 이상이면 덜 중요한 기준부터 차례로 부르되 매번 직전 결과 표에 건다(같은 값은 앞 순서를 지킨다).
     descending은 사용자가 방향을 말했을 때만 준다(안 주면 숫자·순서 칸은 큰 쪽부터, 글 칸은 가나다순).
-    where는 {column: 칸 이름, op: ==,!=,<,<=,>,>=,contains, value: 사용자가 말한 값 그대로}의 목록(AND)이다.
+    where는 {column: 칸 이름, op: ==,!=,<,<=,>,>=,contains,not_contains,starts_with,ends_with, value: 사용자가 말한 값 그대로}의 목록(AND)이다.
+    글 칸(곡·작곡가 등)의 ==·contains·not_contains(제외)·starts_with·ends_with는 전각·반각, 대소문자, 공백, 가운뎃점(・) 차이를 무시한다.
     limit은 묶음마다 앞에서 N개다. group_by는 칸 이름이면 그 칸 값으로 다시 묶고, 빈 문자열이면 묶음을 푼다.
     묶음 순서: 숫자 칸(상수 등)과 순서가 있는 칸(버전은 출시순)으로 묶으면 큰 값(최신)부터이고, 그 칸을 sort로
     정렬하면 descending을 따른다. 글 칸(곡·작곡가 등)으로 묶으면 sort한 순서에서 그 값이 처음 나온 순서다.
