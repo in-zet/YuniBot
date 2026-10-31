@@ -1,18 +1,17 @@
 # skills/goals/skill.py
 from __future__ import annotations
 
-import importlib.util
-import sys
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from pathlib import Path
 from typing import Annotated, Any
 
+from core.db import write_transaction
 from core.decorators import on, slash_only, tool
 from core.events import Section, Stage, highest_stage
 from core.resolvers import ResolutionError
+from core.sibling import load_sibling
 from core.tables import (
     EMPTY_CELL,
     Cell,
@@ -35,7 +34,7 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
-from services.common.players import Player
+from services.common.players import Player, target_player
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.profile import GameProfile
@@ -49,23 +48,10 @@ from services.game.records import PbRow, RatingDeltas
 from services.game.registry import profile_for
 from services.game.terms import ResolvedDifficulty, ResolvedLamp, ResolvedRank
 
-# skills/goals는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다
-# (skills/account-link/skill.py가 쓰는 것과 같은 이유) — 같은 폴더의 models.py/goals_calc.py를
-# 파일 경로로 직접 불러온다.
-_SKILL_DIR = Path(__file__).parent
-
-
-def _load_sibling(name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(f"_chunithm_goals_{name}", _SKILL_DIR / f"{name}.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclass(kw_only=True)가 모듈 전역을 되찾아야 한다
-    spec.loader.exec_module(module)
-    return module
-
-
-models = _load_sibling("models")
-calc = _load_sibling("goals_calc")
+# skills/goals는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다 — 같은 폴더의 models.py/goals_calc.py를
+# 파일 경로로 불러온다.
+models = load_sibling(__file__, "models", prefix="chunithm_goals")
+calc = load_sibling(__file__, "goals_calc", prefix="chunithm_goals")
 
 _SKILL_NAME = "goals"
 _SYNC_SECTION_ORDER = 30
@@ -184,13 +170,8 @@ def _profile(ctx: ToolContext) -> GameProfile:
 
 
 async def _target_player(ctx: ToolContext, player: PlayerRef | None) -> Player | ToolResult:
-    if player is None:
-        me = await ctx.players.get_player(ctx.player_id)
-        if me is None:
-            return ToolResult(error="플레이어 정보를 찾지 못했어.")
-        return me
-    assert isinstance(player, Player)
-    return player
+    # 목표 목록은 목표마다 고른 공개 여부로 거르고, 진행값만 records_public을 따른다(_progress_visible).
+    return await target_player(ctx, player, require_public=False)
 
 
 def _difficulty_code(difficulty: DifficultyRef) -> str:
@@ -469,6 +450,34 @@ def _goal_label(goal: Any, *, with_chart: bool = True) -> str:
     return ref.get("description", "자유 목표")
 
 
+def _local_today() -> date:
+    """기한·알림 시각은 서버 로컬 달력(TZ=Asia/Tokyo)으로 만든다 — 기한 판정과 페이스도 같은 날짜를 봐야 한다.
+    UTC 날짜로 보면 JST 새벽 0~9시에 하루 어긋난다."""
+    return datetime.now().date()  # noqa: DTZ005 - 스케줄러·cron과 같은 서버 로컬 벽시계 기준
+
+
+def _local_date(iso: str) -> date:
+    """UTC로 저장된 시각(created_at)의 서버 로컬 날짜."""
+    return datetime.fromisoformat(iso).astimezone().date()
+
+
+async def _parent_error(ctx: ToolContext, parent_goal_id: str, *, goal_id: str) -> ToolResult | None:
+    """상위 목표로 걸 수 있는지: 본인의 같은 게임 목표여야 하고, 자기 자신이나 자기 하위 목표(순환)는 안 된다.
+    남의 목표를 상위로 걸면 상대가 지울 때 내 목표 행이 바뀐다(delete_goals가 상위 연결을 끊는다)."""
+    parent = await models.fetch_goal(ctx.db, parent_goal_id)
+    if parent is None or parent.player_id != ctx.player_id or parent.game != ctx.game:
+        return ToolResult(error="상위 목표로 쓸 수 있는 내 목표를 찾지 못했어.")
+    seen: set[str] = set()
+    cursor: str | None = parent_goal_id
+    while cursor is not None and cursor not in seen:
+        if cursor == goal_id:
+            return ToolResult(error="목표를 자기 자신이나 자기 하위 목표 아래에 둘 수 없어.")
+        seen.add(cursor)
+        step = await models.fetch_goal(ctx.db, cursor)
+        cursor = step.parent_goal_id if step is not None else None
+    return None
+
+
 def _parse_due(due_at: str | None) -> date | None | ToolResult:
     """기한 문자열(ISO 날짜, 예: 2026-12-31)을 검사한다. 비어 있으면 None(기한 없음)."""
     if due_at is None:
@@ -648,7 +657,7 @@ async def _goal_summary(ctx: ToolContext, goal: Any) -> dict[str, Any]:
 async def _progress_visible(ctx: ToolContext, owner_id: str) -> bool:
     """남의 목표에서 진행값(현재값·달성률·남은 양·진행 기록·예상 레이팅)을 보여 줘도 되나.
     목표의 public은 목표 정의만 공개한다 — 진행값은 그 사람의 기록이라 records_public을 따른다
-    (report의 _target_player와 같은 규칙)."""
+    (services.common.players.target_player와 같은 규칙)."""
     if owner_id == ctx.player_id:
         return True
     owner = await ctx.players.get_player(owner_id)
@@ -905,7 +914,9 @@ async def set_goal(
 
     if duration_tag is None and due is not None:
         # 꼬리표를 안 붙였으면 기한으로 정한다(2주 이내 단기, 3개월 이내 중기, 그 밖은 장기).
-        duration_tag = DurationTag(calc.duration_tag_for(datetime.now(UTC).date(), due))
+        duration_tag = DurationTag(calc.duration_tag_for(_local_today(), due))
+    if parent_goal_id is not None and (error := await _parent_error(ctx, parent_goal_id, goal_id=goal_id)):
+        return error
     await models.insert_goal(
         ctx.db, id=goal_id, player_id=ctx.player_id, kind=kind.value, target_ref=target_ref,
         target_value=target_value, baseline_value=baseline_value, created_at=now, due_at=due_at,
@@ -936,13 +947,8 @@ _G_REMAINING = "남은 양"
 _G_DUE = "기한"
 _G_PUBLIC = "공개"
 _G_ID = "id"
-def _identity_format(game: str) -> str:
-    """채보를 가리키는 칸을 한 줄에 늘어놓는 서식 머리("{곡} {난이도}", maimai는 "{곡} {종류} {난이도}")."""
-    return " ".join("{" + name + "}" for name in tc.identity_columns(game))
-
-
 def _goal_list_formats(game: str) -> tuple[str, ...]:
-    head = _identity_format(game)
+    head = tc.identity_format(game)
     return (
         f"[{{상태}}] {head}  {{목표}}  {{진행}}  기한 {{기한}}",
         f"[{{상태}}] {head}  {{목표}}  {{진행}}",
@@ -967,7 +973,7 @@ _T_CURRENT_LAMP = "현재 램프"
 
 
 def _todo_formats(game: str) -> tuple[str, ...]:
-    head = _identity_format(game)
+    head = tc.identity_format(game)
     return (
         f"{head} {{상수}}  {{점수}} → {{목표 점수}}  (남은 {{남은 점수}})",
         f"{head} {{상수}}  {{목표 램프}} 목표  (현재 램프 {{현재 램프}})",
@@ -1186,6 +1192,8 @@ async def _update_goal(
     if duration_tag is not None:
         fields["duration_tag"] = duration_tag.value
     if parent_goal_id is not None:
+        if error := await _parent_error(ctx, parent_goal_id, goal_id=goal_id):
+            return error
         fields["parent_goal_id"] = parent_goal_id
     if status is not None:
         fields["status"] = status.value
@@ -1263,8 +1271,8 @@ async def _goal_progress(ctx: ToolContext, goal_id: str) -> ToolResult:
     ratio = summary.get("achievement_ratio")
     due = _parse_due(goal.due_at)
     if ratio is not None and isinstance(due, date):
-        created = datetime.fromisoformat(goal.created_at).date()
-        elapsed = calc.elapsed_ratio(created, due, datetime.now(UTC).date())
+        created = _local_date(goal.created_at)
+        elapsed = calc.elapsed_ratio(created, due, _local_today())
         pace = calc.pace(Decimal(ratio), elapsed)
         data["pace"] = pace
         data["elapsed_ratio"] = str(elapsed)
@@ -1406,17 +1414,19 @@ async def add_todos(
         )
 
     now = datetime.now(UTC).isoformat()
-    for title, chart_type, difficulty in targets:
-        pb = pbs.get(tc.pb_key(title, chart_type, difficulty))
-        await models.insert_goal(
-            ctx.db, id=str(uuid.uuid4()), player_id=ctx.player_id, kind=GoalKind.SONG.value, game=ctx.game,
-            target_ref=_song_ref(title, chart_type, difficulty), target_value=float(score),
-            baseline_value=(
-                float(pb.score) if pb is not None else max(0.0, float(score) - _UNPLAYED_SONG_BASELINE_MARGIN)
-            ),
-            created_at=now, due_at=None, duration_tag=None, parent_goal_id=None, public=public,
-            notify_offsets=_default_notify_offsets(None), guild_id=ctx.guild_id,
-        )
+    assert ctx.db is not None
+    async with write_transaction(ctx.db):  # 여러 건이 중간까지만 들어가는 일이 없게 한 단위로 넣는다.
+        for title, chart_type, difficulty in targets:
+            pb = pbs.get(tc.pb_key(title, chart_type, difficulty))
+            await models.insert_goal(
+                ctx.db, id=str(uuid.uuid4()), player_id=ctx.player_id, kind=GoalKind.SONG.value, game=ctx.game,
+                target_ref=_song_ref(title, chart_type, difficulty), target_value=float(score),
+                baseline_value=(
+                    float(pb.score) if pb is not None else max(0.0, float(score) - _UNPLAYED_SONG_BASELINE_MARGIN)
+                ),
+                created_at=now, due_at=None, duration_tag=None, parent_goal_id=None, public=public,
+                notify_offsets=_default_notify_offsets(None), guild_id=ctx.guild_id, commit=False,
+            )
     return ToolResult(
         data=data,
         display=Display(content=f"{len(targets)}개 투두를 추가했어.{note_text}"),
@@ -1730,7 +1740,7 @@ async def _sync_check(ctx: ToolContext, payload: dict[str, Any]) -> Section | No
     if other_lines:
         blocks.append(other_lines)
 
-    today = datetime.now(UTC).date()
+    today = _local_today()
     expired_lines: list[str] = []
     expired: list[dict[str, Any]] = []
     for g in active:
@@ -1782,8 +1792,8 @@ async def on_notify_due(ctx: ToolContext, payload: dict[str, Any]) -> None:
         due = _parse_due(goal.due_at)
         ratio_raw = summary.get("achievement_ratio")
         if isinstance(due, date) and ratio_raw is not None:
-            created = datetime.fromisoformat(goal.created_at).date()
-            elapsed = calc.elapsed_ratio(created, due, datetime.now(UTC).date())
+            created = _local_date(goal.created_at)
+            elapsed = calc.elapsed_ratio(created, due, _local_today())
             pace_text = f" · 페이스 {_PACE_LABELS[calc.pace(Decimal(ratio_raw), elapsed)]}"
         content = f"'{label}' 기한이 {offset}일 남았어. {detail}{pace_text}"
     await _send_goal_notice(ctx, goal, content)

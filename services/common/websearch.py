@@ -18,8 +18,10 @@ class SearchCooldownError(ValueError):
 
 
 class NoSourcesError(ValueError):
-    def __init__(self) -> None:
+    def __init__(self, result: SearchResult) -> None:
         super().__init__("검색 결과에서 출처를 찾지 못했다")
+        # 제공자 호출은 이미 끝나 비용이 나갔다 — 호출부가 사용량을 기록할 수 있게 결과를 들고 있는다.
+        self.result = result
 
 
 class WebsearchService:
@@ -49,7 +51,7 @@ class WebsearchService:
             raise SearchCooldownError()
         result = await self._adapter.search(model=self._model, query=query, on_retry=on_retry)
         if not result.sources:
-            raise NoSourcesError()
+            raise NoSourcesError(result)
         return result
 
     async def aclose(self) -> None:

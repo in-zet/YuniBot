@@ -34,7 +34,7 @@ from core.tool_types import (
     ToolContext,
     ToolResult,
 )
-from services.common.players import Player
+from services.common.players import Player, target_player
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.profile import GameProfile
@@ -63,7 +63,6 @@ _SSS_TIER = frozenset({"SSS", "SSS+"})
 _RANK_ORDER: tuple[str, ...] = (
     "SSS+", "SSS", "SS+", "SS", "S+", "S", "AAA", "AA", "A", "BBB", "BB", "B", "C", "D",
 )
-_PRIVATE_ERROR = "그 사람은 기록을 비공개로 해 놨어."
 _NOT_SYNCED_ERROR = "아직 동기화한 기록이 없어. /동기화를 먼저 해 줘."
 _REPORT_ORDER = 10
 
@@ -78,17 +77,7 @@ class BestKind(StrEnum):
 
 
 async def _target_player(ctx: ToolContext, player: PlayerRef | None) -> Player | ToolResult:
-    """조회 대상 플레이어. 안 넘어왔으면 본인이다(PlayerRef 해석기는 인자가 있을 때만 돈다).
-    본인은 공개 설정과 무관하게 보고, 남은 records_public이 켜져 있을 때만 본다."""
-    if player is None:
-        me = await ctx.players.get_player(ctx.player_id)
-        if me is None:
-            return ToolResult(error="플레이어 정보를 찾지 못했어.")
-        return me
-    assert isinstance(player, Player)
-    if player.id != ctx.player_id and not player.records_public:
-        return ToolResult(error=_PRIVATE_ERROR)
-    return player
+    return await target_player(ctx, player)
 
 
 def _profile(ctx: ToolContext) -> GameProfile:
@@ -207,18 +196,13 @@ _CONTRIBUTION = "기여"
 _SCORE_TAIL = (tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
 
 
-def _identity_format(game: str) -> str:
-    """채보를 가리키는 칸을 한 줄에 늘어놓는 서식 머리("{곡} {난이도}", maimai는 "{곡} {종류} {난이도}")."""
-    return " ".join("{" + name + "}" for name in tc.identity_columns(game))
-
-
 def _best_columns(game: str) -> tuple[str, ...]:
     return (*tc.identity_columns(game), *_SCORE_TAIL)
 
 
 def _best_row_format(game: str) -> str:
     # 한 줄 서식(램프는 글자 출력에서 숨긴다 — 줄 모양은 지금 베스트 줄 그대로).
-    return f"{_identity_format(game)} {{상수}}  {{점수}} {{랭크}}  곡 레이팅 {{곡 레이팅}}"
+    return f"{tc.identity_format(game)} {{상수}}  {{점수}} {{랭크}}  곡 레이팅 {{곡 레이팅}}"
 
 
 def _pb_row_cells(row: PbRow, rank_scores: dict[str, int], game: str) -> dict[str, Cell]:
@@ -657,7 +641,7 @@ async def candidates(
     # 달성률로 말하는 게임(maimai)은 "남은 점수"가 점수 차이가 아니라 노트 가중치에 달려 있어 이 칸을 두지 않는다.
     with_remaining = not game_profile.score_is_percent
     remaining_name = f"{game_profile.candidate_target_label}까지 남은 점수"
-    head = _identity_format(ctx.game)
+    head = tc.identity_format(ctx.game)
     formats = (
         (f"{head} {{상수}}  현재 {{점수}}  {game_profile.candidate_target_label}까지 {{{remaining_name}}}점  상승폭 +{{상승폭}}",)
         if with_remaining

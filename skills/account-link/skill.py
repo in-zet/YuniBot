@@ -1,34 +1,24 @@
 # skills/account-link/skill.py
 from __future__ import annotations
 
-import importlib.util
+import logging
 import secrets
 import string
-import sys
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import discord
 
 from core.decorators import slash_only
+from core.sibling import load_sibling
 from core.slash import render_result, respond
 from core.tool_types import Display, ToolContext, ToolResult
 
-# 스킬 폴더 이름("account-link")에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다
-# (skills/_template/tests/test_template_example.py가 skill.py를 불러오는 것과 같은 이유).
-# 그래서 같은 폴더의 models.py를 파일 경로로 직접 불러온다.
-_MODELS_PATH = Path(__file__).parent / "models.py"
-_spec = importlib.util.spec_from_file_location("_account_link_models", _MODELS_PATH)
-assert _spec is not None and _spec.loader is not None
-models = importlib.util.module_from_spec(_spec)
-# models.py는 `from __future__ import annotations`로 문자열 어노테이션을 쓰는
-# @dataclass(kw_only=True)를 정의한다. dataclasses는 KW_ONLY 센티널 등을 확인하려고
-# `sys.modules[cls.__module__]`을 되찾아 그 모듈의 전역에서 어노테이션을 풀어본다 —
-# module_from_spec만으로는 sys.modules에 등록되지 않아 그 조회가 None이 되어 깨진다.
-# exec_module 전에 등록해야 한다.
-sys.modules[_spec.name] = models
-_spec.loader.exec_module(models)
+# 스킬 폴더 이름("account-link")에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다 — 같은 폴더의 models.py를
+# 파일 경로로 불러온다.
+models = load_sibling(__file__, "models", prefix="account_link")
+
+logger = logging.getLogger(__name__)
 
 CODE_LENGTH = 6
 CODE_TTL = timedelta(minutes=10)
@@ -39,6 +29,16 @@ WRONG_ATTEMPT_COOLDOWN = timedelta(minutes=10)
 # 무관하게 봇 전체에 하나"인 값을 표현하지 못한다. 설계서에 없는 세부 판단으로, 이
 # 값은 설정이 아니라 코드 상수로 둔다.
 MAX_LINKED_ACCOUNTS = 3
+
+
+async def _data_to_discard(ctx: ToolContext, player_id: str) -> tuple[dict[str, int], bool]:
+    """참여자가 버리게 될 데이터: (스킬 표별 건수, 메모리 유무). 참여 때와 마무리 직전에 같은 기준으로 센다.
+    메모리(player_memory)는 코어 테이블이라 player_data 스캐너가 일부러 세지 않는다(core/player_data.py)
+    — 그래서 memory 서비스로 따로 본다. 안 보면 메모리만 있는 계정은 경고 없이 연결되고, 그 메모리는
+    떨어져 나간 옛 플레이어에 영영 남는다."""
+    counts = await ctx.player_data.count(player_id) if ctx.player_data is not None else {}
+    has_memory = bool(await ctx.memory.get(player_id))
+    return counts, has_memory
 
 
 def _generate_code() -> str:
@@ -140,17 +140,17 @@ async def join_link(ctx: ToolContext, code: str) -> ToolResult:
     # "버릴 데이터"가 지금 쓴 계정의 것인지, 다른 계정의 것인지 구분할 길이 없다 — 그 모호함을
     # 풀려고 하지 않고, 참여 자체를 거절해 애초에 그 상황이 생기지 않게 한다(설계 결정).
     # 이렇게 하면 아래 버리고 연결 분기는 "계정 하나 = 플레이어 전부"인 경우에만 돈다.
+    # 계정 수 상한은 코드를 발급할 때만 보면 코드를 여러 개 받아 넘길 수 있다 — 참여 때도 본다.
+    if len(await ctx.players.accounts_for(link_code.issuer_player_id)) >= MAX_LINKED_ACCOUNTS:
+        return ToolResult(error=f"그 플레이어는 이미 계정을 {MAX_LINKED_ACCOUNTS}개 연결했어")
+
     joiner_accounts = await ctx.players.accounts_for(ctx.player_id)
     if len(joiner_accounts) > 1:
         return ToolResult(
             error="이미 다른 계정과 연결된 플레이어야. 먼저 /연결 해제로 풀고 다시 시도해 줘"
         )
 
-    counts = await ctx.player_data.count(ctx.player_id) if ctx.player_data is not None else {}
-    # 메모리(player_memory)는 코어 테이블이라 player_data 스캐너가 일부러 세지 않는다
-    # (core/player_data.py) — 그래서 memory 서비스로 따로 본다. 안 보면 메모리만 있는 계정은
-    # 경고 없이 연결되고, 그 메모리는 떨어져 나간 옛 플레이어에 영영 남는다.
-    has_memory = bool(await ctx.memory.get(ctx.player_id))
+    counts, has_memory = await _data_to_discard(ctx, ctx.player_id)
     if counts or has_memory:
         view = _DiscardConfirmView(code=code, joiner_discord_id=joiner_discord_id, ctx=ctx)
         line_items = [f"- {table}: {n}건" for table, n in counts.items()]
@@ -235,6 +235,59 @@ class _ConfirmButtonsView(discord.ui.View):
         self._side = side
         self._ctx = ctx
 
+    async def _finalize_link(self, link_code: Any) -> str | None:
+        """양쪽이 확인한 뒤의 실제 마무리(데이터 삭제, 계정 재배치). 막아야 하면 사용자에게 보일 문구를 돌려준다."""
+        assert self._ctx.db is not None
+        assert link_code.joiner_discord_id is not None
+        # 코드를 여러 개 받아 둔 채 참여시켜 상한을 넘기는 길도 마무리에서 막는다.
+        if len(await self._ctx.players.accounts_for(link_code.issuer_player_id)) >= MAX_LINKED_ACCOUNTS:
+            return f"그 플레이어는 이미 계정을 {MAX_LINKED_ACCOUNTS}개 연결했어"
+
+        # 참여자 계정은 아직 자기 자신의(옛) 플레이어에 연결되어 있다 —
+        # player_discord_accounts.discord_id는 유니크라 그대로 link_account를 부르면 깨진다.
+        stale_joiner = await self._ctx.players.player_for_discord(link_code.joiner_discord_id)
+        if stale_joiner is not None:
+            # 옛 플레이어가 이미 발급자 자신이면 뭔가 근본적으로 잘못됐다는 뜻이다(예: 마무리
+            # 주장을 두 번 가져갈 수 있었다는 버그) — 조용히 발급자를 해체하거나 데이터를
+            # 지우는 대신 여기서 터뜨린다.
+            if stale_joiner.id == link_code.issuer_player_id:
+                raise RuntimeError("account-link 불변 조건 위반: 참여자의 옛 플레이어가 이미 발급자와 같다")
+            # join_link은 참여자 플레이어의 계정이 하나뿐일 때만 참여를 받는다(그래야 "이
+            # 계정의 데이터"와 "이 플레이어의 데이터"가 같은 것이 된다). 하지만 확인 버튼은
+            # 최대 CODE_TTL(10분)까지 떠 있고, 그 사이 참여자가 (완전히 다른, 동시에 진행
+            # 중인) 별도의 연결 흐름으로 계정을 하나 더 얻었을 수 있다. 마무리 직전에 다시 센다.
+            stale_accounts = await self._ctx.players.accounts_for(stale_joiner.id)
+            single_account = len(stale_accounts) == 1
+            if link_code.discard_agreed:
+                # 버릴 데이터가 어느 계정 것인지 모호해졌다 — 지우지 않고 멈춘다. 여기서
+                # 멈추면 status는 'failed'로 닫힌다.
+                if not single_account:
+                    return "참여자 계정 상태가 바뀌어 더 이상 안전하게 처리할 수 없어. 처음부터 다시 시도해 줘"
+                if self._ctx.player_data is not None:
+                    await self._ctx.player_data.delete(stale_joiner.id)
+                # 메모리는 코어 테이블이라 player_data가 지우지 않는다 — memory 서비스로 지운다.
+                await self._ctx.memory.clear(stale_joiner.id)
+            elif single_account:
+                # 참여할 때 데이터가 없다고 확인했지만 코드가 유효한 10분 사이에 동기화·목표 등이 생겼을 수
+                # 있다. 동의 없이 해체하면 그 데이터가 연결 해제된 옛 플레이어에 고아로 남는다.
+                counts, has_memory = await _data_to_discard(self._ctx, stale_joiner.id)
+                if counts or has_memory:
+                    return "참여한 뒤에 이 계정에 데이터가 생겼어. 처음부터 다시 시도해 줘"
+            if single_account:
+                # 옛 플레이어에는 지금 옮기는 이 계정 하나뿐이다 — 이 계정이 떠나면 아무도
+                # 닿을 수 없는 고아가 된다. unlink_account만 하면 그 고아가 태그(손으로 받은
+                # admin까지)를 영원히 쥐고 있어 players_with_tag("admin")이 유령 관리자를
+                # 세게 되고, admin의 "마지막 관리자는 못 뗀다" 검사가 속는다. dissolve_player는
+                # 계정 연결과 태그를 함께 지운다.
+                await self._ctx.players.dissolve_player(stale_joiner.id)
+            else:
+                # (버릴 데이터가 없는 경로에서만 온다.) 옛 플레이어에 다른 계정이 남아 있으니
+                # 그 플레이어는 여전히 닿을 수 있다 — 이 계정 하나만 떼고 나머지 계정과 태그는
+                # 건드리지 않는다.
+                await self._ctx.players.unlink_account(link_code.joiner_discord_id)
+        await self._ctx.players.link_account(link_code.issuer_player_id, link_code.joiner_discord_id)
+        return None
+
     @discord.ui.button(label="확인", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
         # 마무리 분기는 DB 쓰기를 여러 번 거치고 끝에 notify.dm으로 디스코드 API를 한 번 더
@@ -294,51 +347,18 @@ class _ConfirmButtonsView(discord.ui.View):
                 await respond(interaction, content="이미 처리하고 있어", ephemeral=True)
                 return
 
-            # 참여자 계정은 아직 자기 자신의(옛) 플레이어에 연결되어 있다 —
-            # player_discord_accounts.discord_id는 유니크라 그대로 link_account를 부르면 깨진다.
-            stale_joiner = await self._ctx.players.player_for_discord(refreshed.joiner_discord_id)
-            if stale_joiner is not None:
-                # 옛 플레이어가 이미 발급자 자신이면 뭔가 근본적으로 잘못됐다는 뜻이다(예: 마무리
-                # 주장을 두 번 가져갈 수 있었다는 버그) — 조용히 발급자를 해체하거나 데이터를
-                # 지우는 대신 여기서 터뜨린다.
-                if stale_joiner.id == refreshed.issuer_player_id:
-                    raise RuntimeError(
-                        "account-link 불변 조건 위반: 참여자의 옛 플레이어가 이미 발급자와 같다"
-                    )
-                # join_link은 참여자 플레이어의 계정이 하나뿐일 때만 참여를 받는다(그래야 "이
-                # 계정의 데이터"와 "이 플레이어의 데이터"가 같은 것이 된다). 하지만 확인 버튼은
-                # 최대 CODE_TTL(10분)까지 떠 있고, 그 사이 참여자가 (완전히 다른, 동시에 진행
-                # 중인) 별도의 연결 흐름으로 계정을 하나 더 얻었을 수 있다. 마무리 직전에 다시 센다.
-                stale_accounts = await self._ctx.players.accounts_for(stale_joiner.id)
-                single_account = len(stale_accounts) == 1
-                if refreshed.discard_agreed:
-                    # 버릴 데이터가 어느 계정 것인지 모호해졌다 — 지우지 않고 멈춘다. 여기서
-                    # 멈추면 status는 'finalizing'에 남는다(이 드문 경우의 복구는 다루지 않는다).
-                    if not single_account:
-                        await respond(
-                            interaction,
-                            content="참여자 계정 상태가 바뀌어 더 이상 안전하게 처리할 수 없어. "
-                            "처음부터 다시 시도해 줘",
-                            ephemeral=True,
-                        )
-                        return
-                    if self._ctx.player_data is not None:
-                        await self._ctx.player_data.delete(stale_joiner.id)
-                    # 메모리는 코어 테이블이라 player_data가 지우지 않는다 — memory 서비스로 지운다.
-                    await self._ctx.memory.clear(stale_joiner.id)
-                if single_account:
-                    # 옛 플레이어에는 지금 옮기는 이 계정 하나뿐이다 — 이 계정이 떠나면 아무도
-                    # 닿을 수 없는 고아가 된다. unlink_account만 하면 그 고아가 태그(손으로 받은
-                    # admin까지)를 영원히 쥐고 있어 players_with_tag("admin")이 유령 관리자를
-                    # 세게 되고, admin의 "마지막 관리자는 못 뗀다" 검사가 속는다. dissolve_player는
-                    # 계정 연결과 태그를 함께 지운다.
-                    await self._ctx.players.dissolve_player(stale_joiner.id)
-                else:
-                    # (버릴 데이터가 없는 경로에서만 온다.) 옛 플레이어에 다른 계정이 남아 있으니
-                    # 그 플레이어는 여전히 닿을 수 있다 — 이 계정 하나만 떼고 나머지 계정과 태그는
-                    # 건드리지 않는다.
-                    await self._ctx.players.unlink_account(refreshed.joiner_discord_id)
-            await self._ctx.players.link_account(refreshed.issuer_player_id, refreshed.joiner_discord_id)
+            try:
+                error = await self._finalize_link(refreshed)
+            except Exception:
+                # dissolve_player·link_account·mark_status는 각각 commit이라 중간에 터지면 반쪽 상태가 남는다.
+                # 코드를 'failed'로 닫아 다시 시도하게 하고, 참여 계정이 플레이어 없이 남는 경우는 그 계정의 다음
+                # 메시지가 새 플레이어로 시작시킨다.
+                logger.exception("account-link finalize failed for code %s", self._code)
+                error = "연결하다가 문제가 생겼어. 처음부터 다시 시도해 줘"
+            if error is not None:
+                await models.mark_status(self._ctx.db, self._code, status="failed")
+                await respond(interaction, content=error, ephemeral=True)
+                return
             await models.mark_status(self._ctx.db, self._code, status="completed")
             await self._ctx.emit(
                 "players.linked",
@@ -395,7 +415,11 @@ async def unlink(ctx: ToolContext, discord_id: str) -> ToolResult:
     player = await ctx.players.get_player(ctx.player_id)
     if player is None:
         return ToolResult(error="모르는 플레이어야")
-    if player.primary_discord_id == discord_id and len(accounts) > 1:
+    if len(accounts) <= 1:
+        # 유일한 계정을 풀면 태그(admin 포함)와 데이터를 쥔 채 아무도 닿을 수 없는 플레이어가 남는다
+        # (dissolve_player가 막으려던 상황). 같은 디코 계정은 다음 메시지에 새 플레이어로 시작한다.
+        return ToolResult(error="계정이 하나뿐이라 풀 수 없어. 연결된 계정은 최소 하나가 있어야 해")
+    if player.primary_discord_id == discord_id:
         return ToolResult(error="대표 계정은 먼저 다른 계정으로 대표를 넘긴 뒤에 뗄 수 있어")
 
     await ctx.players.unlink_account(discord_id)

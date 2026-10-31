@@ -110,3 +110,9 @@ def test_diff_song_ids_ignores_title_only_changes_for_same_id() -> None:
     diff = calc.diff_song_ids({"1": "옛 제목"}, {"1": "새 제목"})
     assert diff.added == []
     assert diff.removed == []
+
+
+def test_impossible_month_day_gives_none_instead_of_stopping_the_whole_feed() -> None:
+    posted = date(2026, 10, 1)
+    assert calc.extract_jp_update_date("2/30(金)新曲追加", posted) is None
+    assert calc.extract_intl_update_date("Details of 2/29 Update", date(2027, 2, 1)) is None

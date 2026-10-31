@@ -55,3 +55,39 @@ async def test_scanner_delete_removes_rows_and_returns_prior_counts(conn: aiosql
     remaining = {row[0] for row in await cursor.fetchall()}
     assert remaining == {"p2"}
     assert await scanner.count("p1") == {}
+
+
+async def test_llm_usage_is_never_discovered_or_deleted(conn: aiosqlite.Connection) -> None:
+    await conn.execute("CREATE TABLE llm_usage (id INTEGER PRIMARY KEY, player_id TEXT, estimated_cost_usd REAL)")
+    await conn.execute("INSERT INTO llm_usage VALUES (1, 'p1', 0.5)")
+    tables = await discover_skill_tables(conn)
+    assert "llm_usage" not in tables
+
+    await PlayerDataScanner(conn=conn, table_names=tables).delete("p1")
+    cursor = await conn.execute("SELECT COUNT(*) FROM llm_usage")
+    row = await cursor.fetchone()
+    assert row is not None and row[0] == 1
+
+
+async def test_scanner_delete_follows_foreign_keys_to_child_tables_without_player_id(
+    conn: aiosqlite.Connection,
+) -> None:
+    await conn.executescript(
+        """
+        CREATE TABLE folders_x (id INTEGER PRIMARY KEY, player_id TEXT);
+        CREATE TABLE folders_x_charts (folder_id INTEGER REFERENCES folders_x(id), title TEXT);
+        CREATE TABLE folders_x_notes (chart_rowid INTEGER REFERENCES folders_x_charts(rowid), body TEXT);
+        INSERT INTO folders_x VALUES (1, 'p1'), (2, 'p2');
+        INSERT INTO folders_x_charts VALUES (1, 'a'), (2, 'b');
+        INSERT INTO folders_x_notes VALUES (1, 'n1'), (2, 'n2');
+        """
+    )
+    tables = await discover_skill_tables(conn)
+    assert "folders_x_charts" not in tables
+
+    await PlayerDataScanner(conn=conn, table_names=tables).delete("p1")
+
+    cursor = await conn.execute("SELECT title FROM folders_x_charts")
+    assert [row[0] for row in await cursor.fetchall()] == ["b"]
+    cursor = await conn.execute("SELECT body FROM folders_x_notes")
+    assert [row[0] for row in await cursor.fetchall()] == ["n2"]

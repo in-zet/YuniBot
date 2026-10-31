@@ -7,6 +7,7 @@ from types import ModuleType
 from typing import Any
 
 import discord
+import pytest
 
 from core.tool_types import ToolContext
 
@@ -288,6 +289,48 @@ async def test_login_expired_handler_sends_dm_once() -> None:
 
     assert len(notify.dms) == 1
     assert notify.dms[0][0] == "p1"
+
+
+async def test_login_expired_notice_is_sent_again_after_relogin() -> None:
+    skill = _load_skill()
+    notify = _FakeNotify()
+    ctx = _ctx(notify=notify, chunithm_net=_FakeChunithmNet(linked=False))
+    await skill.on_login_expired(ctx, {"player_id": "p1"})
+
+    await skill._attempt_login(ctx, "my-sega-id", "my-password", _FakeInteraction())
+    await skill.on_login_expired(ctx, {"player_id": "p1"})
+
+    assert len(notify.dms) == 2
+
+
+async def test_login_expired_notice_is_retried_when_the_dm_failed() -> None:
+    skill = _load_skill()
+    notify = _FakeNotify()
+    ctx = _ctx(notify=notify)
+    original = notify.dm
+
+    async def blocked(player_id: str, content: str, *, view=None) -> None:
+        raise RuntimeError("DM 차단")
+
+    notify.dm = blocked
+    with pytest.raises(RuntimeError):
+        await skill.on_login_expired(ctx, {"player_id": "p1"})
+    notify.dm = original
+    await skill.on_login_expired(ctx, {"player_id": "p1"})
+
+    assert len(notify.dms) == 1
+
+
+async def test_login_failure_logs_only_the_exception_class(caplog: pytest.LogCaptureFixture) -> None:
+    skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=False, login_error=RuntimeError("my-password가 틀렸다"))
+    ctx = _ctx(chunithm_net=chunithm_net)
+
+    with caplog.at_level("WARNING"):
+        await skill._attempt_login(ctx, "my-sega-id", "my-password", _FakeInteraction())
+
+    assert "RuntimeError" in caplog.text
+    assert "my-password" not in caplog.text and "my-sega-id" not in caplog.text
 
 
 async def test_logout_locked_without_chunithm_linked_shows_how_to_get_it() -> None:

@@ -887,3 +887,11 @@ def test_chart_type_column_is_a_slot_column_not_an_extra() -> None:
     shown = render.shown_columns(_maimai_table())
 
     assert tc.CHART_TYPE not in {column.name for column in shown.extras}
+
+
+@pytest.mark.parametrize("text", ["FC", "FC+", "AP", "AP+", "FULL COMBO", "ALL JUSTICE", "AJC"])
+def test_every_combo_lamp_text_has_a_label_and_a_color(text: str) -> None:
+    label = render._LAMP_LABELS.get(tc.lamp_cell(text).text)
+
+    assert label is not None
+    assert label in render._LAMP_COLORS

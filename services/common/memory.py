@@ -352,7 +352,19 @@ class MemoryService:
             await self._retry_or_drop(pending, now=now)
             return False
 
+        # 요약하는 사이(수 초) 사용자가 기억해줘·잊어줘를 했으면 옛 상태 기준 결과로 덮어쓰지 않는다 — 방금 저장한
+        # 줄이 사라지거나 지운 항목이 되살아난다. 대기 목록은 남기고 다음 주기에 새 상태로 다시 요약한다.
+        fresh = await self.get_state(pending.player_id)
+        if (fresh.content, fresh.nickname, fresh.forgotten) != (state.content, state.nickname, state.forgotten):
+            await self._postpone(pending, now=now)
+            return False
+
         content, nickname = self._apply_merge(state, merged)
+        if state.content and not content:
+            # 모델이 빈 메모리를 돌려주면 기존 메모리가 통째로 지워진다. 요약 실패로 취급해 다시 시도한다.
+            logger.warning("플레이어 %s의 메모리 요약이 빈 결과라 반영하지 않는다", pending.player_id)
+            await self._retry_or_drop(pending, now=now)
+            return False
         changed = content != state.content or nickname != state.nickname
         if changed:
             await self._write(pending.player_id, content=content, nickname=nickname)
@@ -387,6 +399,13 @@ class MemoryService:
         await self._conn.execute(
             "DELETE FROM player_memory_pending WHERE player_id = ? AND due_at = ?",
             (pending.player_id, pending.due_at),
+        )
+        await self._conn.commit()
+
+    async def _postpone(self, pending: PendingSummary, *, now: float) -> None:
+        await self._conn.execute(
+            "UPDATE player_memory_pending SET due_at = ? WHERE player_id = ? AND due_at = ?",
+            (now + SUMMARY_DELAY_SECONDS, pending.player_id, pending.due_at),
         )
         await self._conn.commit()
 

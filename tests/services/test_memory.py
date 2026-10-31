@@ -330,6 +330,32 @@ async def test_flush_due_does_not_bring_back_forgotten_items(conn: aiosqlite.Con
     assert await service.get("p1") == "짧은 답을 좋아한다\n리듬게임을 오래 했다"
 
 
+async def test_flush_due_does_not_wipe_memory_when_the_model_returns_empty(conn: aiosqlite.Connection) -> None:
+    service = MemoryService(conn)
+    await service.set("p1", "왼손이 약하다")
+    await _enqueue(service, now=1000.0)
+    count = await service.flush_due(now=10**6, merge=await _merge_to(MemoryMerge(content="")))
+    assert count == 0
+    assert await service.get("p1") == "왼손이 약하다"
+    [pending] = await service.due_pending(now=10**9)  # 실패로 보고 다시 시도하려고 남는다
+    assert pending.attempts == 1
+
+
+async def test_flush_due_does_not_overwrite_a_change_made_while_summarizing(conn: aiosqlite.Connection) -> None:
+    service = MemoryService(conn)
+    await service.set("p1", "기존")
+    await _enqueue(service, now=1000.0)
+
+    async def merge(state: MemoryState, pending: PendingSummary) -> MemoryMerge:
+        await service.set("p1", "기존\n방금 기억해 달라고 한 것")  # 요약 호출 중에 들어온 remember
+        return MemoryMerge(content="기존\n왼손이 약하다")
+
+    count = await service.flush_due(now=10**6, merge=merge)
+    assert count == 0
+    assert await service.get("p1") == "기존\n방금 기억해 달라고 한 것"
+    assert len(await service.due_pending(now=10**9)) == 1  # 새 상태로 다음 주기에 다시 요약한다
+
+
 async def test_flush_due_trims_oversized_result_from_the_front_and_cleans_nickname(
     conn: aiosqlite.Connection,
 ) -> None:

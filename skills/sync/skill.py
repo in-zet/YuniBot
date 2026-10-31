@@ -166,10 +166,17 @@ async def run(
         display = Display(content=rendered_text)
     else:
         is_public = False
-        await ctx.notify.dm(ctx.player_id, rendered_text)
-        # notify.dm은 대표 계정으로 보낸다 — 부른 계정(ctx.discord_id)이 아니라 실제 받은 계정을 적는다.
-        sent_location = {"kind": "dm", "discord_id": player.primary_discord_id}
-        display = Display(content="동기화 리포트를 DM으로 보냈어.", ephemeral=True)
+        try:
+            await ctx.notify.dm(ctx.player_id, rendered_text)
+        except Exception:
+            logger.warning("sync report DM failed for player %s", ctx.player_id, exc_info=True)
+            # 본인에게만 보이는 답으로 대신 준다(공개하지 않는다).
+            sent_location = {"kind": "ephemeral"}
+            display = Display(content=f"DM으로 못 보내서 여기로 보여 줄게.\n{rendered_text}", ephemeral=True)
+        else:
+            # notify.dm은 대표 계정으로 보낸다 — 부른 계정(ctx.discord_id)이 아니라 실제 받은 계정을 적는다.
+            sent_location = {"kind": "dm", "discord_id": player.primary_discord_id}
+            display = Display(content="동기화 리포트를 DM으로 보냈어.", ephemeral=True)
 
     sections_data = [section.data for section in sections]
     await ctx.emit(

@@ -6,6 +6,7 @@ from typing import Annotated, Any
 
 import aiosqlite
 
+from core.db import write_transaction
 from core.decorators import tool
 from core.tables import RowRef, TableBuilder, TableNeeds, WorkTable, cell
 from core.tool_types import (
@@ -131,9 +132,9 @@ async def delete_folder(ctx: ToolContext, name: str, game: GameRef | None = None
     folder = await _require_folder(ctx, name)
     if isinstance(folder, ToolResult):
         return folder
-    await ctx.db.execute("DELETE FROM folders_charts WHERE folder_id = ?", (folder["id"],))
-    await ctx.db.execute("DELETE FROM folders_folders WHERE id = ?", (folder["id"],))
-    await ctx.db.commit()
+    async with write_transaction(ctx.db):
+        await ctx.db.execute("DELETE FROM folders_charts WHERE folder_id = ?", (folder["id"],))
+        await ctx.db.execute("DELETE FROM folders_folders WHERE id = ?", (folder["id"],))
     return ToolResult(
         data={"name": folder["name"]},
         display=Display(content=f"'{folder['name']}' 폴더를 지웠어."),
@@ -268,19 +269,19 @@ async def save_table(
         )
 
     now = datetime.now(UTC).isoformat()
-    cursor = await ctx.db.execute(
-        "INSERT INTO folders_folders (player_id, game, name, note, created_at, updated_at) "
-        "VALUES (?, ?, ?, NULL, ?, ?)",
-        (ctx.player_id, ctx.game, name, now, now),
-    )
-    folder_id = cursor.lastrowid
-    for title, chart_type, difficulty in keys:
-        await ctx.db.execute(
-            "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (folder_id, title, chart_type, difficulty, now),
+    async with write_transaction(ctx.db):
+        cursor = await ctx.db.execute(
+            "INSERT INTO folders_folders (player_id, game, name, note, created_at, updated_at) "
+            "VALUES (?, ?, ?, NULL, ?, ?)",
+            (ctx.player_id, ctx.game, name, now, now),
         )
-    await ctx.db.commit()
+        folder_id = cursor.lastrowid
+        for title, chart_type, difficulty in keys:
+            await ctx.db.execute(
+                "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (folder_id, title, chart_type, difficulty, now),
+            )
     return ToolResult(
         data={"name": name, "count": len(keys), "notes": notes},
         display=Display(content=f"'{name}' 폴더를 만들고 {len(keys)}개를 담았어: {_display_names(labels)}"),
@@ -306,13 +307,13 @@ async def add_chart(ctx: ToolContext, name: str, chart: ChartRef, game: GameRef 
             display_mode="optional",
         )
     now = datetime.now(UTC).isoformat()
-    await ctx.db.execute(
-        "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (folder["id"], *key, now),
-    )
-    await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
-    await ctx.db.commit()
+    async with write_transaction(ctx.db):
+        await ctx.db.execute(
+            "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (folder["id"], *key, now),
+        )
+        await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
     return ToolResult(
         data={"name": folder["name"], "added": True},
         display=Display(
@@ -330,19 +331,21 @@ async def remove_chart(ctx: ToolContext, name: str, chart: ChartRef, game: GameR
     folder = await _require_folder(ctx, name)
     if isinstance(folder, ToolResult):
         return folder
-    cursor = await ctx.db.execute(
-        "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
-        (folder["id"], chart.song.title, chart.chart.chart_type, chart.chart.difficulty),
-    )
-    if cursor.rowcount == 0:
+    now = datetime.now(UTC).isoformat()
+    async with write_transaction(ctx.db):
+        cursor = await ctx.db.execute(
+            "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
+            (folder["id"], chart.song.title, chart.chart.chart_type, chart.chart.difficulty),
+        )
+        removed = cursor.rowcount > 0
+        if removed:
+            await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
+    if not removed:
         return ToolResult(
             data={"name": folder["name"], "removed": False},
             display=Display(content=f"'{folder['name']}'에 그 채보가 없어."),
             display_mode="optional",
         )
-    now = datetime.now(UTC).isoformat()
-    await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
-    await ctx.db.commit()
     return ToolResult(
         data={"name": folder["name"], "removed": True},
         display=Display(
@@ -392,14 +395,14 @@ async def add_to_folder(
         )
 
     now = datetime.now(UTC).isoformat()
-    for title, chart_type, difficulty in targets:
-        await ctx.db.execute(
-            "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (folder["id"], title, chart_type, difficulty, now),
-        )
-    await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
-    await ctx.db.commit()
+    async with write_transaction(ctx.db):
+        for title, chart_type, difficulty in targets:
+            await ctx.db.execute(
+                "INSERT INTO folders_charts (folder_id, song_title, chart_type, difficulty, added_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (folder["id"], title, chart_type, difficulty, now),
+            )
+        await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
     return ToolResult(
         data={"count": len(targets), "charts": names, "already": already, "notes": notes},
         display=Display(
@@ -443,13 +446,13 @@ async def remove_from_folder(
         )
 
     now = datetime.now(UTC).isoformat()
-    for title, chart_type, difficulty in targets:
-        await ctx.db.execute(
-            "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
-            (folder["id"], title, chart_type, difficulty),
-        )
-    await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
-    await ctx.db.commit()
+    async with write_transaction(ctx.db):
+        for title, chart_type, difficulty in targets:
+            await ctx.db.execute(
+                "DELETE FROM folders_charts WHERE folder_id = ? AND song_title = ? AND chart_type = ? AND difficulty = ?",
+                (folder["id"], title, chart_type, difficulty),
+            )
+        await ctx.db.execute("UPDATE folders_folders SET updated_at = ? WHERE id = ?", (now, folder["id"]))
     return ToolResult(
         data={"count": len(targets), "charts": names, "missing": missing, "notes": notes},
         display=Display(

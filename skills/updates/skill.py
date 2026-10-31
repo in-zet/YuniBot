@@ -1,18 +1,16 @@
 # skills/updates/skill.py
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
 import re
-import sys
 from datetime import UTC, datetime, time
 from enum import StrEnum
-from pathlib import Path
 from typing import Any
 
 from core.decorators import on, schedule, tool
 from core.events import Section
+from core.sibling import load_sibling
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
 from core.tool_types import Display, ToolContext, ToolResult
 from services.common.notify import parse_channel_ref
@@ -21,23 +19,10 @@ from services.game.records_calc import candidate_upside
 
 logger = logging.getLogger(__name__)
 
-# skills/updates는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다
-# (goals/skill.py와 같은 이유) — 같은 폴더의 models.py/updates_calc.py를 파일 경로로
-# 직접 불러온다.
-_SKILL_DIR = Path(__file__).parent
-
-
-def _load_sibling(name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(f"_chunithm_updates_{name}", _SKILL_DIR / f"{name}.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-models = _load_sibling("models")
-calc = _load_sibling("updates_calc")
+# skills/updates는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다 — 같은 폴더의 models.py/updates_calc.py를
+# 파일 경로로 불러온다.
+models = load_sibling(__file__, "models", prefix="chunithm_updates")
+calc = load_sibling(__file__, "updates_calc", prefix="chunithm_updates")
 
 _SKILL_NAME = "updates"
 _SETTING_CHANNEL = "알림 채널"
@@ -114,7 +99,7 @@ async def _broadcast_to_guilds(ctx: ToolContext, *, region: Region, content: str
             scope="guild", scope_id=guild_id, skill=_SKILL_NAME, name=_SETTING_ROLE, default="",
         )
         full_content = f"{role_mention} {content}".strip() if role_mention else content
-        await ctx.notify.post(channel_id, full_content)
+        await ctx.notify.post(channel_id, full_content, mention_roles=bool(role_mention))
 
 
 async def _compose_notice_message(ctx: ToolContext, notice: Any, *, is_version_change: bool) -> str:
@@ -164,6 +149,18 @@ async def _check_notices(ctx: ToolContext, region: Region) -> bool:
     # 들어올 때(켜진 직후 등) 옛 버전이 "방금 들어온 새 버전"보다 나중에 읽혀 거꾸로
     # "버전이 바뀌었다"고 잘못 보게 된다.
     items = sorted(items, key=lambda item: item.posted_at)
+
+    if not await models.has_notices(ctx.db, region=region.value):
+        # 처음 켰을 때(또는 DB를 비웠을 때)는 곡 목록처럼 기준점만 잡는다 — 페이지에 남은 옛 공지
+        # 수십 건을 새 공지로 알리고 과거 시각 예약을 한꺼번에 쏘지 않는다.
+        for item in items:
+            await models.insert_notice(
+                ctx.db, region=region.value, url=item.url, title=item.title,
+                posted_at=item.posted_at.isoformat(),
+                update_date=item.update_date.isoformat() if item.update_date else None,
+                version_name=item.version_name, created_at=_now().isoformat(), notified=True,
+            )
+        return False
 
     found_new = False
     for item in items:

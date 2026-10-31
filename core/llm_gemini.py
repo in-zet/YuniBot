@@ -46,10 +46,20 @@ def to_provider_content(content: LlmContent) -> types.Content:
 
 
 def _from_provider_response(response: types.GenerateContentResponse) -> GenerationTurn:
-    assert response.candidates, "응답에 candidate가 없다"
-    candidate = response.candidates[0]
-    model_content = candidate.content
-    assert model_content is not None, "candidate에 content가 없다"
+    usage = response.usage_metadata
+    candidate = response.candidates[0] if response.candidates else None
+    model_content = candidate.content if candidate is not None else None
+    if model_content is None:
+        # 안전 필터 차단·MALFORMED_FUNCTION_CALL 등으로 후보나 내용이 비어 올 수 있다. assert는 최적화 실행(-O)에서 사라지고
+        # AssertionError로 올라가 재시도도 없이 끝난다 — 빈 턴으로 돌려, 위쪽이 고정 실패 문구로 답하게 한다.
+        reason = candidate.finish_reason if candidate is not None else None
+        logger.warning("Gemini 응답이 비어 있다(후보 %s, 종료 사유 %s)", "있음" if candidate else "없음", reason)
+        return GenerationTurn(
+            content=LlmContent(role="model", parts=[]),
+            function_calls=[],
+            text=None,
+            usage=_usage_info(usage),
+        )
 
     model_parts = model_content.parts or []
     # thought=True인 part는 모델의 생각이라 답에 싣지 않는다(raw에는 그대로 남는다).
@@ -64,21 +74,22 @@ def _from_provider_response(response: types.GenerateContentResponse) -> Generati
         if p.function_call is not None
     ]
 
-    usage = response.usage_metadata
     return GenerationTurn(
         content=LlmContent(role="model", parts=[LlmPart(text=t) for t in text_parts], raw=model_content),
         function_calls=function_calls,
         text="\n".join(text_parts) if text_parts else None,
-        usage=UsageInfo(
-            input_tokens=usage.prompt_token_count or 0 if usage else 0,
-            cached_input_tokens=usage.cached_content_token_count or 0 if usage else 0,
-            # 사고(thinking) 토큰은 출력 가격에 포함된다(00-core.md "비용과 운영") —
-            # 보이는 출력 텍스트보다 많은 경우가 흔해, 빼면 비용/월상한 집행이 실제보다
-            # 낮게 잡힌다. 새 필드를 만들지 않고 output_tokens에 바로 더한다.
-            output_tokens=(
-                (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0) if usage else 0
-            ),
-        ),
+        usage=_usage_info(usage),
+    )
+
+
+def _usage_info(usage: types.GenerateContentResponseUsageMetadata | None) -> UsageInfo:
+    return UsageInfo(
+        input_tokens=usage.prompt_token_count or 0 if usage else 0,
+        cached_input_tokens=usage.cached_content_token_count or 0 if usage else 0,
+        # 사고(thinking) 토큰은 출력 가격에 포함된다(00-core.md "비용과 운영") —
+        # 보이는 출력 텍스트보다 많은 경우가 흔해, 빼면 비용/월상한 집행이 실제보다
+        # 낮게 잡힌다. 새 필드를 만들지 않고 output_tokens에 바로 더한다.
+        output_tokens=(usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0) if usage else 0,
     )
 
 

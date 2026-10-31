@@ -172,3 +172,22 @@ def test_load_config_websearch_overrides(monkeypatch: pytest.MonkeyPatch) -> Non
     assert config.websearch_provider == "claude"
     assert config.search_model == "claude-haiku-5-5"
     assert config.websearch_cooldown_seconds == 5
+
+
+@pytest.mark.parametrize(
+    "name, value", [("LLM_PROVIDER", "openai"), ("THINKING_LEVEL", "off"), ("WEBSEARCH_PROVIDER", "bing"),
+                    ("SKILL_LOADING_MODE", "lazy")],
+)
+def test_load_config_rejects_unknown_choice_at_boot(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(RuntimeError, match=name):
+        load_config()
+
+
+def test_load_config_choice_ignores_case_and_surrounding_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DISCORD_TOKEN", "fake-token")
+    monkeypatch.setenv("LLM_PROVIDER", " Claude ")
+
+    assert load_config().llm_provider == "claude"

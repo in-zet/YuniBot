@@ -255,7 +255,7 @@ async def test_028_terms_aliases_get_a_game_column_keeping_rows(tmp_path: Path) 
         await conn.commit()
 
         applied = await run_migrations(conn, roots=[("core", real_core)])
-        assert applied == ["core/028_terms_aliases_game.sql"]
+        assert applied == ["core/028_terms_aliases_game.sql", "core/029_change_log.sql"]
 
         cursor = await conn.execute("SELECT game, kind, alias, canonical FROM terms_aliases")
         assert [tuple(r) for r in await cursor.fetchall()] == [("chunithm", "rank", "트플", "SSS")]

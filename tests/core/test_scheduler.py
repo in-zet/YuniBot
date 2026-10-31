@@ -27,6 +27,18 @@ def test_next_fire_time_inside_quiet_hours_shifts_to_quiet_end() -> None:
     assert result == datetime.datetime(2026, 10, 10, 6, 0)
 
 
+def test_quiet_hours_crossing_midnight_shift_both_sides_of_midnight() -> None:
+    start, end = datetime.time(23, 0), datetime.time(6, 0)
+    after = datetime.datetime(2026, 10, 10, 20, 0)
+    late = next_fire_time("30 23 * * *", after, quiet_start=start, quiet_end=end)
+    early = next_fire_time("0 3 * * *", after, quiet_start=start, quiet_end=end)
+    daytime = next_fire_time("0 9 * * *", after, quiet_start=start, quiet_end=end)
+
+    assert late == datetime.datetime(2026, 10, 11, 6, 0)  # 23:30은 다음 날 06:00으로
+    assert early == datetime.datetime(2026, 10, 11, 6, 0)
+    assert daytime == datetime.datetime(2026, 10, 11, 9, 0)
+
+
 def test_next_fire_time_exactly_at_quiet_end_is_unaffected() -> None:
     after = datetime.datetime(2026, 10, 10, 1, 0)
     result = next_fire_time("0 6 * * *", after, quiet_start=QUIET_START, quiet_end=QUIET_END)

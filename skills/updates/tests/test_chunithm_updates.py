@@ -118,10 +118,12 @@ class _FakeRecords:
 @dataclass(slots=True, kw_only=True)
 class _FakeNotify:
     posts: list[tuple[str, str]] = field(default_factory=list)
+    role_pings: list[bool] = field(default_factory=list)
     dms: list[tuple[str, str]] = field(default_factory=list)
 
-    async def post(self, channel_id: str, content: str) -> None:
+    async def post(self, channel_id: str, content: str, *, mention_roles: bool = False) -> None:
         self.posts.append((channel_id, content))
+        self.role_pings.append(mention_roles)
 
     async def dm(self, player_id: str, content: str, *, view: Any | None = None) -> None:
         self.dms.append((player_id, content))
@@ -164,6 +166,14 @@ async def _enable_channel(ctx: ToolContext, *, guild_id: str, channel_id: str = 
 # ---------------------------------------------------------------- _check_notices
 
 
+async def _seed_known_notice(skill: ModuleType, db: aiosqlite.Connection, *, region: str = "intl") -> None:
+    """첫 실행은 기준점만 잡으므로, 새 공지 처리를 보려면 이미 한 번 돈 상태(옛 공지 하나)로 만든다."""
+    await skill.models.insert_notice(
+        db, region=region, url="https://example.invalid/old", title="옛 공지", posted_at="2020-01-01",
+        update_date=None, version_name=None, created_at="2020-01-01T00:00:00", notified=True,
+    )
+
+
 async def test_check_notices_schedules_dated_updates_and_broadcasts_dateless_one_immediately(
     skill: ModuleType, db: aiosqlite.Connection,
 ) -> None:
@@ -171,17 +181,18 @@ async def test_check_notices_schedules_dated_updates_and_broadcasts_dateless_one
     notify = _FakeNotify()
     ctx = _ctx(db=db, http=http, notify=notify)
     await _enable_channel(ctx, guild_id="g1")
+    await _seed_known_notice(skill, db)
 
     found = await skill._check_notices(ctx, skill.Region.INTL)
     assert found is True
 
     cursor = await db.execute("SELECT url, update_date, notified, schedule_id FROM updates_notices ORDER BY id")
     rows = list(await cursor.fetchall())
-    assert len(rows) == 6
+    assert len(rows) == 7
     dated = [r for r in rows if r["update_date"] is not None]
     dateless = [r for r in rows if r["update_date"] is None]
     assert len(dated) == 5
-    assert len(dateless) == 1
+    assert len(dateless) == 2  # 옛 공지 하나(시험이 심은 것) + 버전 알림 글
     # 날짜가 있는 공지는 예약만 걸고 아직 안 알린다.
     assert all(r["notified"] == 0 and r["schedule_id"] is not None for r in dated)
     # 날짜를 못 뽑은 공지(버전 알림 글)는 바로 알린다.
@@ -203,6 +214,7 @@ async def test_check_notices_flags_version_change_only_for_the_chronologically_l
     await players.grant_tag(admin.id, "admin", source="test")
     ctx = _ctx(db=db, http=http, notify=notify)
     await _enable_channel(ctx, guild_id="g1")
+    await _seed_known_notice(skill, db)
 
     await skill._check_notices(ctx, skill.Region.INTL)
 
@@ -215,6 +227,7 @@ async def test_check_notices_skips_urls_already_known(skill: ModuleType, db: aio
     http = _FakeHttp(pages={_INTL_NEWS_URL: html})
     ctx = _ctx(db=db, http=http)
     await _enable_channel(ctx, guild_id="g1")
+    await _seed_known_notice(skill, db)
 
     assert await skill._check_notices(ctx, skill.Region.INTL) is True
     assert await skill._check_notices(ctx, skill.Region.INTL) is False
@@ -222,7 +235,22 @@ async def test_check_notices_skips_urls_already_known(skill: ModuleType, db: aio
     cursor = await db.execute("SELECT COUNT(*) FROM updates_notices")
     row = await cursor.fetchone()
     assert row is not None
-    assert row[0] == 6
+    assert row[0] == 7
+
+
+async def test_check_notices_first_run_only_sets_baseline(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    http = _FakeHttp(pages={_INTL_NEWS_URL: (_REFERENCE_DIR / "intl_news_sample.html").read_text(encoding="utf-8")})
+    notify = _FakeNotify()
+    ctx = _ctx(db=db, http=http, notify=notify)
+    await _enable_channel(ctx, guild_id="g1")
+
+    assert await skill._check_notices(ctx, skill.Region.INTL) is False
+
+    cursor = await db.execute("SELECT notified, schedule_id FROM updates_notices")
+    rows = list(await cursor.fetchall())
+    assert len(rows) == 6
+    assert all(r["notified"] == 1 and r["schedule_id"] is None for r in rows)
+    assert notify.posts == [] and notify.dms == []
 
 
 # ---------------------------------------------------------------- on_notice_due

@@ -76,6 +76,11 @@ def _with_sections(head: str, sections: list[Section]) -> str:
     return "\n\n".join(parts)
 
 
+def _const_text(const: object) -> str:
+    """상수를 모르는 채보(CHUNITHM WE, maimai 宴, 상수 칸이 빈 채보)는 'None'이 아니라 계산 불가로 쓴다."""
+    return "계산 불가" if const is None else str(const)
+
+
 @tool(slash="곡")
 async def info(ctx: ToolContext, song: SongQuery, game: GameRef | None = None) -> ToolResult:
     """곡 정보와 난이도별 채보(상수, 노트 수)를 보여준다."""
@@ -88,7 +93,7 @@ async def info(ctx: ToolContext, song: SongQuery, game: GameRef | None = None) -
     for chart in _charts_in_display_order(song, ctx.game):
         const_suffix = "(추정)" if chart.is_const_unknown else ""
         note_text = f"{chart.note_count}노트" if chart.note_count is not None else "노트 수 알 수 없음"
-        lines.append(f"{_chart_label(chart)} Lv.{chart.level or '?'} 상수 {chart.const}{const_suffix} — {note_text}")
+        lines.append(f"{_chart_label(chart)} Lv.{chart.level or '?'} 상수 {_const_text(chart.const)}{const_suffix} — {note_text}")
 
     # difficulty None = 곡 전체 보기. 받는 스킬은 그 곡의 모든 난이도에 걸친 것을 보여준다.
     sections = await ctx.emit_gather(
@@ -114,7 +119,7 @@ async def chart(ctx: ToolContext, chart: ChartRef, game: GameRef | None = None) 
             "chart_type": chart.chart.chart_type,
         },
     )
-    head = f"{chart.song.title} {_chart_label(chart.chart)} 상수 {chart.chart.const} ({note_text})"
+    head = f"{chart.song.title} {_chart_label(chart.chart)} 상수 {_const_text(chart.chart.const)} ({note_text})"
     return ToolResult(
         data={
             "song": chart.song.title, "difficulty": chart.chart.difficulty, "chart_type": chart.chart.chart_type,
@@ -488,5 +493,5 @@ async def alias_remove(ctx: ToolContext, alias: str, game: GameRef | None = None
         return ToolResult(error="그런 별칭이 없어")
     if row.added_by != ctx.player_id and "admin" not in ctx.tags:
         return ToolResult(error="추가한 사람이나 admin만 지울 수 있어")
-    await ctx.songdb.remove_alias(alias=alias)
+    await ctx.songdb.remove_alias(alias=alias, removed_by=ctx.player_id)
     return ToolResult(data={"alias": alias}, display=Display(content=f"'{alias}' 별칭을 지웠어."), display_mode="optional")

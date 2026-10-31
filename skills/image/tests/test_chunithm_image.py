@@ -255,3 +255,25 @@ async def test_table_image_returns_error_when_extra_columns_do_not_fit(skill: Mo
     assert result.error is not None and "table_query" in result.error
     assert result.display is None
     assert cache.requested == []  # 재킷도 받지 않고 바로 돌려준다
+
+
+async def test_table_image_of_a_numbered_subset_uses_the_source_table_for_drew_and_stale(skill: ModuleType) -> None:
+    """번호 지정으로 id가 비워진 표여도 그림이 '옛 값' 표시와 '그렸다' 기록을 원래 표 기준으로 한다."""
+    table = replace(_table(subject=None), id="", source_id="t7")
+
+    class _Tables:
+        def __init__(self) -> None:
+            self.asked: list[str] = []
+
+        def is_stale(self, player_id: str, channel_id: str, table_id: str) -> bool:
+            self.asked.append(table_id)
+            return table_id == "t7"
+
+    tables = _Tables()
+    ctx = _ctx(songdb=_FakeSongDb(), cache=_FakeImageCache(), records=_FakeRecords())
+    ctx = replace(ctx, tables=tables, channel_id="c1")  # type: ignore[arg-type]
+
+    result = await skill.table_image(ctx, table=table)
+
+    assert result.drew_table == "t7"
+    assert tables.asked == ["t7"]

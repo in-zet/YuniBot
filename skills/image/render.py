@@ -80,7 +80,7 @@ _DIFFICULTY_COLORS = {
 }
 _LAMP_LABELS = {
     "AJC": "AJC", "ALL JUSTICE": "AJ", "FULL COMBO": "FC",
-    "AP+": "AP+", "AP": "AP", "FC+": "FC+",  # maimai 콤보 램프(FC는 위와 같은 글자)
+    "AP+": "AP+", "AP": "AP", "FC+": "FC+", "FC": "FC",  # maimai 콤보 램프(조회 키가 비면 FC만 칩이 빠진다)
 }
 _LAMP_COLORS = {
     "AJC": (255, 215, 70), "AJ": (255, 140, 60), "FC": (70, 200, 110),

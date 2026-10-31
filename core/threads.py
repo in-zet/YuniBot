@@ -154,7 +154,12 @@ class ThreadManager:
 
         if session.state == "open":
             if (now - session.last_activity).total_seconds() >= session.idle_timeout:
-                await session.transport.send_message(pick(IDLE_CHECK_MESSAGES))
+                try:
+                    await session.transport.send_message(pick(IDLE_CHECK_MESSAGES))
+                except Exception:
+                    # DM 차단·채널 소멸이면 같은 실패를 매 틱 되풀이하며 영원히 열려 있게 된다. 못 보내도
+                    # 확인 단계로 넘겨, 종결 시간이 지나면 정상적으로 닫히게 한다.
+                    logger.warning("idle check message failed for %s", session.thread_id, exc_info=True)
                 session.state = "checking"
                 session.checked_at = now
         elif session.state == "checking":

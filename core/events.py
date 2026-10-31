@@ -155,6 +155,14 @@ class EventBus:
             )
         )
 
+    def unregister_owner(self, owner_skill: str) -> None:
+        """한 스킬이 등록한 핸들러를 전부 뗀다(스킬을 중간에 끄는 경우)."""
+        for handlers in (self._notify_handlers, self._gather_handlers):
+            for event_name in list(handlers):
+                handlers[event_name] = [h for h in handlers[event_name] if h.owner_skill != owner_skill]
+                if not handlers[event_name]:
+                    del handlers[event_name]
+
     async def _build_handler_ctx(
         self, handler: _Handler, *, player_id: str, guild_id: str | None, game: str | None = None
     ) -> ToolContext | None:
@@ -250,14 +258,34 @@ class EventBus:
             ctx = await self._build_handler_ctx(handler, player_id=player_id, guild_id=guild_id, game=game)
             if ctx is None:
                 return handler.owner_skill, None
-            section = await asyncio.wait_for(handler.fn(ctx, payload), timeout=self._gather_timeout)
-        except TimeoutError:
-            logger.warning("gather handler '%s' (%s) timed out", handler.fn, handler.owner_skill)
-            return handler.owner_skill, None
+            task = asyncio.ensure_future(handler.fn(ctx, payload))
+            try:
+                done, _pending = await asyncio.wait({task}, timeout=self._gather_timeout)
+            except asyncio.CancelledError:
+                task.cancel()
+                raise
+            if not done:
+                # 시간이 지나도 취소하지 않는다 — 목표 완료·만료처럼 상태를 바꾸는 핸들러가 await 중간에 끊기면
+                # 부분 적용 상태가 남는다. 이번 모으기에서만 빼고 배경에서 끝까지 돌린다.
+                logger.warning("gather handler '%s' (%s) timed out; left running", handler.fn, handler.owner_skill)
+                self._background_tasks.add(task)
+                task.add_done_callback(self._late_gather_done(handler))
+                return handler.owner_skill, None
+            section = task.result()
         except Exception:
             logger.exception("gather handler '%s' (%s) failed", handler.fn, handler.owner_skill)
             return handler.owner_skill, None
         return handler.owner_skill, section
+
+    def _late_gather_done(self, handler: _Handler) -> Callable[[asyncio.Task[Any]], None]:
+        def done(task: asyncio.Task[Any]) -> None:
+            self._background_tasks.discard(task)
+            if not task.cancelled() and task.exception() is not None:
+                logger.error(
+                    "late gather handler '%s' (%s) failed", handler.fn, handler.owner_skill, exc_info=task.exception()
+                )
+
+        return done
 
     async def drain(self) -> None:
         """테스트 전용: 배경에서 도는 notify 핸들러가 모두 끝나길 기다린다."""

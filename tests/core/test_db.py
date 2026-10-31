@@ -5,7 +5,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-from core.db import GuardedConnection, connect_guarded, transaction
+from core.db import GuardedConnection, connect_guarded, transaction, write_transaction
 
 
 @pytest.fixture
@@ -60,3 +60,15 @@ async def test_transaction_helper_is_noop_for_plain_connection() -> None:
             await plain.execute("CREATE TABLE u (n INTEGER)")
     finally:
         await plain.close()
+
+
+async def test_write_transaction_commits_on_success_and_rolls_back_on_error(conn: GuardedConnection) -> None:
+    async with write_transaction(conn):
+        await conn.execute("INSERT INTO t VALUES ('a')")
+    with pytest.raises(RuntimeError):
+        async with write_transaction(conn):
+            await conn.execute("INSERT INTO t VALUES ('half')")
+            raise RuntimeError("중간 실패")
+    # 실패한 묶음은 지워졌고, 다음 커밋에 반쪽이 딸려 들어가지도 않는다.
+    await conn.commit()
+    assert await _names(conn) == ["a"]

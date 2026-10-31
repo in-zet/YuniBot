@@ -11,8 +11,10 @@ import aiosqlite
 class SettingsService:
     """manifest.settings에 선언된 플레이어·서버 설정값과, 서버별 스킬 켜기/끄기를 저장한다."""
 
-    def __init__(self, conn: aiosqlite.Connection) -> None:
+    def __init__(self, conn: aiosqlite.Connection, *, skill_defaults: dict[str, bool] | None = None) -> None:
         self._conn = conn
+        # 스킬 이름 → manifest `enabled`(서버가 따로 정하지 않았을 때의 켜짐 기본값).
+        self.skill_defaults: dict[str, bool] = skill_defaults or {}
 
     async def get_value(
         self, *, scope: str, scope_id: str, skill: str, name: str, default: Any
@@ -54,7 +56,8 @@ class SettingsService:
             (guild_id, skill),
         )
         row = await cursor.fetchone()
-        return True if row is None else bool(row[0])
+        # 서버가 정한 적 없으면 스킬 manifest의 `enabled`(기본값)를 따른다. 기본값이 없는 스킬은 켜짐.
+        return self.skill_defaults.get(skill, True) if row is None else bool(row[0])
 
     async def set_skill_enabled(self, *, guild_id: str, skill: str, enabled: bool, updated_by: str) -> None:
         now = datetime.now(UTC).isoformat()

@@ -85,6 +85,24 @@ async def test_emit_gather_drops_slow_handler() -> None:
 
 
 @pytest.mark.asyncio
+async def test_emit_gather_timeout_does_not_cancel_a_state_changing_handler() -> None:
+    bus = EventBus(gather_timeout=0.01)
+    finished: list[str] = []
+
+    async def slow_writer(ctx: ToolContext, payload: object) -> Section | None:
+        await asyncio.sleep(0.05)
+        finished.append("step 2")  # 취소됐다면 여기까지 오지 못해 부분 적용 상태가 남는다
+        return Section(data={"late": True})
+
+    bus.register_gather("evt", owner_skill="writer", fn=slow_writer, skill_services=[])
+
+    assert await bus.emit_gather("evt", {}, player_id="1", guild_id=None) == []
+    await bus.drain()
+
+    assert finished == ["step 2"]
+
+
+@pytest.mark.asyncio
 async def test_emit_gather_handler_returning_none_is_skipped() -> None:
     bus = EventBus()
 

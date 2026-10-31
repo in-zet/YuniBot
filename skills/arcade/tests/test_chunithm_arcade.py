@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -431,6 +432,26 @@ async def test_on_session_viewed_shows_settings_to_others_when_public(
     )
 
     assert section is not None
+
+
+async def test_on_session_viewed_adds_the_arcade_name_for_others_only_when_public(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    owner_id = await _make_player(db)
+    viewer_id = await _make_player(db)
+    owner_ctx = _ctx(player_id=owner_id, db=db)
+    arcade = await _make_arcade(owner_ctx)
+    await owner_ctx.arcades.record_visit(arcade.id, player_id=owner_id, game="chunithm")
+    play_date = datetime.now(UTC).date().isoformat()
+    viewer_ctx = _ctx(player_id=viewer_id, db=db)
+    payload = {"player_id": owner_id, "session_id": "s1", "play_date": play_date}
+
+    assert await skill.on_session_viewed(viewer_ctx, payload) is None
+    await skill.set_privacy(owner_ctx, public=True)
+    section = await skill.on_session_viewed(viewer_ctx, payload)
+
+    assert section is not None
+    assert arcade.name in section.display.content
 
 
 # ---------------------------------------------------------------- register_arcade

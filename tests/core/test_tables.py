@@ -328,6 +328,13 @@ def test_resolve_returns_the_stored_table() -> None:
     arg = _resolve("t1", store)
     assert arg.table.id == "t1"
     assert arg.table.row_count == 6
+    assert arg.table.source_id == ""
+
+
+def test_resolve_with_numbers_remembers_which_stored_table_it_came_from() -> None:
+    store = _store_with(_chart_table())
+    arg = _resolve("t1:2,3", store)
+    assert arg.table.id == "" and arg.table.source_id == "t1"
     assert not arg.stale
 
 

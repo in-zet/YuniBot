@@ -63,17 +63,23 @@ async def insert_notice(
     version_name: str | None,
     created_at: str,
     game: str = "chunithm",
+    notified: bool = False,
 ) -> int:
     conn.row_factory = aiosqlite.Row
     cursor = await conn.execute(
         "INSERT INTO updates_notices (game, region, url, title, posted_at, update_date, version_name, "
-        "schedule_id, notified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, ?)",
-        (game, region, url, title, posted_at, update_date, version_name, created_at),
+        "schedule_id, notified, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+        (game, region, url, title, posted_at, update_date, version_name, int(notified), created_at),
     )
     await conn.commit()
     row_id = cursor.lastrowid
     assert row_id is not None
     return row_id
+
+
+async def has_notices(conn: aiosqlite.Connection, *, region: str) -> bool:
+    cursor = await conn.execute("SELECT 1 FROM updates_notices WHERE region = ? LIMIT 1", (region,))
+    return await cursor.fetchone() is not None
 
 
 async def notice_exists(conn: aiosqlite.Connection, *, region: str, url: str) -> bool:

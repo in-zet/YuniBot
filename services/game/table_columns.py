@@ -109,6 +109,11 @@ def identity_columns(game: str = DEFAULT_GAME) -> tuple[str, ...]:
     return (SONG, CHART_TYPE, DIFFICULTY)
 
 
+def identity_format(game: str = DEFAULT_GAME) -> str:
+    """채보를 가리키는 칸을 한 줄에 늘어놓는 서식 머리("{곡} {난이도}", maimai는 "{곡} {종류} {난이도}")."""
+    return " ".join("{" + name + "}" for name in identity_columns(game))
+
+
 def common_columns(
     *names: str, hidden_in_text: Collection[str] = (), game: str = DEFAULT_GAME
 ) -> list[Column]:

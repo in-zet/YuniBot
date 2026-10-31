@@ -81,6 +81,19 @@ async def test_info_lists_every_chart_type_in_display_order(songdb) -> None:
     assert charts == ["STD MAS", "DX MAS", "DX REM"]
 
 
+async def test_unknown_const_is_shown_as_unavailable_not_as_none(songdb) -> None:
+    skill = _load_skill()
+    song = songdb.song_by_title("[宴]Party")
+    chart = next(iter(song.charts.values()))
+    assert chart.const is None
+
+    info = await skill.info(_ctx(songdb), song=song)
+    detail = await skill.chart(_ctx(songdb), chart=ResolvedChart(song=song, chart=chart))
+
+    assert "None" not in (info.display.content or "") and "계산 불가" in (info.display.content or "")
+    assert "None" not in (detail.display.content or "") and "계산 불가" in (detail.display.content or "")
+
+
 async def test_chart_names_the_chart_type_and_emits_the_games_event(songdb) -> None:
     skill = _load_skill()
     song = songdb.song_by_title("Both")

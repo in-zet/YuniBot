@@ -104,6 +104,9 @@ class WorkTable:
     row_formats: tuple[str, ...] = ()
     # 이 표의 값이 어느 게임 것인지. 보관소에 넣을 때 도구가 불린 게임으로 붙는다(`TableStore.put`).
     game: str = ""
+    # 번호 지정·TableNeeds로 행이 빠져 id가 비워진 표가 원래 어느 보관 표에서 왔는지(`resolve_table_arg`가 채운다).
+    # 그림 도구가 옛 값 표시와 "그렸다" 기록을 원래 표 기준으로 하려고 쓴다.
+    source_id: str = ""
 
     @property
     def rows(self) -> tuple[Row, ...]:
@@ -682,6 +685,8 @@ def resolve_table_arg(
         table = pick_numbers(table, numbers)
     if needs is not None:
         table = _apply_needs(table, needs, partial_row_hints)
+    if table.id != table_id:
+        table = replace(table, source_id=table_id)
     return TableArg(table, stale)
 
 

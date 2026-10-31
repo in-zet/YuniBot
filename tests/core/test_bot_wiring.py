@@ -560,10 +560,39 @@ async def test_failing_catch_up_job_is_isolated_and_others_still_run(caplog: pyt
     assert "a.boom" in caplog.text
 
 
+async def test_failed_polled_job_moves_to_its_next_cron_time_instead_of_repeating_every_tick() -> None:
+    from core.events import EventBus
+    from core.player_data import PlayerDataScanner
+    from core.scheduler import Scheduler
+
+    async def boom(ctx: object) -> None:
+        raise RuntimeError("예약 작업 실패")
+
+    conn = await aiosqlite.connect(":memory:")
+    try:
+        await conn.executescript(Path("migrations/core/006_schedules.sql").read_text())
+        scheduler = Scheduler(conn, quiet_start=datetime.time(2, 0), quiet_end=datetime.time(6, 0))
+        now = datetime.datetime(2026, 10, 10, 9, 0)  # noqa: DTZ001 - 예약은 서버 로컬 벽시계 기준(core/bot.py)
+        await scheduler.sync_recurring([("a", "boom", "0 9 * * *", False)], now=now - datetime.timedelta(days=1))
+        due = await scheduler.poll_due_recurring(now=now)
+        assert due == [("a", "boom")]
+
+        await _run_due_recurring(
+            due, {("a", "boom"): ScheduleSpec(fn=boom, cron="0 9 * * *")}, scheduler=scheduler,
+            services={}, event_bus=EventBus(), player_data=PlayerDataScanner(conn=conn, table_names=()), db=conn,
+            now=now, skip_failed=True,
+        )
+
+        assert await scheduler.poll_due_recurring(now=now + datetime.timedelta(minutes=1)) == []
+    finally:
+        await conn.close()
+
+
 async def test_sync_admin_bootstrap_does_not_touch_manually_granted_admin() -> None:
     conn = await aiosqlite.connect(":memory:")
     await conn.executescript(Path("migrations/core/001_players.sql").read_text())
     await conn.executescript(Path("migrations/core/002_player_tags.sql").read_text())
+    await conn.executescript(Path("migrations/core/029_change_log.sql").read_text())
     await conn.commit()
     players = PlayersService(conn)
 
@@ -850,7 +879,9 @@ class _RecordingGateway:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str, object | None]] = []
 
-    async def send_channel_message(self, channel_id: str, content: str, *, view: object | None = None) -> None:
+    async def send_channel_message(
+        self, channel_id: str, content: str, *, view: object | None = None, mention_roles: bool = False
+    ) -> None:
         self.sent.append((channel_id, content, view))
 
     async def open_dm_channel(self, discord_id: str) -> str:
@@ -915,3 +946,40 @@ async def test_session_review_flow_runs_through_the_real_bus_notify_and_thread_m
         assert pending is not None and "좋았어" in pending[0] and "어땠어" not in pending[0]
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_register_event_handlers_rolls_back_earlier_handlers_when_a_later_one_fails() -> None:
+    received: list[str] = []
+
+    async def good(ctx: ToolContext, payload: dict[str, object]) -> None:
+        received.append("good")
+
+    async def bad(ctx: ToolContext, payload: dict[str, object]) -> "NotDefinedAnywhere":  # noqa: F821, UP037  # pyright: ignore[reportUndefinedVariable]
+        return None
+
+    code = SkillCode(
+        event_handlers=[
+            EventHandlerSpec(fn=good, event_name="players.first_seen"),
+            EventHandlerSpec(fn=bad, event_name="players.first_seen"),
+        ]
+    )
+    skill = LoadedSkill(
+        manifest=SkillManifest(
+            name="half-skill", description="테스트용", examples=["예시"], category="메모",
+            games=[], version=1, services=[],
+        ),
+        path=Path("."),
+        code=code,
+    )
+    registry = SkillRegistry([])
+    registry._loaded = {"half-skill": skill}  # pyright: ignore[reportPrivateUsage]
+
+    bus = EventBus()
+    _register_event_handlers(bus, registry)
+    bus.bind_dispatch(services={}, tag_provider=_FakeTagProvider({"p1": set()}), settings=None)
+    await bus.emit_notify("players.first_seen", {}, player_id="p1", guild_id=None)
+    await bus.drain()
+
+    assert received == []
+    assert "half-skill" not in {s.manifest.name for s in registry.enabled_skills()}

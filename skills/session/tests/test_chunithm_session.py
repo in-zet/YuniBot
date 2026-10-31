@@ -19,7 +19,7 @@ from core.tables import render_text
 from core.threads import ThreadMessage, ThreadTranscript
 from core.tool_types import ToolContext
 from services.common.arcades import Arcade, ArcadeVisit
-from services.common.players import Player, PlayersService
+from services.common.players import PRIVATE_RECORDS_ERROR, Player, PlayersService
 from services.game.records import PbRow, SyncLogSummary
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -335,6 +335,31 @@ async def test_get_session_filters_by_arcade(skill: ModuleType, db: aiosqlite.Co
     assert result.data["arcade"] == "겜플"
 
 
+async def test_others_arcade_visits_are_not_read_without_the_arcade_skill(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    """남의 방문은 arcade_privacy를 보는 arcade 스킬만 붙인다 — session이 직접 읽으면 비공개가 샌다."""
+    me, players = await _me(db)
+    arcades = _FakeArcades(arcades={"ar1": Arcade(id="ar1", name="겜플", created_by=me.id, created_at="x")})
+    ctx = _ctx(db=db, player_id=me.id, players=players, arcades=arcades)
+    await skill.on_sync_reported(ctx, _reported_payload(player_id=me.id))
+    await arcades.record_visit("ar1", player_id=me.id, game="chunithm")
+    other = await players.create_player()
+    await players.set_visibility(me.id, "records_public", True)
+    me = await players.get_player(me.id)
+    assert me is not None
+    viewer_ctx = _ctx(db=db, player_id=other.id, players=players, arcades=arcades)
+
+    shown = await skill.get_session(viewer_ctx, player=me)
+    assert shown.error is None
+    assert shown.data["arcade"] is None
+    assert "겜플" not in shown.display.content
+    listed = await skill.list_sessions(viewer_ctx, player=me)
+    assert listed.data["sessions"][0]["arcade"] is None
+    assert (await skill.get_session(viewer_ctx, player=me, arcade=arcades.arcades["ar1"])).error is not None
+    assert (await skill.list_sessions(viewer_ctx, player=me, arcade=arcades.arcades["ar1"])).error is not None
+
+
 async def test_list_sessions_filters_by_period(skill: ModuleType, db: aiosqlite.Connection) -> None:
     me, players = await _me(db)
     ctx = _ctx(db=db, player_id=me.id, players=players)
@@ -388,7 +413,7 @@ async def test_others_private_records_are_hidden(skill: ModuleType, db: aiosqlit
     me = await players.create_player()
     ctx_viewer = _ctx(db=db, player_id=me.id, players=players)
     result = await skill.get_session(ctx_viewer, player=other)
-    assert result.error == skill._PRIVATE_ERROR
+    assert result.error == PRIVATE_RECORDS_ERROR
 
 
 async def test_others_public_records_are_visible(skill: ModuleType, db: aiosqlite.Connection) -> None:

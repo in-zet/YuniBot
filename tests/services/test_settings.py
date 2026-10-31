@@ -64,3 +64,14 @@ async def test_set_skill_enabled_is_scoped_per_guild(conn: aiosqlite.Connection)
 
     assert await service.is_skill_enabled(guild_id="g1", skill="web-qa") is False
     assert await service.is_skill_enabled(guild_id="g2", skill="web-qa") is True
+
+
+async def test_skill_enabled_follows_the_manifest_default_until_a_guild_decides(conn: aiosqlite.Connection) -> None:
+    service = SettingsService(conn, skill_defaults={"beta-skill": False})
+
+    assert await service.is_skill_enabled(guild_id="g1", skill="beta-skill") is False
+    assert await service.is_skill_enabled(guild_id="g1", skill="other") is True
+
+    await service.set_skill_enabled(guild_id="g1", skill="beta-skill", enabled=True, updated_by="admin1")
+    assert await service.is_skill_enabled(guild_id="g1", skill="beta-skill") is True
+    assert await service.is_skill_enabled(guild_id="g2", skill="beta-skill") is False

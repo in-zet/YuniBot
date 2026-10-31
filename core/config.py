@@ -5,7 +5,7 @@ import datetime
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
 from dotenv import load_dotenv
 
@@ -42,6 +42,16 @@ class CoreConfig:
     skill_loading_mode: Literal["instructions", "full"] = "instructions"
     max_tool_calls_per_turn: int = 5
     max_tokens_per_turn: int = 50000
+
+
+def _choice[T: str](name: str, raw: str, allowed: tuple[T, ...]) -> T:
+    """환경변수 값이 허용된 값 중 하나인지 부팅 때 확인한다. cast는 검증이 아니라서, 대문자 오타 같은 값이
+    조용히 다른 제공자를 고르거나 요청마다 터지게 만든다."""
+    value = raw.strip().lower()
+    for candidate in allowed:
+        if value == candidate:
+            return candidate
+    raise RuntimeError(f"{name} 값이 잘못됐다: {raw!r} (허용: {', '.join(allowed)})")
 
 
 def _parse_time(raw: str, default: datetime.time) -> datetime.time:
@@ -100,17 +110,17 @@ def load_config() -> CoreConfig:
         quiet_hours_start=quiet_start,
         quiet_hours_end=quiet_end,
         cookie_encryption_key=cookie_key,
-        llm_provider=cast("Literal['gemini', 'claude']", llm_provider_raw),
+        llm_provider=_choice("LLM_PROVIDER", llm_provider_raw, ("gemini", "claude")),
         gemini_api_key=gemini_api_key,
         anthropic_api_key=anthropic_api_key,
         agent_model=agent_model,
         summary_model=summary_model,
         fallback_model=fallback_model,
-        websearch_provider=cast("Literal['gemini', 'claude']", websearch_provider_raw),
+        websearch_provider=_choice("WEBSEARCH_PROVIDER", websearch_provider_raw, ("gemini", "claude")),
         search_model=search_model,
         websearch_cooldown_seconds=websearch_cooldown_seconds,
-        thinking_level=cast("Literal['low', 'medium', 'high']", thinking_level_raw),
-        skill_loading_mode=cast("Literal['instructions', 'full']", skill_loading_mode_raw),
+        thinking_level=_choice("THINKING_LEVEL", thinking_level_raw, ("low", "medium", "high")),
+        skill_loading_mode=_choice("SKILL_LOADING_MODE", skill_loading_mode_raw, ("instructions", "full")),
         max_tool_calls_per_turn=max_tool_calls_per_turn,
         max_tokens_per_turn=max_tokens_per_turn,
     )

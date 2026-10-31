@@ -39,7 +39,10 @@ class DiscordGateway(Protocol):
     """core/bot.py가 실제 discord.Client로 구현을 채운다. 서비스는 디스코드 API를 직접
     모른다 — 이 프로토콜이 유일한 창구다."""
 
-    async def send_channel_message(self, channel_id: str, content: str, *, view: Any | None = None) -> None: ...
+    # mention_roles는 역할 멘션 핑을 허용할 때만 True다(기본은 사용자 멘션만 — 사용자가 쓴 글의 @역할이 핑이 되지 않게).
+    async def send_channel_message(
+        self, channel_id: str, content: str, *, view: Any | None = None, mention_roles: bool = False
+    ) -> None: ...
     # DM 채널을 열고(이미 있으면 그대로) 그 디스코드 채널 id를 돌려준다.
     async def open_dm_channel(self, discord_id: str) -> str: ...
     async def send_dm(self, discord_id: str, content: str, *, view: Any | None = None) -> None: ...
@@ -74,8 +77,11 @@ class NotifyService:
         # 대화 첫 메시지에 붙일 "끝내기" 버튼을 만드는 함수. 디스코드 UI는 코어(core/bot.py)가 안다.
         self._end_button = end_button
 
-    async def post(self, channel_id: str, content: str) -> None:
-        await self._gateway.send_channel_message(channel_id, content)
+    async def post(self, channel_id: str, content: str, *, mention_roles: bool = False) -> None:
+        if mention_roles:
+            await self._gateway.send_channel_message(channel_id, content, mention_roles=True)
+        else:
+            await self._gateway.send_channel_message(channel_id, content)
 
     async def dm(self, player_id: str, content: str, *, view: Any | None = None) -> None:
         player = await self._players.get_player(player_id)

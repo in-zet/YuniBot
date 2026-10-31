@@ -23,11 +23,15 @@ class _FakeGateway:
         self.dms: list[tuple[str, str, object]] = []
         self.reactions: list[tuple[str, str, str]] = []
         self.channel_views: list[object | None] = []
+        self.role_pings: list[bool] = []
         self.fail_send = False
 
-    async def send_channel_message(self, channel_id: str, content: str, *, view: object | None = None) -> None:
+    async def send_channel_message(
+        self, channel_id: str, content: str, *, view: object | None = None, mention_roles: bool = False
+    ) -> None:
         if self.fail_send:
             raise RuntimeError("전송 실패")
+        self.role_pings.append(mention_roles)
         self.channel_messages.append((channel_id, content))
         self.channel_views.append(view)
 
@@ -61,6 +65,13 @@ async def test_post_sends_to_gateway(env) -> None:
     notify, _, _, gateway = env
     await notify.post("chan-1", "동기화 완료")
     assert gateway.channel_messages == [("chan-1", "동기화 완료")]
+    assert gateway.role_pings == [False]  # 기본은 역할 핑을 열지 않는다
+
+
+async def test_post_can_allow_role_pings_for_a_configured_role(env) -> None:
+    notify, _, _, gateway = env
+    await notify.post("chan-1", "<@&123> 업데이트", mention_roles=True)
+    assert gateway.role_pings == [True]
 
 
 async def test_dm_uses_primary_account(env) -> None:

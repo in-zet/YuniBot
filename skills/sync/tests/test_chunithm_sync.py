@@ -397,6 +397,23 @@ async def test_run_private_report_sends_dm_and_returns_short_ephemeral(skill: Mo
     assert reported["rendered_text"] == "유니 한마디\n\n세션 요약\n\n목표 점검"
 
 
+async def test_run_private_report_dm_failure_still_emits_reported_and_shows_ephemeral(skill: ModuleType) -> None:
+    f = ctx_with_fake_services(public=False, sections=_REPORT_SECTIONS)
+
+    async def _blocked(player_id: str, content: str, *, view: Any = None) -> None:
+        raise RuntimeError("DM 차단")
+
+    f.notify.dm = _blocked  # type: ignore[method-assign]
+
+    result = await skill.run(f.ctx)
+
+    assert result.error is None
+    assert result.display is not None
+    assert result.display.ephemeral is True
+    assert "세션 요약" in (result.display.content or "")
+    assert _reported(f)["sent_location"] == {"kind": "ephemeral"}
+
+
 # ---------------------------------------------------------------- quiet
 
 

@@ -10,7 +10,8 @@ import aiosqlite
 
 from core.permissions import STATUS_ONLY_TAGS
 from core.resolvers import ResolutionError
-from core.tool_types import ToolContext
+from core.tool_types import PlayerRef, ToolContext, ToolResult
+from services.common.audit import record_removal
 
 _VISIBILITY_FIELDS = frozenset(
     {
@@ -200,12 +201,15 @@ class PlayersService:
         )
         await self._conn.commit()
 
-    async def revoke_tag(self, player_id: str, tag: str) -> None:
+    async def revoke_tag(self, player_id: str, tag: str, *, revoked_by: str | None = None) -> None:
+        """`revoked_by`(바꾼 플레이어 id 또는 'system:...')를 주면 지운 사람·시각을 `change_log`에 남긴다."""
         if tag in STATUS_ONLY_TAGS:
             raise ValueError(f"'{tag}'는 상태 태그라 손으로 못 바꾼다")
         await self._conn.execute(
             "DELETE FROM player_tags WHERE player_id = ? AND tag = ?", (player_id, tag)
         )
+        if revoked_by is not None:
+            await record_removal(self._conn, actor=revoked_by, action="tag.revoke", target=player_id, detail=tag)
         await self._conn.commit()
 
     async def tags_for(self, player_id: str) -> set[str]:
@@ -291,3 +295,22 @@ class PlayersService:
             "DELETE FROM player_tags WHERE player_id = ? AND tag = ?", (player_id, tag)
         )
         await self._conn.commit()
+
+
+PRIVATE_RECORDS_ERROR = "그 사람은 기록을 비공개로 해 놨어."
+
+
+async def target_player(
+    ctx: ToolContext, player: PlayerRef | None, *, require_public: bool = True
+) -> Player | ToolResult:
+    """조회 대상 플레이어. 안 넘어왔으면 본인이다(PlayerRef 해석기는 인자가 있을 때만 돈다). 본인은 공개 설정과
+    무관하게 보고, 남은 `require_public`이면 records_public이 켜져 있을 때만 본다(report·session·goals가 같이 쓴다)."""
+    if player is None:
+        me = await ctx.players.get_player(ctx.player_id)
+        if me is None:
+            return ToolResult(error="플레이어 정보를 찾지 못했어.")
+        return me
+    assert isinstance(player, Player)
+    if require_public and player.id != ctx.player_id and not player.records_public:
+        return ToolResult(error=PRIVATE_RECORDS_ERROR)
+    return player

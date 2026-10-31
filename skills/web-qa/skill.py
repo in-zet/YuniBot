@@ -5,7 +5,7 @@ import logging
 from datetime import UTC, datetime
 
 from core.decorators import tool
-from core.search import SearchSource
+from core.search import SearchResult, SearchSource
 from core.tool_types import Display, ToolContext, ToolResult
 from services.common.websearch import NoSourcesError, SearchCooldownError
 
@@ -39,6 +39,15 @@ def _shown_sources(found: list[SearchSource]) -> list[dict[str, str]]:
     return shown
 
 
+async def _record_usage(ctx: ToolContext, result: SearchResult) -> None:
+    if ctx.usage is not None:
+        await ctx.usage.record(
+            guild_id=ctx.guild_id or "dm", player_id=ctx.player_id, model=ctx.websearch.model, kind="websearch",
+            input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
+            search_requests=result.usage.search_requests,
+        )
+
+
 @tool(cost="llm", max_calls_per_turn=5)
 async def search(ctx: ToolContext, question: str) -> ToolResult:
     """츄니즘 일반 질문(시스템, 공략, 이벤트 등)을 웹에서 찾아 내용과 출처를 돌려준다. 상수·노트
@@ -48,18 +57,14 @@ async def search(ctx: ToolContext, question: str) -> ToolResult:
             result = await ctx.websearch.search(query=question, player_id=ctx.player_id, now=_now())
     except SearchCooldownError:
         return ToolResult(error="검색은 조금 더 기다렸다가 다시 해 달라고 전해라")
-    except NoSourcesError:
+    except NoSourcesError as exc:
+        await _record_usage(ctx, exc.result)  # 출처가 없어도 호출 비용은 나갔다 — 월 상한 집계에서 빠지면 안 된다.
         return ToolResult(error="이 질문은 출처를 찾지 못했다. 모른다고 답하고 공식 사이트나 위키를 찾아보라고 제안해라")
     except Exception:
         logger.warning("웹 검색 실패", exc_info=True)
         return ToolResult(error="지금 웹 검색이 안 된다. 같은 검색을 다시 하지 말고, 검색이 안 돼서 못 찾았다고 말하고 잠시 뒤에 다시 물어봐 달라고 전해라")
 
-    if ctx.usage is not None:
-        await ctx.usage.record(
-            guild_id=ctx.guild_id or "dm", player_id=ctx.player_id, model=ctx.websearch.model, kind="websearch",
-            input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
-            search_requests=result.usage.search_requests,
-        )
+    await _record_usage(ctx, result)
 
     sources = _shown_sources(result.sources)
     source_lines = "\n".join(f"- {s['title']}: {s['url']}" for s in sources)

@@ -186,6 +186,7 @@ async def test_get_note_shows_public_note_to_other_player(skill: ModuleType, db:
     assert len(result.data["others"]) == 1
     assert result.data["others"][0]["player_id"] == "p1"
     assert result.data["others"][0]["body"] == "공개 메모"
+    assert "p1" not in (result.display.content or "")  # 내부 id를 화면에 내보내지 않는다
 
 
 async def test_get_note_limits_others_to_three_with_more_flag(skill: ModuleType, db: aiosqlite.Connection) -> None:

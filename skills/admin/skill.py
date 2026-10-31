@@ -1,12 +1,15 @@
 # skills/admin/skill.py
 from __future__ import annotations
 
+import math
+
 from core.decorators import tool
 from core.tool_types import Display, PlayerRef, ToolContext, ToolResult
 from services.common.notify import parse_channel_ref
 from services.common.players import Player
 
 _UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
+_MAX_COOLDOWN_SECONDS = 86_400
 
 
 @tool(slash="관리 사용량")
@@ -86,7 +89,7 @@ async def revoke_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResul
         if target.id in holders and len(holders) <= 1:
             return ToolResult(error="마지막 관리자는 뗄 수 없어")
     try:
-        await ctx.players.revoke_tag(target.id, tag)
+        await ctx.players.revoke_tag(target.id, tag, revoked_by=ctx.player_id)
     except ValueError as exc:
         return ToolResult(error=str(exc))
     return ToolResult(data={"player_id": target.id, "revoked": tag}, display=Display(ephemeral=True))
@@ -97,6 +100,11 @@ async def set_limits(ctx: ToolContext, monthly_cost_cap: float, player_cooldown_
     """월 비용 상한과 플레이어별 쿨다운을 저장한다. 멘션 응답에 바로 적용된다."""
     if ctx.guild_id is None:
         return ToolResult(error="서버 안에서만 쓸 수 있어")
+    # 0 이하·무한·NaN 상한은 모든 멘션을 한도 문구로 막고, 음수나 하루를 넘는 쿨다운은 쿨다운을 없애거나 영구로 만든다.
+    if not math.isfinite(monthly_cost_cap) or monthly_cost_cap <= 0:
+        return ToolResult(error="월 비용 상한은 0보다 큰 숫자여야 해")
+    if not 0 <= player_cooldown_seconds <= _MAX_COOLDOWN_SECONDS:
+        return ToolResult(error=f"쿨다운은 0초에서 {_MAX_COOLDOWN_SECONDS}초(하루) 사이여야 해")
     await ctx.settings.set_value(
         scope="guild", scope_id=ctx.guild_id, skill="admin", name="월 비용 상한",
         value=monthly_cost_cap, updated_by=ctx.player_id,

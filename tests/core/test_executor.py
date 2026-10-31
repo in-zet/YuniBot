@@ -878,3 +878,71 @@ async def test_invoke_tells_when_it_fell_back_to_the_skills_game() -> None:
     assert outcome.result.data["game_note"] == "maimai는 이 기능이 아직 없어서 chunithm 기준으로 처리했다"
     assert outcome.result.display is not None
     assert outcome.result.display.content == "결과\n(maimai는 이 기능이 아직 없어서 chunithm 기준으로 처리했다)"
+
+
+@tool(slash="널선택")
+async def optional_chart(ctx: ToolContext, chart: ChartRef | None = None) -> ToolResult:
+    """선택 인자 하나를 받는 도구."""
+    return ToolResult(data={"chart": chart})
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_for_an_optional_arg_is_treated_as_omitted() -> None:
+    class _NeverCalled:
+        async def resolve(self, raw: object, ctx: ToolContext) -> object:
+            raise AssertionError(f"None을 해석기에 넘기면 안 된다: {raw!r}")
+
+    resolvers = ResolverRegistry()
+    resolvers.register(ChartRef, _NeverCalled())
+    executor = ToolExecutor(resolvers=resolvers, tag_provider=InMemoryTagProvider(), tag_definitions={})
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(optional_chart.__yuni_tool__, ctx, {"chart": None})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.error is None
+    assert outcome.result.data == {"chart": None}
+
+
+@pytest.mark.asyncio
+async def test_tag_check_runs_before_any_argument_resolution() -> None:
+    calls: list[object] = []
+
+    class _Recording:
+        async def resolve(self, raw: object, ctx: ToolContext) -> object:
+            calls.append(raw)
+            return {"song": "x"}
+
+    @tool(slash="잠긴조회", tags=["sega-linked"])
+    async def locked_lookup(ctx: ToolContext, chart: ChartRef) -> ToolResult:
+        """태그가 필요한 조회."""
+        return ToolResult(data={})
+
+    resolvers = ResolverRegistry()
+    resolvers.register(ChartRef, _Recording())
+    executor = ToolExecutor(resolvers=resolvers, tag_provider=InMemoryTagProvider(), tag_definitions={})
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(locked_lookup.__yuni_tool__, ctx, {"chart": "아무거나"})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.error is not None
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_unpressed_confirmations_expire(monkeypatch: pytest.MonkeyPatch) -> None:
+    import core.executor as executor_module
+
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+    first = await executor.invoke(dangerous.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
+    assert first.confirm_token is not None
+
+    real_monotonic = executor_module.time.monotonic
+    monkeypatch.setattr(executor_module.time, "monotonic", lambda: real_monotonic() + 601)
+    second = await executor.invoke(dangerous.__yuni_tool__, ctx, {})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert second.confirm_token is not None
+    stale = await executor.confirm(first.confirm_token, confirmed=True, player_id="p1")
+    assert stale.error is not None and "만료" in stale.error
+    fresh = await executor.confirm(second.confirm_token, confirmed=True, player_id="p1")
+    assert fresh.error is None

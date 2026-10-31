@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -50,6 +51,11 @@ class _PendingConfirm:
     ctx: ToolContext
     resolved_args: dict[str, Any]
     requester_id: str  # 확인을 요청한 플레이어. 이 사람만 확인/취소할 수 있다.
+    created_at: float
+
+
+# 확인 버튼(ConfirmView)은 120초 뒤 사라진다 — 그 뒤에도 남은 대기 요청은 치운다(눌리지 않은 요청이 쌓이지 않게).
+_CONFIRM_TTL_SECONDS = 600.0
 
 
 def _missing_tags(requirement: TagRequirement, player_tags: set[str]) -> set[str]:
@@ -162,14 +168,32 @@ class ToolExecutor:
         ):
             return ExecutionOutcome(result=ToolResult(error="모르는 명령이야"))
 
+        tool_requirement = TagRequirement(tags=list(spec.tags), tags_any=list(spec.tags_any))
+        skill_requirement = TagRequirement(
+            tags=list(skill_tags or []), tags_any=list(skill_tags_any or [])
+        )
+        player_tags = set(ctx.tags)
+
+        tool_ok = check_tags(tool_requirement, player_tags)
+        skill_ok = check_tags(skill_requirement, player_tags)
+        if not (tool_ok and skill_ok):
+            missing = _missing_tags(tool_requirement, player_tags) | _missing_tags(
+                skill_requirement, player_tags
+            )
+            lock = describe_lock(missing_tags=sorted(missing), tag_definitions=self._tag_definitions)
+            if lock.visible and lock.message:
+                return ExecutionOutcome(result=ToolResult(error=lock.message))
+            return ExecutionOutcome(result=ToolResult(error="모르는 명령이야"))
+
         schema = build_arg_schema(spec.fn)
         fallback_note: str | None = None
 
+        table_args: dict[str, Any] = {}  # 게임을 정하려고 이미 푼 TableRef 인자(아래 인자 해석에서 다시 풀지 않는다)
         if self._game_chooser is not None:
             # 도구가 `game` 인자를 받으면 사용자가 말한 게임이다. 없으면 받은 표의 게임 → 주 게임 → 기본 게임이다.
             requested = raw_args.get("game")
             try:
-                preferred = self._table_game(spec, schema.args, ctx, raw_args, turn_table_ids)
+                preferred = self._table_game(spec, schema.args, ctx, raw_args, turn_table_ids, table_args)
                 if preferred is None and self._preferred_game is not None:
                     preferred = await self._preferred_game(ctx.player_id)
                 game = self._game_chooser(requested if isinstance(requested, str) else None, preferred)
@@ -191,7 +215,8 @@ class ToolExecutor:
         resolved: dict[str, Any] = {}
         stale_input = False
         for arg in schema.args:
-            if arg.name not in raw_args:
+            # 모델이 선택 인자를 명시적 null로 넘기면 생략과 같다 — 해석기에 None을 넘기지 않는다.
+            if arg.name not in raw_args or raw_args[arg.name] is None:
                 if arg.required:
                     return ExecutionOutcome(result=ToolResult(error=f"필수 인자 '{arg.name}'가 없어"))
                 resolved[arg.name] = arg.default
@@ -200,7 +225,7 @@ class ToolExecutor:
             raw_value = raw_args[arg.name]
             if arg.py_type is TableRef:
                 try:
-                    table_arg = resolve_table_arg(
+                    table_arg = table_args.get(arg.name) or resolve_table_arg(
                         raw_value,
                         store=self._tables,
                         player_id=ctx.player_id,
@@ -241,23 +266,6 @@ class ToolExecutor:
             else:
                 resolved[arg.name] = raw_value
 
-        tool_requirement = TagRequirement(tags=list(spec.tags), tags_any=list(spec.tags_any))
-        skill_requirement = TagRequirement(
-            tags=list(skill_tags or []), tags_any=list(skill_tags_any or [])
-        )
-        player_tags = set(ctx.tags)
-
-        tool_ok = check_tags(tool_requirement, player_tags)
-        skill_ok = check_tags(skill_requirement, player_tags)
-        if not (tool_ok and skill_ok):
-            missing = _missing_tags(tool_requirement, player_tags) | _missing_tags(
-                skill_requirement, player_tags
-            )
-            lock = describe_lock(missing_tags=sorted(missing), tag_definitions=self._tag_definitions)
-            if lock.visible and lock.message:
-                return ExecutionOutcome(result=ToolResult(error=lock.message))
-            return ExecutionOutcome(result=ToolResult(error="모르는 명령이야"))
-
         confirm_mode = getattr(spec, "confirm", "never")
         if confirm_mode == "always":
             return self._hold(spec, ctx, resolved)
@@ -289,15 +297,22 @@ class ToolExecutor:
     ) -> ExecutionOutcome:
         """확인을 받을 때까지 실행을 미룬다. resolved에는 dry_run이 들어가지 않는다 —
         확인 뒤 confirm()이 그대로 실제 호출에 쓴다."""
+        self._drop_expired_pending()
         token = str(uuid.uuid4())
         self._pending[token] = _PendingConfirm(
-            spec=spec, ctx=ctx, resolved_args=resolved, requester_id=ctx.player_id
+            spec=spec, ctx=ctx, resolved_args=resolved, requester_id=ctx.player_id, created_at=time.monotonic()
         )
         return ExecutionOutcome(result=None, needs_confirm=True, confirm_token=token, preview=preview)
+
+    def _drop_expired_pending(self) -> None:
+        cutoff = time.monotonic() - _CONFIRM_TTL_SECONDS
+        for token in [t for t, pending in self._pending.items() if pending.created_at < cutoff]:
+            del self._pending[token]
 
     async def confirm(self, confirm_token: str, *, confirmed: bool, player_id: str) -> ToolResult:
         """player_id는 버튼을 누른 플레이어다. 요청한 본인이 아니면 실행도 취소도 하지 않고,
         토큰도 소비하지 않는다(본인은 그대로 확인/취소할 수 있다)."""
+        self._drop_expired_pending()
         pending = self._pending.get(confirm_token)
         if pending is None:
             return ToolResult(error="만료됐거나 모르는 확인 요청이야")
@@ -321,10 +336,12 @@ class ToolExecutor:
         ctx: ToolContext,
         raw_args: dict[str, Any],
         turn_table_ids: Collection[str],
+        resolved_out: dict[str, Any],
     ) -> str | None:
-        """도구가 받은 표가 어느 게임 것인지. 표를 못 풀면(없는 id 등) None — 오류는 인자 해석 단계가 낸다."""
+        """도구가 받은 표가 어느 게임 것인지. 표를 못 풀면(없는 id 등) None — 오류는 인자 해석 단계가 낸다.
+        푼 표는 `resolved_out`에 담아 인자 해석이 다시 풀지 않게 한다."""
         for arg in args:
-            if arg.py_type is not TableRef or arg.name not in raw_args:
+            if arg.py_type is not TableRef or arg.name not in raw_args or raw_args[arg.name] is None:
                 continue
             try:
                 resolved = resolve_table_arg(
@@ -334,6 +351,7 @@ class ToolExecutor:
                 )
             except TableError:
                 continue
+            resolved_out[arg.name] = resolved
             if resolved.table.game:
                 return resolved.table.game
         return None

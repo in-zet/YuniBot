@@ -655,6 +655,80 @@ async def test_unlink_rejects_another_players_account(link_env) -> None:
     assert [a.discord_id for a in await players.accounts_for(attacker.id)] == ["111"]
 
 
+async def test_unlink_rejects_the_only_account(link_env) -> None:
+    skill, players, _, make_ctx = link_env
+    player = await players.create_player()
+    await players.link_account(player.id, "111")
+    await players.grant_tag(player.id, "admin", source="admin:x")
+
+    result = await skill.unlink(make_ctx(player.id, "111"), discord_id="111")
+
+    assert result.error is not None
+    assert [a.discord_id for a in await players.accounts_for(player.id)] == ["111"]
+
+
+async def test_join_rejects_when_the_issuer_already_has_max_accounts(link_env) -> None:
+    skill, players, _, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    code = (await skill.start_link(make_ctx(issuer.id, "111"))).data["code"]
+    await players.link_account(issuer.id, "112")
+    await players.link_account(issuer.id, "113")  # 코드를 받은 뒤에 상한까지 찼다
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+
+    result = await skill.join_link(make_ctx(joiner.id, "222"), code=code)
+
+    assert result.error is not None
+    assert str(skill.MAX_LINKED_ACCOUNTS) in result.error
+
+
+async def test_finalize_stops_when_data_appeared_after_joining_without_discard_consent(link_env) -> None:
+    skill, players, notify, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    started = await skill.start_link(make_ctx(issuer.id, "111"))
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joiner_ctx = make_ctx(joiner.id, "222")
+    joined = await skill.join_link(joiner_ctx, code=started.data["code"])  # 이때는 데이터가 없다
+    assert joined.error is None
+    assert joiner_ctx.db is not None
+    await joiner_ctx.db.execute("INSERT INTO goals_items (id, player_id, text) VALUES ('g9', ?, '새 목표')", (joiner.id,))
+    await joiner_ctx.db.commit()
+
+    await notify.dms[-1][2].confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+    click = _FakeInteraction("222")
+    await joined.display.view.confirm.callback(click)  # pyright: ignore[reportCallIssue]
+
+    assert "데이터가 생겼어" in click.response.calls[0]["content"]
+    moved = await players.player_for_discord("222")
+    assert moved is not None and moved.id == joiner.id  # 해체하지 않았다
+    assert await joiner_ctx.player_data.count(joiner.id) == {"goals_items": 1}  # pyright: ignore[reportOptionalMemberAccess]
+
+
+async def test_finalize_failure_closes_the_code_as_failed(link_env, monkeypatch) -> None:
+    skill, players, notify, make_ctx = link_env
+    issuer = await players.create_player()
+    await players.link_account(issuer.id, "111")
+    started = await skill.start_link(make_ctx(issuer.id, "111"))
+    joiner = await players.create_player()
+    await players.link_account(joiner.id, "222")
+    joined = await skill.join_link(make_ctx(joiner.id, "222"), code=started.data["code"])
+
+    async def boom(*_args, **_kwargs) -> None:
+        raise RuntimeError("db 오류")
+
+    monkeypatch.setattr(players, "link_account", boom)
+    await notify.dms[-1][2].confirm.callback(_FakeInteraction("111"))  # pyright: ignore[reportCallIssue]
+    click = _FakeInteraction("222")
+    await joined.display.view.confirm.callback(click)  # pyright: ignore[reportCallIssue]
+
+    assert "문제가 생겼어" in click.response.calls[0]["content"]
+    code = await skill.models.get_code(players._conn, started.data["code"])  # pyright: ignore[reportPrivateUsage]
+    assert code is not None and code.status == "failed"
+
+
 async def test_unlink_own_non_primary_account_still_works(link_env) -> None:
     skill, players, _, make_ctx = link_env
     player = await players.create_player()

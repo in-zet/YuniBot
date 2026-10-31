@@ -17,6 +17,7 @@ class PromptAssembler:
         self._rules_text = rules_text
         self._persona_text = persona_text
         self._registry = registry
+        self._skill_bodies: dict[str, str] = {}  # SKILL.md는 로드된 뒤 바뀌지 않는다 — 왕복마다 디스크에서 다시 읽지 않는다.
 
     def visible_skill_cards(self, *, player_tags: set[str]) -> list[LoadedSkill]:
         return [
@@ -53,7 +54,9 @@ class PromptAssembler:
         for skill in visible:
             level = skill_state.level_for(skill.manifest.name)
             if level in ("instructions", "full"):
-                instruction_bodies.append(f"## {skill.manifest.name}\n{_skill_body(skill)}")
+                if skill.manifest.name not in self._skill_bodies:
+                    self._skill_bodies[skill.manifest.name] = _skill_body(skill)
+                instruction_bodies.append(f"## {skill.manifest.name}\n{self._skill_bodies[skill.manifest.name]}")
 
         sections = [self._rules_text, self._persona_text, "## 스킬 카드\n" + cards]
         if instruction_bodies:

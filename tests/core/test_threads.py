@@ -68,6 +68,29 @@ async def test_idle_timeout_asks_then_closes() -> None:
     assert closed[0].closed_reason == "timeout"
 
 
+class _BlockedTransport:
+    async def send_message(self, text: str) -> None:
+        raise RuntimeError("DM 차단")
+
+
+@pytest.mark.asyncio
+async def test_idle_check_send_failure_still_moves_on_and_closes() -> None:
+    manager = ThreadManager()
+    closed: list[ThreadTranscript] = []
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    _ = await manager.open(
+        skill_name="session", player_id="p1", transport=_BlockedTransport(), channel_id="c1",
+        idle_timeout=300.0, close_timeout=300.0, on_close=lambda t: closed.append(t), now=base,
+    )
+
+    await manager.check_idle(now=base + timedelta(seconds=301))
+    assert manager.open_for("p1", "session") is not None
+    await manager.check_idle(now=base + timedelta(seconds=301 + 301))
+
+    assert len(closed) == 1
+    assert manager.open_for("p1", "session") is None
+
+
 @pytest.mark.asyncio
 async def test_message_during_check_phase_cancels_close() -> None:
     manager = ThreadManager()

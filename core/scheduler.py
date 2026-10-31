@@ -13,12 +13,18 @@ import croniter
 def _shift_past_quiet_hours(
     candidate: datetime.datetime, *, quiet_start: datetime.time, quiet_end: datetime.time
 ) -> datetime.datetime:
-    """새벽 정지 시간대(quiet_start <= t < quiet_end) 안에 걸리면 그 시간대가 끝나는 시각으로
-    민다. 정지 시간대가 자정을 걸치지 않는 경우만 다룬다(기본값 02~06시가 그렇다) — 자정을
-    걸치는 설정은 미확인 사항으로 남긴다."""
+    """새벽 정지 시간대 안에 걸리면 그 시간대가 끝나는 시각으로 민다. 정지 시간대는 quiet_start <= t < quiet_end
+    이고(기본값 02~06시), quiet_start > quiet_end면 자정을 걸치는 시간대(예: 23~06시)로 본다.
+    같으면 정지 시간대가 없다."""
     candidate_time = candidate.time()
-    if quiet_start <= candidate_time < quiet_end:
-        return candidate.replace(hour=quiet_end.hour, minute=quiet_end.minute, second=0, microsecond=0)
+    ends_at = candidate.replace(hour=quiet_end.hour, minute=quiet_end.minute, second=0, microsecond=0)
+    if quiet_start < quiet_end:
+        return ends_at if quiet_start <= candidate_time < quiet_end else candidate
+    if quiet_start > quiet_end:
+        if candidate_time >= quiet_start:
+            return ends_at + datetime.timedelta(days=1)
+        if candidate_time < quiet_end:
+            return ends_at
     return candidate
 
 
@@ -104,6 +110,16 @@ class Scheduler:
             "UPDATE schedule_recurring SET last_run_at = ?, next_run_at = ? "
             "WHERE owner_skill = ? AND fn_name = ?",
             (ran_at.isoformat(), next_run.isoformat(), owner_skill, fn_name),
+        )
+        await self._conn.commit()
+
+    async def skip_to_next(self, owner_skill: str, fn_name: str, *, cron: str, after: datetime.datetime) -> None:
+        """실패한 반복 작업의 next_run_at만 다음 cron 시각으로 넘긴다(last_run_at은 그대로 — 실행한 게 아니다).
+        안 넘기면 시각이 과거에 남아 폴링 때마다(매 분) 같은 작업을 다시 돌린다."""
+        next_run = next_fire_time(cron, after, quiet_start=self._quiet_start, quiet_end=self._quiet_end)
+        await self._conn.execute(
+            "UPDATE schedule_recurring SET next_run_at = ? WHERE owner_skill = ? AND fn_name = ?",
+            (next_run.isoformat(), owner_skill, fn_name),
         )
         await self._conn.commit()
 

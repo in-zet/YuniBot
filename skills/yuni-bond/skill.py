@@ -1,14 +1,11 @@
 # skills/yuni-bond/skill.py
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
-import sys
 import uuid
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Annotated, Any
 
 import aiosqlite
@@ -16,6 +13,7 @@ import aiosqlite
 from core.decorators import on, prompt_context, tool
 from core.events import Section
 from core.resolvers import ResolutionError
+from core.sibling import load_sibling
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, TableNeeds, WorkTable, cell
 from core.tool_types import (
     ArcadeRef,
@@ -40,21 +38,8 @@ from services.game.songdb import SongRecord
 
 logger = logging.getLogger(__name__)
 
-# 폴더 이름에 하이픈이 있어 보통의 import 경로로 쓸 수 없다(goals와 같은 이유) — 같은 폴더의 순수
-# 계산 모듈을 파일 경로로 직접 불러온다.
-_SKILL_DIR = Path(__file__).parent
-
-
-def _load_sibling(name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(f"_yuni_bond_{name}", _SKILL_DIR / f"{name}.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-calc = _load_sibling("bond_calc")
+# 폴더 이름에 하이픈이 있어 보통의 import 경로로 쓸 수 없다 — 같은 폴더의 순수 계산 모듈을 파일 경로로 불러온다.
+calc = load_sibling(__file__, "bond_calc", prefix="yuni_bond")
 
 _SKILL_NAME = "yuni-bond"
 _GAME = "chunithm"

@@ -12,6 +12,7 @@ import yaml
 
 from core.resolvers import ResolutionError
 from core.tool_types import DEFAULT_GAME, ToolContext
+from services.common.audit import record_removal
 from services.game.rating_format import score_text
 
 # 기본 사전은 츄니즘 것이다(옛 호출부 호환). 다른 게임은 프로필의 terms_path를 넘긴다.
@@ -252,13 +253,18 @@ class TermsService:
             return None
         return TermAliasRow(kind=row["kind"], alias=row["alias"], canonical=row["canonical"], added_by=row["added_by"])
 
-    async def remove_alias(self, *, kind: str, alias: str) -> None:
+    async def remove_alias(self, *, kind: str, alias: str, removed_by: str | None = None) -> None:
+        """`removed_by`를 주면 지운 사람·시각을 `change_log`에 남긴다(서버 공유 데이터라 지우면 흔적이 사라진다)."""
         assert self._conn is not None
         key = ALIAS_KINDS.get(kind, kind)
         alias = alias.strip().lower()
         await self._conn.execute(
             "DELETE FROM terms_aliases WHERE game = ? AND kind = ? AND alias = ?", (self._game, key, alias)
         )
+        if removed_by is not None:
+            await record_removal(
+                self._conn, actor=removed_by, action="terms_alias.remove", target=alias, detail=f"{self._game}:{key}"
+            )
         await self._conn.commit()
         self._db_aliases.get(key, {}).pop(alias, None)
         target = self._alias_map_for(key)
@@ -453,14 +459,23 @@ def _normalize_category(raw: str) -> str:
     raise ValueError(f"모르는 분류: {text}")
 
 
+def _finite_decimal(text: str) -> Decimal | None:
+    """숫자로 읽히는 유한한 값만. 'nan'·'inf'나 '1e999999999' 같은 말은 Decimal이 받아 주지만 비교·정수화에서
+    예외가 나거나 거대한 정수를 만든다."""
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        return None
+    if not value.is_finite() or value.adjusted() > 12:
+        return None
+    return value
+
+
 def _parse_percent_score(text: str) -> int | None:
     """"99.5%", "100.5", "99"처럼 달성률로 말한 점수를 ×10000 정수로. 101 이하만 달성률로 본다(maimai 최대는 101%)."""
     stripped = text.replace(",", "").removesuffix("%").strip()
-    try:
-        value = Decimal(stripped)
-    except InvalidOperation:
-        return None
-    if not Decimal(0) <= value <= Decimal(101):
+    value = _finite_decimal(stripped)
+    if value is None or not Decimal(0) <= value <= Decimal(101):
         return None
     return int(value * 10_000)
 
@@ -469,10 +484,8 @@ def _parse_numeric_score(text: str) -> int | None:
     stripped = text.replace(",", "")
 
     if stripped.lower().endswith("k"):
-        try:
-            return int(Decimal(stripped[:-1]) * 1000)
-        except InvalidOperation:
-            return None
+        value = _finite_decimal(stripped[:-1])
+        return None if value is None else int(value * 1000)
 
     if stripped.isdigit():
         return int(stripped)

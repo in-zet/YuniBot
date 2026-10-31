@@ -1424,6 +1424,28 @@ async def test_delete_also_removes_progress_rows_and_detaches_children(skill: Mo
     assert child_row is not None and child_row.parent_goal_id is None
 
 
+async def test_parent_goal_must_be_my_own_and_not_form_a_cycle(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    mine = _ctx(db=db, tags=frozenset())
+    other = _ctx(db=db, tags=frozenset(), player_id="p2")
+    others_goal = await skill.set_goal(other, skill.GoalKind.FREEFORM, description="남의 목표")
+    top = await skill.set_goal(mine, skill.GoalKind.FREEFORM, description="상위")
+    child = await skill.set_goal(mine, skill.GoalKind.FREEFORM, description="하위", parent_goal_id=top.data["goal_id"])
+    assert child.error is None
+
+    foreign = await skill.set_goal(
+        mine, skill.GoalKind.FREEFORM, description="남의 밑", parent_goal_id=others_goal.data["goal_id"]
+    )
+    missing = await skill.set_goal(mine, skill.GoalKind.FREEFORM, description="없는 밑", parent_goal_id="nope")
+    cycle = await skill.update(mine, top.data["goal_id"], parent_goal_id=child.data["goal_id"])
+    itself = await skill.update(mine, top.data["goal_id"], parent_goal_id=top.data["goal_id"])
+    foreign_update = await skill.update(mine, top.data["goal_id"], parent_goal_id=others_goal.data["goal_id"])
+
+    assert all(r.error is not None for r in (foreign, missing, cycle, itself, foreign_update))
+    # 남의 목표는 내 목표가 걸려 있지 않으니, 상대가 지워도 내 행이 바뀌지 않는다.
+    top_row = await skill.models.fetch_goal(db, top.data["goal_id"])
+    assert top_row is not None and top_row.parent_goal_id is None
+
+
 async def test_set_goal_rejects_invalid_due_date(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
     result = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습", due_at="다음 주")

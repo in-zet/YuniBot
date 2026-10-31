@@ -21,6 +21,7 @@ CORE_OWNED_TABLES: frozenset[str] = frozenset(
         "arcade_visits",
         "schedule_recurring",
         "schedule_once",
+        "llm_usage",  # 월 비용 상한의 길드별 집계 원장 — 플레이어를 버려도 쓴 돈은 그대로 남는다.
     }
 )
 
@@ -67,9 +68,34 @@ class PlayerDataScanner:
                 counts[table] = count
         return counts
 
+    async def _children(self, table: str) -> list[tuple[str, str, str]]:
+        """`table`을 외래키로 가리키는 (자식 표, 자식 열, 부모 열). player_id 열이 없는 자식도 잡힌다.
+        SQLite는 foreign_keys를 켜지 않아 ON DELETE CASCADE가 일하지 않으므로 직접 따라간다."""
+        cursor = await self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+        links: list[tuple[str, str, str]] = []
+        for (name,) in await cursor.fetchall():
+            if name == table:
+                continue  # 자기 참조(parent_goal_id)는 같은 플레이어의 행끼리라 따로 볼 것이 없다.
+            fk_cursor = await self.conn.execute(f'PRAGMA foreign_key_list("{name}")')
+            for fk in await fk_cursor.fetchall():
+                if fk[2] == table:  # (id, seq, table, from, to, ...)
+                    links.append((name, fk[3], fk[4] or "rowid"))
+        return links
+
+    async def _delete_where(self, table: str, where: str, params: tuple[str, ...]) -> None:
+        for child, child_column, parent_column in await self._children(table):
+            await self._delete_where(
+                child,
+                f'"{child_column}" IN (SELECT "{parent_column}" FROM "{table}" WHERE {where})',
+                params,
+            )
+        await self.conn.execute(f'DELETE FROM "{table}" WHERE {where}', params)
+
     async def delete(self, player_id: str) -> dict[str, int]:
         counts = await self.count(player_id)
         for table in counts:
-            await self.conn.execute(f'DELETE FROM "{table}" WHERE player_id = ?', (player_id,))
+            await self._delete_where(table, "player_id = ?", (player_id,))
         await self.conn.commit()
         return counts

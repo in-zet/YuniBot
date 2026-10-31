@@ -298,11 +298,20 @@ async def on_session_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         (player_id, payload["play_date"]),
     )
     row = await cursor.fetchone()
-    if row is None:
+    lines: list[str] = []
+    data: dict[str, Any] = {"kind": "arcade_settings"}
+    # session은 남의 방문을 공개 설정 없이는 못 읽으므로, 공개 확인을 마친 여기서 오락실 이름을 붙인다.
+    if player_id != ctx.player_id:
+        visits = await ctx.arcades.visits_for(player_id=player_id, game=ctx.game)
+        visited = [v for v in visits if v.visited_at[:10] == payload["play_date"]]
+        found = await ctx.arcades.get(visited[-1].arcade_id) if visited else None
+        if found is not None:
+            lines.append(f"오락실  {found.name}")
+            data["arcade"] = found.name
+    if row is not None:
+        lines.append(f"설정  {settings_line(_named_from_row(row))}")
+        data.update(_named_from_row(row))
+    if not lines:
         return None
 
-    return Section(
-        order=_REPORT_ORDER,
-        display=Display(content=f"설정  {settings_line(_named_from_row(row))}"),
-        data={"kind": "arcade_settings", **_named_from_row(row)},
-    )
+    return Section(order=_REPORT_ORDER, display=Display(content="\n".join(lines)), data=data)

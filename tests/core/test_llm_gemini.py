@@ -405,3 +405,22 @@ async def test_generate_reports_cached_input_tokens() -> None:
     )
 
     assert (turn.usage.input_tokens, turn.usage.cached_input_tokens) == (100, 60)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("candidates", [None, [types.Candidate(finish_reason=types.FinishReason.SAFETY)]])
+async def test_blocked_or_empty_response_becomes_an_empty_turn_instead_of_an_assertion_error(
+    candidates: list[types.Candidate] | None,
+) -> None:
+    adapter = GeminiLlmAdapter(api_key="fake")
+    usage = types.GenerateContentResponseUsageMetadata(prompt_token_count=10, candidates_token_count=0)
+    response = types.GenerateContentResponse(candidates=candidates, usage_metadata=usage)
+    adapter._client.aio._models = _FakeModelsApi(response=response)  # pyright: ignore[reportAttributeAccessIssue]
+
+    turn = await adapter.generate(
+        model="gemini-3.8-flash", system_instruction="규칙",
+        contents=[LlmContent(role="user", parts=[LlmPart(text="질문")])], tools=[], thinking_level="low",
+    )
+
+    assert turn.text is None and turn.function_calls == []
+    assert turn.usage.input_tokens == 10  # 비용은 이미 나갔다

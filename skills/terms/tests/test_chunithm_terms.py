@@ -23,6 +23,7 @@ _PLAYERS_MIGRATION = (
 _TERMS_SERVER_MIGRATION = (
     Path("migrations/core/009_terms_server.sql").read_text() + Path("migrations/core/021_terms_aliases.sql").read_text()
     + Path("migrations/core/028_terms_aliases_game.sql").read_text()
+    + Path("migrations/core/029_change_log.sql").read_text()
 )
 
 

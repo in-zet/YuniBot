@@ -40,10 +40,15 @@ def extract_version_name(title: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _resolve_month_day(month: int, day: int, posted_at: date) -> date:
-    candidate = date(posted_at.year, month, day)
-    if candidate < posted_at - timedelta(days=_YEAR_WRAP_TOLERANCE_DAYS):
-        candidate = date(posted_at.year + 1, month, day)
+def _resolve_month_day(month: int, day: int, posted_at: date) -> date | None:
+    """제목의 "M/D"를 날짜로. 2/30 같은 말이 안 되는 날짜(또는 비윤년의 2/29)는 None — 그 공지 하나 때문에
+    피드 전체 파싱이 멈추면 안 된다."""
+    try:
+        candidate = date(posted_at.year, month, day)
+        if candidate < posted_at - timedelta(days=_YEAR_WRAP_TOLERANCE_DAYS):
+            candidate = date(posted_at.year + 1, month, day)
+    except ValueError:
+        return None
     return candidate
 
 

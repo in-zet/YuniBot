@@ -7,6 +7,8 @@ from typing import Any
 
 import aiosqlite
 
+from core.db import write_transaction
+
 _GOAL_COLUMNS = (
     "id, player_id, game, kind, target_ref, target_value, baseline_value, created_at, "
     "due_at, duration_tag, parent_goal_id, status, public, notify_offsets, guild_id"
@@ -99,7 +101,9 @@ async def insert_goal(
     public: bool = False,
     notify_offsets: list[int] | None = None,
     guild_id: str | None = None,
+    commit: bool = True,
 ) -> None:
+    """`commit=False`는 호출자가 `write_transaction` 안에서 여러 건을 한 단위로 넣을 때 쓴다."""
     conn.row_factory = aiosqlite.Row
     await conn.execute(
         f"INSERT INTO goals_goals ({_GOAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -109,7 +113,8 @@ async def insert_goal(
             json.dumps(notify_offsets) if notify_offsets is not None else None, guild_id,
         ),
     )
-    await conn.commit()
+    if commit:
+        await conn.commit()
 
 
 async def fetch_goal(conn: aiosqlite.Connection, goal_id: str) -> GoalRow | None:
@@ -211,12 +216,13 @@ async def delete_goals(conn: aiosqlite.Connection, goal_ids: list[str]) -> int:
     if not goal_ids:
         return 0
     placeholders = ",".join("?" for _ in goal_ids)
-    await conn.execute(f"DELETE FROM goals_progress WHERE goal_id IN ({placeholders})", goal_ids)
-    await conn.execute(
-        f"UPDATE goals_goals SET parent_goal_id = NULL WHERE parent_goal_id IN ({placeholders})", goal_ids
-    )
-    cursor = await conn.execute(f"DELETE FROM goals_goals WHERE id IN ({placeholders})", goal_ids)
-    await conn.commit()
+    async with write_transaction(conn):
+        await conn.execute(f"DELETE FROM goals_progress WHERE goal_id IN ({placeholders})", goal_ids)
+        await conn.execute(f"DELETE FROM goals_notify_schedule WHERE goal_id IN ({placeholders})", goal_ids)
+        await conn.execute(
+            f"UPDATE goals_goals SET parent_goal_id = NULL WHERE parent_goal_id IN ({placeholders})", goal_ids
+        )
+        cursor = await conn.execute(f"DELETE FROM goals_goals WHERE id IN ({placeholders})", goal_ids)
     return cursor.rowcount
 
 

@@ -1,33 +1,19 @@
 # skills/image/skill.py
 from __future__ import annotations
 
-import importlib.util
-import sys
+import asyncio
 from enum import StrEnum
-from pathlib import Path
 from typing import Annotated, Any
 
 from core.decorators import tool
+from core.sibling import load_sibling
 from core.tables import TableError, TableNeeds, WorkTable
 from core.tool_types import Display, DisplayFile, TableRef, ToolContext, ToolResult
 from services.game import table_columns as tc
 from services.game.image_cache import jacket_url
 
-# skills/image는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다 — 같은 폴더의
-# render.py를 파일 경로로 직접 불러온다(goals와 같은 방식).
-_SKILL_DIR = Path(__file__).parent
-
-
-def _load_sibling(name: str) -> Any:
-    spec = importlib.util.spec_from_file_location(f"_chunithm_image_{name}", _SKILL_DIR / f"{name}.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # dataclass가 모듈 전역을 되찾아야 한다
-    spec.loader.exec_module(module)
-    return module
-
-
-render = _load_sibling("render")
+# skills/image는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다 — 같은 폴더의 render.py를 파일 경로로 불러온다.
+render = load_sibling(__file__, "render", prefix="chunithm_image")
 
 
 class Layout(StrEnum):
@@ -96,12 +82,17 @@ async def table_image(
         )
     elif version is not None:
         header = render.HeaderProfile(version=version)
+    # 번호 지정이나 곡 칸이 빈 행 제외로 id가 비워진 표는 원래 표(source_id) 기준으로 본다.
+    stored_id = table.id or table.source_id
     stale = bool(
         ctx.tables is not None and ctx.channel_id is not None
-        and ctx.tables.is_stale(ctx.player_id, ctx.channel_id, table.id)
+        and ctx.tables.is_stale(ctx.player_id, ctx.channel_id, stored_id)
     )
 
-    files = render.render_pages(table, layout=Layout(layout).value, jackets=jackets, profile=header, stale=stale)
+    # 그림 그리기는 CPU를 오래 쓴다(최대 9장) — 이벤트 루프에서 돌리면 그동안 모든 응답과 하트비트가 멈춘다.
+    files = await asyncio.to_thread(
+        render.render_pages, table, layout=Layout(layout).value, jackets=jackets, profile=header, stale=stale
+    )
     missing = sum(1 for data in jackets.values() if data is None)
     return ToolResult(
         data={
@@ -109,5 +100,5 @@ async def table_image(
             "drawn_columns": render.drawn_labels(table),
         },
         display=Display(files=[DisplayFile(name, data) for name, data in files]),
-        drew_table=table.id,
+        drew_table=stored_id or None,
     )

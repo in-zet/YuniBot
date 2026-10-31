@@ -122,13 +122,17 @@ async def _fetch_public_others(
     return shown, total
 
 
+# 공개 메모의 작성자는 내부 id(UUID)를 사람이 읽을 수 없으니 화면에 내보내지 않는다(id는 data에만 있다).
+_OTHER_AUTHOR = "다른 플레이어"
+
+
 def _head(song_title: str, difficulty: str, chart_type: str = "") -> str:
     label = " ".join(part for part in (chart_type, difficulty) if part)
     return f"{song_title} {label}" if label else song_title
 
 
 def _others_lines(others: list[dict[str, Any]], others_total: int) -> list[str]:
-    lines = [f"{o['player_id']}의 메모\n{o['body']}" for o in others]
+    lines = [f"{_OTHER_AUTHOR}의 메모\n{o['body']}" for o in others]
     if others_total > len(others):
         lines.append(f"...외 {others_total - len(others)}개 더 있음")
     return lines
@@ -413,7 +417,7 @@ async def _song_viewed(ctx: ToolContext, payload: dict[str, Any], game: str) -> 
 
     lines = [f"내 메모 ({_scope_label(m['difficulty'] or '', m['chart_type'] or '')})\n{m['body']}" for m in mine]
     lines += [
-        f"{o['player_id']}의 메모 ({_scope_label(o['difficulty'] or '', o['chart_type'] or '')})\n{o['body']}"
+        f"{_OTHER_AUTHOR}의 메모 ({_scope_label(o['difficulty'] or '', o['chart_type'] or '')})\n{o['body']}"
         for o in others
     ]
     if others_total > len(others):

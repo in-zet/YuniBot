@@ -56,3 +56,17 @@ def transaction(conn: aiosqlite.Connection) -> AbstractAsyncContextManager[None]
     if isinstance(conn, GuardedConnection):
         return conn.transaction()
     return nullcontext()
+
+
+@asynccontextmanager
+async def write_transaction(conn: aiosqlite.Connection) -> AsyncIterator[None]:
+    """여러 문장을 한 단위로 쓴다: 연결 전체를 잠근 채 끝나면 `commit()`, 예외가 나면 `rollback()`.
+    그냥 `execute()` 여러 번 뒤에 `commit()`하면 그 await 사이에 낀 다른 요청의 `commit()`이 중간 상태를
+    확정하고, 중간 문장이 실패해도 되돌리는 곳이 없어 다음 커밋에 반쪽 쓰기가 확정된다."""
+    async with transaction(conn):
+        try:
+            yield
+        except BaseException:
+            await conn.rollback()
+            raise
+        await conn.commit()

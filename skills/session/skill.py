@@ -10,6 +10,7 @@ from typing import Any
 
 import aiosqlite
 
+from core.db import write_transaction
 from core.decorators import on, tool
 from core.events import Section
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
@@ -23,7 +24,7 @@ from core.tool_types import (
     ToolResult,
 )
 from services.common.arcades import Arcade
-from services.common.players import Player
+from services.common.players import Player, target_player
 from services.game.rating_format import rating_text, song_rating_text
 from services.game.registry import profile_for
 
@@ -38,8 +39,8 @@ _SESSION_FORMATS = (
 )
 _SYNC_REPORT_KIND = "sync_report"
 _UNKNOWN = "계산 불가"
-_PRIVATE_ERROR = "그 사람은 기록을 비공개로 해 놨어."
 _NOT_SYNCED_ERROR = "아직 저장된 세션이 없어."
+_OTHERS_ARCADE_ERROR = "다른 사람이 어느 오락실에서 쳤는지로는 못 찾아."
 
 _SKILL_NAME = "session"
 _SETTING_ASK = "후기 물어보기"
@@ -61,17 +62,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _target_player(ctx: ToolContext, player: PlayerRef | None) -> Player | ToolResult:
-    """조회 대상 플레이어(report._target_player와 같은 규칙). 본인은 공개 설정과
-    무관하게 보고, 남은 records_public이 켜져 있을 때만 본다."""
-    if player is None:
-        me = await ctx.players.get_player(ctx.player_id)
-        if me is None:
-            return ToolResult(error="플레이어 정보를 찾지 못했어.")
-        return me
-    assert isinstance(player, Player)
-    if player.id != ctx.player_id and not player.records_public:
-        return ToolResult(error=_PRIVATE_ERROR)
-    return player
+    return await target_player(ctx, player)
 
 
 async def _all_report_rows(ctx: ToolContext, *, player_id: str) -> list[aiosqlite.Row]:
@@ -88,7 +79,10 @@ async def _visits_by_date(ctx: ToolContext, *, player_id: str) -> dict[str, str]
     """플레이 날짜(visited_at의 날짜 부분) → 오락실 id. 하루에 방문이 여러 번이면 가장 나중
     것이 이긴다(visits_for는 visited_at 오름차순). visited_at은 동기화 시각(UTC) 기준이라
     플레이 날짜(새벽 4시 경계, 로컬)와 어긋날 수 있다 — 오락실 스킬이 생기기 전까지의
-    근사값이다."""
+    근사값이다. 방문 기록은 arcade 스킬의 공개 설정(`arcade_privacy`)에 묶이는데 session은 그 표를 못 본다 —
+    그래서 본인 것만 읽고, 공개로 해 둔 남의 오락실은 arcade가 `session.viewed` 조각으로 붙인다."""
+    if player_id != ctx.player_id:
+        return {}
     visits = await ctx.arcades.visits_for(player_id=player_id, game=ctx.game)
     return {v.visited_at[:10]: v.arcade_id for v in visits}
 
@@ -188,6 +182,8 @@ async def list_sessions(
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
+    if arcade is not None and target.id != ctx.player_id:
+        return ToolResult(error=_OTHERS_ARCADE_ERROR)
     assert ctx.db is not None
 
     conditions = ["player_id = ?", "game = ?"]
@@ -270,6 +266,8 @@ async def get_session(
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
+    if arcade is not None and target.id != ctx.player_id:
+        return ToolResult(error=_OTHERS_ARCADE_ERROR)
 
     rows = await _all_report_rows(ctx, player_id=target.id)
     if not rows:
@@ -367,11 +365,12 @@ async def delete_session(
 
     where = " AND ".join(conditions)
     # 후기는 세션 요약에 딸려 있다 — 세션을 지우면 후기도 함께 지운다.
-    _ = await ctx.db.execute(
-        f"DELETE FROM session_reviews WHERE session_id IN (SELECT session_id FROM session_reports WHERE {where})", params
-    )
-    cursor = await ctx.db.execute(f"DELETE FROM session_reports WHERE {where}", params)
-    await ctx.db.commit()
+    async with write_transaction(ctx.db):
+        _ = await ctx.db.execute(
+            f"DELETE FROM session_reviews WHERE session_id IN (SELECT session_id FROM session_reports WHERE {where})",
+            params,
+        )
+        cursor = await ctx.db.execute(f"DELETE FROM session_reports WHERE {where}", params)
     if cursor.rowcount == 0:
         return ToolResult(error="그 조건에 맞는 세션이 없어.")
     return ToolResult(
@@ -564,21 +563,21 @@ async def _store_report(ctx: ToolContext, payload: dict[str, Any]) -> None:
     yuni_line: str = payload.get("yuni_line") or ""
     now = datetime.now(UTC).isoformat()
 
-    for session in payload.get("sessions", []):
-        await ctx.db.execute(
-            "INSERT INTO session_reports (session_id, player_id, game, play_date, estimated, "
-            "rendered_text, sections_data, yuni_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT (session_id) DO UPDATE SET play_date = excluded.play_date, "
-            "estimated = excluded.estimated, rendered_text = excluded.rendered_text, "
-            "sections_data = excluded.sections_data, yuni_line = excluded.yuni_line, "
-            "created_at = excluded.created_at",
-            (
-                session["id"], player_id, ctx.game, session["play_date"], int(session["estimated"]),
-                rendered_text, sections_json, yuni_line, now,
-            ),
-        )
+    async with write_transaction(ctx.db):
+        for session in payload.get("sessions", []):
+            await ctx.db.execute(
+                "INSERT INTO session_reports (session_id, player_id, game, play_date, estimated, "
+                "rendered_text, sections_data, yuni_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (session_id) DO UPDATE SET play_date = excluded.play_date, "
+                "estimated = excluded.estimated, rendered_text = excluded.rendered_text, "
+                "sections_data = excluded.sections_data, yuni_line = excluded.yuni_line, "
+                "created_at = excluded.created_at",
+                (
+                    session["id"], player_id, ctx.game, session["play_date"], int(session["estimated"]),
+                    rendered_text, sections_json, yuni_line, now,
+                ),
+            )
 
-    await ctx.db.commit()
     await _ask_for_review(ctx, payload)
 
 

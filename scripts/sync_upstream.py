@@ -125,16 +125,31 @@ def discover_import_closure(tmp: Path) -> list[Path]:
 
 
 def vendor(tmp: Path, files: list[Path]) -> None:
-    if THIRD_PARTY_DIR.exists():
-        shutil.rmtree(THIRD_PARTY_DIR)
+    """가져올 파일을 전부 임시 폴더에 먼저 모은 뒤 기존 벤더 폴더와 바꾼다. 복사 중간에 실패해도(upstream에 추가 데이터
+    파일이 없어졌다는 등) `third_party/chuni_penguin`이 비거나 반쪽이 되지 않는다."""
+    wanted = [*files, *(Path(p) for p in EXTRA_DATA_FILES)]
+    missing = [str(rel) for rel in wanted if not (tmp / rel).is_file()]
+    if missing:
+        raise SystemExit(f"upstream에 없는 파일이 있어 가져오지 않는다: {', '.join(missing)}")
+    outside = [str(rel) for rel in wanted if THIRD_PARTY_DIR.name not in rel.parts[:1]]
+    if outside:
+        raise SystemExit(f"{THIRD_PARTY_DIR.name} 밖의 파일은 바꿔치기 대상이 아니다: {', '.join(outside)}")
 
-    for rel_path in [*files, *(Path(p) for p in EXTRA_DATA_FILES)]:
-        src = tmp / rel_path
-        dst = THIRD_PARTY_DIR.parent / rel_path
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        _ = shutil.copy2(src, dst)
+    staging_root = THIRD_PARTY_DIR.parent / ".sync_staging"
+    if staging_root.exists():
+        shutil.rmtree(staging_root)
+    try:
+        for rel_path in wanted:
+            dst = staging_root / rel_path
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            _ = shutil.copy2(tmp / rel_path, dst)
+        _ = shutil.copy2(tmp / "LICENSE", staging_root / THIRD_PARTY_DIR.name / "UPSTREAM_LICENSE")
 
-    _ = shutil.copy2(tmp / "LICENSE", THIRD_PARTY_DIR / "UPSTREAM_LICENSE")
+        if THIRD_PARTY_DIR.exists():
+            shutil.rmtree(THIRD_PARTY_DIR)
+        _ = (staging_root / THIRD_PARTY_DIR.name).replace(THIRD_PARTY_DIR)
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
 
 
 def write_upstream_file(commit: str, applied_patches: list[str]) -> None:

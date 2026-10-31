@@ -34,6 +34,7 @@ _CORE_MIGRATIONS = [
     Path("migrations/core/001_players.sql").read_text(),
     Path("migrations/core/002_player_tags.sql").read_text(),
     Path("migrations/core/003_settings.sql").read_text(),
+    Path("migrations/core/029_change_log.sql").read_text(),
 ]
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 
@@ -166,6 +167,19 @@ async def test_toggle_skill_rejects_unknown_skill_name(admin_env) -> None:
     assert row is not None and row[0] == 0
 
 
+async def test_revoke_tag_leaves_who_and_when_in_the_change_log(admin_env) -> None:
+    skill, players, _, make_ctx = admin_env
+    target = await players.create_player()
+    await players.grant_tag(target.id, "tester", source="admin:x")
+    ctx = make_ctx("admin1", guild_id="g1")
+
+    result = await skill.revoke_tag(ctx, target=target, tag="tester")
+
+    assert result.error is None
+    cursor = await players._conn.execute("SELECT actor, action, target, detail FROM change_log")  # pyright: ignore[reportPrivateUsage]
+    assert [tuple(r) for r in await cursor.fetchall()] == [("admin1", "tag.revoke", target.id, "tester")]
+
+
 async def test_set_limits_stores_guild_scoped_values(admin_env) -> None:
     skill, _, settings, make_ctx = admin_env
     ctx = make_ctx("admin1", guild_id="g1")
@@ -179,6 +193,22 @@ async def test_set_limits_stores_guild_scoped_values(admin_env) -> None:
     assert await settings.get_value(
         scope="guild", scope_id="g1", skill="admin", name="플레이어 쿨다운", default=0
     ) == 5
+
+
+@pytest.mark.parametrize(
+    ("cap", "cooldown"),
+    [(0.0, 5), (-1.0, 5), (float("nan"), 5), (float("inf"), 5), (25.0, -1), (25.0, 86_401)],
+)
+async def test_set_limits_rejects_values_that_would_lock_or_unlock_everything(admin_env, cap, cooldown) -> None:
+    skill, _, settings, make_ctx = admin_env
+    ctx = make_ctx("admin1", guild_id="g1")
+
+    result = await skill.set_limits(ctx, monthly_cost_cap=cap, player_cooldown_seconds=cooldown)
+
+    assert result.error is not None
+    assert await settings.get_value(
+        scope="guild", scope_id="g1", skill="admin", name="월 비용 상한", default=None
+    ) is None
 
 
 async def test_set_report_channel_stores_bare_id(admin_env) -> None:

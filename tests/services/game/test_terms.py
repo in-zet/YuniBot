@@ -368,6 +368,15 @@ async def test_maimai_scores_are_read_as_achievement(maimai_terms: TermsService,
     assert await maimai_terms.resolve_score(text, _CTX) == expected
 
 
+@pytest.mark.parametrize("text", ["nan", "NaN%", "inf", "-inf", "1e999", "nank", "infk", "1e99999999k", "1e400"])
+async def test_non_finite_or_absurd_scores_are_a_resolution_error(
+    terms: TermsService, maimai_terms: TermsService, text: str
+) -> None:
+    for service in (terms, maimai_terms):
+        with pytest.raises(ResolutionError):
+            await service.resolve_score(text, _CTX)
+
+
 async def test_maimai_explain_rank_uses_percent(maimai_terms: TermsService) -> None:
     explanation = await maimai_terms.explain("SS+", _CTX)
     assert explanation is not None and explanation.meaning == "달성률 99.5000% 이상"

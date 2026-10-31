@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import enum
+import functools
 import inspect
 import types
 from collections.abc import Callable
@@ -68,8 +69,11 @@ def _strip_annotated(py_type: Any) -> tuple[Any, list[Any]]:
     return py_type, []
 
 
+@functools.cache
 def build_arg_schema(fn: Callable[..., Any]) -> ArgSchema:
-    """ctx(와 실행기가 넣는 dry_run)를 제외한 함수 인자에서 JSON Schema에 준하는 ArgSchema를 만든다."""
+    """ctx(와 실행기가 넣는 dry_run)를 제외한 함수 인자에서 JSON Schema에 준하는 ArgSchema를 만든다.
+    함수는 로드된 뒤 바뀌지 않아 결과를 함수별로 재사용한다(왕복마다 도구 선언·호출마다 인자 해석이 부른다).
+    돌려준 ArgSchema는 읽기 전용으로 쓴다."""
     hints = get_type_hints(fn, include_extras=True)
     signature = inspect.signature(fn)
     args: list[ArgSpec] = []

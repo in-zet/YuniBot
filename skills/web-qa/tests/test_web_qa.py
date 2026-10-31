@@ -158,12 +158,23 @@ async def test_search_shows_at_most_three_unique_sources_with_short_titles(skill
 
 
 async def test_search_no_sources_error_becomes_korean_message(skill: ModuleType) -> None:
-    websearch = _FakeWebsearch(error=NoSourcesError())
+    websearch = _FakeWebsearch(error=NoSourcesError(_result(sources=[])))
 
     result = await skill.search(_ctx(websearch=websearch, usage=None), question="질문")
 
     assert result.error is not None
     assert result.data == {}
+
+
+@pytest.mark.asyncio
+async def test_search_without_sources_still_records_the_cost(skill: ModuleType) -> None:
+    """출처가 없어도 제공자 호출은 이미 나갔다 — 월 비용 상한 집계에서 빠지면 안 된다."""
+    usage = _FakeUsageService()
+    websearch = _FakeWebsearch(error=NoSourcesError(_result(sources=[])))
+
+    await skill.search(_ctx(websearch=websearch, usage=usage), question="질문")
+
+    assert [(c["kind"], c["input_tokens"], c["output_tokens"]) for c in usage.calls] == [("websearch", 100, 50)]
 
 
 @pytest.mark.asyncio

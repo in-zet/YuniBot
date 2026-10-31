@@ -105,7 +105,12 @@ class YuniClient(discord.Client):
         housekeeping: Callable[[float], Awaitable[None]] | None = None,
         tables: TableStore | None = None,
     ) -> None:
-        super().__init__(intents=intents)
+        # 사용자 글(용어 제안, 목표 설명, 웹 검색 결과 등)이 그대로 봇 메시지로 나가는 길이 있다 — @everyone이나
+        # 역할 멘션이 들어 있어도 핑이 나가지 않게 막는다. 역할 핑이 필요한 알림만 보낼 때 따로 연다(mention_roles).
+        super().__init__(
+            intents=intents,
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True, replied_user=True),
+        )
         self.tree = app_commands.CommandTree(self)
         self.conn = conn
         self.http_service = http_service
@@ -148,7 +153,7 @@ class YuniClient(discord.Client):
             due_recurring = await self._scheduler.poll_due_recurring(now=now)
             await _run_due_recurring(
                 due_recurring, self._schedule_fns, scheduler=self._scheduler, services=self._services,
-                event_bus=self._event_bus, player_data=self._player_data, db=self.conn, now=now,
+                event_bus=self._event_bus, player_data=self._player_data, db=self.conn, now=now, skip_failed=True,
             )
             due_once = await self._scheduler.poll_due_once(now=now)
             await _emit_due_once(due_once, self._event_bus)
@@ -292,7 +297,7 @@ class _BotDiscordGateway:
         self._get_client = get_client
 
     async def send_channel_message(
-        self, channel_id: str, content: str, *, view: discord.ui.View | None = None
+        self, channel_id: str, content: str, *, view: discord.ui.View | None = None, mention_roles: bool = False
     ) -> None:
         client = self._get_client()
         # 캐시에 없는 DM 채널(재시작 뒤 등)은 fetch로 찾는다.
@@ -300,10 +305,13 @@ class _BotDiscordGateway:
         # get_channel()의 반환형은 카테고리/포럼 채널도 포함한다 — 그런 채널에는 보낼 수
         # 없으므로(런타임에도 실패한다), Messageable로 좁혀진 것만 보낸다.
         if isinstance(channel, discord.abc.Messageable):
+            extra: dict[str, Any] = {}
+            if mention_roles:
+                extra["allowed_mentions"] = discord.AllowedMentions(everyone=False, roles=True, users=True)
             if view is not None:
-                await channel.send(content, view=view)
+                await channel.send(content, view=view, **extra)
             else:
-                await channel.send(content)
+                await channel.send(content, **extra)
 
     async def open_dm_channel(self, discord_id: str) -> str:
         user = await self._get_client().fetch_user(int(discord_id))
@@ -318,7 +326,9 @@ class _BotDiscordGateway:
             await user.send(content)
 
     async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
-        channel = self._get_client().get_channel(int(channel_id))
+        client = self._get_client()
+        # send_channel_message처럼 캐시에 없는 DM 채널(재시작 뒤 등)은 fetch로 찾는다.
+        channel = client.get_channel(int(channel_id)) or await client.fetch_channel(int(channel_id))
         if isinstance(channel, discord.abc.Messageable):
             message = await channel.fetch_message(int(message_id))
             await message.add_reaction(emoji)
@@ -371,7 +381,7 @@ async def _sync_admin_bootstrap(players: PlayersService, admin_discord_ids: froz
                 "막기 위해 admin 태그를 유지한다", player_id,
             )
             continue
-        await players.revoke_tag(player_id, "admin")
+        await players.revoke_tag(player_id, "admin", revoked_by="system:env_bootstrap")
 
 
 def _register_event_handlers(bus: EventBus, registry: SkillRegistry) -> None:
@@ -401,6 +411,9 @@ def _register_event_handlers(bus: EventBus, registry: SkillRegistry) -> None:
                     skill_tags_any=list(skill.manifest.tags_any),
                 )
         except Exception as exc:  # noqa: BLE001 - 한 스킬의 어떤 실패도 코어 전체를 죽이면 안 된다
+            # 이미 등록한 앞쪽 핸들러를 되돌린다 — 안 그러면 꺼진 스킬(마이그레이션도 안 돌아 표가 없다)의
+            # 핸들러가 이벤트마다 불려 예외를 쏟는다.
+            bus.unregister_owner(skill.manifest.name)
             registry.disable(skill.manifest.name, f"이벤트 핸들러 등록 실패: {exc}")
 
 
@@ -414,10 +427,12 @@ async def _run_due_recurring(
     player_data: PlayerDataScanner,
     db: aiosqlite.Connection,
     now: datetime.datetime,
+    skip_failed: bool = False,
 ) -> None:
     """기동 시 밀린 반복 예약을 하나씩 돌린다. 한 작업이 실패해도 경고만 남기고 다음 작업으로
     넘어간다 — 그렇지 않으면 예약 하나의 결함이 build_client()를 터뜨려 봇 전체가 못 뜬다.
-    실패한 작업은 mark_run하지 않는다(실행한 것이 아니므로)."""
+    실패한 작업은 mark_run하지 않는다(실행한 것이 아니므로). 운영 중 폴링은 `skip_failed=True`로 다음 cron 시각으로
+    넘긴다 — 안 그러면 실패한 작업이 매 분 되풀이된다(기동 시에는 다음 폴링이 이어서 처리한다)."""
     for owner_skill, fn_name in due:
         try:
             spec = schedule_fns[(owner_skill, fn_name)]
@@ -429,6 +444,8 @@ async def _run_due_recurring(
             await scheduler.mark_run(owner_skill, fn_name, cron=spec.cron, ran_at=now)
         except Exception:  # 한 예약 작업의 어떤 실패도 기동 전체를 죽이면 안 된다
             logger.warning("밀린 예약 작업 '%s.%s' 실행 실패, 건너뛴다", owner_skill, fn_name, exc_info=True)
+            if skip_failed and (owner_skill, fn_name) in schedule_fns:
+                await scheduler.skip_to_next(owner_skill, fn_name, cron=schedule_fns[(owner_skill, fn_name)].cron, after=now)
 
 
 async def _emit_due_once(due_once: list[OnceSchedule], event_bus: EventBus) -> None:
@@ -482,7 +499,9 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     skill_tables = await discover_skill_tables(conn)
     player_data = PlayerDataScanner(conn=conn, table_names=skill_tables)
 
-    settings_service = SettingsService(conn)
+    settings_service = SettingsService(
+        conn, skill_defaults={s.manifest.name: s.manifest.enabled for s in registry.enabled_skills()}
+    )
     memory_service = MemoryService(conn)
     arcades_service = ArcadesService(conn)
     secrets_service = SecretsService(config.cookie_encryption_key) if config.cookie_encryption_key else None

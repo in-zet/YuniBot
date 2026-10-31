@@ -126,7 +126,7 @@ async def alias_remove(ctx: ToolContext, kind: str, alias: str, game: GameRef | 
         return ToolResult(error="그런 별칭이 없어")
     if row.added_by != ctx.player_id and "admin" not in ctx.tags:
         return ToolResult(error="추가한 사람이나 admin만 지울 수 있어")
-    await ctx.terms.remove_alias(kind=kind, alias=alias)
+    await ctx.terms.remove_alias(kind=kind, alias=alias, removed_by=ctx.player_id)
     return ToolResult(
         data={"kind": kind, "alias": alias}, display=Display(content=f"'{alias}' 별칭을 지웠어."), display_mode="optional"
     )

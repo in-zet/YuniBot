@@ -6,7 +6,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Protocol, cast
 
 from core.agent import AgentLoop, AgentTurnResult
@@ -378,7 +378,8 @@ class MentionEntry:
             sent_id = await send(text, displays)
             if thread is not None:
                 thread.opened_skills = skill_state.ordered_skills()
-                thread.record_yuni(text, at=now)
+                # 전문의 시각은 플레이어 메시지(UTC)와 같은 기준이어야 한다 — now는 서버 로컬 벽시계다.
+                thread.record_yuni(text, at=now.astimezone(UTC))
             elif sent_id is not None and self._conversation_skills is not None:
                 try:
                     await self._conversation_skills.save(

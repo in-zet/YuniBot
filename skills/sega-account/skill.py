@@ -1,12 +1,15 @@
 # skills/sega-account/skill.py
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import discord
 
 from core.decorators import on, slash_only, tool
 from core.tool_types import Display, ToolContext, ToolResult
+
+logger = logging.getLogger(__name__)
 
 _notified_expiries: set[str] = set()
 
@@ -17,14 +20,17 @@ async def _attempt_login(ctx: ToolContext, username: str, password: str, interac
     두 번 베끼지 않는다."""
     try:
         profile = await ctx.chunithm_net.login_with_credentials(ctx.player_id, username, password, ctx)
-    except Exception:  # noqa: BLE001 - 어떤 예외든 같은 안내만 준다. 원인 예외를 그대로
+    except Exception as error:  # noqa: BLE001 - 어떤 예외든 같은 안내만 준다. 원인 예외를 그대로
         # 보여주면 비밀번호나 응답 본문의 일부가 메시지에 섞여 나갈 수 있다(CLAUDE.md 비밀 값 규칙).
+        # 로그에도 예외 클래스 이름만 남긴다 — 비밀번호 오류와 어댑터·네트워크 결함을 운영에서 가르려면 필요하다.
+        logger.warning("sega login failed for player %s: %s", ctx.player_id, type(error).__name__)
         await interaction.followup.send(
             "로그인에 실패했어. ID와 비밀번호가 맞는지 확인해 줘. "
             "(OTP(2단계 인증)를 쓰는 계정은 아직 이 방법으로 로그인할 수 없어.)",
             ephemeral=True,
         )
         return
+    _notified_expiries.discard(ctx.player_id)  # 다시 로그인했으니 다음 만료는 또 안내해야 한다.
     await interaction.followup.send(
         f"로그인 완료! ({profile.username}) `/동기화`로 기록을 가져와 줘.", ephemeral=True
     )
@@ -150,10 +156,10 @@ async def logout(ctx: ToolContext) -> ToolResult:
 @on("sega.login.expired")
 async def on_login_expired(ctx: ToolContext, payload: dict[str, object]) -> None:
     """만료된 로그인에 대해 대표 계정에 재로그인을 한 번만 안내한다(이 프로세스가 켜져
-    있는 동안만 — 재시작하면 다시 보낸다. 이 이벤트는 core/events.py의 EventBus가 이
+    있는 동안만 — 재시작하거나 다시 로그인하면 다시 보낸다. 이 이벤트는 core/events.py의 EventBus가 이
     스킬의 manifest.services만 담은 실제 ctx와 함께 호출한다 — 배선은 끝났다)."""
     player_id = str(payload["player_id"])
     if player_id in _notified_expiries:
         return
-    _notified_expiries.add(player_id)
     await ctx.notify.dm(player_id, "CHUNITHM-NET 로그인이 풀렸어. `/로그인`으로 다시 로그인해 줘.")
+    _notified_expiries.add(player_id)  # 보낸 뒤에 적는다 — DM이 막혀 실패하면 다음 만료 때 다시 시도한다.

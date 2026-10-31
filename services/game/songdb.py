@@ -15,6 +15,7 @@ from core.fuzzy import similar_names
 from core.resolvers import ResolutionError
 from core.text_match import text_contains
 from core.tool_types import ToolContext
+from services.common.audit import record_removal
 from services.game.profile import GameProfile
 
 _MAX_CANDIDATES = 8
@@ -218,10 +219,15 @@ class SongDb:
             return None
         return AliasRow(alias=row["alias"], song_title=row["song_title"], added_by=row["added_by"])
 
-    async def remove_alias(self, *, alias: str) -> None:
+    async def remove_alias(self, *, alias: str, removed_by: str | None = None) -> None:
+        """`removed_by`를 주면 지운 사람·시각을 `change_log`에 남긴다(서버 공유 데이터라 지우면 흔적이 사라진다)."""
         assert self._conn is not None
         alias = alias.lower()
         await self._conn.execute("DELETE FROM songdb_aliases WHERE game = ? AND alias = ?", (self._profile.game, alias))
+        if removed_by is not None:
+            await record_removal(
+                self._conn, actor=removed_by, action="songdb_alias.remove", target=alias, detail=self._profile.game
+            )
         await self._conn.commit()
 
     def song_by_title(self, title: str) -> SongRecord | None:

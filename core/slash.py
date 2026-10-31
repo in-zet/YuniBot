@@ -518,7 +518,12 @@ class ConfirmView(discord.ui.View):
         await interaction.response.defer()  # _dispatch와 같은 이유 — 도구 본문이 느릴 수 있다.
         player_id = await self._player_id_for(interaction)
         result = await self._executor.confirm(self._token, confirmed=confirmed, player_id=player_id)
-        await _send_result(interaction, result)
+        kwargs = render_result(result)
+        if not kwargs.get("ephemeral"):
+            # 공개 결과는 확인 메시지를 고쳐 쓰는 것이라, 안 지우면 확인/취소 버튼이 결과 밑에 남는다.
+            kwargs.setdefault("view", None)
+        await respond(interaction, **kwargs)
+        self.stop()
 
     @discord.ui.button(label="확인", style=discord.ButtonStyle.danger)
     async def confirm_button(self, interaction: discord.Interaction, _button: discord.ui.Button[Any]) -> None:
