@@ -10,7 +10,7 @@ triggers: [목표, 투두, todo, to-do, 기한, 순회]
 category: 목표
 games: [chunithm, maimai]
 version: 1
-services: [records, songdb, notify, players, settings, scheduler, yuni, db]
+services: [records, songdb, terms, notify, players, settings, scheduler, yuni, db]
 listens: [chunithm.sync.completed, maimai.sync.completed, chunithm.song.viewed, maimai.song.viewed, chunithm.plan.requested, goals.notify_due, goals.final_deadline]
 emits: [chunithm.goal.completed, maimai.goal.completed, goals.notify_due, goals.final_deadline]
 settings:
@@ -56,7 +56,7 @@ settings:
   `folder_max_const`, `folder_level`, `folder_version` 중 정확히 하나와 `folder_difficulty`(선택)를
   받는다. `folder_difficulty`를 비우면 난이도를 가리지 않고 그 상수/레벨/버전에 맞는 채보를 전부
   묶는다.
-- 마이마이의 레이팅 목표는 구곡 35 + 신곡 15 곡 레이팅 합(정수), 점수 목표는 달성률(%)이다. 램프 목표의 `all_justice`는 마이마이에서 올 퍼펙트(AP)이고, 클리어 램프가 없어 폴더의 `cleared` 조건은 못 쓴다. 오버파워 목표는 마이마이에 없다.
+- 마이마이의 레이팅 목표는 구곡 35 + 신곡 15 곡 레이팅 합(정수), 점수 목표는 달성률(%)이다. 마이마이에는 클리어 램프가 없어 폴더의 `cleared` 조건은 못 쓰고(`folder_condition`을 비우면 마이마이는 `played`), 오버파워 목표도 없다.
 - 오버파워 목표는 전체(overall)만 지원한다. 폴더별 오버파워 퍼센트는 이번 단계 범위 밖이다 —
   요청받으면 아직 안 된다고 분명히 말한다.
 - `due_at`은 YYYY-MM-DD 날짜만 받고, 꼬리표를 안 주면 기한으로 단기/중기/장기를 정한다.
@@ -70,8 +70,8 @@ settings:
 - 남의 목표는 목표마다 고른 공개 여부(`public`)로 거른다. 다만 공개 목표라도 그 사람이 기록을
   비공개(`records_public` 꺼짐)로 해 두었으면 목표 정의만 보이고 현재값·달성률·남은 양은 빠진다
   ("진행 상황은 비공개야"). 그 숫자를 짐작해 말하지 않는다.
-- 곡별 목표는 점수(`target_score`)나 램프(`lamp`: 풀콤보 `full_combo`, 올 저스티스 `all_justice`)
-  중 하나다. 풀콤보·올 저스티스는 점수로 바꾸지 않고 램프로 판정한다.
+- 곡별 목표는 점수(`target_score`)나 램프(`lamp`: 풀콤보, 올 저스티스 — 마이마이는 FC, AP)
+  중 하나다. 램프는 플레이어가 말한 그대로 넘긴다(해석은 코드가 한다). 풀콤보·올 저스티스는 점수로 바꾸지 않고 램프로 판정한다.
 - `list_goals`/`todo_list`의 슬래시 출력에는 목표 id가 붙는다. 슬래시 명령(`/목표 수정`·`/목표 진행`·
   `/목표 삭제`·`/투두 완료`)은 그 id를 받고, 모델은 같은 일을 표를 받는 도구(`update_goal`·`goal_progress`·
   `delete_goals`·`complete_todos`)로 한다.

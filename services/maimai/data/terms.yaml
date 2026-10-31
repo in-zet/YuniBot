@@ -81,13 +81,13 @@
   aliases: []
 - canonical: "AP"
   category: lamp
-  aliases: []
+  aliases: [올퍼펙트, 올 퍼펙트, 올퍼펙, ALL PERFECT]
 - canonical: "FC+"
   category: lamp
   aliases: []
 - canonical: "FC"
   category: lamp
-  aliases: []
+  aliases: [풀콤, 풀콤보, FULL COMBO]
 - canonical: "FDX+"
   category: lamp
   aliases: []

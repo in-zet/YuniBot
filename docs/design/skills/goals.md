@@ -14,11 +14,11 @@ examples:
   - 15.0에서 15.3 마스 중 SSS 안 된 거 전부 투두에 넣어 줘
   - 내 목표 어디까지 왔어?
 category: 목표
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
-services: [records, songdb, notify, players, yuni]
-listens: [chunithm.sync.completed, chunithm.song.viewed, chunithm.plan.requested]
-emits: [chunithm.goal.completed]
+services: [records, songdb, terms, notify, players, yuni]
+listens: [chunithm.sync.completed, maimai.sync.completed, chunithm.song.viewed, maimai.song.viewed, chunithm.plan.requested]
+emits: [chunithm.goal.completed, maimai.goal.completed]
 ```
 
 스킬 자체의 태그 조건은 없다. 로그인하지 않아도 곡별 목표와 자유 목표는 쓸 수 있다. 기록이 필요한 도구와 자동 완료만 `chunithm-synced`가 필요하다.
@@ -46,7 +46,7 @@ emits: [chunithm.goal.completed]
 - 단기, 중기, 장기는 플레이어가 붙이는 꼬리표다. 붙이지 않으면 기한으로 정한다. 2주 이내는 단기, 3개월 이내는 중기, 그보다 길면 장기다.
 - 목표끼리 상위와 하위로 묶을 수 있다. 예: 장기 레이팅 17.00 아래에 중기 폴더 순회, 그 아래에 단기 곡별 목표.
 - 기한 없는 목표도 둘 수 있다. 알림은 없고 동기화 리포트에만 나온다.
-- 레이팅 최종 목표(예: 17.00)는 플레이어당 하나로 두고, 설정 당시 레이팅을 기준값으로 저장한다.
+- 레이팅 최종 목표(예: 17.00)는 플레이어의 게임마다 하나로 두고(2026-10-31 maimai 확장 — 목표는 `game`을 들고 있고, 점수·레이팅 단위와 램프 이름은 그 게임을 따른다. maimai는 오버파워 목표와 폴더 `cleared` 조건이 없다), 설정 당시 레이팅을 기준값으로 저장한다.
 
 ## 달성률, 페이스, 필요량
 
@@ -63,7 +63,7 @@ emits: [chunithm.goal.completed]
 - **한 건 추가**: 곡, 난이도, 목표를 지정한다.
 - **일괄 추가**: 상수 범위, 난이도, 현재 랭크 조건으로 고른다. 예: MAS 상수 15.0\~15.3 중 SSS 미만인 채보 전부. 추가 전에 대상 개수를 보여 주고 확인 버튼을 받는다. 현재 랭크 조건은 `chunithm-synced`가 있어야 쓸 수 있다.
 - **목록**: 미완료 목록을 상수순 또는 남은 점수순으로 보여 준다.
-- **완료**: 동기화에서 목표를 달성하면 자동으로 완료하고 `chunithm.goal.completed`를 낸다. 수동 완료도 된다.
+- **완료**: 동기화에서 목표를 달성하면 자동으로 완료하고 `<게임>.goal.completed`(chunithm/maimai)를 낸다. 수동 완료도 된다.
 - **공개 여부**: 항목마다 고른다. 기본값은 비공개다.
 
 ## 기한 알림

@@ -170,6 +170,17 @@ async def find_song_goal(
     return None
 
 
+async def in_progress_song_chart_keys(
+    conn: aiosqlite.Connection, player_id: str, *, game: str
+) -> set[tuple[str, str, str]]:
+    """진행 중인 곡 목표의 채보 (곡 제목, 채보 종류, 난이도) 집합. 여러 채보를 한꺼번에 견줄 때 쓴다."""
+    rows = await list_goals_for_player(conn, player_id, kind="song", statuses=["in_progress"], game=game)
+    return {
+        (row.target_ref.get("song_title", ""), row.target_ref.get("chart_type", ""), row.target_ref.get("difficulty", ""))
+        for row in rows
+    }
+
+
 _UPDATABLE_FIELDS = frozenset(
     {"target_value", "due_at", "duration_tag", "parent_goal_id", "status", "public", "notify_offsets"}
 )

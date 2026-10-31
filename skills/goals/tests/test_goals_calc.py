@@ -6,6 +6,8 @@ from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
 
+from services.game.rating_format import rating_text
+
 _CALC_PY = Path(__file__).parent.parent / "goals_calc.py"
 
 
@@ -160,16 +162,15 @@ def test_ratio_percent_truncates_to_two_decimals() -> None:
     assert calc.ratio_percent(D("-0.0507")) == D("-5.07")
 
 
-def test_truncate4_keeps_four_decimals_and_drops_the_rest() -> None:
-    assert calc.truncate4(D("0.02749")) == D("0.0274")
-    assert str(calc.truncate4(D("0.1"))) == "0.1000"
-
-
 def test_rating_remaining_to_17_keeps_four_decimals() -> None:
     remaining = calc.rating_remaining(D("16.9726"), D("17"))
 
-    assert calc.truncate4(remaining) == D("0.0274")
-    assert calc.truncate4(calc.rating_gap_to_song_rating_sum(remaining)) == D("1.3700")
+    assert rating_text(remaining) == "0.0274"
+    assert rating_text(calc.rating_gap_to_song_rating_sum(remaining)) == "1.3700"
+
+
+def test_rating_gap_uses_the_given_multiplier() -> None:
+    assert calc.rating_gap_to_song_rating_sum(D("1"), 35) == D("35")
 
 
 def test_truncate2_drops_third_decimal() -> None:

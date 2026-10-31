@@ -55,11 +55,20 @@ class ToolContext:
     # 게임 이름 → 그 게임의 서비스(스킬이 선언한 이름만 바뀐다). `for_game`이 쓴다.
     game_services: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
+    def with_game_services(self, all_games: Mapping[str, Mapping[str, object]]) -> ToolContext:
+        """게임별 서비스 묶음을 붙인다. 이 맥락이 선언한 서비스 이름만 남겨, 선언하지 않은 서비스가 `game_services`로 새지 않게 한다."""
+        scoped = {game: {k: v for k, v in bundle.items() if k in self.services} for game, bundle in all_games.items()}
+        return replace(self, game_services=scoped)
+
     def for_game(self, game: str) -> ToolContext:
         """다른 게임의 맥락. 스킬이 선언한 서비스 중 게임별인 것(records·songdb·terms·chunithm_net)이 그 게임 것으로 바뀐다.
-        저장된 데이터가 자기 게임을 들고 있는 스킬(goals의 목표 등)이 그 게임으로 계산할 때 쓴다."""
-        overlay = self.game_services.get(game, {})
-        return replace(self, game=game, services={**self.services, **{k: v for k, v in overlay.items() if k in self.services}})
+        저장된 데이터가 자기 게임을 들고 있는 스킬(goals의 목표 등)이 그 게임으로 계산할 때 쓴다.
+        그 게임의 서비스를 모르면 게임 이름만 바꾸고 다른 게임 서비스를 그대로 두게 되므로 오류로 멈춘다."""
+        if game == self.game:
+            return self
+        if game not in self.game_services:
+            raise ValueError(f"{game} 게임의 서비스를 모른다")
+        return replace(self, game=game, services={**self.services, **self.game_services[game]})
 
     def __getattr__(self, name: str) -> Any:
         # dataclass가 정의한 필드(player_id, tags, services)는 정상 __getattribute__로 먼저 해석되므로

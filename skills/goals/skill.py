@@ -12,6 +12,7 @@ from typing import Annotated, Any
 
 from core.decorators import on, slash_only, tool
 from core.events import Section, Stage, highest_stage
+from core.resolvers import ResolutionError
 from core.tables import (
     EMPTY_CELL,
     Cell,
@@ -26,6 +27,7 @@ from core.tool_types import (
     DifficultyRef,
     Display,
     GameRef,
+    LampRef,
     PlayerRef,
     RankRef,
     ScoreRef,
@@ -37,10 +39,15 @@ from services.common.players import Player
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.profile import GameProfile
-from services.game.rating_format import rating_delta_text, rating_text, score_text
+from services.game.rating_format import (
+    RATING_PLACES,
+    rating_delta_text,
+    rating_text,
+    score_text,
+)
 from services.game.records import PbRow, RatingDeltas
 from services.game.registry import profile_for
-from services.game.terms import ResolvedDifficulty, ResolvedRank
+from services.game.terms import ResolvedDifficulty, ResolvedLamp, ResolvedRank
 
 # skills/goals는 폴더 이름에 하이픈이 있어 보통의 패키지 import 경로로 쓸 수 없다
 # (skills/account-link/skill.py가 쓰는 것과 같은 이유) — 같은 폴더의 models.py/goals_calc.py를
@@ -138,9 +145,19 @@ def _lamp_raw(lamp: str, profile: GameProfile) -> str:
     return {SongLamp.FULL_COMBO.value: profile.full_combo_lamp, SongLamp.ALL_JUSTICE.value: profile.all_justice_lamp}[lamp]
 
 
-def _remaining_text(value: int, profile: GameProfile) -> str:
-    """남은 점수를 단위 없이(CHUNITHM "7,500", maimai "0.5000%")."""
-    return score_text(value, percent=True) if profile.score_is_percent else f"{value:,}"
+def _remaining_cell(value: int, profile: GameProfile) -> Cell:
+    """남은 점수 칸. 원래 값은 보이는 단위 그대로(maimai는 달성률 %p) — 거르기·정렬이 보이는 숫자와 맞는다."""
+    raw = value / 10_000 if profile.score_is_percent else value
+    return cell(raw, _points(value, profile))
+
+
+def _song_lamp_from(lamp: LampRef, profile: GameProfile) -> SongLamp | None:
+    """terms가 해석한 램프를 곡 목표 램프로. 그 게임의 풀콤보·올 저스티스가 아니면 None."""
+    assert isinstance(lamp, ResolvedLamp)
+    by_name = {
+        profile.full_combo_lamp.upper(): SongLamp.FULL_COMBO, profile.all_justice_lamp.upper(): SongLamp.ALL_JUSTICE,
+    }
+    return by_name.get(lamp.canonical.upper())
 
 
 def _points(value: int, profile: GameProfile) -> str:
@@ -366,7 +383,7 @@ def _lamp_met(row: PbRow | None, lamp: str, profile: GameProfile) -> bool:
 
 def _chart_name(ref: dict[str, Any]) -> str:
     """"곡 (종류) 난이도". 채보 종류가 없는 게임(CHUNITHM)의 목표에는 종류가 없다."""
-    return " ".join(part for part in (ref["song_title"], ref.get("chart_type", ""), ref["difficulty"]) if part)
+    return f"{ref['song_title']} {_type_difficulty(ref)}"
 
 
 def _type_difficulty(ref: dict[str, Any]) -> str:
@@ -388,10 +405,29 @@ async def _pb(ctx: ToolContext, player_id: str, ref: dict[str, Any]) -> PbRow | 
     )
 
 
+async def _pbs_of(ctx: ToolContext, player_id: str, goals: list[Any]) -> dict[int, PbRow | None]:
+    """곡 목표들의 PB를 한 번에(목표 순번 → PB). `ctx`는 그 목표들의 게임 것이어야 한다."""
+    keys = [
+        tc.pb_key(g.target_ref["song_title"], g.target_ref.get("chart_type", ""), g.target_ref["difficulty"])
+        for g in goals
+    ]
+    found = await ctx.records.pb_rows_for(player_id, list(dict.fromkeys(keys)))
+    return {index: found.get(key) for index, key in enumerate(keys)}
+
+
 def _rating_places(goal: Any) -> int:
     """레이팅 목표 숫자의 소수 자리. 전체 레이팅은 그 게임의 자리수(maimai 정수), 평균 목표는 넷째 자리까지다."""
     metric = goal.target_ref.get("metric", RatingMetric.COMPUTED.value)
-    return profile_for(goal.game).overall_places if metric == RatingMetric.COMPUTED.value else 4
+    return profile_for(goal.game).overall_places if metric == RatingMetric.COMPUTED.value else RATING_PLACES
+
+
+def _song_rating_sum_multiplier(profile: GameProfile, metric: str) -> int:
+    """남은 레이팅에 곱해 곡 레이팅 합을 얻는 수. 전체 레이팅은 나눗수, 평균 지표는 그 틀의 곡 수."""
+    if metric == RatingMetric.BEST30.value:
+        return profile.best_frame_size
+    if metric == RatingMetric.NEW20.value:
+        return profile.new_frame_size
+    return profile.rating_divisor
 
 
 def _song_target_text(goal: Any) -> str:
@@ -410,7 +446,7 @@ def _goal_label(goal: Any, *, with_chart: bool = True) -> str:
         return f"{_chart_name(ref)}  {target}" if with_chart else target
     if goal.kind == "rating":
         target_text = (
-            calc.truncate_places(_dec(goal.target_value), _rating_places(goal)) if goal.target_value is not None else "?"
+            rating_text(_dec(goal.target_value), places=_rating_places(goal)) if goal.target_value is not None else "?"
         )
         return f"레이팅 {target_text}"
     if goal.kind == "overpower":
@@ -426,6 +462,8 @@ def _goal_label(goal: Any, *, with_chart: bool = True) -> str:
         condition = ref["condition"]
         if condition == FolderCondition.RANK.value and ref.get("rank"):
             condition = f"{ref['rank']} 이상"
+        elif condition in (FolderCondition.FULL_COMBO.value, FolderCondition.ALL_JUSTICE.value):
+            condition = _lamp_label(condition, profile_for(goal.game))
         difficulty_label = ref["difficulty"] or "전체 난이도"
         return f"폴더({scope} {difficulty_label})  {condition}"
     return ref.get("description", "자유 목표")
@@ -467,11 +505,10 @@ def _row_matches_condition(
         return True
     if condition == FolderCondition.CLEARED:
         return row.clear_lamp not in ("", "NONE", "FAILED")
-    if condition == FolderCondition.FULL_COMBO:
-        return row.combo_lamp not in ("", "NONE")
-    if condition == FolderCondition.ALL_JUSTICE:
+    if condition in (FolderCondition.FULL_COMBO, FolderCondition.ALL_JUSTICE):
         order = profile.combo_lamp_order
-        return order.get(row.combo_lamp, 0) >= order.get(profile.all_justice_lamp, 1 << 30)
+        needed = profile.full_combo_lamp if condition == FolderCondition.FULL_COMBO else profile.all_justice_lamp
+        return order.get(row.combo_lamp, 0) >= order.get(needed, 1 << 30)
     if condition == FolderCondition.RANK:
         return rank_min_score is not None and row.score >= rank_min_score
     return False
@@ -595,11 +632,11 @@ async def _goal_summary(ctx: ToolContext, goal: Any) -> dict[str, Any]:
 
     if goal.kind == GoalKind.RATING.value:
         remaining = calc.rating_remaining(current, target)
-        summary["remaining"] = str(calc.truncate_places(remaining, _rating_places(goal)))
-        summary["song_rating_sum_needed"] = str(
-            calc.truncate_places(
-                calc.rating_gap_to_song_rating_sum(remaining, profile.rating_divisor), _rating_places(goal)
-            )
+        places = _rating_places(goal)
+        multiplier = _song_rating_sum_multiplier(profile, goal.target_ref.get("metric", RatingMetric.COMPUTED.value))
+        summary["remaining"] = rating_text(remaining, places=places)
+        summary["song_rating_sum_needed"] = rating_text(
+            calc.rating_gap_to_song_rating_sum(remaining, multiplier), places=places
         )
     elif goal.kind == GoalKind.OVERPOWER.value:
         summary["remaining"] = str(calc.truncate2(calc.rating_remaining(current, target)))
@@ -644,7 +681,7 @@ def _summary_text(goal: Any, summary: dict[str, Any]) -> str:
             parts.append(f"남은 {_points(summary['remaining_score'], profile)}")
     elif goal.kind in (GoalKind.RATING.value, GoalKind.OVERPOWER.value) and current is not None:
         if goal.kind == GoalKind.RATING.value:
-            parts.append(f"현재 {calc.truncate_places(Decimal(current), _rating_places(goal))}")
+            parts.append(f"현재 {rating_text(Decimal(current), places=_rating_places(goal))}")
         else:
             parts.append(f"현재 {calc.truncate2(Decimal(current))}")
         remaining_text = f"남은 {summary['remaining']}"
@@ -694,13 +731,13 @@ async def set_goal(
     target_value: float | None = None,
     chart: ChartRef | None = None,
     target_score: ScoreRef | None = None,
-    lamp: SongLamp | None = None,
+    lamp: LampRef | None = None,
     folder_min_const: float | None = None,
     folder_max_const: float | None = None,
     folder_level: str | None = None,
     folder_version: str | None = None,
     folder_difficulty: DifficultyRef | None = None,
-    folder_condition: FolderCondition = FolderCondition.CLEARED,
+    folder_condition: FolderCondition | None = None,
     folder_rank: RankRef | None = None,
     overpower_mode: OverpowerMode = OverpowerMode.PERCENTAGE,
     overpower_scope: OverpowerScope = OverpowerScope.OVERALL,
@@ -717,26 +754,36 @@ async def set_goal(
     folder_version 중 하나 + 선택적 folder_difficulty(비우면 난이도를 가리지 않고 전부 묶는다)
     (+folder_condition, rank 조건이면 folder_rank), song은
     chart(곡+난이도 원문 그대로, 예: "크로노 마스")에 target_score(점수 숫자나 랭크 이름을 원문
-    그대로 — 점수 환산은 해석기가 한다) 또는 lamp(full_combo/all_justice) 중 하나(이미 달성했으면
+    그대로 — 점수 환산은 해석기가 한다) 또는 lamp(풀콤보·올 저스티스 — maimai는 FC·AP) 중 하나(이미 달성했으면
     에러), freeform은 description.
     due_at은 ISO 날짜(YYYY-MM-DD)다. 레이팅·오버파워·폴더 목표는 그 게임의 NET 동기화(chunithm-synced, maimai-synced)가 있어야
-    만들 수 있다. 오버파워 목표는 츄니즘만 된다. lamp의 all_justice는 마이마이에서 올 퍼펙트(AP)다. 레이팅 최종 목표는 플레이어당 하나뿐이다 — 이미 있으면 새로 만들지 않고
+    만들 수 있다. 오버파워 목표는 츄니즘만 된다. folder_condition을 비우면 CHUNITHM은 클리어, maimai는 플레이(클리어 램프가 없다)다. 레이팅 최종 목표는 플레이어당 하나뿐이다 — 이미 있으면 새로 만들지 않고
     에러를 돌려주고 `update`를 쓰라고 안내한다(설계서에 없던 세부, SKILL.md 본문 참고)."""
     # LLM 경로는 enum 인자를 원문 문자열로 넘긴다(core/schema.py) — 슬래시와 달리 여기서
     # 직접 enum으로 되돌려야 .value 호출이 안전하다(report의 BestKind(kind)와 같은 패턴).
     kind = GoalKind(kind)
     metric = RatingMetric(metric)
     overpower_mode = OverpowerMode(overpower_mode)
-    folder_condition = FolderCondition(folder_condition)
-    if lamp is not None:
-        lamp = SongLamp(lamp)
     if duration_tag is not None:
         duration_tag = DurationTag(duration_tag)
     profile = _profile(ctx)
-    if kind in (GoalKind.RATING, GoalKind.OVERPOWER, GoalKind.FOLDER) and profile.synced_tag not in ctx.tags:
-        return ToolResult(error=f"그 목표는 {profile.net_name} 동기화가 돼 있어야 만들 수 있어. /동기화를 먼저 해 줘.")
+    if folder_condition is None:
+        # 클리어 램프가 없는 게임(maimai)은 "플레이했다"가 기본 조건이다.
+        folder_condition = FolderCondition.CLEARED if profile.clear_lamp_order else FolderCondition.PLAYED
+    else:
+        folder_condition = FolderCondition(folder_condition)
     if kind == GoalKind.OVERPOWER and not profile.has_overpower:
         return ToolResult(error=f"{profile.label}에는 오버파워가 없어서 오버파워 목표는 츄니즘만 만들 수 있어.")
+    if kind in (GoalKind.RATING, GoalKind.OVERPOWER, GoalKind.FOLDER) and profile.synced_tag not in ctx.tags:
+        return ToolResult(error=f"그 목표는 {profile.net_name} 동기화가 돼 있어야 만들 수 있어. /동기화를 먼저 해 줘.")
+    song_lamp: SongLamp | None = None
+    if lamp is not None:
+        song_lamp = _song_lamp_from(lamp, profile)
+        if song_lamp is None:
+            return ToolResult(
+                error=f"램프 목표는 {_lamp_label(SongLamp.FULL_COMBO.value, profile)}나 "
+                f"{profile.all_justice_label}만 만들 수 있어."
+            )
     due = _parse_due(due_at)
     if isinstance(due, ToolResult):
         return due
@@ -820,8 +867,11 @@ async def set_goal(
         score = _score(target_score)
         if chart is None:
             return ToolResult(error="곡과 난이도(chart)가 필요해.")
-        if (score is None) == (lamp is None):
-            return ToolResult(error="목표는 점수(target_score)나 램프(lamp: 풀콤보/올 저스티스) 중 하나만 줘.")
+        if (score is None) == (song_lamp is None):
+            return ToolResult(
+                error=f"목표는 점수(target_score)나 램프(lamp: {_lamp_label(SongLamp.FULL_COMBO.value, profile)}/"
+                f"{profile.all_justice_label}) 중 하나만 줘."
+            )
         assert isinstance(chart, ResolvedChart)
         song_title, difficulty, chart_type = chart.song.title, chart.chart.difficulty, chart.chart.chart_type
         if await models.find_song_goal(
@@ -830,11 +880,11 @@ async def set_goal(
             return ToolResult(error="그 채보에는 이미 진행 중인 투두가 있어.")
         song_ref = _song_ref(song_title, chart_type, difficulty)
         row = await _pb(ctx, ctx.player_id, song_ref)
-        if lamp is not None:
+        if song_lamp is not None:
             # 램프 목표는 점수로 바꾸지 않는다 — target_ref에 램프를 싣고 target_value는 비운다.
-            if _lamp_met(row, lamp.value, profile):
+            if _lamp_met(row, song_lamp.value, profile):
                 return ToolResult(error="이미 그 목표를 달성했어.")
-            target_ref = {**song_ref, "lamp": lamp.value}
+            target_ref = {**song_ref, "lamp": song_lamp.value}
             target_value = None
             baseline_value = None
         else:
@@ -916,11 +966,10 @@ _T_TARGET_LAMP = "목표 램프"
 _T_CURRENT_LAMP = "현재 램프"
 
 
-def _todo_formats(game: str, *, percent: bool) -> tuple[str, ...]:
+def _todo_formats(game: str) -> tuple[str, ...]:
     head = _identity_format(game)
-    unit = "" if percent else "점"  # 달성률 게임은 "남은 점수" 칸 글자가 이미 "0.5000%"다
     return (
-        f"{head} {{상수}}  {{점수}} → {{목표 점수}}  (남은 {{남은 점수}}{unit})",
+        f"{head} {{상수}}  {{점수}} → {{목표 점수}}  (남은 {{남은 점수}})",
         f"{head} {{상수}}  {{목표 램프}} 목표  (현재 램프 {{현재 램프}})",
         f"{head}  {{목표 램프}} 목표",
     )
@@ -957,7 +1006,7 @@ def _goal_cells(goal: Any, summary: dict[str, Any]) -> dict[str, Cell]:
     if remaining is None:
         remaining_cell = EMPTY_CELL
     elif is_song and profile.score_is_percent:
-        remaining_cell = cell(remaining, _points(int(remaining), profile))  # 달성률 차이(×10000)를 %로
+        remaining_cell = _remaining_cell(int(remaining), profile)
     else:
         remaining_cell = cell(remaining, f"{remaining:g}")
     return {
@@ -1024,7 +1073,7 @@ async def update(
     goal_id: str,
     *,
     target_value: float | None = None,
-    target_score: ScoreRef | None = None,
+    target_score: str | None = None,
     due_at: str | None = None,
     duration_tag: DurationTag | None = None,
     parent_goal_id: str | None = None,
@@ -1074,7 +1123,7 @@ async def _update_goal(
     goal_id: str,
     *,
     target_value: float | None,
-    target_score: ScoreRef | None,
+    target_score: ScoreRef | str | None,
     due_at: str | None,
     duration_tag: DurationTag | None,
     parent_goal_id: str | None,
@@ -1098,7 +1147,15 @@ async def _update_goal(
     if target_score is not None:
         if goal.kind != GoalKind.SONG.value:
             return ToolResult(error="target_score는 곡 목표에만 쓸 수 있어. 레이팅·오버파워는 target_value를 줘.")
-        score = _score(target_score)
+        if isinstance(target_score, str):
+            # 슬래시는 목표 id만 받아 실행기가 목표의 게임을 모른다 — 점수 표현은 그 목표의 게임 terms가 해석한다.
+            goal_ctx = ctx.for_game(goal.game)
+            try:
+                score = await goal_ctx.terms.resolve_score(target_score, goal_ctx)
+            except ResolutionError as exc:
+                return ToolResult(error=str(exc))
+        else:
+            score = _score(target_score)
         assert score is not None
         # set_goal의 "이미 그 목표를 달성했어" 검사와 같은 기준 — 없으면 PB보다 낮게 내린
         # 목표가 그 채보를 다시 플레이할 때까지 영원히 in_progress로 남는다(achievement_ratio
@@ -1221,7 +1278,7 @@ async def _goal_progress(ctx: ToolContext, goal_id: str) -> ToolResult:
         places = _profile(ctx).overall_places
         data["projected_rating"] = rating_text(projected, places=places) if projected is not None else None
         if projected is not None:
-            lines.append(f"곡별 목표를 모두 달성하면 예상 레이팅 {calc.truncate_places(projected, places)}")
+            lines.append(f"곡별 목표를 모두 달성하면 예상 레이팅 {rating_text(projected, places=places)}")
 
     # id는 다음 /목표 수정·삭제에 타이핑할 때만 필요하다 — 멘션 답에는 슬래시 본문에만 붙인다.
     # (모델용 goal_progress는 같은 표 행을 가리키므로 id를 따로 말할 필요가 없다.)
@@ -1280,13 +1337,13 @@ async def _delete_goals(ctx: ToolContext, ids: list[str], *, dry_run: bool) -> T
 
 @tool(slash="투두 추가", mutates=True)
 async def todo_add(
-    ctx: ToolContext, chart: ChartRef, target_score: ScoreRef | None = None, lamp: SongLamp | None = None,
+    ctx: ToolContext, chart: ChartRef, target_score: ScoreRef | None = None, lamp: LampRef | None = None,
     *, public: bool = False, due_at: str | None = None, game: GameRef | None = None,
 ) -> ToolResult:
     """곡별 목표(To-Do) 한 건을 추가한다. chart는 곡+난이도 원문(예: "크로노 마스"). 목표는 둘 중
     하나만 준다: target_score(점수 숫자나 랭크 이름 SSS, SSS+ 등을 플레이어가 말한 그대로 — 점수
-    환산은 해석기가 하므로 직접 계산하지 않는다) 또는 lamp(풀콤보면 full_combo, 올 저스티스면
-    all_justice — 점수와 상관없는 램프 목표). 이미 달성한 채보면 에러다."""
+    환산은 해석기가 하므로 직접 계산하지 않는다) 또는 lamp(풀콤보·올 저스티스, maimai는 FC·AP를 플레이어가 말한 그대로
+    — 점수와 상관없는 램프 목표). 이미 달성한 채보면 에러다."""
     return await set_goal(
         ctx, GoalKind.SONG, chart=chart, target_score=target_score, lamp=lamp, public=public, due_at=due_at,
     )
@@ -1309,6 +1366,11 @@ async def add_todos(
     score = _score(target_score)
     assert score is not None
     charts = list(dict.fromkeys(tc.row_chart_key(row) for row in table.rows))  # (제목, 채보 종류, 난이도)
+    profile = _profile(ctx)
+    if "" not in profile.chart_types and any(not chart_type for _, chart_type, _ in charts):
+        # 종류가 빈 목표는 어떤 PB·상수와도 맞지 않아 영영 끝나지 않는다.
+        return ToolResult(error=f"{profile.label} 채보는 종류(STD/DX)까지 알아야 해. 종류 칸이 있는 표로 줘.")
+    in_progress = await models.in_progress_song_chart_keys(ctx.db, ctx.player_id, game=ctx.game)
     pbs = await ctx.records.pb_rows_for(ctx.player_id, [tc.pb_key(*chart) for chart in charts])
 
     targets: list[tuple[str, str, str]] = []
@@ -1318,9 +1380,7 @@ async def add_todos(
         pb = pbs.get(tc.pb_key(*chart_key))
         if pb is not None and pb.score >= score:
             reached += 1  # 이미 목표 점수를 넘겼다
-        elif await models.find_song_goal(
-            ctx.db, ctx.player_id, song_title=title, difficulty=difficulty, chart_type=chart_type, game=ctx.game
-        ):
+        elif chart_key in in_progress:
             existing += 1  # 이미 투두가 있다
         else:
             targets.append(chart_key)
@@ -1373,9 +1433,10 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST, game: Gam
         ctx.db, ctx.player_id, kind=GoalKind.SONG.value, statuses=[GoalStatus.IN_PROGRESS.value], game=ctx.game
     )
     items: list[dict[str, Any]] = []
-    for g in rows:
+    pb_by_index = await _pbs_of(ctx, ctx.player_id, rows)
+    for index, g in enumerate(rows):
         title, dif, chart_type = g.target_ref["song_title"], g.target_ref["difficulty"], g.target_ref.get("chart_type", "")
-        pb = await _pb(ctx, ctx.player_id, g.target_ref)
+        pb = pb_by_index[index]
         current = pb.score if pb is not None else 0
         const = ctx.songdb.const_for(title, dif, chart_type)
         lamp = _song_lamp(g)
@@ -1412,7 +1473,7 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST, game: Gam
     builder.column(_T_TARGET_LAMP, value_type="LampRef")
     builder.column(_T_CURRENT_LAMP, value_type="LampRef")
     builder.column(_G_ID, slash_only=True)
-    builder.row_formats(_todo_formats(ctx.game, percent=profile.score_is_percent))
+    builder.row_formats(_todo_formats(ctx.game))
     builder.step(f"투두 ({'남은 점수순' if sort == TodoSort.REMAINING else '상수순'})")
     for i in items:
         lamp = i["lamp"]
@@ -1430,8 +1491,7 @@ async def todo_list(ctx: ToolContext, sort: TodoSort = TodoSort.CONST, game: Gam
                     if i["target_score"] is not None else EMPTY_CELL
                 ),
                 _T_REMAINING: (
-                    cell(i["remaining_score"], _remaining_text(i["remaining_score"], profile))
-                    if i["remaining_score"] is not None else EMPTY_CELL
+                    _remaining_cell(i["remaining_score"], profile) if i["remaining_score"] is not None else EMPTY_CELL
                 ),
                 _T_TARGET_LAMP: (
                     cell(_lamp_raw(lamp, profile), _lamp_label(lamp, profile)) if lamp is not None else EMPTY_CELL
@@ -1516,14 +1576,14 @@ async def _rating_goal_block(
     ratio, label = await _record_progress_and_maybe_complete(ctx, goal, sync_id, current)
     target = _dec(goal.target_value)
     # 전체 레이팅은 그 게임의 자리수로(CHUNITHM 소수 넷째 자리, maimai 정수), 평균은 두 게임 모두 넷째 자리다.
-    places = _profile(ctx).overall_places if metric == RatingMetric.COMPUTED else 4
-    remaining = calc.truncate_places(calc.rating_remaining(current, target), places)
+    places = _rating_places(goal)
+    remaining = rating_text(calc.rating_remaining(current, target), places=places)
     previous = _previous_metric_value(deltas, metric)
     change_text = _NO_PREVIOUS if previous is None else f"이번 동기화 {rating_delta_text(current, previous, places=places)}"
     lines = [
-        f"최종 목표 {calc.truncate_places(target, places)}",
+        f"최종 목표 {rating_text(target, places=places)}",
         (
-            f"현재 {calc.truncate_places(current, places)} · 남은 레이팅 {remaining} · {change_text} · "
+            f"현재 {rating_text(current, places=places)} · 남은 레이팅 {remaining} · {change_text} · "
             f"달성률 {calc.ratio_percent(ratio)}%"
         ),
     ]
@@ -1532,7 +1592,7 @@ async def _rating_goal_block(
         lines.append(f"달성  {label}")
     data = {
         "goal_id": goal.id, "target": rating_text(target, places=places), "current": rating_text(current, places=places),
-        "remaining": rating_text(remaining, places=places),
+        "remaining": remaining,
         "change": rating_delta_text(current, previous, places=places) if previous is not None else None,
         "achievement_ratio": str(ratio),
     }
@@ -1830,9 +1890,10 @@ async def on_plan_requested(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         return None
 
     items: list[dict[str, Any]] = []
-    for g in rows:
+    pb_by_index = await _pbs_of(ctx, player_id, rows)
+    for index, g in enumerate(rows):
         title, dif = g.target_ref["song_title"], _type_difficulty(g.target_ref)
-        pb = await _pb(ctx, player_id, g.target_ref)
+        pb = pb_by_index[index]
         current = pb.score if pb is not None else 0
         lamp = _song_lamp(g)
         if lamp is not None:

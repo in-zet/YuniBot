@@ -187,8 +187,7 @@ class EventBus:
             db=self._db if "db" in handler.skill_services else None,
             scheduler=self._scheduler if "scheduler" in handler.skill_services else None,
             tables=self._tables if "tables" in handler.skill_services else None,
-            game_services=self._game_services,
-        )
+        ).with_game_services(self._game_services)
         # 이벤트를 낸 쪽이 다루는 게임이 있으면, 핸들러가 선언한 서비스 중 게임별인 것은 그 게임 것으로 바꾼다
         # (도구 실행기가 `ctx.game`에 맞춰 서비스를 바꾸는 것과 같다).
         return ctx if game is None else ctx.for_game(game)

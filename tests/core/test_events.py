@@ -380,9 +380,8 @@ async def test_handler_gets_the_emitting_games_services_only_for_declared_names(
 
 def test_for_game_swaps_only_the_services_the_context_already_has() -> None:
     chunithm_records, maimai_records = object(), object()
-    ctx = ToolContext(
-        player_id="p1", tags=frozenset(), services={"records": chunithm_records},
-        game_services={"maimai": {"records": maimai_records, "songdb": object()}},
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={"records": chunithm_records}).with_game_services(
+        {"maimai": {"records": maimai_records, "songdb": object()}}
     )
 
     swapped = ctx.for_game("maimai")
@@ -390,4 +389,19 @@ def test_for_game_swaps_only_the_services_the_context_already_has() -> None:
     assert swapped.game == "maimai" and swapped.records is maimai_records
     assert set(swapped.services) == {"records"}  # 선언하지 않은 서비스는 따라오지 않는다
     assert ctx.records is chunithm_records  # 원래 맥락은 그대로
-    assert ctx.for_game("unknown").records is chunithm_records
+    assert ctx.for_game(ctx.game) is ctx
+
+
+def test_with_game_services_keeps_only_declared_names() -> None:
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={"records": object()}).with_game_services(
+        {"maimai": {"records": object(), "chunithm_net": object()}}
+    )
+
+    assert set(ctx.game_services["maimai"]) == {"records"}  # 선언하지 않은 NET 서비스는 game_services로도 새지 않는다
+
+
+def test_for_game_refuses_a_game_it_has_no_services_for() -> None:
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={"records": object()})
+
+    with pytest.raises(ValueError, match="maimai"):
+        ctx.for_game("maimai")

@@ -17,15 +17,17 @@ import pytest
 
 from core.events import EventBus
 from core.scheduler import Scheduler
-from core.tables import render_text
+from core.tables import TableBuilder, render_text
 from core.tool_types import ToolContext
 from services.common.players import PlayersService
 from services.common.settings import SettingsService
 from services.common.yuni import YuniService
+from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.records import RecordsService
+from services.game.registry import profile_for
 from services.game.sync_types import ChartPlay, ProfileSnapshot, SyncSnapshot
-from services.game.terms import ResolvedDifficulty, TermsService
+from services.game.terms import ResolvedDifficulty, ResolvedLamp, TermsService
 from services.maimai.profile import MAIMAI
 from services.maimai.songdb import MaimaiSongDbService
 
@@ -206,7 +208,7 @@ async def test_goals_are_per_game(skill, world, db) -> None:
 
 async def test_ap_lamp_goal_is_judged_with_the_maimai_lamp_order(skill, world) -> None:
     ctx = world.ctx()
-    result = await skill.todo_add(ctx, chart=world.chart("Old Std", "STD"), lamp=skill.SongLamp.ALL_JUSTICE)
+    result = await skill.todo_add(ctx, chart=world.chart("Old Std", "STD"), lamp=ResolvedLamp(canonical="AP", min_score=None))
     assert result.error is None
     assert "올 퍼펙트" in (result.display.content if result.display else "")
 
@@ -253,3 +255,86 @@ async def test_scheduled_notice_computes_with_the_goals_own_game(skill, world, d
 
     [(_, text)] = world.notify.dms
     assert "레이팅 950" in text and "현재 896" in text
+
+
+# ---------------------------------------------------------------- 코드 검토(2026-10-31) 수정
+
+
+async def test_slash_update_resolves_the_score_with_the_goals_own_game(skill, world) -> None:
+    """주 게임이 CHUNITHM이어도 maimai 목표의 점수는 maimai 기준으로 해석한다(SSS+ = 100.5%)."""
+    await skill.todo_add(world.ctx(), chart=world.chart("Fresh", "DX"), target_score=1_005_000)
+    [goal] = await skill.models.list_goals_for_player(world.db, world.player_id)
+    chunithm_terms = TermsService(profile_for("chunithm").terms_path, game="chunithm")
+    ctx = replace(world.ctx(game="chunithm"), services={**world.ctx().services, "terms": chunithm_terms})
+
+    result = await skill.update(ctx, goal.id, target_score="SSS+")
+
+    assert result.error is None
+    [updated] = await skill.models.list_goals_for_player(world.db, world.player_id)
+    assert updated.target_value == 1_005_000
+
+
+def test_song_rating_sum_multiplier_follows_the_metric(skill) -> None:
+    chunithm = profile_for("chunithm")
+    assert skill._song_rating_sum_multiplier(MAIMAI, "computed_rating") == 1
+    assert skill._song_rating_sum_multiplier(MAIMAI, "best30_average") == 35
+    assert skill._song_rating_sum_multiplier(MAIMAI, "new20_average") == 15
+    assert skill._song_rating_sum_multiplier(chunithm, "computed_rating") == 50
+    assert skill._song_rating_sum_multiplier(chunithm, "best30_average") == 30
+    assert skill._song_rating_sum_multiplier(chunithm, "new20_average") == 20
+
+
+async def test_folder_goal_defaults_to_played_without_a_clear_lamp(skill, world) -> None:
+    result = await skill.set_goal(world.ctx(), skill.GoalKind.FOLDER, folder_level="13+")
+
+    assert result.error is None
+    [goal] = await skill.models.list_goals_for_player(world.db, world.player_id)
+    assert goal.target_ref["condition"] == "played"
+
+
+async def test_folder_goal_shows_the_games_own_lamp_name(skill, world) -> None:
+    await skill.set_goal(
+        world.ctx(), skill.GoalKind.FOLDER, folder_level="13+", folder_condition=skill.FolderCondition.ALL_JUSTICE
+    )
+    [goal] = await skill.models.list_goals_for_player(world.db, world.player_id)
+
+    assert "올 퍼펙트" in skill._goal_label(goal)
+
+
+async def test_overpower_is_refused_before_asking_for_a_sync(skill, world) -> None:
+    result = await skill.set_goal(world.ctx(tags=frozenset()), skill.GoalKind.OVERPOWER, target_value=1)
+
+    assert result.error is not None and "오버파워가 없어" in result.error
+
+
+async def test_lamp_goal_only_takes_the_games_combo_lamps(skill, world) -> None:
+    result = await skill.todo_add(
+        world.ctx(), chart=world.chart("Fresh", "DX"), lamp=ResolvedLamp(canonical="AP+", min_score=None)
+    )
+
+    assert result.error is not None and "올 퍼펙트" in result.error
+
+
+async def test_add_todos_needs_the_chart_type_in_a_typed_game(skill, world) -> None:
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.step("검색 결과")
+    builder.row(
+        tc.chart_ref("Fresh", "MAS"), {tc.SONG: tc.song_cell("Fresh"), tc.DIFFICULTY: tc.difficulty_cell("MAS")}
+    )
+
+    result = await skill.add_todos(world.ctx(), builder.build(), 1_005_000)
+
+    assert result.error is not None and "종류" in result.error
+    assert await skill.models.list_goals_for_player(world.db, world.player_id) == []
+
+
+async def test_todo_remaining_cell_raw_value_is_in_the_shown_unit(skill, world) -> None:
+    await skill.todo_add(world.ctx(), chart=world.chart("Fresh", "DX"), target_score=1_005_000)
+
+    result = await skill.todo_list(world.ctx())
+
+    assert result.table is not None
+    [row] = result.table.rows
+    remaining = row.cell("남은 점수")
+    assert remaining.text == "0.4000%" and remaining.raw == 0.4  # 1.0%p 미만 같은 거르기가 보이는 숫자와 맞는다

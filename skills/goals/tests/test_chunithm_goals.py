@@ -44,7 +44,12 @@ from services.game.records import (
 from services.game.records_calc import remaining_to_target
 from services.game.registry import profile_for
 from services.game.songdb import ChartRecord, SongRecord
-from services.game.terms import ResolvedDifficulty, ResolvedRank, TermsService
+from services.game.terms import (
+    ResolvedDifficulty,
+    ResolvedLamp,
+    ResolvedRank,
+    TermsService,
+)
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 _CORE_PLAYERS_SQL = Path("migrations/core/001_players.sql").read_text()
@@ -209,6 +214,11 @@ def _ctx(
 _SYNCED = frozenset({"chunithm-synced"})
 _MAS = ResolvedDifficulty(canonical="MASTER")
 _SSS = ResolvedRank(canonical="SSS", min_score=1_007_500)
+
+
+def _lamp(name: str) -> ResolvedLamp:
+    """terms가 해석한 램프(곡 목표의 full_combo/all_justice)."""
+    return ResolvedLamp(canonical={"full_combo": "FULL COMBO", "all_justice": "ALL JUSTICE"}[name], min_score=None)
 
 
 def _chart(title: str, difficulty: str = "MAS", *, note_count: int | None = None, const: float | None = None) -> ResolvedChart:
@@ -1447,7 +1457,7 @@ async def test_todo_add_lamp_goal_is_stored_in_target_ref(
     skill: ModuleType, db: aiosqlite.Connection, lamp: str, label: str
 ) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    result = await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp(lamp))
+    result = await skill.todo_add(ctx, _chart("곡A"), lamp=_lamp(lamp))
     assert result.error is None
     assert result.data["target_ref"] == {"song_title": "곡A", "difficulty": "MAS", "lamp": lamp}
     assert result.data["target_value"] is None
@@ -1456,7 +1466,7 @@ async def test_todo_add_lamp_goal_is_stored_in_target_ref(
 
 async def test_song_goal_requires_exactly_one_of_score_or_lamp(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    both = await skill.todo_add(ctx, _chart("곡A"), 1_007_500, lamp=skill.SongLamp.FULL_COMBO)
+    both = await skill.todo_add(ctx, _chart("곡A"), 1_007_500, lamp=_lamp("full_combo"))
     assert both.error is not None
     neither = await skill.todo_add(ctx, _chart("곡A"))
     assert neither.error is not None
@@ -1471,7 +1481,7 @@ async def test_lamp_goal_rejected_when_chart_already_has_that_lamp(
 ) -> None:
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0", combo=combo)]})
     ctx = _ctx(db=db, tags=frozenset(), records=records)
-    result = await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp(lamp))
+    result = await skill.todo_add(ctx, _chart("곡A"), lamp=_lamp(lamp))
     assert result.error is not None
     assert await skill.models.list_goals_for_player(db, "p1") == []
 
@@ -1479,7 +1489,7 @@ async def test_lamp_goal_rejected_when_chart_already_has_that_lamp(
 async def test_aj_goal_allowed_when_chart_only_has_full_combo(skill: ModuleType, db: aiosqlite.Connection) -> None:
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_009_500, "SSS+", 15.0, "17.0", combo="FULL COMBO")]})
     ctx = _ctx(db=db, tags=frozenset(), records=records)
-    result = await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp.ALL_JUSTICE)
+    result = await skill.todo_add(ctx, _chart("곡A"), lamp=_lamp("all_justice"))
     assert result.error is None
 
 
@@ -1489,7 +1499,7 @@ async def test_on_sync_completed_auto_completes_lamp_goal_when_lamp_appears(
 ) -> None:
     records = _FakeRecords()
     ctx = _ctx(db=db, tags=frozenset(), records=records)
-    created = await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp(lamp))
+    created = await skill.todo_add(ctx, _chart("곡A"), lamp=_lamp(lamp))
     goal_id = created.data["goal_id"]
 
     # 동기화가 records_pb를 갱신한 뒤의 상태: 점수는 그대로라도 램프가 올랐다.
@@ -1509,7 +1519,7 @@ async def test_on_sync_completed_lamp_goal_not_completed_by_score_alone(skill: M
     """램프 목표는 점수 비교(target_value)로 완료되지 않는다 — 점수가 올라도 램프가 없으면 그대로다."""
     records = _FakeRecords()
     ctx = _ctx(db=db, tags=frozenset(), records=records)
-    created = await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp.FULL_COMBO)
+    created = await skill.todo_add(ctx, _chart("곡A"), lamp=_lamp("full_combo"))
     records.pbs["p1"] = [_pb("곡A", "MAS", 1_009_000, "SSS+", 15.0, "17.15", combo="NONE")]
     records.diffs["sync1"] = _diff(updates=[ChartUpdate(
         song_title="곡A", difficulty="MAS", old_score=1_000_000, new_score=1_009_000, old_rank="SS",
@@ -1523,7 +1533,7 @@ async def test_on_sync_completed_lamp_goal_not_completed_by_score_alone(skill: M
 
 async def test_lamp_goal_in_todo_list_and_song_view(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
-    await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp.ALL_JUSTICE)
+    await skill.todo_add(ctx, _chart("곡A"), lamp=_lamp("all_justice"))
     listed = await skill.todo_list(ctx)
     assert listed.table is not None
     assert not listed.table.rows[0].cell("남은 점수").filled
@@ -1851,7 +1861,7 @@ async def test_todo_list_lamp_goal_with_const_shows_current_lamp(skill: ModuleTy
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0", combo="FULL COMBO")]})
     songdb = _FakeSongDb(consts={("곡A", "MAS"): 15.0})
     ctx = _ctx(db=db, tags=frozenset(), records=records, songdb=songdb)
-    await skill.todo_add(ctx, _chart("곡A"), lamp=skill.SongLamp.ALL_JUSTICE)
+    await skill.todo_add(ctx, _chart("곡A"), lamp=_lamp("all_justice"))
 
     result = await skill.todo_list(ctx)
 

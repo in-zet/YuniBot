@@ -184,7 +184,9 @@ class ToolExecutor:
                 # 게임을 말하지 않았는데 주 게임이 이 스킬이 다루지 않는 게임이면, 스킬이 다루는 게임으로 간다.
                 fallback_note = f"{game}는 이 기능이 아직 없어서 {games[0]} 기준으로 처리했다"
                 game = games[0]
-            ctx = replace(ctx, game_services=self._game_services).for_game(game)
+            ctx = ctx.with_game_services(self._game_services)
+            # 게임별 서비스 묶음을 모르는 설치(게임이 하나뿐인 시험 등)는 게임 이름만 정한다.
+            ctx = ctx.for_game(game) if game in self._game_services else replace(ctx, game=game)
 
         resolved: dict[str, Any] = {}
         stale_input = False
