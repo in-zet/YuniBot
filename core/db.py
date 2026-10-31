@@ -48,6 +48,7 @@ async def connect_guarded(database: str | Path) -> GuardedConnection:
 
     conn = GuardedConnection(connector, 64)
     _ = await conn
+    conn.row_factory = aiosqlite.Row  # 서비스·스킬 모델은 열 이름으로 읽는다 — 연결을 열 때 한 번만 정한다.
     return conn
 
 

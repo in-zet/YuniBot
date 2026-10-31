@@ -173,8 +173,6 @@ class TermsService:
         self._lamp_aliases = _alias_map(entries, "lamp")
         self._lamp_values = _value_map(entries, "lamp")
         self._conn = conn
-        if self._conn is not None:
-            self._conn.row_factory = aiosqlite.Row
         # 확인받아 저장한 전역 별칭(terms_aliases). 난이도·랭크·램프는 위 별칭 지도에 그대로 섞어 넣고
         # (그래서 해석 경로는 따로 안 바뀐다), 작곡가는 여기서만 본다. 키는 소문자 별칭 → 정식 이름.
         self._db_aliases: dict[str, dict[str, str]] = {kind: {} for kind in ALIAS_KINDS.values()}

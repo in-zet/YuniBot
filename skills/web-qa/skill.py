@@ -40,11 +40,17 @@ def _shown_sources(found: list[SearchSource]) -> list[dict[str, str]]:
 
 
 async def _record_usage(ctx: ToolContext, result: SearchResult) -> None:
+    await _record(
+        ctx, input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
+        search_requests=result.usage.search_requests,
+    )
+
+
+async def _record(ctx: ToolContext, *, input_tokens: int, output_tokens: int, search_requests: int) -> None:
     if ctx.usage is not None:
         await ctx.usage.record(
             guild_id=ctx.guild_id or "dm", player_id=ctx.player_id, model=ctx.websearch.model, kind="websearch",
-            input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
-            search_requests=result.usage.search_requests,
+            input_tokens=input_tokens, output_tokens=output_tokens, search_requests=search_requests,
         )
 
 
@@ -60,7 +66,10 @@ async def search(ctx: ToolContext, question: str) -> ToolResult:
     except NoSourcesError as exc:
         await _record_usage(ctx, exc.result)  # 출처가 없어도 호출 비용은 나갔다 — 월 상한 집계에서 빠지면 안 된다.
         return ToolResult(error="이 질문은 출처를 찾지 못했다. 모른다고 답하고 공식 사이트나 위키를 찾아보라고 제안해라")
-    except Exception:
+    except Exception as exc:
+        if isinstance(exc, TimeoutError):
+            # 끊긴 호출은 쓴 토큰을 모른다. 요청은 이미 나갔으니 검색 요금 한 건만이라도 월 상한 집계에 넣는다.
+            await _record(ctx, input_tokens=0, output_tokens=0, search_requests=1)
         logger.warning("웹 검색 실패", exc_info=True)
         return ToolResult(error="지금 웹 검색이 안 된다. 같은 검색을 다시 하지 말고, 검색이 안 돼서 못 찾았다고 말하고 잠시 뒤에 다시 물어봐 달라고 전해라")
 

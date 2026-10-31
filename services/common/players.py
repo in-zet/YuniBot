@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 import aiosqlite
 
-from core.permissions import STATUS_ONLY_TAGS
+from core.permissions import is_status_only_tag
 from core.resolvers import ResolutionError
 from core.tool_types import PlayerRef, ToolContext, ToolResult
 from services.common.audit import record_removal
@@ -72,7 +72,6 @@ class PlayersService:
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
-        self._conn.row_factory = aiosqlite.Row
 
     async def create_player(self) -> Player:
         player_id = str(uuid.uuid4())
@@ -190,7 +189,7 @@ class PlayersService:
         await self._conn.commit()
 
     async def grant_tag(self, player_id: str, tag: str, *, source: str) -> None:
-        if tag in STATUS_ONLY_TAGS:
+        if is_status_only_tag(tag):
             raise ValueError(f"'{tag}'는 상태 태그라 손으로 못 바꾼다")
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
@@ -203,7 +202,7 @@ class PlayersService:
 
     async def revoke_tag(self, player_id: str, tag: str, *, revoked_by: str | None = None) -> None:
         """`revoked_by`(바꾼 플레이어 id 또는 'system:...')를 주면 지운 사람·시각을 `change_log`에 남긴다."""
-        if tag in STATUS_ONLY_TAGS:
+        if is_status_only_tag(tag):
             raise ValueError(f"'{tag}'는 상태 태그라 손으로 못 바꾼다")
         await self._conn.execute(
             "DELETE FROM player_tags WHERE player_id = ? AND tag = ?", (player_id, tag)
@@ -275,10 +274,10 @@ class PlayersService:
         return player
 
     async def set_status_tag(self, player_id: str, tag: str, *, source: str) -> None:
-        """grant_tag와 반대 방향의 가드: STATUS_ONLY_TAGS **밖**의 태그는 거부한다.
+        """grant_tag와 반대 방향의 가드: 상태 태그(`is_status_only_tag`)가 **아닌** 태그는 거부한다.
         chunithm_net/records 서비스가 로그인·첫 동기화를 감지했을 때만 쓴다."""
-        if tag not in STATUS_ONLY_TAGS:
-            raise ValueError(f"'{tag}'는 상태 태그가 아니다: {sorted(STATUS_ONLY_TAGS)}")
+        if not is_status_only_tag(tag):
+            raise ValueError(f"'{tag}'는 상태 태그가 아니다")
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
             "INSERT INTO player_tags (player_id, tag, source, granted_at) VALUES (?, ?, ?, ?) "
@@ -289,8 +288,8 @@ class PlayersService:
         await self._conn.commit()
 
     async def revoke_status_tag(self, player_id: str, tag: str) -> None:
-        if tag not in STATUS_ONLY_TAGS:
-            raise ValueError(f"'{tag}'는 상태 태그가 아니다: {sorted(STATUS_ONLY_TAGS)}")
+        if not is_status_only_tag(tag):
+            raise ValueError(f"'{tag}'는 상태 태그가 아니다")
         await self._conn.execute(
             "DELETE FROM player_tags WHERE player_id = ? AND tag = ?", (player_id, tag)
         )

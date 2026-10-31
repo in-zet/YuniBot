@@ -38,7 +38,6 @@ async def create_code(
     conn: aiosqlite.Connection, *, code: str, issuer_player_id: str, issuer_discord_id: str,
     now: datetime, ttl: timedelta,
 ) -> None:
-    conn.row_factory = aiosqlite.Row
     await conn.execute(
         "INSERT INTO account_link_codes "
         "(code, issuer_player_id, issuer_discord_id, status, created_at, expires_at) "
@@ -49,7 +48,6 @@ async def create_code(
 
 
 async def get_code(conn: aiosqlite.Connection, code: str) -> LinkCode | None:
-    conn.row_factory = aiosqlite.Row
     cursor = await conn.execute("SELECT * FROM account_link_codes WHERE code = ?", (code,))
     row = await cursor.fetchone()
     return _row_to_code(row) if row else None
@@ -105,7 +103,6 @@ async def mark_status(conn: aiosqlite.Connection, code: str, *, status: str) -> 
 
 
 async def wrong_attempt_count(conn: aiosqlite.Connection, discord_id: str, *, now: datetime) -> int:
-    conn.row_factory = aiosqlite.Row
     cursor = await conn.execute(
         "SELECT wrong_count, locked_until FROM account_link_attempts WHERE discord_id = ?", (discord_id,)
     )
@@ -122,7 +119,6 @@ async def wrong_attempt_count(conn: aiosqlite.Connection, discord_id: str, *, no
 async def record_wrong_attempt(
     conn: aiosqlite.Connection, discord_id: str, *, now: datetime, lock_after: int, cooldown: timedelta
 ) -> int:
-    conn.row_factory = aiosqlite.Row
     cursor = await conn.execute(
         "SELECT wrong_count, locked_until FROM account_link_attempts WHERE discord_id = ?", (discord_id,)
     )

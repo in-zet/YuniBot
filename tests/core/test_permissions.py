@@ -7,6 +7,7 @@ from core.permissions import (
     TagRequirement,
     check_tags,
     describe_lock,
+    is_status_only_tag,
 )
 
 
@@ -86,3 +87,11 @@ def test_describe_lock_mixed_hidden_and_visible_gives_no_guidance() -> None:
     )
     assert lock.visible is False
     assert lock.message is None
+
+
+def test_status_only_tags_are_sega_linked_and_every_game_synced_tag() -> None:
+    assert is_status_only_tag("sega-linked")
+    assert is_status_only_tag("chunithm-synced")
+    assert is_status_only_tag("maimai-synced")
+    assert not is_status_only_tag("admin")
+    assert not is_status_only_tag("tester")

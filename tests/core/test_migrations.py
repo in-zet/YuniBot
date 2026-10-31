@@ -77,7 +77,7 @@ async def test_run_migrations_applies_multi_statement_file_with_semicolon_in_str
 
         cursor = await conn.execute("SELECT id, note FROM players")
         rows = await cursor.fetchall()
-        assert rows == [("p1", "a;b")]
+        assert [tuple(row) for row in rows] == [("p1", "a;b")]
 
 
 @pytest.mark.asyncio

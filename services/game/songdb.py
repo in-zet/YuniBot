@@ -128,8 +128,6 @@ class SongDb:
         self._songs = songs
         self._available_intl = available
         self._conn = conn
-        if self._conn is not None:
-            self._conn.row_factory = aiosqlite.Row
 
     @property
     def profile(self) -> GameProfile:

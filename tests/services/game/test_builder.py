@@ -59,6 +59,19 @@ async def test_each_game_gets_its_own_net_service_in_the_chunithm_net_slot(conn,
     assert isinstance(games["maimai"].skill_services()["chunithm_net"], MaimaiNetService)
 
 
+async def test_nickname_source_exists_only_for_a_game_whose_net_knows_nicknames(conn, tmp_path: Path) -> None:
+    keyed = await build_all_game_services(
+        conn=conn, players=PlayersService(conn), secrets=SecretsService(Fernet.generate_key()), data_dir=tmp_path
+    )
+    keyless = await build_all_game_services(
+        conn=conn, players=PlayersService(conn), secrets=None, data_dir=tmp_path
+    )
+
+    assert keyed["chunithm"].nickname_source() is not None
+    assert keyed["maimai"].nickname_source() is None
+    assert keyless["chunithm"].nickname_source() is None
+
+
 async def test_without_a_secrets_key_no_game_has_a_net_service(conn, tmp_path: Path) -> None:
     games = await build_all_game_services(
         conn=conn, players=PlayersService(conn), secrets=None, data_dir=tmp_path

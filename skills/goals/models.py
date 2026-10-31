@@ -104,7 +104,6 @@ async def insert_goal(
     commit: bool = True,
 ) -> None:
     """`commit=False`는 호출자가 `write_transaction` 안에서 여러 건을 한 단위로 넣을 때 쓴다."""
-    conn.row_factory = aiosqlite.Row
     await conn.execute(
         f"INSERT INTO goals_goals ({_GOAL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
@@ -118,7 +117,6 @@ async def insert_goal(
 
 
 async def fetch_goal(conn: aiosqlite.Connection, goal_id: str) -> GoalRow | None:
-    conn.row_factory = aiosqlite.Row
     cursor = await conn.execute(f"SELECT {_GOAL_COLUMNS} FROM goals_goals WHERE id = ?", (goal_id,))
     row = await cursor.fetchone()
     return _goal_from_row(row) if row is not None else None
@@ -133,7 +131,6 @@ async def list_goals_for_player(
     game: str | None = None,
 ) -> list[GoalRow]:
     """플레이어의 목표. `game`을 주면 그 게임의 목표만 본다."""
-    conn.row_factory = aiosqlite.Row
     query = f"SELECT {_GOAL_COLUMNS} FROM goals_goals WHERE player_id = ?"
     params: list[Any] = [player_id]
     if game is not None:
@@ -245,7 +242,6 @@ async def insert_progress(
 
 
 async def list_progress(conn: aiosqlite.Connection, goal_id: str) -> list[ProgressRow]:
-    conn.row_factory = aiosqlite.Row
     cursor = await conn.execute(
         "SELECT id, goal_id, sync_id, recorded_at, value, achievement_ratio FROM goals_progress "
         "WHERE goal_id = ? ORDER BY recorded_at",
@@ -263,7 +259,6 @@ async def insert_schedule(conn: aiosqlite.Connection, *, goal_id: str, schedule_
 
 
 async def list_schedules(conn: aiosqlite.Connection, goal_id: str, *, kind: str | None = None) -> list[ScheduleRow]:
-    conn.row_factory = aiosqlite.Row
     query = "SELECT id, goal_id, schedule_id, kind FROM goals_notify_schedule WHERE goal_id = ?"
     params: list[Any] = [goal_id]
     if kind is not None:

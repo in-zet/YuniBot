@@ -303,7 +303,6 @@ class RecordsService:
         self._game = game
         self._profile = profile if profile is not None else profile_for(game)
         self._conn = conn
-        self._conn.row_factory = aiosqlite.Row
         self._songdb = songdb
         self._players = players
         self._diff_cache: dict[str, SyncDiff] = {}

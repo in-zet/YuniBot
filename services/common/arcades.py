@@ -41,7 +41,6 @@ class ArcadesService:
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
-        self._conn.row_factory = aiosqlite.Row
 
     async def create(self, *, name: str, created_by: str) -> Arcade:
         """새 오락실을 등록한다. 공백·대소문자를 무시하고 같은 이름이 이미 있으면 ValueError."""

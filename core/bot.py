@@ -56,7 +56,6 @@ from core.tool_types import (
     ToolContext,
 )
 from core.usage import UsageService
-from services.chunithm.chunithm_net import ChunithmNetService
 from services.common.arcades import ArcadesService
 from services.common.http import HttpService, build_http_service
 from services.common.memory import SUMMARY_DELAY_SECONDS, MemoryService, PendingSummary
@@ -618,14 +617,8 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
         )
 
     # 호칭: 메모리의 호칭 칸 → CHUNITHM-NET 닉네임 → (멘션이면) 디스코드 서버 닉네임. 게임 쪽 닉네임은 소스로 받는다.
-    address_sources: list[NicknameSource] = []
-    if isinstance(games.net, ChunithmNetService):  # 닉네임은 기본 게임(CHUNITHM)의 NET 상태에서 읽는다
-        net_service = games.net
-
-        async def _net_nickname(player_id: str) -> str | None:
-            return (await net_service.status(player_id)).nickname
-
-        address_sources.append(_net_nickname)
+    nickname_source = games.nickname_source()  # 닉네임은 기본 게임의 NET 상태에서 읽는다
+    address_sources: list[NicknameSource] = [nickname_source] if nickname_source is not None else []
     address_resolver = AddressResolver(memory=memory_service, sources=address_sources)
 
     # 유니의 한마디와 메모리 요약은 싼 모델(SUMMARY_MODEL)로 만든다. 규칙이 말투보다 앞선다(rules.md가 먼저).

@@ -10,6 +10,7 @@ from typing import Any
 
 import aiosqlite
 
+from core.address import NicknameSource
 from core.resolvers import ResolverRegistry
 from core.tool_types import (
     ChartRef,
@@ -98,6 +99,17 @@ class GameServices:
         if self.net is not None:
             services["chunithm_net"] = self.net  # 스킬에는 게임과 상관없이 이 이름이다. 게임별 서비스가 이 자리에 낀다.
         return services
+
+    def nickname_source(self) -> NicknameSource | None:
+        """이 게임의 NET에 저장된 플레이어 닉네임을 읽는 소스. NET이 없거나 닉네임을 모르는 게임이면 None."""
+        net = self.net
+        if not isinstance(net, ChunithmNetService):
+            return None
+
+        async def _nickname(player_id: str) -> str | None:
+            return (await net.status(player_id)).nickname
+
+        return _nickname
 
     def resolvers(self) -> dict[type, Any]:
         return {

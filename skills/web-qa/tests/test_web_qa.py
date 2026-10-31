@@ -202,3 +202,22 @@ async def test_search_gives_up_when_total_time_runs_out(skill: ModuleType, monke
 
     assert result.error is not None
     assert "다시 하지 말고" in result.error
+
+
+@pytest.mark.asyncio
+async def test_search_timeout_still_records_one_search_request(skill: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """시간 초과로 끊겨도 요청은 나갔다 — 토큰은 모르지만 검색 한 건은 월 상한 집계에 남는다."""
+
+    class _Slow(_FakeWebsearch):
+        async def search(self, *, query: str, player_id: str, now: datetime) -> SearchResult:
+            await asyncio.sleep(10)
+            return await super().search(query=query, player_id=player_id, now=now)
+
+    monkeypatch.setattr(skill, "_SEARCH_TOTAL_SECONDS", 0.01)
+    usage = _FakeUsageService()
+
+    await skill.search(_ctx(websearch=_Slow(result=_result()), usage=usage), question="질문")
+
+    assert [(c["kind"], c["input_tokens"], c["output_tokens"], c["search_requests"]) for c in usage.calls] == [
+        ("websearch", 0, 0, 1)
+    ]

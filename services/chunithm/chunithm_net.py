@@ -220,7 +220,6 @@ class ChunithmNetService:
         credential_adapter_factory: CredentialAdapterFactory | None = None,
     ) -> None:
         self._conn = conn
-        self._conn.row_factory = aiosqlite.Row
         self._secrets = secrets
         self._players = players
         self._cookies = SegaCookieStore(conn=conn, secrets=secrets, players=players)

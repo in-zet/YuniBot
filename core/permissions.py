@@ -7,9 +7,15 @@ from typing import Protocol
 from core.manifest import DefinedTag
 
 # "상태 태그"는 서비스가 상태를 보고 자동으로만 붙이고 뗀다. 손으로(admin의 grant_tag/
-# revoke_tag 포함) 못 바꾼다. chunithm_net/records가 로그인·첫 동기화 때 실제로 붙인다(게임별 첫 동기화 태그는 `GameProfile.synced_tag`).
-# 설명(description/how_to_get)은 sega-account 스킬의 defines_tags가 소유한다.
-STATUS_ONLY_TAGS: frozenset[str] = frozenset({"sega-linked", "chunithm-synced", "maimai-synced"})
+# revoke_tag 포함) 못 바꾼다. 로그인 때 `sega-linked`를, 게임별 첫 동기화 때 `<게임>-synced`
+# (`GameProfile.synced_tag`)를 서비스가 붙인다. 설명(description/how_to_get)은 sega-account 스킬의
+# defines_tags가 소유한다.
+SEGA_LINKED_TAG = "sega-linked"
+_SYNCED_TAG_SUFFIX = "-synced"
+
+
+def is_status_only_tag(tag: str) -> bool:
+    return tag == SEGA_LINKED_TAG or tag.endswith(_SYNCED_TAG_SUFFIX)
 
 
 @dataclass(slots=True, kw_only=True)
