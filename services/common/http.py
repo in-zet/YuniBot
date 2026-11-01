@@ -17,8 +17,15 @@ class HttpService:
     간격 제한은 aiolimiter가 한다 — 둘 다 벤더링된 third_party 코드가 이미
     의존하는 라이브러리라 새 의존성을 더하지 않는다."""
 
-    def __init__(self, *, client: httpx.AsyncClient, min_interval_seconds: float = 1.0) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        min_interval_seconds: float = 1.0,
+        uncached_client: httpx.AsyncClient | None = None,
+    ) -> None:
         self._client = client
+        self._uncached_client = uncached_client or client
         self._min_interval = min_interval_seconds
         self._limiters: dict[tuple[str, float], AsyncLimiter] = {}
 
@@ -31,11 +38,15 @@ class HttpService:
             self._limiters[key] = AsyncLimiter(1, period)
         return self._limiters[key]
 
-    async def get(self, url: str, *, min_interval_seconds: float | None = None) -> httpx.Response:
+    async def get(
+        self, url: str, *, min_interval_seconds: float | None = None, use_cache: bool = True
+    ) -> httpx.Response:
         """`min_interval_seconds`를 주면 이 호출만 그 간격(호스트별)으로 센다. 작은 그림 파일을
-        여러 장 받을 때처럼 기본 간격이 너무 느린 곳에 쓴다."""
+        여러 장 받을 때처럼 기본 간격이 너무 느린 곳에 쓴다. `use_cache=False`는 hishel을 거치지 않는
+        평범한 클라이언트로 받는다 — 스스로 저장하는 호출(그림)이나, 응답 머리글이 규격에 안 맞아 hishel이
+        예외를 내는 곳에 쓴다(`cache_disabled` 확장은 응답 머리글을 여전히 파싱해서 소용없다)."""
         async with self._limiter_for(url, min_interval_seconds):
-            return await self._client.get(url)
+            return await (self._client if use_cache else self._uncached_client).get(url)
 
     async def get_json(self, url: str) -> Any:
         response = await self.get(url)
@@ -44,6 +55,8 @@ class HttpService:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+        if self._uncached_client is not self._client:
+            await self._uncached_client.aclose()
 
 
 async def build_http_service(*, cache_db_path: Path, min_interval_seconds: float = 1.0) -> HttpService:
@@ -55,4 +68,6 @@ async def build_http_service(*, cache_db_path: Path, min_interval_seconds: float
         cacheable_methods=["GET"], cacheable_status_codes=[200], allow_heuristics=False
     )
     client = hishel.AsyncCacheClient(storage=storage, controller=controller)
-    return HttpService(client=client, min_interval_seconds=min_interval_seconds)
+    return HttpService(
+        client=client, min_interval_seconds=min_interval_seconds, uncached_client=httpx.AsyncClient()
+    )

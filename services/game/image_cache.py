@@ -31,7 +31,9 @@ _FETCH_CONCURRENCY = 8
 
 
 class _HttpGet(Protocol):
-    async def get(self, url: str, *, min_interval_seconds: float | None = None) -> httpx.Response: ...
+    async def get(
+        self, url: str, *, min_interval_seconds: float | None = None, use_cache: bool = True
+    ) -> httpx.Response: ...
 
 
 def jacket_url(jacket: str | None, *, now: datetime | None = None) -> str | None:
@@ -100,8 +102,10 @@ class ImageCache:
     async def _download(self, url: str) -> bytes | None:
         async with self._semaphore:
             try:
-                response = await self._http.get(url, min_interval_seconds=_FETCH_INTERVAL_SECONDS)
-            except httpx.HTTPError:
+                # 그림은 아래에서 디스크에 직접 저장하므로 HTTP 캐시를 거치지 않는다. 마이마이 NET 아이콘은
+                # Cache-Control 머리글이 두 번 오고 둘째가 규격에 안 맞아(2026-11-01) hishel이 예외를 낸다.
+                response = await self._http.get(url, min_interval_seconds=_FETCH_INTERVAL_SECONDS, use_cache=False)
+            except Exception:  # 그림 하나가 표 전체를 막으면 안 된다 — 못 받은 그림은 None으로 비운다.
                 logger.warning("그림을 받지 못했다: %s", url, exc_info=True)
                 return None
         if response.status_code != 200 or not _is_image(response.content):

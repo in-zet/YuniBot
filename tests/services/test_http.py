@@ -100,3 +100,30 @@ async def test_per_call_interval_uses_its_own_limiter_per_host() -> None:
     response = await service.get("https://example.test/a", min_interval_seconds=0.0)
     assert response.status_code == 200
     await service.aclose()
+
+
+async def test_use_cache_false_bypasses_hishel_even_when_the_response_has_a_malformed_cache_control() -> None:
+    """2026-11-01: maimaidx-eng.com 아이콘은 Cache-Control이 두 번 오고 둘째(`private no-cache ...`, 쉼표 없음)가
+    hishel의 파서를 터뜨렸다. hishel을 거치지 않으면 그 응답을 그냥 받는다."""
+    import hishel
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers=[("Cache-Control", "max-age=864000"), ("Cache-Control", "private no-cache no-store must-revalidate")],
+            content=b"png",
+        )
+
+    client = hishel.AsyncCacheClient(
+        transport=httpx.MockTransport(handler),
+        storage=hishel.AsyncInMemoryStorage(),
+        controller=hishel.Controller(cacheable_methods=["GET"], cacheable_status_codes=[200]),
+    )
+    service = HttpService(
+        client=client, min_interval_seconds=0.0, uncached_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+
+    response = await service.get("https://example.test/icon.png", use_cache=False)
+
+    assert response.content == b"png"
+    await service.aclose()
