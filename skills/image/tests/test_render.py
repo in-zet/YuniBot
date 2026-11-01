@@ -4,6 +4,7 @@ import colorsys
 import importlib.util
 import io
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -523,6 +524,40 @@ def test_rating_tier_names_follow_chunithm_table(rating: str, name: str) -> None
 def test_rating_tier_is_none_for_non_numbers() -> None:
     assert render.rating_tier("-") is None
     assert render.rating_tier("") is None
+
+
+@pytest.mark.parametrize(
+    "rating,name",
+    [("0", "하양"), ("999", "하양"), ("1000", "파랑"), ("2000", "초록"), ("4000", "노랑"), ("7000", "빨강"),
+     ("8564", "빨강"), ("10000", "보라"), ("12000", "동"), ("13000", "은"), ("14000", "금"), ("14499", "금"),
+     ("14500", "백금"), ("14999", "백금"), ("15000", "무지개"), ("16500", "무지개")],
+)
+def test_maimai_rating_tier_names(rating: str, name: str) -> None:
+    tier = render.rating_tier(rating, "maimai")
+
+    assert tier is not None and tier[0] == name
+    assert (tier[1] is None) == (name == "무지개")
+
+
+def test_rating_tier_is_none_for_a_game_without_a_known_table() -> None:
+    assert render.rating_tier("8564", "unknown") is None
+
+
+def _maimai_rating_header(rating: str) -> Image.Image:
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, tc.SONG)
+    builder.summary({"레이팅": rating})
+    builder.row(tc.chart_ref("곡 0", "MAS"), {tc.SONG: tc.song_cell("곡 0")})
+    (_, data), = render.render_pages(replace(builder.build(), game="maimai"), layout="list", jackets={})
+    return Image.open(io.BytesIO(data)).convert("RGB")
+
+
+def test_maimai_rating_is_drawn_in_its_tier_color() -> None:
+    """2026-11-01: maimai 레이팅은 단계 색 없이 흰 글자였다."""
+    red = _colors_in_rating_area(_maimai_rating_header("8564"))
+
+    assert any(r > 200 and g < 120 and b < 130 for r, g, b in red)
+    assert len(_colors_in_rating_area(_maimai_rating_header("15500"))) > 3 * len(red)
 
 
 def _rating_header(rating: str) -> Image.Image:

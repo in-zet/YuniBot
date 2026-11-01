@@ -32,6 +32,7 @@ from core.tables import (
 from core.tool_types import DEFAULT_GAME
 from services.chunithm.rating_tier import tier_for
 from services.game import table_columns as tc
+from services.maimai.rating_tier import tier_for as maimai_tier_for
 
 logger = logging.getLogger(__name__)
 
@@ -381,12 +382,35 @@ _TIER_COLORS: dict[str, tuple[int, int, int] | None] = {
 _RATING_OUTLINE = (28, 22, 20)  # 게임 숫자처럼 모든 단계의 글자에 두르는 어두운 테두리
 
 
-def rating_tier(rating: str) -> tuple[str, tuple[int, int, int] | None] | None:
-    """레이팅 글자("17.0024")의 색 단계 이름과 단색(무지개 계열은 None). 숫자가 아니면 None."""
+# maimai DX 레이팅 색 단계의 색(게임의 레이팅 배경색을 눈으로 옮긴 것, 2026-11-01). 경계와 이름은 `services/maimai/rating_tier.py`.
+_MAIMAI_TIER_COLORS: dict[str, tuple[int, int, int] | None] = {
+    "무지개": None,
+    "백금": (250, 240, 200),
+    "금": (250, 206, 58),
+    "은": (190, 226, 242),
+    "동": (226, 132, 42),
+    "보라": (176, 108, 230),
+    "빨강": (238, 86, 96),
+    "노랑": (250, 220, 60),
+    "초록": (112, 232, 52),
+    "파랑": (92, 160, 245),
+    "하양": (236, 238, 244),
+}
+
+
+def rating_tier(rating: str, game: str = DEFAULT_GAME) -> tuple[str, tuple[int, int, int] | None] | None:
+    """레이팅 글자("17.0024", maimai는 "8564")의 색 단계 이름과 단색(무지개 계열은 None). 숫자가 아니거나
+    단계 기준을 모르는 게임이면 None."""
     try:
-        tier = tier_for(Decimal(rating))
+        value = Decimal(rating)
     except InvalidOperation:
         return None
+    if game == "maimai":
+        maimai_tier = maimai_tier_for(value)
+        return None if maimai_tier is None else (maimai_tier.name, _MAIMAI_TIER_COLORS[maimai_tier.name])
+    if game not in ("", DEFAULT_GAME):
+        return None
+    tier = tier_for(value)
     return None if tier is None else (tier.name, _TIER_COLORS[tier.name])
 
 
@@ -432,11 +456,11 @@ def _highlight_top(fill: Image.Image, box: tuple[int, int, int, int]) -> Image.I
 
 def _draw_rating_value(
     canvas: Image.Image, xy: tuple[int, int], text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
-    *, tiered: bool = True,
+    *, game: str = DEFAULT_GAME,
 ) -> None:
     """레이팅 숫자를 단계 색으로 그린다. 모든 단계에 어두운 테두리, 무지개는 파스텔 사선 그라데이션 글자,
     극무지개는 짙은 수직 그라데이션에 윗부분을 살짝 밝힌 글자(번짐 없음)."""
-    tier = rating_tier(text) if tiered else None
+    tier = rating_tier(text, game)
     x, y = xy
     if tier is None:
         ImageDraw.Draw(canvas).text(xy, text, font=font, fill=_TEXT)
@@ -475,7 +499,7 @@ def _ascent(font: ImageFont.FreeTypeFont | ImageFont.ImageFont) -> int:
 
 
 def _draw_final_rating(
-    canvas: Image.Image, width: int, rating: str, y: int, *, tiered: bool = True
+    canvas: Image.Image, width: int, rating: str, y: int, *, game: str = DEFAULT_GAME
 ) -> tuple[int, int]:
     """머리말 오른쪽 끝에 최종 레이팅을 크게 그린다. 소수점 아래 셋째·넷째 자리는 밝은 회색으로 작게 붙인다.
     (왼쪽 끝 x, 아래 끝 y)를 돌려준다."""
@@ -488,7 +512,7 @@ def _draw_final_rating(
     right = width - _MARGIN
     draw.text((right - _width(label_font, "RATING"), y), "RATING", font=label_font, fill=_MUTED)
     value_y = y + _fs(13) + 4
-    _draw_rating_value(canvas, (right - value_width, value_y), main, font, tiered=tiered)
+    _draw_rating_value(canvas, (right - value_width, value_y), main, font, game=game)
     if tail:  # 큰 글자와 바닥선을 맞춘다
         draw.text(
             (right - tail_width, value_y + _ascent(font) - _ascent(tail_font)), tail, font=tail_font, fill=_RATING_TAIL_COLOR
@@ -522,10 +546,7 @@ def _draw_header(
         reserved = 0  # 오른쪽 끝에 크게 그린 레이팅이 차지하는 폭 — 왼쪽 글줄은 이 안으로 안 들어간다.
         rating_bottom = y
         if rating is not None:
-            # 색 단계(무지개 등)는 CHUNITHM 레이팅 표다. 다른 게임은 단계 기준을 확인하기 전까지 단색으로 그린다.
-            left, rating_bottom = _draw_final_rating(
-                canvas, width, rating, notes_bottom, tiered=table.game in ("", DEFAULT_GAME)
-            )
+            left, rating_bottom = _draw_final_rating(canvas, width, rating, notes_bottom, game=table.game or DEFAULT_GAME)
             reserved = width - left + 16
         has_icon = profile is not None and (profile.character is not None or profile.frame is not None)
         if has_icon:
