@@ -707,6 +707,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [folders](skills/folders.md) | 츄니즘 | 채보를 모은 이름 붙인 폴더 생성·조회, 표로 일괄 추가/삭제, 메모 | 없음 |
 | [yuni-lore](skills/yuni-lore.md) | 공통 | 유니·나비·Linked VERSE 설정집을 구간별로 읽어 답하기(결말은 스포일러 확인 후) | 없음 |
 | [web-qa](skills/web-qa.md) | 츄니즘 | 용어 사전에 없는 일반 질문을 검색해 출처와 함께 답하기 | 없음 |
+| [rating-calc](skills/rating-calc.md) | 공통 | 상수·랭크로 곡 레이팅 계산, 곡 레이팅에서 상수 역산, 필요 점수 | 없음 |
 
 17단계에서 두 게임을 다루는 스킬은 게임 중립 이름으로 바뀐다(`song` → `song` 등, 표는 `docs/plan/2026-10-23_수정.md` §17.3). 바뀌기 전까지 이 표는 지금 이름을 쓴다.
 
