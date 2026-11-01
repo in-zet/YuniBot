@@ -674,3 +674,41 @@ async def test_current_version_is_most_common_version_among_new_songs(songdb: So
     for song in new_songs:
         song.version = None
     assert songdb.current_version() is None  # 신곡이 있어도 수록 버전을 모르면 None
+
+
+async def test_song_missing_from_the_chunimaru_list_is_new_when_its_version_is_the_current_one(
+    songdb: SongDbService,
+) -> None:
+    """2026-11-01: NET에는 있는데 Chunimaru 국제판 목록에 아직 없는 신곡이 신곡 프레임에서 빠져 18곡만 나왔다."""
+    sample = json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8"))
+    listed = {entry["title"] for entry in sample["songs"]}
+    unlisted = [song for title, song in songdb._songs.items() if title not in listed]
+    same_version, other_version, no_version = unlisted[0], unlisted[1], unlisted[2]
+    songdb._apply_chunimaru(sample)
+    current = songdb.current_version()
+    assert current is not None
+
+    same_version.version, other_version.version, no_version.version = current, "다른 버전", None
+    same_version.is_new = other_version.is_new = no_version.is_new = False
+    songdb._apply_chunimaru(sample)
+
+    assert songdb.is_new_for(same_version.title) is True
+    assert songdb.is_new_for(other_version.title) is False
+    assert songdb.is_new_for(no_version.title) is False  # 버전을 모르면 판단하지 않는다
+    # 목록에 있는 곡은 Chunimaru 표시를 그대로 따른다.
+    assert songdb.is_new_for("B.B.K.K.B.K.K.") is False
+
+
+async def test_unlisted_song_stops_being_new_when_the_current_version_moves_on(songdb: SongDbService) -> None:
+    sample = json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8"))
+    listed = {entry["title"] for entry in sample["songs"]}
+    unlisted = next(song for title, song in songdb._songs.items() if title not in listed)
+    songdb._apply_chunimaru(sample)
+    unlisted.version = songdb.current_version()
+    songdb._apply_chunimaru(sample)
+    assert songdb.is_new_for(unlisted.title) is True
+
+    unlisted.version = "옛 버전"
+    songdb._apply_chunimaru(sample)
+
+    assert songdb.is_new_for(unlisted.title) is False

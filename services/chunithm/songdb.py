@@ -283,6 +283,15 @@ class SongDbService(SongDb):
         self._songs.update(new_songs)
         self._by_id.update({song.id: song for song in new_songs.values()})
         self._available_intl = new_available
+        # Chunimaru의 국제판 목록은 늦게 갱신된다. NET에는 이미 있는데 목록에 아직 없는 곡은 신곡 표시를 못 받아
+        # 신곡 20 프레임이 NET과 어긋난다(2026-11-01 Glitch Street 등 — NET은 신곡 20, 우리는 18). 신곡은 지금
+        # 가동 중인 버전의 곡이므로, 목록에 없는 곡은 수록 버전이 지금 버전이면 신곡으로 본다. 목록에 있는 곡은
+        # Chunimaru 표시를 그대로 믿는다.
+        current = self.current_version()
+        if current is not None:
+            for title, song in self._songs.items():
+                if title not in new_is_new and song.version:
+                    song.is_new = song.version == current
 
     async def refresh_on_startup(self, http: _HttpGetJson) -> None:
         await self.refresh_from_chunimaru(http)
