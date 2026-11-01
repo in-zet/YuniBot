@@ -386,13 +386,20 @@ async def test_aliases_are_saved_per_game(terms_with_conn: TermsService) -> None
     conn = terms_with_conn._conn
     assert conn is not None
     maimai = TermsService(MAIMAI.terms_path, conn=conn, game="maimai", percent_scores=True)
-    await terms_with_conn.add_alias(kind="rank", alias="트플", canonical="SSS", added_by="p1")
-    await maimai.add_alias(kind="rank", alias="트플", canonical="SSS+", added_by="p1")
+    await terms_with_conn.add_alias(kind="rank", alias="쓰리에스", canonical="SSS", added_by="p1")
+    await maimai.add_alias(kind="rank", alias="쓰리에스", canonical="SSS+", added_by="p1")
 
     reloaded_chunithm = TermsService(conn=conn)
     reloaded_maimai = TermsService(MAIMAI.terms_path, conn=conn, game="maimai", percent_scores=True)
     await reloaded_chunithm.load_aliases()
     await reloaded_maimai.load_aliases()
 
-    assert (await reloaded_chunithm.resolve_rank("트플", _CTX)).canonical == "SSS"
-    assert (await reloaded_maimai.resolve_rank("트플", _CTX)).canonical == "SSS+"
+    assert (await reloaded_chunithm.resolve_rank("쓰리에스", _CTX)).canonical == "SSS"
+    assert (await reloaded_maimai.resolve_rank("쓰리에스", _CTX)).canonical == "SSS+"
+
+
+async def test_maimai_understands_the_korean_rank_slang(maimai_terms: TermsService) -> None:
+    """2026-11-01: "마이에서 트플플"을 못 알아들었다."""
+    assert (await maimai_terms.resolve_rank("트플플", _CTX)).canonical == "SSS+"
+    assert (await maimai_terms.resolve_rank("트리플", _CTX)).canonical == "SSS"
+    assert (await maimai_terms.resolve_rank("트플플", _CTX)).min_score == 1_005_000

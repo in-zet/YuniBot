@@ -1,31 +1,32 @@
 # services/maimai/data/terms.yaml
 # maimai DX의 값 용어(랭크·난이도·램프)의 정식 이름과 기준 점수. value는 달성률 ×10000이다(100.5% = 1005000).
-# 랭크 경계는 TrueRou/maimai.py utils/coefficient.py의 계수표(레이팅 구간)와 같다. 한국어 은어는 넣지 않았다 —
-# 쓰는 말은 도구가 못 알아들었을 때 확인받아 별칭으로 쌓는다(terms_aliases, 게임별).
+# 랭크 경계는 TrueRou/maimai.py utils/coefficient.py의 계수표(레이팅 구간)와 같다. 랭크 은어(트플플 등)는 츄니즘과
+# 같은 말을 쓴다(2026-11-01 — "마이에서 트플플"을 못 알아들었다). 그 밖의 은어는 도구가 못 알아들었을 때 확인받아
+# 별칭으로 쌓는다(terms_aliases, 게임별).
 - canonical: "SSS+"
   category: rank
   value: 1005000
-  aliases: []
+  aliases: [트플플]
 - canonical: "SSS"
   category: rank
   value: 1000000
-  aliases: []
+  aliases: [트리플, 트플]
 - canonical: "SS+"
   category: rank
   value: 995000
-  aliases: []
+  aliases: [더블플]
 - canonical: "SS"
   category: rank
   value: 990000
-  aliases: []
+  aliases: [더블]
 - canonical: "S+"
   category: rank
   value: 980000
-  aliases: []
+  aliases: [에스플]
 - canonical: "S"
   category: rank
   value: 970000
-  aliases: []
+  aliases: [에스]
 - canonical: "AAA"
   category: rank
   value: 940000
