@@ -530,13 +530,14 @@ def test_rating_tier_is_none_for_non_numbers() -> None:
     "rating,name",
     [("0", "하양"), ("999", "하양"), ("1000", "파랑"), ("2000", "초록"), ("4000", "노랑"), ("7000", "빨강"),
      ("8564", "빨강"), ("10000", "보라"), ("12000", "동"), ("13000", "은"), ("14000", "금"), ("14499", "금"),
-     ("14500", "백금"), ("14999", "백금"), ("15000", "무지개"), ("16500", "무지개")],
+     ("14500", "백금"), ("14999", "백금"), ("15000", "무지개"), ("15999", "무지개"), ("16000", "극무지개"),
+     ("16750", "극무지개")],
 )
 def test_maimai_rating_tier_names(rating: str, name: str) -> None:
     tier = render.rating_tier(rating, "maimai")
 
     assert tier is not None and tier[0] == name
-    assert (tier[1] is None) == (name == "무지개")
+    assert (tier[1] is None) == name.endswith("무지개")
 
 
 def test_rating_tier_is_none_for_a_game_without_a_known_table() -> None:
