@@ -236,9 +236,10 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
                     output_tokens=result.usage.output_tokens, cached_input_tokens=result.usage.cached_input_tokens,
                 )
                 problems = judge_example(case, trace) if isinstance(case, EvalCase) else judge_scenario(case, trace)
-                if assemble_response(result).numeric_violation:
+                assembled = assemble_response(result, conversation_text=question)
+                if assembled.numeric_violation:
                     report.numeric_violations += 1
-                    problems.append("숫자 규칙 위반")
+                    problems.append(f"숫자 규칙 위반 {sorted(assembled.unknown_numbers)} — 답: {assembled.text!r}")
                 if problems:
                     report.failures += 1
                 tag = "통과" if not problems else "실패"

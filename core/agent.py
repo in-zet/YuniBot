@@ -46,6 +46,8 @@ OnHeavyCall = Callable[[], Awaitable[None]]
 class AgentTurnResult:
     text: str | None = None
     collected_data: list[dict[str, Any]] = field(default_factory=list)
+    # 도구가 돌려준 오류 문구. 모델이 읽고 말하는 도구 출력이라 숫자 대조에서 맞는 숫자로 친다.
+    tool_errors: list[str] = field(default_factory=list)
     optional_displays: dict[str, Display] = field(default_factory=dict)
     required_displays: list[Display] = field(default_factory=list)
     usage: UsageInfo = field(default_factory=lambda: UsageInfo(input_tokens=0, output_tokens=0))
@@ -59,6 +61,8 @@ class AgentTurnResult:
     usage_by_model: dict[str, UsageInfo] = field(default_factory=dict)
     # 이번 턴에 만든 표 전부(보관소 id). 번호(`rows`·`"t3:2"`)는 사람이 본 표에만 쓰므로 이 표들에는 거절한다.
     turn_table_ids: list[str] = field(default_factory=list)
+    # 그 표 본체들. 숫자 대조(core/response_assembly.py)가 표 칸 값도 맞는 숫자로 친다.
+    turn_tables: list[WorkTable] = field(default_factory=list)
     # 이번 턴의 마지막 표. 턴 끝에 이 표 하나만 글자로 그린다.
     last_table_id: str | None = None
     # 그림 표 도구가 이미 그린 표. 글자로 다시 그리지 않는다.
@@ -349,6 +353,8 @@ class AgentLoop:
                     result.drawn_table_ids.append(tool_result.drew_table)
                 if tool_result.data:
                     result.collected_data.append(tool_result.data)
+                if tool_result.error:
+                    result.tool_errors.append(tool_result.error)
                 if tool_result.display is not None and tool_result.display_mode == "optional":
                     display_id = f"d{len(result.optional_displays) + 1}"
                     result.optional_displays[display_id] = tool_result.display
@@ -384,6 +390,7 @@ class AgentLoop:
         stored = store.get(ctx.player_id, ctx.channel_id, table_id)
         assert stored is not None
         turn.last_table = stored
+        turn.turn_tables.append(stored)
         turn.last_table_stale = tool_result.table_stale
         tool_result.data = {**tool_result.data, **summarize_table(stored, stale=tool_result.table_stale)}
         return tool_result

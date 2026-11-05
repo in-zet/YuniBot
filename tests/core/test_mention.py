@@ -9,7 +9,7 @@ from core.agent import AgentLoop
 from core.cooldown import CooldownTracker
 from core.events import EventBus
 from core.executor import ToolExecutor
-from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGES, NUMERIC_VIOLATION_MESSAGES
+from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGES
 from core.llm import GenerationTurn, LlmContent, LlmPart
 from core.mention import (
     ChannelMessage,
@@ -214,8 +214,8 @@ async def test_mention_entry_sends_assembled_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mention_entry_replaces_text_on_numeric_violation() -> None:
-    """2026-11-05: 도구 호출 없이 숫자를 지어내면(숫자 규칙 위반) 그 글자 답은 안 보내고 고정 문구로 바꾼다."""
+async def test_mention_entry_sends_text_as_is_on_numeric_violation() -> None:
+    """숫자 규칙 위반은 로그만 남기고 글자 답은 그대로 보낸다(2026-11-05: 사과 문구로 바꾸던 것을 철회)."""
     script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="상수는 15.3이야")]), text="상수는 15.3이야")]
     entry = MentionEntry(
         agent=_agent(script),
@@ -235,7 +235,7 @@ async def test_mention_entry_replaces_text_on_numeric_violation() -> None:
         trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC),
         send=lambda text, displays: sent.append(text) or _noop(), typing=_NoopTyping(),
     )
-    assert sent[0] in NUMERIC_VIOLATION_MESSAGES
+    assert sent[0] == "상수는 15.3이야"
 
 
 async def _noop() -> None:

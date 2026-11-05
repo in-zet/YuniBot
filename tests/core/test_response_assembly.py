@@ -101,6 +101,27 @@ def test_required_displays_stay_even_with_no_table_tag() -> None:
     assert assembled.displays == [Display(content="출처")]
 
 
+def test_numbers_the_player_said_are_not_a_violation() -> None:
+    # 사용자가 말한 숫자를 되풀이하는 것은 지어낸 게 아니다. 대화에 없는 숫자는 여전히 위반이다.
+    result = AgentTurnResult(text="스피드 9.00으로 바꿨어", collected_data=[{"ok": True}])
+    assert assemble_response(result, conversation_text="p1: 스피드 9.00으로 바꿔 줘").unknown_numbers == set()
+    assert assemble_response(result, conversation_text="p1: 스피드 바꿔 줘").unknown_numbers == {9.0}
+
+
+def test_numbers_in_this_turns_tables_are_not_a_violation() -> None:
+    builder = TableBuilder(unit="채보").column("const", "상수").step("15 이상")
+    builder.row(RowRef("k", "0"), {"const": cell(15.4, "15.4")})
+    group_titled = dataclasses.replace(builder.build(), id="t1")
+    result = AgentTurnResult(text="제일 높은 건 15.4야, 15.7은 없어", turn_tables=[group_titled])
+    assert assemble_response(result).unknown_numbers == {15.7}
+
+
+def test_numbers_in_tool_error_messages_are_not_a_violation() -> None:
+    # 오류 문구도 도구가 낸 글이다("지금 있는 폴더: 상수 15.0 폴더").
+    result = AgentTurnResult(text="지금 있는 건 '상수 15.0 폴더'뿐이야", tool_errors=["지금 있는 폴더: 상수 15.0 폴더"])
+    assert assemble_response(result).unknown_numbers == set()
+
+
 # ---- 작업 표 글자 출력 ----
 
 

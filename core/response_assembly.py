@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.agent import AgentTurnResult
+from core.tables import WorkTable
 from core.tool_types import Display, table_display
 
 logger = logging.getLogger(__name__)
@@ -56,24 +57,48 @@ def flatten_numbers(data: list[dict[str, Any]]) -> set[float]:
     return numbers
 
 
+def table_numbers(table: WorkTable) -> set[float]:
+    """표에 찍히는 숫자 전부(칸 값·칸 글자·묶음 이름·요약). 도구가 만든 값이라 유니가 말해도 된다."""
+    numbers: set[float] = set()
+    texts = [*table.summary.values()]
+    for group in table.groups:
+        texts.extend([group.title or "", *group.summary.values()])
+        for row in group.rows:
+            for value in row.cells.values():
+                texts.append(value.text)
+                if isinstance(value.raw, (int, float)) and not isinstance(value.raw, bool):
+                    numbers.add(float(value.raw))
+    for text in texts:
+        numbers.update(extract_numbers(text))
+    return numbers
+
+
 @dataclass(slots=True, kw_only=True)
 class AssembledResponse:
     text: str
     displays: list[Display] = field(default_factory=list)
-    numeric_violation: bool = False
+    # 말 속 숫자 중 어디서도 확인 안 된 것. 비어 있지 않으면 숫자 규칙 위반이다.
+    unknown_numbers: set[float] = field(default_factory=set)
+
+    @property
+    def numeric_violation(self) -> bool:
+        return bool(self.unknown_numbers)
 
 
-def assemble_response(result: AgentTurnResult) -> AssembledResponse:
+def assemble_response(result: AgentTurnResult, *, conversation_text: str = "") -> AssembledResponse:
+    """conversation_text: 모델이 본 대화 글. 사용자가 말한 숫자나 앞서 보인 숫자를 되풀이하는 것은
+    숫자를 지어낸 게 아니라 맞는 숫자로 친다(2026-11-05: 이것과 표 칸 값을 안 봐서 정상 답이 위반으로 잡혔다)."""
     text = result.text or ""
-    known_numbers = flatten_numbers(result.collected_data)
-    spoken_numbers = extract_numbers(text)
-    violation = not spoken_numbers <= known_numbers
-    if violation:
-        # 2026-11-05: 하드 제약 위반(LLM이 도구로 확인 안 된 숫자를 말함)이라 ERROR로 올린다 — 이 턴의
-        # 글자 답은 core/mention.py가 고정 문구로 바꿔 내보낸다(이 함수는 감지만 하고 교체는 안 한다).
-        logger.error(
-            "numeric rule violation: spoken=%s not subset of known=%s", spoken_numbers, known_numbers
-        )
+    known_numbers = flatten_numbers(result.collected_data) | extract_numbers(conversation_text)
+    for table in result.turn_tables:
+        known_numbers |= table_numbers(table)
+    displays_text = [d.content or "" for d in (*result.required_displays, *result.optional_displays.values())]
+    for tool_text in (*result.tool_errors, *displays_text):
+        known_numbers |= extract_numbers(tool_text)
+    unknown_numbers = extract_numbers(text) - known_numbers
+    if unknown_numbers:
+        # 하드 제약 위반(LLM이 어디서도 확인 안 된 숫자를 말함)이라 ERROR로 남긴다.
+        logger.error("numeric rule violation: unknown=%s", sorted(unknown_numbers))
 
     requested_ids = set(_SHOW_TAG_RE.findall(text))
     omit_tables = _NO_TABLE_TAG in text
@@ -96,4 +121,4 @@ def assemble_response(result: AgentTurnResult) -> AssembledResponse:
         required.append(table_display(table, stale=result.last_table_stale))
     displays = required + optional
 
-    return AssembledResponse(text=clean_text, displays=displays, numeric_violation=violation)
+    return AssembledResponse(text=clean_text, displays=displays, unknown_numbers=unknown_numbers)

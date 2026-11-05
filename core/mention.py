@@ -17,7 +17,6 @@ from core.fallback_messages import (
     COOLDOWN_ACTIVE_MESSAGES,
     LLM_FAILURE_MESSAGES,
     MONTHLY_CAP_REACHED_MESSAGES,
-    NUMERIC_VIOLATION_MESSAGES,
     PRIVATE_DM_FAILED_MESSAGES,
     REPLY_SEND_FAILED_MESSAGES,
     RETRY_WAIT_MESSAGES,
@@ -449,7 +448,7 @@ class MentionEntry:
             await reply(pick(TOOL_CALL_CAP_MESSAGES), [])
             return
 
-        assembled = assemble_response(result)
+        assembled = assemble_response(result, conversation_text="\n".join(m.content for m in context))
         # private 표시물(본인에게만 보여야 하는 내용)은 채널 답장에 붙이지 않고 DM으로 보낸다.
         public_displays: list[Display] = []
         dm_failed = False
@@ -459,12 +458,7 @@ class MentionEntry:
                     dm_failed = not await self._send_private(player.id, display.content) or dm_failed
             else:
                 public_displays.append(display)
-        # 2026-11-05: 숫자 규칙 위반(도구로 확인 안 된 숫자를 말함)이면 그 글자 답은 안 보내고
-        # 고정 문구로 바꾼다 — 표시물(표·그림)은 도구가 낸 실제 데이터라 그대로 둔다.
-        if assembled.numeric_violation:
-            text = pick(NUMERIC_VIOLATION_MESSAGES)
-        else:
-            text = assembled.text or pick(LLM_FAILURE_MESSAGES)
+        text = assembled.text or pick(LLM_FAILURE_MESSAGES)
         try:
             sent_id = await reply(f"{text}\n{pick(PRIVATE_DM_FAILED_MESSAGES)}" if dm_failed else text, public_displays)
         except Exception:
