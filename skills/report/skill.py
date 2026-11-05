@@ -316,18 +316,21 @@ _CONST_TABLE_TAIL = (tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
 @tool()
 async def const_table(
     ctx: ToolContext,
-    min_const: float,
+    min_const: float = 0,
     max_const: float | None = None,
     difficulty: DifficultyRef | None = None,
     only_played: bool = False,
+    new_only: bool = False,
     player: PlayerRef | None = None,
     game: GameRef | None = None,
 ) -> ToolResult:
     """상수표: 상수 범위의 채보를 상수별로 묶고(큰 상수부터), 묶음 안은 난이도가 높은 순, 같은 난이도는 점수 높은 순으로
     늘어놓은 표에 점수·랭크·램프·곡 레이팅을 붙여 준다. 상수를 모르는 채보는 빠진다. 위쪽 한계를 말하지 않았으면 max_const를
     비운다("15 이상"). "15대"는 15.0~15.9다. 난이도를 말하지 않았으면 비워 모든 난이도를 보인다. 기록 없는 채보도 기본으로
-    넣고(기록 없음), 사람이 "점수 있는 것만"이라고 했을 때만 only_played를 켠다. 누구 기록인지 말하지 않았으면 player를 비운다.
-    그림("상수표 그림으로")은 이 표를 table_image에 넘긴다."""
+    넣고(기록 없음), 사람이 "점수 있는 것만"이라고 했을 때만 only_played를 켠다. "신곡만"이면 new_only를 켠다 — 이때는
+    min_const를 안 줘도 된다(신곡 범위 자체가 좁아 되묻지 않는다). 신곡이 아닌데 상수 범위를 안 말했으면 되묻는다(0부터
+    전부로 지어내지 않는다). 누구 기록인지 말하지 않았으면 player를 비운다. 그림("상수표 그림으로")은 이 표를 table_image에
+    넘긴다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
@@ -335,7 +338,7 @@ async def const_table(
     if difficulty is not None:
         assert isinstance(difficulty, ResolvedDifficulty)
         code = tc.LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
-    hits = ctx.songdb.find_songs(min_const=min_const, max_const=max_const, difficulty=code)
+    hits = ctx.songdb.find_songs(min_const=min_const, max_const=max_const, difficulty=code, new_only=new_only)
     pbs = await ctx.records.pb_rows_for(target.id, [_hit_key(hit) for hit in hits])
     if only_played:
         hits = [hit for hit in hits if _hit_key(hit) in pbs]
@@ -362,6 +365,8 @@ async def const_table(
     builder = TableBuilder(subject=target.id, unit="채보")
     tc.add_columns(builder, *identity, *_CONST_TABLE_TAIL, game=ctx.game)
     builder.step(" ".join(part for part in (tc.const_range_text(min_const, max_const), code) if part))
+    if new_only:
+        builder.step("신곡만")
     builder.step(await _owner_label(ctx, target))
     if only_played:
         builder.step("점수 있는 것만")

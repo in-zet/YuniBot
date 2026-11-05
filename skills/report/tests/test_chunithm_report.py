@@ -1105,6 +1105,22 @@ async def test_const_table_groups_come_biggest_const_first_and_include_unplayed_
     assert result.data["with_record"] == 0
 
 
+async def test_const_table_new_only_needs_no_const_range(skill: ModuleType) -> None:
+    """2026-11-05: "신곡만" + 상수표는 min_const 없이도 되묻지 않고 바로 된다 — 전에는 이걸 못 받아서
+    모델이 song 스킬의 find_songs로 대신했다(상수 묶음·점수 정렬이 없는 단순 목록이 나왔다)."""
+    songdb = _real_songdb()
+    new_hit = next(h for h in songdb.find_songs(min_const=15.0, max_const=15.0) if h.chart.difficulty == "MAS")
+    new_hit.song.is_new = True
+    f = _ctx(records=_FakeRecords(), songdb=songdb)
+
+    result = await skill.const_table(f.ctx, new_only=True, difficulty=_diff("MASTER"))
+
+    table = result.table
+    assert result.error is None and table is not None
+    assert _row_keys(table) == [(new_hit.song.title, "MAS")]
+    assert "신곡만" in table.steps
+
+
 async def test_const_table_only_played_difficulty_and_open_ended_range(skill: ModuleType) -> None:
     songdb = _real_songdb()
     hit = next(h for h in songdb.find_songs(min_const=15.5, difficulty="MAS"))

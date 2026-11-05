@@ -100,7 +100,7 @@ listens: [chunithm.sync.completed]
 | `analyze_slash` | `analyze`의 슬래시 입구(표 없음) | `player: PlayerRef`, 상수 범위(선택) | `/분석`(`@slash_only`) | 표 |
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count` | `/후보곡` | 표 |
 
-| `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`, `max_const`(선택), `difficulty: DifficultyRef`(선택, 없으면 모든 난이도), `only_played`(기본 꺼짐), `player: PlayerRef`(기본 나) | 없음 | 표 |
+| `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty: DifficultyRef`(선택, 없으면 모든 난이도), `only_played`(기본 꺼짐), `new_only`(기본 꺼짐, 신곡만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
@@ -172,6 +172,7 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 - 정형화: "상수표"는 모양이 정해져 있다. 상수 범위를 정하고, **상수 → 난이도 → 내 점수** 순서로 정렬한다. 상수별로 묶고(표지는 "15.5 · 15채보", 큰 상수부터), 묶음 안은 난이도가 높은 순(ULTIMA → MASTER → EXPERT → ADVANCED → BASIC), 같은 난이도는 점수가 높은 순이다. 점수 없는 채보는 같은 난이도 맨 뒤. 칸은 곡·난이도·상수·점수·랭크·램프·곡 레이팅이다(그림 카드는 이 칸들을 그대로 그린다).
 - 정렬이 기준 셋이라 `table_query`(정렬 칸 하나)로는 못 만들어서 도구가 코드로 직접 정렬해 표를 만든다. `find_songs`+`add_scores`+`table_query`를 모델이 이어 붙이던 방식을 대신한다.
 - 난이도를 안 주면 모든 난이도(범위에 드는 BAS~ULT 전부)다. 상수를 모르는 채보는 범위 검색에서 빠진다(추정 상수는 "(추정)"으로 들어간다). 기록 없는 채보는 기본으로 넣고 "기록 없음"이며, `only_played`를 켜면(사용자가 "점수 있는 것만") 뺀다. `steps`는 "15.0~15.5 상수 MAS → 내 점수(→ 점수 있는 것만)".
+- **신곡만(2026-11-05)**: `new_only`를 켜면 `min_const`를 안 줘도 된다(신곡 범위 자체가 좁아 되묻지 않는다, `min_const` 기본값 0). "신곡"이 아닌데 상수 범위를 안 말했으면 여전히 되묻는다. 전에는 "신곡 마스터 상수표"처럼 물으면 이 도구가 신곡을 못 걸러 모델이 `song` 스킬의 `find_songs`로 대신했는데, 거기엔 상수 묶음·점수 정렬·점수 붙이기가 없어 "상수표"가 아니라 그냥 채보 목록이 나왔다(실기 2026-11-05 — 또 그 find_songs를 중복 호출하면서 그려지지 않은 표가 하나 더 생겨, 11행 넘는 표를 글자로 붙이는 길에서 안 바란 .txt 첨부까지 나왔다, `core/tables.py` `TABLE_FILE_ROWS`). `services/game/songdb.py`의 `find_songs`는 원래 `new_only`를 지원해서 이 도구만 못 받던 것을 고쳤다.
 - 다른 플레이어의 상수표는 `add_scores`와 같은 공개 검사(`_target_player`)를 쓴다. 누구 점수인지 적는 `steps` 문구도 같은 함수(`_owner_label`)다.
 - "상수표", "15.0~15.5 상수표 그림으로"는 이 도구 → `table_image(layout="card")` 두 번이다.
 
