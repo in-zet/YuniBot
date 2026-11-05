@@ -1159,6 +1159,53 @@ async def test_const_table_difficulty_range(skill: ModuleType) -> None:
     assert set(_row_keys(table)) == expected
 
 
+def _plain_table(hits: list[Any], game: str) -> WorkTable:
+    """find_songs가 돌려주는 모양의, 묶음·정렬·점수가 없는 맨 검색 결과 표(테스트용)."""
+    identity = tc.identity_columns(game)
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, *identity, game=game)
+    for hit in hits:
+        builder.row(tc.chart_ref(hit.song.title, hit.chart.difficulty, hit.chart.chart_type), tc.chart_cells(hit.song, hit.chart, identity))
+    return builder.build()
+
+
+async def test_const_table_takes_a_table_from_another_tool(skill: ModuleType) -> None:
+    """2026-11-05: 레벨처럼 const_table엔 없는 조건으로 find_songs가 먼저 찾은(묶음·정렬 없는) 표를 줘도,
+    const_table이 상수→난이도→점수로 다시 묶고 정렬하고 점수를 붙인다 — 조건을 const_table에 추가로 안 베껴도 된다."""
+    songdb = _real_songdb()
+    hits = songdb.find_songs(level="15")
+    mas = [h for h in hits if h.chart.difficulty == "MAS"]
+    assert len(mas) >= 2
+    pbs = [_scored(mas[0], 1_000_000), _scored(mas[1], 990_000)]
+    found = _plain_table(hits, "chunithm")
+    f = _ctx(records=_FakeRecords(pbs={"me": pbs}), songdb=songdb)
+
+    result = await skill.const_table(f.ctx, table=found)
+
+    table = result.table
+    assert result.error is None and table is not None
+    expected = {(h.song.title, h.chart.difficulty) for h in hits if h.chart.const is not None}
+    assert set(_row_keys(table)) == expected
+    # 상수별로 묶였다 — find_songs가 준 표는 묶음이 없었다.
+    assert len(table.groups) > 1 or len({h.chart.const for h in hits if h.chart.const is not None}) <= 1
+
+
+async def test_const_table_new_only_filters_table_input(skill: ModuleType) -> None:
+    """2026-11-05: table을 줘도 new_only는 (검색이 아니라 songdb.is_new_for로) 여전히 걸러진다."""
+    songdb = _real_songdb()
+    hits = songdb.find_songs(min_const=15.0, max_const=15.0)
+    new_hit = next(h for h in hits if h.chart.difficulty == "MAS")
+    new_hit.song.is_new = True
+    found = _plain_table(hits, "chunithm")
+    f = _ctx(records=_FakeRecords(), songdb=songdb)
+
+    result = await skill.const_table(f.ctx, table=found, new_only=True)
+
+    table = result.table
+    assert result.error is None and table is not None
+    assert _row_keys(table) == [(new_hit.song.title, "MAS")]
+
+
 async def test_const_table_only_played_difficulty_and_open_ended_range(skill: ModuleType) -> None:
     songdb = _real_songdb()
     hit = next(h for h in songdb.find_songs(min_const=15.5, difficulty="MAS"))
