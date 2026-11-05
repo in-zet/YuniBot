@@ -9,7 +9,7 @@ from core.agent import AgentLoop
 from core.cooldown import CooldownTracker
 from core.events import EventBus
 from core.executor import ToolExecutor
-from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGES
+from core.fallback_messages import COOLDOWN_ACTIVE_MESSAGES, NUMERIC_VIOLATION_MESSAGES
 from core.llm import GenerationTurn, LlmContent, LlmPart
 from core.mention import (
     ChannelMessage,
@@ -53,27 +53,28 @@ def test_build_conversation_context_follows_reply_chain() -> None:
 
 
 def test_build_conversation_context_stops_when_chain_breaks() -> None:
-    m1 = _msg("1", author="p1", content="상관없는 글")
+    m1 = _msg("1", author="p1", content="상관없는 글")  # 유니를 멘션하지 않은 혼잣말
     m2 = _msg("2", author="p1", content="그럼 이건?", mentions_bot=True)  # 답장이 아니라 새 멘션
     context = build_conversation_context([m1, m2], trigger=m2, player_discord_ids={"p1"})
     # m2는 답장이 아니므로(reference_id=None) 사슬 거슬러 오르기가 아니라 최근 채널 기록
-    # 폴백으로 간다 — 이 플레이어 자신의 과거 메시지(m1)도 "이 플레이어가 보낸" 메시지라
-    # 맥락에 포함된다(test_build_conversation_context_caps_at_max_messages이 같은 원칙을
-    # 봇 메시지가 하나도 없는 9개 이력에서도 확인한다).
-    assert [m.message_id for m in context] == ["1", "2"]
+    # 폴백으로 간다 — 이 플레이어 자신의 과거 메시지라도 유니를 멘션하지 않았으면(m1) 맥락에
+    # 안 섞인다(2026-11-05 결정: 00-core.md "멘션이 없는 메시지는 맥락으로도 모으지 않는다"를
+    # 본인 메시지에도 그대로 적용).
+    assert [m.message_id for m in context] == ["2"]
 
 
 def test_build_conversation_context_falls_back_to_recent_channel_history() -> None:
-    m1 = _msg("1", author="p1", content="예전 질문")
+    m1 = _msg("1", author="p1", content="예전 질문")  # 유니를 멘션하지 않았다
     m2 = _msg("2", author="bot", is_bot=True, content="예전 답")
     m3 = _msg("3", author="other", content="상관없는 다른 사람 대화")
     m4 = _msg("4", author="p1", content="새 멘션", mentions_bot=True)
     context = build_conversation_context([m1, m2, m3, m4], trigger=m4, player_discord_ids={"p1"})
-    assert [m.message_id for m in context] == ["1", "2", "4"]  # 다른 사람(other) 메시지는 빠진다
+    # m1(본인이지만 멘션 안 함)과 m3(다른 사람) 모두 빠지고, 봇 메시지(m2)만 남는다.
+    assert [m.message_id for m in context] == ["2", "4"]
 
 
 def test_build_conversation_context_caps_at_max_player_messages() -> None:
-    history = [_msg(str(i), author="p1", content=f"{i}") for i in range(1, 10)]
+    history = [_msg(str(i), author="p1", content=f"{i}", mentions_bot=True) for i in range(1, 10)]
     trigger = _msg("10", author="p1", content="마지막", mentions_bot=True)
     context = build_conversation_context(
         history + [trigger], trigger=trigger, player_discord_ids={"p1"}, max_player_messages=3
@@ -85,7 +86,7 @@ def test_build_conversation_context_caps_at_max_player_messages() -> None:
 def test_build_conversation_context_does_not_count_yuni_messages() -> None:
     # 유니가 한 질문에 세 메시지(나눠 보낸 긴 표 등)로 답해도 플레이어 한 턴으로 친다.
     messages = [
-        _msg("1", author="p1", content="질문"),
+        _msg("1", author="p1", content="질문", mentions_bot=True),
         _msg("2", author="bot", is_bot=True, content="답 1"),
         _msg("3", author="bot", is_bot=True, content="답 2"),
         _msg("4", author="bot", is_bot=True, content="답 3"),
@@ -99,9 +100,9 @@ def test_build_conversation_context_does_not_count_yuni_messages() -> None:
 
 def test_build_conversation_context_drops_yuni_answers_of_cut_question() -> None:
     messages = [
-        _msg("1", author="p1", content="오래된 질문"),
+        _msg("1", author="p1", content="오래된 질문", mentions_bot=True),
         _msg("2", author="bot", is_bot=True, content="오래된 답"),
-        _msg("3", author="p1", content="질문"),
+        _msg("3", author="p1", content="질문", mentions_bot=True),
         _msg("4", author="bot", is_bot=True, content="답"),
         _msg("5", author="p1", content="새 멘션", mentions_bot=True),
     ]
@@ -210,6 +211,31 @@ async def test_mention_entry_sends_assembled_text() -> None:
         send=lambda text, displays: sent.append(text) or _noop(), typing=_NoopTyping(),
     )
     assert sent == ["답이다"]
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_replaces_text_on_numeric_violation() -> None:
+    """2026-11-05: 도구 호출 없이 숫자를 지어내면(숫자 규칙 위반) 그 글자 답은 안 보내고 고정 문구로 바꾼다."""
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="상수는 15.3이야")]), text="상수는 15.3이야")]
+    entry = MentionEntry(
+        agent=_agent(script),
+        players=_FakePlayers(), notify=NotifyService.__new__(NotifyService),
+        cooldown=CooldownTracker(), settings=_FakeSettings(), usage=_FakeUsage(),
+        bot_discord_id="bot", agent_model="gemini-3.8-flash", memory=_FakeMemory(), event_bus=EventBus(),
+        known_skill_names={"chunithm-border"}, skill_loading_mode="instructions",
+    )
+    sent: list[str] = []
+
+    class _NoopTyping:
+        async def __aenter__(self): return None
+        async def __aexit__(self, *exc): return None
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC),
+        send=lambda text, displays: sent.append(text) or _noop(), typing=_NoopTyping(),
+    )
+    assert sent[0] in NUMERIC_VIOLATION_MESSAGES
 
 
 async def _noop() -> None:

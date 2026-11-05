@@ -69,7 +69,9 @@ def assemble_response(result: AgentTurnResult) -> AssembledResponse:
     spoken_numbers = extract_numbers(text)
     violation = not spoken_numbers <= known_numbers
     if violation:
-        logger.warning(
+        # 2026-11-05: 하드 제약 위반(LLM이 도구로 확인 안 된 숫자를 말함)이라 ERROR로 올린다 — 이 턴의
+        # 글자 답은 core/mention.py가 고정 문구로 바꿔 내보낸다(이 함수는 감지만 하고 교체는 안 한다).
+        logger.error(
             "numeric rule violation: spoken=%s not subset of known=%s", spoken_numbers, known_numbers
         )
 

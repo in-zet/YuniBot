@@ -17,6 +17,7 @@ from core.fallback_messages import (
     COOLDOWN_ACTIVE_MESSAGES,
     LLM_FAILURE_MESSAGES,
     MONTHLY_CAP_REACHED_MESSAGES,
+    NUMERIC_VIOLATION_MESSAGES,
     PRIVATE_DM_FAILED_MESSAGES,
     REPLY_SEND_FAILED_MESSAGES,
     RETRY_WAIT_MESSAGES,
@@ -108,11 +109,13 @@ def build_conversation_context(
     """같은 채널의 최근 메시지 중 '유니와 이 플레이어가 주고받은' 것만 추린다.
 
     trigger가 답장이면(reference_id가 있으면) 그 사슬을 거슬러 올라가며, 사슬이 끊기면(참조한
-    메시지가 없거나 봇/이 플레이어가 아닌 다른 사람의 메시지면) 거기서 멈춘다. 답장이 아니면
-    최근 채널 기록에서 '봇이 보냈거나 이 플레이어가 보낸' 메시지만 모은다(다른 사람의 대화는 맥락에
-    안 섞인다 — 00-core.md "대화 맥락": "멘션이 없는 메시지는 맥락으로도 모으지 않는다"와 같은
-    원칙을 제3자 메시지에도 적용한다). 어느 쪽이든 길이는 플레이어 메시지 수(trigger 포함)로만
-    센다 — 유니가 한 번에 여러 메시지로 답해도 한 턴이다(2026-10-20 결정).
+    메시지가 없거나 봇/이 플레이어가 아닌 다른 사람의 메시지면) 거기서 멈춘다 — 답장은 특정 메시지를
+    가리키는 명시적 신호라 멘션 여부를 안 본다. 답장이 아니면 최근 채널 기록에서 '봇이 보냈거나
+    이 플레이어가 유니를 멘션해서 보낸' 메시지만 모은다 — 00-core.md "대화 맥락": "멘션이 없는
+    메시지는 맥락으로도 모으지 않는다"를 본인 메시지에도 그대로 적용한다(2026-11-05 결정 전에는
+    본인이 멘션 없이 혼자 쓴 글도 다음 멘션 맥락에 섞여, 무관한 연속 질문이 서로 오염됐다). 어느
+    쪽이든 길이는 플레이어 메시지 수(trigger 포함)로만 센다 — 유니가 한 번에 여러 메시지로 답해도
+    한 턴이다(2026-10-20 결정).
     """
     by_id = {m.message_id: m for m in messages}
 
@@ -131,7 +134,8 @@ def build_conversation_context(
     else:
         relevant = [
             m for m in messages
-            if m.message_id != trigger.message_id and (m.is_bot or m.author_discord_id in player_discord_ids)
+            if m.message_id != trigger.message_id
+            and (m.is_bot or (m.author_discord_id in player_discord_ids and m.mentions_bot))
         ]
         relevant.append(trigger)
     return _last_player_turns(relevant, trigger=trigger, max_player_messages=max_player_messages)
@@ -455,7 +459,12 @@ class MentionEntry:
                     dm_failed = not await self._send_private(player.id, display.content) or dm_failed
             else:
                 public_displays.append(display)
-        text = assembled.text or pick(LLM_FAILURE_MESSAGES)
+        # 2026-11-05: 숫자 규칙 위반(도구로 확인 안 된 숫자를 말함)이면 그 글자 답은 안 보내고
+        # 고정 문구로 바꾼다 — 표시물(표·그림)은 도구가 낸 실제 데이터라 그대로 둔다.
+        if assembled.numeric_violation:
+            text = pick(NUMERIC_VIOLATION_MESSAGES)
+        else:
+            text = assembled.text or pick(LLM_FAILURE_MESSAGES)
         try:
             sent_id = await reply(f"{text}\n{pick(PRIVATE_DM_FAILED_MESSAGES)}" if dm_failed else text, public_displays)
         except Exception:

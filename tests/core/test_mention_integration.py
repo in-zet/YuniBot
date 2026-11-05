@@ -523,7 +523,9 @@ async def test_mention_entry_queues_only_the_players_own_messages_for_summary() 
     memory = _FakeMemory()
     entry, _usage = _mention_entry(script, memory=memory)
 
-    earlier = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="나 왼손이 약해")
+    earlier = ChannelMessage(
+        message_id="1", author_discord_id="p1", is_bot=False, content="나 왼손이 약해", mentions_bot=True
+    )
     bot_reply = ChannelMessage(message_id="2", author_discord_id="bot", is_bot=True, content="유니의 말")
     other = ChannelMessage(message_id="3", author_discord_id="p2", is_bot=False, content="쟤는 왼손 약해")
     trigger = ChannelMessage(
@@ -1262,7 +1264,10 @@ async def test_table_pushed_out_of_the_context_is_deleted() -> None:
     entry, _usage = _mention_entry([_say("응")], tables=store)
     # 유니의 m100 뒤로 플레이어 메시지가 10개를 넘으면 m100은 맥락 밖이다
     later = [
-        ChannelMessage(message_id=f"p{i}", author_discord_id="p1", is_bot=False, content="잡담", channel_id="c1")
+        ChannelMessage(
+            message_id=f"p{i}", author_discord_id="p1", is_bot=False, content="잡담", channel_id="c1",
+            mentions_bot=True,
+        )
         for i in range(11)
     ]
     trigger = _trigger("2")
