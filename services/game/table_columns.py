@@ -24,11 +24,12 @@ from core.tables import (
     TableError,
     cell,
 )
-from core.tool_types import DEFAULT_GAME
+from core.tool_types import DEFAULT_GAME, DifficultyRef
 from services.game.rating_format import score_text, song_rating_text
 from services.game.records import PbRow
 from services.game.registry import GAME_PROFILES, profile_for
 from services.game.songdb import ChartRecord, SongRecord
+from services.game.terms import ResolvedDifficulty
 
 SONG = "곡"
 # 채보 종류(maimai STD/DX). 종류가 없는 게임(츄니즘)의 표에는 이 칸이 없다.
@@ -69,6 +70,24 @@ SHORT_TO_LONG_DIFFICULTY: dict[str, str] = {
 LONG_TO_SHORT_DIFFICULTY: dict[str, str] = {
     long: short for profile in GAME_PROFILES.values() for long, short in profile.long_to_short.items()
 }
+
+
+def difficulty_code(difficulty: DifficultyRef | None) -> str | None:
+    """난이도 인자를 songdb 조회용 짧은 코드로 바꾼다. 비어 있으면 난이도를 가리지 않는다는
+    뜻으로 None을 그대로 돌려준다(find_by_version의 "비우면 버전 전체" 규칙과 같다)."""
+    if difficulty is None:
+        return None
+    assert isinstance(difficulty, ResolvedDifficulty)
+    return LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
+
+
+def difficulty_range_text(low: str | None, high: str | None) -> str | None:
+    """표의 조건 줄에 적는 난이도 범위. 범위를 안 걸었으면 None."""
+    if low is None and high is None:
+        return None
+    if low is not None and high is not None:
+        return f"{low}~{high}"
+    return f"{low} 이상" if low is not None else f"{high} 이하"
 
 # 곡 단위 행(곡은 차 있고 난이도만 빈 행)을 난이도가 필요한 도구가 뺄 때 붙이는 안내.
 PARTIAL_ROW_HINTS: tuple[PartialRowHint, ...] = (

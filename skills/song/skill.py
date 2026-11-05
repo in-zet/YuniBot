@@ -34,25 +34,6 @@ from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.registry import profile_for
 from services.game.songdb import ChartRecord, ConstRangeHit, SongRecord
-from services.game.terms import ResolvedDifficulty
-
-
-def _difficulty_range_text(low: str | None, high: str | None) -> str | None:
-    """표의 조건 줄에 적는 난이도 범위. 범위를 안 걸었으면 None."""
-    if low is None and high is None:
-        return None
-    if low is not None and high is not None:
-        return f"{low}~{high}"
-    return f"{low} 이상" if low is not None else f"{high} 이하"
-
-
-def _difficulty_code(difficulty: DifficultyRef | None) -> str | None:
-    """난이도 인자를 songdb 조회용 짧은 코드로 바꾼다. 비어 있으면 난이도를 가리지 않는다는
-    뜻으로 None을 그대로 돌려준다(find_by_version의 "비우면 버전 전체" 규칙과 같다)."""
-    if difficulty is None:
-        return None
-    assert isinstance(difficulty, ResolvedDifficulty)
-    return tc.LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
 
 
 def _charts_in_display_order(song: SongRecord, game: str) -> list[ChartRecord]:
@@ -178,7 +159,7 @@ async def find_by_const(
 ) -> ToolResult:
     """상수 범위와 난이도로 채보 목록을 상수순으로 찾는다. "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
     max_const를 비운다(지어내지 않는다). 플레이어가 신곡만 말했으면 new_only를 켠다."""
-    short_code = _difficulty_code(difficulty)
+    short_code = tc.difficulty_code(difficulty)
     hits = ctx.songdb.find_by_const(
         min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
     )
@@ -195,7 +176,7 @@ async def find_by_version(
     """수록 버전으로 채보 목록을 상수순으로 찾는다. 난이도를 안 주면 그 버전의 모든 채보를
     난이도 가리지 않고 찾는다. version은 곡 DB의 버전 이름(VERSE, X-VERSE, X-VERSE-X 등)이어야 한다.
     Linked VERSE(링버) 같은 해금 시스템·모드 이름이면 쓰지 않는다."""
-    short_code = _difficulty_code(difficulty)
+    short_code = tc.difficulty_code(difficulty)
     hits = ctx.songdb.find_by_version(version=version, difficulty=short_code)
     if not hits:
         versions = profile_for(ctx.game).version_order
@@ -215,7 +196,7 @@ async def find_linked_verse(
     X-VERSE에서 시작한 해금 시스템이라 `find_by_version`으로는 찾을 수 없다. gate를 비우면 전부(ORIGIN, AIR, STAR,
     AMAZON, CRYSTAL, PARADISE, NEW, SUN, LUMINOUS, VERSE, 전도 악곡, UNIVERSE, ENDING), 난이도를 안 주면 곡마다 모든
     난이도다. 상수표나 그림을 달라고 하면 난이도를 MAS로 준다."""
-    short_code = _difficulty_code(difficulty)
+    short_code = tc.difficulty_code(difficulty)
     try:
         hits = ctx.songdb.find_linked_verse(gate=gate, difficulty=short_code)
     except ValueError:
@@ -274,8 +255,8 @@ async def find_songs(
     ):
         return ToolResult(error="조건을 하나는 줘야 해(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡, 곡명 글자 중)")
 
-    codes = [code for code in (_difficulty_code(difficulty), _difficulty_code(other_difficulty)) if code is not None]
-    low, high = _difficulty_code(min_difficulty), _difficulty_code(max_difficulty)
+    codes = [code for code in (tc.difficulty_code(difficulty), tc.difficulty_code(other_difficulty)) if code is not None]
+    low, high = tc.difficulty_code(min_difficulty), tc.difficulty_code(max_difficulty)
     try:
         hits = ctx.songdb.find_songs(
             min_const=min_const, max_const=max_const, level=level, version=version,
@@ -292,7 +273,7 @@ async def find_songs(
         f"레벨 {level}" if level else None,
         f"{version} 버전" if version else None,
         "·".join(dict.fromkeys(codes)) or None,
-        _difficulty_range_text(low, high),
+        tc.difficulty_range_text(low, high),
         _note_range_text(min_note_count, max_note_count),
         "신곡만" if new_only else None,
         f"곡에 {title} 포함" if title else None,
@@ -309,7 +290,7 @@ async def find_by_artist(
     말하지 않았으면 비운다(곡 단위 행으로 나온다)."""
     artist = ctx.terms.artist_alias(artist) or artist  # 확인받아 저장된 작곡가 별칭이면 곡 DB 표기로
     songs = ctx.songdb.find_by_artist(name=artist)
-    short_code = _difficulty_code(difficulty)
+    short_code = tc.difficulty_code(difficulty)
     condition = f"{artist} 작곡"
     if not songs:
         similar = similar_names(artist, ctx.songdb.all_artists(), limit=3, cutoff=0.6)
@@ -362,7 +343,7 @@ async def charts_of(
     (모든 난이도로 펼치지 않는다). 그 난이도가 없는 곡은 빠진다. 이미 채보인 행은 그대로 둔다.
     점수·보더·채보 링크처럼 난이도가 필요한 도구에 곡 표를 넘기기 전에 쓴다."""
     assert isinstance(table, WorkTable)
-    code = _difficulty_code(difficulty) or _DEFAULT_EXPAND
+    code = tc.difficulty_code(difficulty) or _DEFAULT_EXPAND
     columns = _expand_columns(ctx.game)
     missing = 0
     expanded = 0

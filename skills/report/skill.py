@@ -52,7 +52,6 @@ from services.game.records import (
 )
 from services.game.registry import profile_for
 from services.game.songdb import ConstRangeHit
-from services.game.terms import ResolvedDifficulty
 
 # 판정 수(상세 판정)는 CHUNITHM-NET 플레이 상세 페이지를 한 곡씩 따로 열어야 붙는다.
 # 설계서가 고정한 상한이다 — 바꾸지 않는다.
@@ -319,6 +318,9 @@ async def const_table(
     min_const: float = 0,
     max_const: float | None = None,
     difficulty: DifficultyRef | None = None,
+    other_difficulty: DifficultyRef | None = None,
+    min_difficulty: DifficultyRef | None = None,
+    max_difficulty: DifficultyRef | None = None,
     only_played: bool = False,
     new_only: bool = False,
     player: PlayerRef | None = None,
@@ -326,19 +328,25 @@ async def const_table(
 ) -> ToolResult:
     """상수표: 상수 범위의 채보를 상수별로 묶고(큰 상수부터), 묶음 안은 난이도가 높은 순, 같은 난이도는 점수 높은 순으로
     늘어놓은 표에 점수·랭크·램프·곡 레이팅을 붙여 준다. 상수를 모르는 채보는 빠진다. 위쪽 한계를 말하지 않았으면 max_const를
-    비운다("15 이상"). "15대"는 15.0~15.9다. 난이도를 말하지 않았으면 비워 모든 난이도를 보인다. 기록 없는 채보도 기본으로
-    넣고(기록 없음), 사람이 "점수 있는 것만"이라고 했을 때만 only_played를 켠다. "신곡만"이면 new_only를 켠다 — 이때는
-    min_const를 안 줘도 된다(신곡 범위 자체가 좁아 되묻지 않는다). 신곡이 아닌데 상수 범위를 안 말했으면 되묻는다(0부터
-    전부로 지어내지 않는다). 누구 기록인지 말하지 않았으면 player를 비운다. 그림("상수표 그림으로")은 이 표를 table_image에
-    넘긴다."""
+    비운다("15 이상"). "15대"는 15.0~15.9다. 난이도를 말하지 않았으면 비워 모든 난이도를 보인다. "마스터나 울티마"처럼
+    난이도를 둘 말했으면 difficulty와 other_difficulty에 하나씩 준다. "마스터부터 울티마까지"·"마스터/리마스터만"처럼
+    난이도가 셋 이상이거나 범위면 min_difficulty/max_difficulty를 준다(find_songs와 같은 뜻 — 이 도구로 난이도 범위가
+    안 된다고 find_songs로 넘기지 않는다, 상수 묶음·점수 정렬이 없어진다). 기록 없는 채보도 기본으로 넣고(기록 없음),
+    사람이 "점수 있는 것만"이라고 했을 때만 only_played를 켠다. "신곡만"이면 new_only를 켠다 — 이때는 min_const를 안 줘도
+    된다(신곡 범위 자체가 좁아 되묻지 않는다). 신곡이 아닌데 상수 범위를 안 말했으면 되묻는다(0부터 전부로 지어내지
+    않는다). 누구 기록인지 말하지 않았으면 player를 비운다. 그림("상수표 그림으로")은 이 표를 table_image에 넘긴다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
-    code = None
-    if difficulty is not None:
-        assert isinstance(difficulty, ResolvedDifficulty)
-        code = tc.LONG_TO_SHORT_DIFFICULTY.get(difficulty.canonical, difficulty.canonical)
-    hits = ctx.songdb.find_songs(min_const=min_const, max_const=max_const, difficulty=code, new_only=new_only)
+    codes = [code for code in (tc.difficulty_code(difficulty), tc.difficulty_code(other_difficulty)) if code is not None]
+    low, high = tc.difficulty_code(min_difficulty), tc.difficulty_code(max_difficulty)
+    try:
+        hits = ctx.songdb.find_songs(
+            min_const=min_const, max_const=max_const, difficulty=codes or None,
+            min_difficulty=low, max_difficulty=high, new_only=new_only,
+        )
+    except ValueError as exc:
+        return ToolResult(error=str(exc))
     pbs = await ctx.records.pb_rows_for(target.id, [_hit_key(hit) for hit in hits])
     if only_played:
         hits = [hit for hit in hits if _hit_key(hit) in pbs]
@@ -364,7 +372,13 @@ async def const_table(
     identity = tc.identity_columns(ctx.game)
     builder = TableBuilder(subject=target.id, unit="채보")
     tc.add_columns(builder, *identity, *_CONST_TABLE_TAIL, game=ctx.game)
-    builder.step(" ".join(part for part in (tc.const_range_text(min_const, max_const), code) if part))
+    builder.step(" ".join(
+        part for part in (
+            tc.const_range_text(min_const, max_const), "·".join(dict.fromkeys(codes)) or None,
+            tc.difficulty_range_text(low, high),
+        )
+        if part
+    ))
     if new_only:
         builder.step("신곡만")
     builder.step(await _owner_label(ctx, target))

@@ -1121,6 +1121,44 @@ async def test_const_table_new_only_needs_no_const_range(skill: ModuleType) -> N
     assert "신곡만" in table.steps
 
 
+async def test_const_table_two_difficulties_either_matches(skill: ModuleType) -> None:
+    """2026-11-05: "마스터나 울티마"는 difficulty+other_difficulty로 둘 중 어느 쪽이든 받는다."""
+    songdb = _real_songdb()
+    expected = {
+        (h.song.title, h.chart.difficulty)
+        for h in songdb.find_songs(min_const=15.0, max_const=15.0, difficulty=["MAS", "ULT"])
+    }
+    assert expected
+    f = _ctx(records=_FakeRecords(), songdb=songdb)
+
+    result = await skill.const_table(
+        f.ctx, min_const=15.0, max_const=15.0, difficulty=_diff("MASTER"), other_difficulty=_diff("ULTIMA")
+    )
+
+    table = result.table
+    assert table is not None
+    assert set(_row_keys(table)) == expected
+
+
+async def test_const_table_difficulty_range(skill: ModuleType) -> None:
+    """2026-11-05: "마스터부터 울티마까지"는 min_difficulty/max_difficulty — find_songs로 새지 않아도 된다."""
+    songdb = _real_songdb()
+    expected = {
+        (h.song.title, h.chart.difficulty)
+        for h in songdb.find_songs(min_const=15.0, max_const=15.0, min_difficulty="MAS", max_difficulty="ULT")
+    }
+    assert expected  # 범위에 드는 채보가 있어야 시험이 뭔가를 검증한다
+    f = _ctx(records=_FakeRecords(), songdb=songdb)
+
+    result = await skill.const_table(
+        f.ctx, min_const=15.0, max_const=15.0, min_difficulty=_diff("MASTER"), max_difficulty=_diff("ULTIMA")
+    )
+
+    table = result.table
+    assert table is not None
+    assert set(_row_keys(table)) == expected
+
+
 async def test_const_table_only_played_difficulty_and_open_ended_range(skill: ModuleType) -> None:
     songdb = _real_songdb()
     hit = next(h for h in songdb.find_songs(min_const=15.5, difficulty="MAS"))
