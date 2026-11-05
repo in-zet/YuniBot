@@ -22,7 +22,7 @@
 | `skills/` | 스킬 폴더(`SKILL.md`·`skill.py`·`migrations/`·`tests/`), `_template/` | **관리대상** |
 | `prompts/` | `rules.md`(규칙) · `persona.md`(말투) — 모델에 그대로 들어간다 | **관리대상** |
 | `migrations/core/` | 코어·서비스 SQL. 적용한 파일은 고치지 않는다 | **관리대상** |
-| `scripts/` | `sync_upstream.py`(third_party 교체) · `eval_agent.py`(도구 선택 평가, LLM 키 필요) · `clear_global_commands.py`(옛 전역 슬래시 정리) | **관리대상** |
+| `scripts/` | `sync_upstream.py`(third_party 교체) · `eval_agent.py`·`eval_scenarios.py`(해석 평가와 그 시나리오, 운영 모델로 LLM 호출) · `clear_global_commands.py`(옛 전역 슬래시 정리) | **관리대상** |
 | `tests/` | 코어·서비스 시험, `fixtures/`(연습·불량 스킬), `support/fake_llm.py` | **관리대상** |
 | `third_party/chuni_penguin/` | chuni-penguin에서 가져온 코드 + 시드. `database/seeds/songs.json`(7.5MB)은 열지 않는다 | **읽기전용** |
 | `third_party/patches/` | 가져온 코드에 자동 적용하는 패치와 이유 | **관리대상** |

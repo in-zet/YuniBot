@@ -15,7 +15,7 @@ skills/_template/      새 스킬의 복사본
 prompts/               rules.md(규칙), persona.md(유니 말투)
 third_party/           chuni_penguin(가져온 코드, 읽기 전용) · patches/
 migrations/core/       코어와 서비스의 SQL 파일(번호순)
-scripts/               sync_upstream.py, eval_agent.py, clear_global_commands.py
+scripts/               sync_upstream.py, eval_agent.py, eval_scenarios.py, clear_global_commands.py
 tests/                 코어·서비스 시험(스킬 시험은 각 스킬의 tests/)
 ```
 
@@ -46,7 +46,7 @@ tests/                 코어·서비스 시험(스킬 시험은 각 스킬의 t
 - 계약 시험은 모든 스킬에 자동으로 돈다: manifest, 도구 스키마, 이름과 슬래시 중복, docstring, 선언하지 않은 서비스 사용, 테이블 접두사, 마이그레이션 파일 이름.
 - 도구 함수의 docstring은 모델에게 가는 도구 설명이다. 계획·이력 이야기를 쓰지 않는다.
 - CHUNITHM-NET 파서는 `docs/reference/`의 저장본으로 시험한다. 실제 사이트에 접속하는 시험은 만들지 않는다.
-- LLM을 부르는 시험은 기본 실행에서 뺀다. 스킬 `examples`로 도구 선택을 재는 평가는 `scripts/eval_agent.py`(LLM 키 필요).
+- LLM을 부르는 시험은 기본 실행에서 뺀다. 도구 선택·해석 평가는 `scripts/eval_agent.py`(스킬 `examples` + `scripts/eval_scenarios.py`의 시나리오 — 불린 도구와 보인 표의 출처를 본다, LLM 키 필요).
 
 ## 5. 주석
 
