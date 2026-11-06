@@ -70,6 +70,54 @@ async def test_agent_loop_returns_text_when_model_answers_directly() -> None:
     assert result.hit_tool_call_cap is False
 
 
+def _say(text: str) -> GenerationTurn:
+    return GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text=text)]), text=text)
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_numeric_violation_back_once() -> None:
+    # 확인 안 된 숫자를 말하면 답을 되돌려 한 번 다시 쓰게 한다. 되돌릴 때 준 말의 숫자는 맞는 숫자가 아니다.
+    registry = _registry()
+    llm = FakeLlmAdapter([_say("상수는 15.3이야"), _say("상수는 도구로 확인해야 해"), _say("안 쓰인다")])
+    loop = AgentLoop(
+        llm=llm, executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    result = await loop.run(ctx=_ctx(), skill_state=_state(registry), user_text="크로노 상수", prompt_context_snippets=[])
+    assert result.text == "상수는 도구로 확인해야 해"
+    assert result.numeric_retried is True
+    retry_message = llm.calls[1][2][-1].parts[0].text or ""
+    assert "15.3" in retry_message and "15.3" not in result.seen_text
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_retries_numeric_violation_only_once() -> None:
+    registry = _registry()
+    llm = FakeLlmAdapter([_say("15.3이야"), _say("그래도 15.3이야")])
+    loop = AgentLoop(
+        llm=llm, executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    result = await loop.run(ctx=_ctx(), skill_state=_state(registry), user_text="크로노 상수", prompt_context_snippets=[])
+    assert result.text == "그래도 15.3이야"
+    assert len(llm.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_does_not_retry_numbers_the_player_said() -> None:
+    registry = _registry()
+    llm = FakeLlmAdapter([_say("스피드 9.00으로 할게")])
+    loop = AgentLoop(
+        llm=llm, executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    result = await loop.run(ctx=_ctx(), skill_state=_state(registry), user_text="p1: 스피드 9.00", prompt_context_snippets=[])
+    assert result.numeric_retried is False
+
+
 @pytest.mark.asyncio
 async def test_agent_loop_reports_served_model_only_when_fallback_answered() -> None:
     registry = _registry()

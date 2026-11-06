@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 
 from core.events import Section, Stage, highest_stage
 from core.llm import LlmAdapter, LlmContent, LlmPart
-from core.response_assembly import extract_numbers, flatten_numbers
+from core.numeric_check import extract_numbers, flatten_numbers
 from core.usage import UsageService
 from services.common.memory import MemoryMerge, MemoryState, PendingSummary
 

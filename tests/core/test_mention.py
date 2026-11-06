@@ -214,9 +214,11 @@ async def test_mention_entry_sends_assembled_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mention_entry_sends_text_as_is_on_numeric_violation() -> None:
-    """숫자 규칙 위반은 로그만 남기고 글자 답은 그대로 보낸다(2026-11-05: 사과 문구로 바꾸던 것을 철회)."""
-    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="상수는 15.3이야")]), text="상수는 15.3이야")]
+async def test_mention_entry_marks_numbers_still_unverified_after_retry() -> None:
+    """한 번 다시 쓰게 했는데도 확인 안 된 숫자가 남으면 답은 그대로 보내고 그 숫자를 표시한다
+    (2026-11-05: 답 전체를 사과 문구로 바꾸던 것을 철회)."""
+    said = GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="상수는 15.3이야")]), text="상수는 15.3이야")
+    script = [said, said]
     entry = MentionEntry(
         agent=_agent(script),
         players=_FakePlayers(), notify=NotifyService.__new__(NotifyService),
@@ -235,7 +237,7 @@ async def test_mention_entry_sends_text_as_is_on_numeric_violation() -> None:
         trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC),
         send=lambda text, displays: sent.append(text) or _noop(), typing=_NoopTyping(),
     )
-    assert sent[0] == "상수는 15.3이야"
+    assert sent[0] == "상수는 15.3이야\n⚠ 도구로 확인 안 된 숫자: 15.3"
 
 
 async def _noop() -> None:

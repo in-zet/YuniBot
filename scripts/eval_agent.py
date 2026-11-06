@@ -68,6 +68,8 @@ class EvalReport:
     total: int = 0
     failures: int = 0
     numeric_violations: int = 0
+    # 숫자 규칙 위반으로 답을 한 번 되돌려 다시 쓰게 한 턴 수(다시 쓴 뒤에도 남으면 numeric_violations에도 센다).
+    numeric_retries: int = 0
     latencies_seconds: list[float] = field(default_factory=list)
     estimated_cost_usd: float = 0.0
 
@@ -236,7 +238,9 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
                     output_tokens=result.usage.output_tokens, cached_input_tokens=result.usage.cached_input_tokens,
                 )
                 problems = judge_example(case, trace) if isinstance(case, EvalCase) else judge_scenario(case, trace)
-                assembled = assemble_response(result, conversation_text=question)
+                assembled = assemble_response(result)
+                if result.numeric_retried:
+                    report.numeric_retries += 1
                 if assembled.numeric_violation:
                     report.numeric_violations += 1
                     problems.append(f"숫자 규칙 위반 {sorted(assembled.unknown_numbers)} — 답: {assembled.text!r}")
@@ -246,6 +250,8 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
                 run = f" #{attempt + 1}" if args.repeat > 1 else ""
                 print(f"[{tag}] {suite}/{label}{run} {elapsed:4.1f}s {question!r}", flush=True)
                 print(f"        도구 {trace.tool_names}  보인 표 {[(t, sorted(trace.lineage.get(t, set()))) for t in trace.shown_table_ids]}")
+                if result.numeric_retried:
+                    print("        (숫자 규칙 위반으로 한 번 다시 썼다)")
                 for problem in problems:
                     print(f"        - {problem}")
                 await asyncio.sleep(1)
@@ -258,7 +264,7 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
             continue
         avg = sum(report.latencies_seconds) / len(report.latencies_seconds)
         print(
-            f"[{suite}] 총 {report.total}건 | 실패 {report.failures} | 숫자 규칙 위반 {report.numeric_violations} | "
+            f"[{suite}] 총 {report.total}건 | 실패 {report.failures} | 숫자 다시 쓰기 {report.numeric_retries} · 그래도 위반 {report.numeric_violations} | "
             f"평균 지연 {avg:.2f}s | 추정 비용 ${report.estimated_cost_usd:.4f}"
         )
 

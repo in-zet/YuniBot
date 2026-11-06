@@ -448,7 +448,7 @@ class MentionEntry:
             await reply(pick(TOOL_CALL_CAP_MESSAGES), [])
             return
 
-        assembled = assemble_response(result, conversation_text="\n".join(m.content for m in context))
+        assembled = assemble_response(result)
         # private 표시물(본인에게만 보여야 하는 내용)은 채널 답장에 붙이지 않고 DM으로 보낸다.
         public_displays: list[Display] = []
         dm_failed = False

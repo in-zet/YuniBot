@@ -1,7 +1,8 @@
 import dataclasses
 
 from core.agent import AgentTurnResult
-from core.response_assembly import assemble_response, extract_numbers, flatten_numbers
+from core.numeric_check import extract_numbers, flatten_numbers
+from core.response_assembly import assemble_response
 from core.tables import RowRef, TableBuilder, cell
 from core.tool_types import Display
 
@@ -103,9 +104,16 @@ def test_required_displays_stay_even_with_no_table_tag() -> None:
 
 def test_numbers_the_player_said_are_not_a_violation() -> None:
     # 사용자가 말한 숫자를 되풀이하는 것은 지어낸 게 아니다. 대화에 없는 숫자는 여전히 위반이다.
-    result = AgentTurnResult(text="스피드 9.00으로 바꿨어", collected_data=[{"ok": True}])
-    assert assemble_response(result, conversation_text="p1: 스피드 9.00으로 바꿔 줘").unknown_numbers == set()
-    assert assemble_response(result, conversation_text="p1: 스피드 바꿔 줘").unknown_numbers == {9.0}
+    said = AgentTurnResult(text="스피드 9.00으로 바꿨어", seen_text="p1: 스피드 9.00으로 바꿔 줘")
+    assert assemble_response(said).unknown_numbers == set()
+    not_said = AgentTurnResult(text="스피드 9.00으로 바꿨어", seen_text="p1: 스피드 바꿔 줘")
+    assert assemble_response(not_said).unknown_numbers == {9.0}
+
+
+def test_violation_note_is_added_to_the_text() -> None:
+    # 다시 쓰게 했는데도 남은 위반은 답 끝에 그 숫자를 표시한다(답은 그대로 보낸다).
+    assembled = assemble_response(AgentTurnResult(text="기준은 1,009,000점이야", seen_text="트플플"))
+    assert assembled.text == "기준은 1,009,000점이야\n⚠ 도구로 확인 안 된 숫자: 1,009,000"
 
 
 def test_numbers_in_this_turns_tables_are_not_a_violation() -> None:

@@ -21,6 +21,12 @@ from core.llm import (
     UsageInfo,
 )
 from core.llm_pricing import billable_input_tokens
+from core.numeric_check import (
+    extract_numbers,
+    flatten_numbers,
+    retry_instruction,
+    table_numbers,
+)
 from core.prompt import PromptAssembler
 from core.registry import LoadedSkill
 from core.registry_snapshot import RegistrySnapshot
@@ -48,6 +54,10 @@ class AgentTurnResult:
     collected_data: list[dict[str, Any]] = field(default_factory=list)
     # 도구가 돌려준 오류 문구. 모델이 읽고 말하는 도구 출력이라 숫자 대조에서 맞는 숫자로 친다.
     tool_errors: list[str] = field(default_factory=list)
+    # 모델이 본 대화 글. 여기 있는 숫자를 되풀이하는 것은 숫자 규칙 위반이 아니다(core/numeric_check.py).
+    seen_text: str = ""
+    # 숫자 규칙 위반으로 답을 한 번 되돌려 다시 쓰게 했는지.
+    numeric_retried: bool = False
     optional_displays: dict[str, Display] = field(default_factory=dict)
     required_displays: list[Display] = field(default_factory=list)
     usage: UsageInfo = field(default_factory=lambda: UsageInfo(input_tokens=0, output_tokens=0))
@@ -70,6 +80,18 @@ class AgentTurnResult:
     # 마지막 표 본체와 옛 값 여부. 턴 끝 글자 출력(core/response_assembly.py)이 쓴다.
     last_table: WorkTable | None = None
     last_table_stale: bool = False
+
+    def unknown_numbers(self, text: str) -> set[float]:
+        """text 속 숫자 중 어디서도 확인 안 된 것(숫자 규칙 위반). 맞는 숫자는 도구 `data`·오류 문구·표시물 본문,
+        이번 턴의 작업 표, 모델이 본 대화 글(`seen_text` — 사용자가 말한 숫자를 되풀이하는 것은 지어낸 게 아니다)에
+        있는 숫자다(2026-11-05: 대화 글과 표를 안 봐서 정상 답이 위반으로 잡혔다). 검사 규칙은 core/numeric_check.py."""
+        known = flatten_numbers(self.collected_data) | extract_numbers(self.seen_text)
+        for table in self.turn_tables:
+            known |= table_numbers(table)
+        displays_text = [d.content or "" for d in (*self.required_displays, *self.optional_displays.values())]
+        for tool_text in (*self.tool_errors, *displays_text):
+            known |= extract_numbers(tool_text)
+        return extract_numbers(text) - known
 
 
 class AgentLoop:
@@ -190,7 +212,7 @@ class AgentLoop:
         thread_end: ThreadEndRequest | None = None,
     ) -> AgentTurnResult:
         """thread_end가 있으면 대화 스레드 안의 응답이다 — 모델에게 end_conversation 도구가 보이고, 부르면 thread_end가 켜진다."""
-        result = AgentTurnResult()
+        result = AgentTurnResult(seen_text=user_text)
         # 코어 도구 전용 내부 키(manifest.services 선언 대상이 아니다): table_query/table_peek이 쓴다.
         services: dict[str, object] = {
             **ctx.services,
@@ -285,6 +307,17 @@ class AgentLoop:
                 return result
 
             if not turn.function_calls:
+                # 숫자 규칙 위반이면 한 번만 되돌려 다시 쓰게 한다 — 모델이 도구로 확인하거나 그 숫자를 빼고 다시 답한다.
+                # 두 번째도 위반이면 그대로 내보내고 응답 조립이 숫자에 표시를 단다(2026-11-05 사용자 결정).
+                unknown = result.unknown_numbers(turn.text or "")
+                if unknown and not result.numeric_retried:
+                    logger.warning(
+                        "player %s: 확인 안 된 숫자 %s — 답을 되돌려 다시 쓰게 한다", ctx.player_id, sorted(unknown)
+                    )
+                    result.numeric_retried = True
+                    contents.append(turn.content)
+                    contents.append(LlmContent(role="user", parts=[LlmPart(text=retry_instruction(unknown))]))
+                    continue
                 logger.info(
                     "player %s: 멘션 응답 종료 — LLM 턴 %d회, 도구 호출 %s, 쓴 스킬 %s, 누적 토큰 입력 %d(캐시 %d)/출력 %d",
                     ctx.player_id, llm_turns, tool_call_log, self._skills_used(tool_call_log, player_tags),
