@@ -30,12 +30,12 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="상수표/츄니 신곡 마스터·울티마 그림",
         question="츄니즘 신곡에 포함되는 곡 마스터/울티마만 상수표 그려줘",
-        shown_from=_CONST_TABLE, must_call=("image_table_image",),
+        shown_from=_CONST_TABLE, must_call=("song_find_songs", "image_table_image"),
     ),
     Scenario(
         name="상수표/마이 신곡 마스터·리마스터 그림",
         question="마이마이 신곡에 포함되는 곡 마스터/리마스터만 상수표 그려줘",
-        shown_from=_CONST_TABLE, must_call=("image_table_image",),
+        shown_from=_CONST_TABLE, must_call=("song_find_songs", "image_table_image"),
     ),
     Scenario(name="상수표/레벨 조건", question="레벨 14+ 마스터 상수표 보여줘", shown_from=_CONST_TABLE),
     Scenario(name="상수표/버전 조건", question="LUMINOUS PLUS 버전 곡들 상수표 보여줘", shown_from=_CONST_TABLE),

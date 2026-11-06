@@ -1096,60 +1096,6 @@ async def test_const_table_groups_come_biggest_const_first_and_include_unplayed_
     assert result.data["with_record"] == 0
 
 
-async def test_const_table_new_only_needs_no_const_range(skill: ModuleType) -> None:
-    """2026-11-05: "신곡만" + 상수표는 min_const 없이도 되묻지 않고 바로 된다 — 전에는 이걸 못 받아서
-    모델이 song 스킬의 find_songs로 대신했다(상수 묶음·점수 정렬이 없는 단순 목록이 나왔다)."""
-    songdb = _real_songdb()
-    new_hit = next(h for h in songdb.find_songs(min_const=15.0, max_const=15.0) if h.chart.difficulty == "MAS")
-    new_hit.song.is_new = True
-    f = _ctx(records=_FakeRecords(), songdb=songdb)
-
-    result = await skill.const_table(f.ctx, new_only=True, difficulty=_diff("MASTER"))
-
-    table = result.table
-    assert result.error is None and table is not None
-    assert _row_keys(table) == [(new_hit.song.title, "MAS")]
-    assert "신곡만" in table.steps
-
-
-async def test_const_table_two_difficulties_either_matches(skill: ModuleType) -> None:
-    """2026-11-05: "마스터나 울티마"는 difficulty+other_difficulty로 둘 중 어느 쪽이든 받는다."""
-    songdb = _real_songdb()
-    expected = {
-        (h.song.title, h.chart.difficulty)
-        for h in songdb.find_songs(min_const=15.0, max_const=15.0, difficulty=["MAS", "ULT"])
-    }
-    assert expected
-    f = _ctx(records=_FakeRecords(), songdb=songdb)
-
-    result = await skill.const_table(
-        f.ctx, min_const=15.0, max_const=15.0, difficulty=_diff("MASTER"), other_difficulty=_diff("ULTIMA")
-    )
-
-    table = result.table
-    assert table is not None
-    assert set(_row_keys(table)) == expected
-
-
-async def test_const_table_difficulty_range(skill: ModuleType) -> None:
-    """2026-11-05: "마스터부터 울티마까지"는 min_difficulty/max_difficulty — find_songs로 새지 않아도 된다."""
-    songdb = _real_songdb()
-    expected = {
-        (h.song.title, h.chart.difficulty)
-        for h in songdb.find_songs(min_const=15.0, max_const=15.0, min_difficulty="MAS", max_difficulty="ULT")
-    }
-    assert expected  # 범위에 드는 채보가 있어야 시험이 뭔가를 검증한다
-    f = _ctx(records=_FakeRecords(), songdb=songdb)
-
-    result = await skill.const_table(
-        f.ctx, min_const=15.0, max_const=15.0, min_difficulty=_diff("MASTER"), max_difficulty=_diff("ULTIMA")
-    )
-
-    table = result.table
-    assert table is not None
-    assert set(_row_keys(table)) == expected
-
-
 def _plain_table(hits: list[Any], game: str) -> WorkTable:
     """find_songs가 돌려주는 모양의, 묶음·정렬·점수가 없는 맨 검색 결과 표(테스트용)."""
     identity = tc.identity_columns(game)
@@ -1181,16 +1127,15 @@ async def test_const_table_takes_a_table_from_another_tool(skill: ModuleType) ->
     assert len(table.groups) > 1 or len({h.chart.const for h in hits if h.chart.const is not None}) <= 1
 
 
-async def test_const_table_new_only_filters_table_input(skill: ModuleType) -> None:
-    """2026-11-05: table을 줘도 new_only는 (검색이 아니라 songdb.is_new_for로) 여전히 걸러진다."""
+async def test_const_table_keeps_new_song_and_two_difficulty_filters_from_the_table(skill: ModuleType) -> None:
+    """2026-11-06: 신곡·난이도 둘 같은 조건은 const_table 인자가 아니라 find_songs가 거른 표로 받는다 — 표의 채보만 나온다."""
     songdb = _real_songdb()
-    hits = songdb.find_songs(min_const=15.0, max_const=15.0)
-    new_hit = next(h for h in hits if h.chart.difficulty == "MAS")
+    new_hit = next(h for h in songdb.find_songs(min_const=15.0, max_const=15.0) if h.chart.difficulty == "MAS")
     new_hit.song.is_new = True
-    found = _plain_table(hits, "chunithm")
+    found = _plain_table(songdb.find_songs(new_only=True, difficulty=["MAS", "ULT"]), "chunithm")
     f = _ctx(records=_FakeRecords(), songdb=songdb)
 
-    result = await skill.const_table(f.ctx, table=found, new_only=True)
+    result = await skill.const_table(f.ctx, table=found)
 
     table = result.table
     assert result.error is None and table is not None

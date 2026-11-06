@@ -101,7 +101,7 @@ listens: [chunithm.sync.completed]
 | `analyze` | 상수대별 평균, 랭크 분포 (표 반환). 표를 주면 그 표의 채보만으로 통계 | `player: PlayerRef`, 상수 범위(선택), `table: TableRef \| None`(선택, 곡·난이도 필요) | 표 |
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count` | 표 |
 
-| `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty`·`other_difficulty: DifficultyRef`(선택, 난이도 둘), `min_difficulty`/`max_difficulty: DifficultyRef`(선택, 난이도 범위), `only_played`(기본 꺼짐), `new_only`(기본 꺼짐, 신곡만), `table: TableRef`(선택, 다른 도구가 찾은 표를 상수표로 가공만) | `table` 줄 땐 Row(곡·난이도) | 표 |
+| `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty: DifficultyRef`(선택, 하나), `only_played`(기본 꺼짐), `table: TableRef`(선택, `find_songs`가 찾은 표를 상수표로 가공만 — 신곡·난이도 둘 이상·레벨 등 그 밖의 조건은 이쪽) | `table` 줄 땐 Row(곡·난이도) | 표 |
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
@@ -178,5 +178,6 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 - 다른 플레이어의 상수표는 `add_scores`와 같은 공개 검사(`_target_player`)를 쓴다. 누구 점수인지 적는 `steps` 문구도 같은 함수(`_owner_label`)다.
 - "상수표", "15.0~15.5 상수표 그림으로"는 이 도구 → `table_image(layout="card")` 두 번이다.
 - **다른 도구가 찾은 표를 받아 가공만 하기(`table`, 2026-11-05)**: 난이도 둘·범위를 고친 바로 다음에도 "이 도구 인자에 없는 조건"이 또 나오면(레벨·버전·노트 수·곡명 등) 같은 패턴(모델이 `find_songs`+`add_scores`로 새서 묶음·정렬이 없어짐)이 반복될 거라 판단해, 조건을 하나씩 따라가며 추가하는 대신 `add_scores`/`analyze`가 이미 쓰는 "표를 받아 가공"(`table: TableRef`) 모양을 그대로 가져왔다. `table`을 주면 `find_songs`(min_const 등)로는 안 찾고, 그 표의 행마다 `tc.row_chart_key`로 (곡·종류·난이도)를 뽑아 `songdb.song_by_title`/`chart_for`로 실제 상수를 다시 찾아(상수 모르면 뺀다) 그 뒤는 평소와 같은 상수→난이도→점수 정렬·그룹·점수 붙이기를 돈다(`_hits_from_table`). `min_const`/`difficulty` 등 검색 인자는 `table`과 같이 안 쓴다(이미 `find_songs`에서 걸렀다고 보고 무시) — `new_only`만 `table` 경로에서도 후처리로 적용된다(검색이 아니라 `songdb.is_new_for`로 거른다). "레벨 10의 익스퍼트 상수표"처럼 이 도구에 없는 조건은 이제부터 `find_songs(level=...)` → `const_table(table=그 표, difficulty=EXPERT)`가 아니라 `find_songs(level=..., difficulty=EXPERT)` → `const_table(table=그 표)`다(난이도도 `find_songs` 쪽에서 미리 거른다, `table` 경로는 검색 인자를 안 보니까).
+- **조건 인자 줄이기(2026-11-06)**: `other_difficulty`·`min_difficulty`/`max_difficulty`·`new_only`를 지웠다. 같은 조건이 `find_songs`와 이 도구 두 군데 있어 모델이 어느 쪽에 넣을지 갈렸다(평가에서 "신곡 마스터·울티마 상수표"를 두 방식으로 섞어 불렀다). 이제 바로 찾는 길은 상수 범위와 난이도 하나뿐이고, 그 밖의 조건은 `find_songs`가 거른 표를 `table`로 받는다. 위 두 항목(신곡만·난이도 둘·범위, 2026-11-05)을 대체한다.
 
 - **상수·곡 레이팅은 읽을 때 지금 곡 DB 상수로 다시 계산한다**(2026-10-22): `records_pb`에 저장된 상수·곡 레이팅은 동기화 때의 값이라, Chunimaru 갱신으로 상수가 바뀌면 곡 DB와 어긋난다(HERA 15.0→15.1인데 저장된 곡 레이팅 17.09). `RecordsService._current`가 읽는 모든 길(`pb_row`·`pb_rows_for`·`all_pb_rows`)에서 점수는 그대로 두고 상수·레이팅만 다시 구한다. 동기화는 점수가 오른 채보만 행을 쓰므로, 저장값도 `_refresh_stored_ratings`로 맞춘다(점수 불변 채보 포함). 동기화 로그 스냅샷(`rating_deltas`)은 그 시점 값 그대로다.

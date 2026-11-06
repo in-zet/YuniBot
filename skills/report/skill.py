@@ -318,49 +318,31 @@ async def const_table(
     min_const: float = 0,
     max_const: float | None = None,
     difficulty: DifficultyRef | None = None,
-    other_difficulty: DifficultyRef | None = None,
-    min_difficulty: DifficultyRef | None = None,
-    max_difficulty: DifficultyRef | None = None,
     only_played: bool = False,
-    new_only: bool = False,
     table: Annotated[TableRef | None, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])] = None,
     player: PlayerRef | None = None,
     game: GameRef | None = None,
 ) -> ToolResult:
     """상수표: 채보를 상수별로 묶고(큰 상수부터), 묶음 안은 난이도가 높은 순, 같은 난이도는 점수 높은 순으로
     늘어놓은 표에 점수·랭크·램프·곡 레이팅을 붙여 준다. 상수를 모르는 채보는 빠진다.
-    상수 범위·난이도(아래)로 바로 찾을 땐 table을 비운다: 위쪽 한계를 말하지 않았으면 max_const를 비운다("15 이상").
-    "15대"는 15.0~15.9다. 난이도를 말하지 않았으면 비워 모든 난이도를 보인다. "마스터나 울티마"처럼 난이도를 둘
-    말했으면 difficulty와 other_difficulty에 하나씩 준다. "마스터부터 울티마까지"·"마스터/리마스터만"처럼 난이도가
-    셋 이상이거나 범위면 min_difficulty/max_difficulty를 준다. 신곡이 아닌데 상수 범위를 안 말했으면 되묻는다(0부터
-    전부로 지어내지 않는다).
-    레벨·버전·노트 수·곡명처럼 여기 없는 조건이면 먼저 find_songs로 그 조건의 표를 만들고 그 표를 table에 줘라 —
-    find_songs+add_scores로 이어 붙이지 않는다(상수 묶음·정렬이 없어진다). table을 주면 min_const 등 검색 인자는
-    안 쓰니 비워 둔다(이미 find_songs에서 걸렀으니).
-    "신곡만"이면 new_only를 켠다(min_const 없이도, table과도 같이 쓸 수 있다). 기록 없는 채보도 기본으로 넣고
-    (기록 없음), 사람이 "점수 있는 것만"이라고 했을 때만 only_played를 켠다. 누구 기록인지 말하지 않았으면 player를
+    조건이 상수 범위와 난이도 하나뿐이면 바로 찾는다(table을 비운다): 위쪽 한계를 말하지 않았으면 max_const를
+    비운다("15 이상"). "15대"는 15.0~15.9다. 난이도를 말하지 않았으면 비워 모든 난이도를 보인다. 상수 범위도 다른
+    조건도 안 말했으면 되묻는다(0부터 전부로 지어내지 않는다).
+    그 밖의 조건(신곡, 난이도 둘 이상·범위, 레벨·버전·노트 수·곡명)이 하나라도 있으면 먼저 find_songs로 그 조건
+    전부(상수 범위·난이도 포함)의 표를 만들고 그 표를 table에 줘라 — find_songs+add_scores로 이어 붙이지 않는다(상수
+    묶음·정렬이 없어진다). table을 주면 min_const 등 검색 인자는 안 쓰니 비워 둔다(이미 find_songs에서 걸렀으니).
+    기록 없는 채보도 기본으로 넣고(기록 없음), 사람이 "점수 있는 것만"이라고 했을 때만 only_played를 켠다. 누구 기록인지 말하지 않았으면 player를
     비운다. 그림("상수표 그림으로")은 이 표를 table_image에 넘긴다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
-    codes: list[str] = []
-    low: str | None = None
-    high: str | None = None
+    code: str | None = None
     if table is not None:
         assert isinstance(table, WorkTable)
         hits = _hits_from_table(ctx, table)
-        if new_only:
-            hits = [hit for hit in hits if ctx.songdb.is_new_for(hit.song.title)]
     else:
-        codes = [code for code in (tc.difficulty_code(difficulty), tc.difficulty_code(other_difficulty)) if code is not None]
-        low, high = tc.difficulty_code(min_difficulty), tc.difficulty_code(max_difficulty)
-        try:
-            hits = ctx.songdb.find_songs(
-                min_const=min_const, max_const=max_const, difficulty=codes or None,
-                min_difficulty=low, max_difficulty=high, new_only=new_only,
-            )
-        except ValueError as exc:
-            return ToolResult(error=str(exc))
+        code = tc.difficulty_code(difficulty)
+        hits = ctx.songdb.find_songs(min_const=min_const, max_const=max_const, difficulty=code)
     pbs = await ctx.records.pb_rows_for(target.id, [_hit_key(hit) for hit in hits])
     if only_played:
         hits = [hit for hit in hits if _hit_key(hit) in pbs]
@@ -388,13 +370,10 @@ async def const_table(
     tc.add_columns(builder, *identity, *_CONST_TABLE_TAIL, game=ctx.game)
     builder.step(" ".join(
         part for part in (
-            tc.const_range_text(None if table is not None else min_const, max_const), "·".join(dict.fromkeys(codes)) or None,
-            tc.difficulty_range_text(low, high),
+            tc.const_range_text(None if table is not None else min_const, max_const), code,
         )
         if part
     ))
-    if new_only:
-        builder.step("신곡만")
     builder.step(await _owner_label(ctx, target))
     if only_played:
         builder.step("점수 있는 것만")
