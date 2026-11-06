@@ -151,48 +151,12 @@ def _chart_table(hits: list[ConstRangeHit], conditions: list[str | None], game: 
     return builder.build()
 
 
-@tool()
-async def find_by_const(
-    ctx: ToolContext, min_const: float, difficulty: DifficultyRef,
-    max_const: float | None = None, new_only: bool = False, game: GameRef | None = None,
-) -> ToolResult:
-    """상수 범위와 난이도로 채보 목록을 상수순으로 찾는다. "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
-    max_const를 비운다(지어내지 않는다). 플레이어가 신곡만 말했으면 new_only를 켠다."""
-    short_code = tc.difficulty_code(difficulty)
-    hits = ctx.songdb.find_by_const(
-        min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
-    )
-    if not hits:
-        return _none_found()
-    conditions = [tc.const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
-    return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions, ctx.game))
-
-
-@tool()
-async def find_by_version(
-    ctx: ToolContext, version: str, difficulty: DifficultyRef | None = None, game: GameRef | None = None
-) -> ToolResult:
-    """수록 버전으로 채보 목록을 상수순으로 찾는다. 난이도를 안 주면 그 버전의 모든 채보를
-    난이도 가리지 않고 찾는다. version은 곡 DB의 버전 이름(VERSE, X-VERSE, X-VERSE-X 등)이어야 한다.
-    Linked VERSE(링버) 같은 해금 시스템·모드 이름이면 쓰지 않는다."""
-    short_code = tc.difficulty_code(difficulty)
-    hits = ctx.songdb.find_by_version(version=version, difficulty=short_code)
-    if not hits:
-        versions = profile_for(ctx.game).version_order
-        if version not in versions:
-            return ToolResult(error=f"'{version}'은 곡 DB의 버전 이름이 아니야. 버전 이름: {', '.join(versions)}")
-        return _none_found()
-    return ToolResult(
-        data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code], ctx.game)
-    )
-
-
 @tool(games=["chunithm"])
 async def find_linked_verse(
     ctx: ToolContext, gate: str | None = None, difficulty: DifficultyRef | None = None
 ) -> ToolResult:
     """Linked VERSE(링크드 버스, 링버)의 해금곡 채보를 게이트별 묶음 표로 찾는다. Linked VERSE는 수록 버전이 아니라
-    X-VERSE에서 시작한 해금 시스템이라 `find_by_version`으로는 찾을 수 없다. gate를 비우면 전부(ORIGIN, AIR, STAR,
+    X-VERSE에서 시작한 해금 시스템이라 `find_songs`의 version으로는 찾을 수 없다. gate를 비우면 전부(ORIGIN, AIR, STAR,
     AMAZON, CRYSTAL, PARADISE, NEW, SUN, LUMINOUS, VERSE, 전도 악곡, UNIVERSE, ENDING), 난이도를 안 주면 곡마다 모든
     난이도다. 상수표나 그림을 달라고 하면 난이도를 MAS로 준다."""
     short_code = tc.difficulty_code(difficulty)
@@ -236,11 +200,14 @@ async def find_songs(
     exclude_title: str | None = None,
     game: GameRef | None = None,
 ) -> ToolResult:
-    """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부·곡명 글자를 한 번에 조합해 채보를 찾는다.
+    """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부·곡명 글자로 채보를 찾는 검색 입구다. 조건이 하나여도
+    이걸 쓰고, 여러 개면 한 번에 겹쳐 준다. 말하지 않은 조건은 비운다 — "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
+    max_const를 비운다(지어내지 않는다). 플레이어가 신곡을 말했을 때만 new_only를 켠다.
+    version은 곡 DB의 버전 이름(VERSE, X-VERSE, X-VERSE-X 등)이어야 하고, 버전만 주고 난이도를 안 주면 그 버전의
+    모든 채보다. Linked VERSE(링버) 같은 해금 시스템·모드 이름은 version에 넣지 않는다.
     title은 곡명에 들어 있는 글자(부분 일치), exclude_title은 곡명에 없어야 하는 글자다. 둘 다 전각·반각, 대소문자, 공백, 가운뎃점(・) 차이를
     무시한다. 곡 DB의 제목은 원제(일본어·영어)라서 한글로는 안 맞는다 — 한글로 들은 이름은 아는 원제 글자로 바꿔 준다("플랑드르"면 "フランドール").
     "최종귀축" 같은 한글 표기는 "最終鬼畜"처럼 한자로 바꿔 준다. 못 바꾸겠으면 되묻기 전에 아는 글자로 먼저 찾아 본다.
-    `find_by_const`·`find_by_version`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
     "마스터나 울티마"처럼 난이도를 둘 말했으면 difficulty와 other_difficulty에 하나씩 준다(둘 중 어느 쪽이든 맞는 채보).
     난이도가 셋 이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 min_difficulty/max_difficulty를 준다(BASIC<ADVANCED<EXPERT<MASTER<ULTIMA).
     조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다.
@@ -266,6 +233,9 @@ async def find_songs(
     except ValueError as exc:
         return ToolResult(error=str(exc))
     if not hits:
+        versions = profile_for(ctx.game).version_order
+        if version is not None and version not in versions:
+            return ToolResult(error=f"'{version}'은 곡 DB의 버전 이름이 아니야. 버전 이름: {', '.join(versions)}")
         return _none_found()
     conditions = [
         tc.const_range_text(min_const, max_const),

@@ -117,11 +117,11 @@ async def test_chart_names_the_chart_type_and_emits_the_games_event(songdb) -> N
     assert result.display is not None and "DX REM" in (result.display.content or "")
 
 
-async def test_find_by_const_returns_typed_rows_with_a_type_column(songdb) -> None:
+async def test_find_songs_by_const_returns_typed_rows_with_a_type_column(songdb) -> None:
     skill = _load_skill()
     ctx = _ctx(songdb)
 
-    result = await skill.find_by_const(ctx, min_const=12.0, difficulty=await _difficulty(ctx, "MAS"))
+    result = await skill.find_songs(ctx, min_const=12.0, difficulty=await _difficulty(ctx, "MAS"))
 
     table = result.table
     assert table is not None
@@ -138,18 +138,18 @@ async def test_find_songs_handles_remaster_and_hides_utage_from_ranges(songdb) -
     assert _rows(result.table) == [("Both", "DX", "REM")]
 
 
-async def test_find_by_version_with_unknown_version_lists_the_names(songdb) -> None:
+async def test_find_songs_by_version_with_unknown_version_lists_the_names(songdb) -> None:
     skill = _load_skill()
 
-    result = await skill.find_by_version(_ctx(songdb), version="NO SUCH")
+    result = await skill.find_songs(_ctx(songdb), version="NO SUCH")
 
     assert result.error is not None and "CiRCLE PLUS" in result.error
 
 
-async def test_find_by_version_finds_the_charts_of_that_version(songdb) -> None:
+async def test_find_songs_by_version_finds_the_charts_of_that_version(songdb) -> None:
     skill = _load_skill()
 
-    result = await skill.find_by_version(_ctx(songdb), version="CiRCLE PLUS")
+    result = await skill.find_songs(_ctx(songdb), version="CiRCLE PLUS")
 
     assert _rows(result.table) == [("Fresh", "DX", "MAS")]
 

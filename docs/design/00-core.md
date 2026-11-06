@@ -333,7 +333,7 @@ skills/chunithm-border/
 "15 이상 마스 상수표 내 점수로 만들어줘"는 `report.const_table(min_const=15.0, difficulty="MAS")` → `table_image(layout="card")`로 호출 2번이다(2026-10-21 정형화 — 전에는 `find_songs` → `add_scores` → `table_query` → `table_image` 4번이었다. `const_table`이 상수 → 난이도 → 점수 정렬과 점수 칸까지 코드로 만든다).
 
 **첫 범위.**
-- 표를 만드는 쪽: `song`의 `find_by_const`·`find_by_version`·`find_songs`·`find_by_artist`, `report.best`, `folders`의 폴더 불러오기
+- 표를 만드는 쪽: `song`의 `find_by_const`·`find_by_version`(2026-11-06에 `find_songs`로 합침)·`find_songs`·`find_by_artist`, `report.best`, `folders`의 폴더 불러오기
 - `find_by_artist`에 선택 인자 `difficulty`를 더한다. 난이도를 말했으면 그 난이도의 채보 행, 말하지 않았으면 **곡 단위 행**(난이도 칸 비움)을 만든다. MAS로 가정하지 않는다(2026-10-20 결정 — 앞서 정한 "기본 MAS"를 바꿨다).
 - 표를 받는 쪽: `report.add_scores`(새 도구), `folders`의 표를 폴더로 저장하기(칸은 버리고 채보 목록만), `image.table_image`
 - `find_songs`의 `sort_by`/`descending`은 `table_query`와 겹쳐서 뺀다.

@@ -35,12 +35,7 @@ emits: [chunithm.song.viewed]
 - 노트 수가 비어 있는 채보는 노트 수를 "알 수 없음"으로 표시한다.
 - 곡 하나를 조회하면 `chunithm.song.viewed` 모으기 이벤트를 내고, 돌아온 조각을 곡 정보 아래에 붙인다.
 
-**상수 범위 검색**: 상수 범위와 난이도로 채보 목록을 낸다. 가나다순이 아니라 상수순이다. 위쪽 한계(`max`)는 선택이라 "14.7 이상"은 한계 없이 찾고, `new_only`를 켜면 신곡(`songdb`의 `is_new`)만 낸다(2026-10-20 결정 — "신곡 중 14.7 이상" 실기에서 모델이 15.5 상한을 지어내고 신곡 조건은 빠뜨렸다). 난이도는 여전히 필수다.
-
-**수록 버전 검색**: 버전 이름(문자열 그대로 비교, `SongRecord.version`과 같은 값)과 선택적 난이도로
-채보 목록을 낸다. 난이도를 안 주면 그 버전의 모든 채보를 난이도 가리지 않고 낸다 — `folders`·
-`goals`의 "버전 폴더"가 이미 이 규칙으로 `songdb.find_by_version`을 쓰고 있어 같은 의미를
-그대로 노출한다(2026-10-20 결정).
+**상수 범위·버전 검색**: 조건 검색 입구는 `find_songs` 하나다(2026-11-06, 아래 "구현 결정"). 상수 범위는 위쪽 한계(`max_const`)가 선택이라 "14.7 이상"은 한계 없이 찾고, `new_only`를 켜면 신곡(`songdb`의 `is_new`)만 낸다(2026-10-20 결정 — "신곡 중 14.7 이상" 실기에서 모델이 15.5 상한을 지어내고 신곡 조건은 빠뜨렸다). 버전 이름은 문자열 그대로 비교하고(`SongRecord.version`과 같은 값), 버전만 주고 난이도를 안 주면 그 버전의 모든 채보를 낸다 — `folders`·`goals`의 "버전 폴더"가 쓰는 `songdb.find_by_version`과 같은 뜻이다(2026-10-20 결정). 결과가 없고 버전 이름이 게임의 버전 목록에 없으면 버전 이름 목록을 담은 오류를 낸다.
 
 **작곡가 검색**: 아티스트 크레딧(`SongRecord.artist`)으로 수록곡을 찾는다. 대소문자 구분 없는 부분
 일치라 "A vs. B" 같은 콜라보 크레딧도 걸린다. 아티스트는 채보가 아니라 곡 단위 값이라 기본은 곡 단위
@@ -59,8 +54,7 @@ emits: [chunithm.song.viewed]
 `chart_link`와 같은 `songdb.chart_link`(sdvx.in, 없으면 유튜브 검색)이고, 곡 단위 행은 빠지며(`charts_of`로 먼저 펼친다),
 `songdb`에서 못 찾은 채보는 원래 값 None·"링크 없음"이다.
 
-**조합 검색**: 상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부 중 둘 이상을 AND로 동시에
-거는 질문을 위한 것이다(`find_by_const`/`find_by_version`은 조건 하나+난이도만 받는다). 조건을
+**조합 검색**: 상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부·곡명 글자를 준 것만 AND로 겹친다. 조건을
 하나도 안 주면(`new_only`도 꺼진 채) 범위가 너무 넓어 바로 에러를 돌려준다. 준 조건만 보고 안 준
 건 거르지 않는다. 순서는 상수 내림차순(2026-10-22 변경, 이전엔 오름차순)·모르면 뒤·같으면 제목순으로 고정이다. 다른 순서는 결과 표에
 `table_query`를 쓴다(작업 표 Part 2, 2026-10-20 — `sort_by`·`descending` 인자를 뺐다).
@@ -90,11 +84,9 @@ emits: [chunithm.song.viewed]
 | --- | --- | --- | --- | --- | --- |
 | `info` | 곡 정보와 난이도별 채보 | `song: SongQuery` | 없음 | required | never |
 | `chart` | 채보 하나의 상수, 노트 수 | `chart: ChartRef` | 없음 | optional | never |
-| `find_by_const` | 상수 범위와 난이도로 채보 목록 | `min`, `difficulty`: DifficultyRef, `max`(선택), `new_only`(선택) | 없음 | required | never |
-| `find_by_version` | 수록 버전(+선택적 난이도)으로 채보 목록 | `version`, `difficulty: DifficultyRef \| None` | 없음 | required | never |
 | `find_linked_verse` | Linked VERSE 해금곡 채보를 게이트별 묶음 표로(게이트·난이도로 좁힘) | `gate: str \| None`, `difficulty: DifficultyRef \| None` | required | never |
 | `find_by_artist` | 작곡가로 수록곡 목록 | `artist`, `difficulty: DifficultyRef \| None`(선택) | 없음 | required | never |
-| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부·곡명 글자를 조합해 채보 목록 | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `other_difficulty: DifficultyRef \| None`, `min_difficulty: DifficultyRef \| None`, `max_difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only`, `title`, `exclude_title` | 없음 | required | never |
+| `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부·곡명 글자로 채보 목록(조건 하나여도 이것) | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `other_difficulty: DifficultyRef \| None`, `min_difficulty: DifficultyRef \| None`, `max_difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only`, `title`, `exclude_title` | 없음 | required | never |
 | `charts_of` | 표의 곡 단위 행을 채보 행으로 펼친 새 표 | `table: TableRef`(곡 칸 필요), `difficulty: DifficultyRef \| None`(선택, 없으면 MAS) | 없음 | 표 | never |
 | `songs_of` | 표의 채보 행을 곡 단위 행으로 합친 새 표(`charts_of`의 반대) | `table: TableRef`(곡 칸 필요) | 없음 | 표 | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | optional | never |
@@ -123,11 +115,8 @@ emits: [chunithm.song.viewed]
 - 별칭 추가 요청이 모호하면 어느 곡인지 확인한 뒤 추가한다.
 - 작곡가 이름은 기억이나 추측으로 보태지 않는다. `find_by_artist`가 찾은 결과만 말하고,
   없으면 없다고 한다(철자가 다를 수 있다고 알려 줘도 된다).
-- 수록 버전으로 찾을 때 난이도를 안 말했으면 `find_by_version`의 난이도를 비워 그 버전
-  전체를 보여준다. 난이도를 말했으면 그 난이도만 좁힌다.
-- 상수·레벨·버전·난이도·노트 수·신곡 중 두 개 이상을 동시에 걸면 `find_songs`를 쓴다(상수 범위
-  하나만, 또는 버전 하나만이면 `find_by_const`/`find_by_version`이 먼저다 — 레벨만으로 찾는 건
-  `find_songs`뿐이다). 말하지 않은 조건은 비워 둔다 — 지어내지 않는다.
+- 조건으로 채보를 찾을 때는 조건이 하나든 여럿이든 `find_songs` 한 번에 준다. 말하지 않은 조건은 비워 둔다 — 지어내지 않는다.
+- 수록 버전으로 찾을 때 난이도를 안 말했으면 난이도를 비워 그 버전 전체를 보여준다. 난이도를 말했으면 그 난이도만 좁힌다.
 - 상수·버전·검색·작곡가 결과는 표로 나온다. 표 id를 받으면 행을 다시 나열하지 않는다. 결과는 상수
   내림차순(큰 것부터)이고, "노트 수 많은 순"처럼 다른 순서나 추가 조건은 그 표에 `table_query`를 쓴다(다시 찾지 않는다).
 - `find_by_artist`는 플레이어가 난이도를 말했을 때만 `difficulty`를 준다. 말하지 않았으면 비우고,
@@ -139,12 +128,12 @@ emits: [chunithm.song.viewed]
 - 노트 수가 비어 있는 채보의 표시.
 - 다른 곡에 쓰인 별칭을 거절하는지.
 - 매핑이 없는 채보에 유튜브 링크만 나오는지.
-- `find_by_version`이 난이도 없이 그 버전 전체를, 난이도를 주면 그 난이도만 내는지.
+- `find_songs`가 버전만 주면 그 버전 전체를, 난이도를 같이 주면 그 난이도만 내는지, 없는 버전 이름이면 이름 목록을 주는지.
 - `find_by_artist`가 대소문자를 가리지 않고 부분 일치로 찾는지, 콜라보 크레딧에도 걸리는지.
 - `find_songs`가 준 조건만 AND로 겹치는지(상수 범위+노트 수 조합 등), 조건이 하나도 없으면
   에러를 돌리는지.
-- `find_by_const`가 `max_const` 없이 "min 이상"을, `new_only`로 신곡만 찾는지.
-- 네 검색 도구가 표를 돌려주는지(칸·가리키는 것·`steps`·단위), `find_songs` 순서가 상수 내림차순·모르면
+- `find_songs`가 `max_const` 없이 "min 이상"을, `new_only`로 신곡만 찾는지.
+- 검색 도구가 표를 돌려주는지(칸·가리키는 것·`steps`·단위), `find_songs` 순서가 상수 내림차순·모르면
   뒤·같으면 제목순인지, `find_by_artist`가 난이도를 주면 채보 행을 내고 안 주면 곡 단위 행을 내는지.
 
 ## 미확인 사항
@@ -224,5 +213,11 @@ emits: [chunithm.song.viewed]
 - 실기(2026-10-30): "플랑드르랑 관계있는 곡 모두 나열"에 유니가 곡명 일부로 찾는 방법이 없어 원제를 되묻고, 곡명을 받은 뒤에도 후보를 되물었다. 안 찾아진 작곡가 검색의 안내 문구("해당 작곡가의 곡이 없어.")는 유니의 말 뒤에 그대로 붙었고, "곡"을 달라고 했는데 채보 21개가 그림으로 나갔다.
 - `find_songs`에 `title`(곡명에 들어 있는 글자)·`exclude_title`(없어야 하는 글자)을 더했다. 비교는 `core/text_match.py`의 느슨한 부분 일치(전각·반각, 대소문자, 공백, 가운뎃점·구두점 무시)이고, 곡 DB 제목(원제)만 본다. 한글 별칭은 보지 않는다. 한글로 들은 이름은 유니가 아는 원제 글자로 바꿔 넣는다(`SKILL.md`). 슬래시 `/검색`도 두 칸을 옵션으로 받는다.
 - 표에 이미 있는 곡을 글자로 거르는 일은 코어 `table_query`의 `where`가 한다(`contains`·`not_contains`·`starts_with`·`ends_with`, `docs/design/00-core.md`). 정규식은 모델이 틀리게 쓰거나 느려지는 패턴(ReDoS)이 위험해 쓰지 않기로 했다(2026-10-31 사용자 결정).
-- **결과 없음 안내**: `find_by_const`·`find_by_version`·`find_linked_verse`·`find_songs`·`find_by_artist`는 결과가 없으면 표시물을 내지 않는다(`count: 0`을 보고 유니가 직접 말한다. 슬래시 전용으로 두던 "없어" 문구는 2026-11-06에 지웠다). 다른 스킬(`report`·`notes`·`folders` 등)의 같은 문구는 그대로다.
+- **결과 없음 안내**: `find_linked_verse`·`find_songs`·`find_by_artist`는 결과가 없으면 표시물을 내지 않는다(`count: 0`을 보고 유니가 직접 말한다. 슬래시 전용으로 두던 "없어" 문구는 2026-11-06에 지웠다). 다른 스킬(`report`·`notes`·`folders` 등)의 같은 문구는 그대로다.
 - **곡 단위**: 사용자가 "곡"을 달라고 하면 채보 표를 `songs_of`로 곡 단위로 합친 뒤 보여 주거나 그린다(`SKILL.md`).
+
+## 구현 결정 (2026-11-06, 검색 입구를 `find_songs` 하나로)
+- 유니가 부르는 `find_by_const`·`find_by_version` 도구를 지웠다. 두 검색은 `find_songs`에 그 조건 하나만 주면 같다. "조건이 하나면 전용 도구, 둘 이상이면 `find_songs`"라는 갈림길이 도구를 잘못 고르거나 같은 검색을 두 번 하게 만들었다. 이전 `find_by_const`의 "난이도 필수"(2026-10-20)는 없어졌다 — `find_songs`는 난이도를 안 주면 모든 난이도를 찾는다.
+- `find_by_version`에만 있던 "없는 버전 이름이면 이름 목록" 오류는 `find_songs`로 옮겼다(결과가 없을 때만 본다).
+- 곡 DB 서비스의 `find_by_const`·`find_by_version`은 그대로다(`goals`·`updates`·`records`가 쓴다).
+- `find_by_artist`는 남겼다. 저장된 작곡가 별칭을 풀고 못 찾으면 비슷한 이름을 주며, 난이도를 안 주면 곡 단위 표를 낸다 — `find_songs`에 넣으면 같은 도구가 곡 표와 채보 표를 오가게 된다. `find_linked_verse`도 버전이 아니라 해금 시스템이라 남겼다.

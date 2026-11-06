@@ -22,7 +22,7 @@ class Scenario:
 
 
 _CONST_TABLE = ("report_const_table",)
-_SEARCH = ("song_find_songs", "song_find_by_const", "song_find_by_version")
+_SEARCH = ("song_find_songs",)
 
 SCENARIOS: tuple[Scenario, ...] = (
     # 상수표 — 어떤 조건이 붙어도 보이는 표는 const_table을 거쳐야 한다(상수 묶음·난이도·점수 정렬).

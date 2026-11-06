@@ -117,11 +117,11 @@ async def test_info_emits_whole_song_view_and_renders_sections() -> None:
     assert "곡 전체 메모" in content
 
 
-async def test_find_by_const_returns_sorted_results() -> None:
+async def test_find_songs_by_const_returns_sorted_results() -> None:
     skill = _load_skill()
     songdb = SongDbService()
 
-    result = await skill.find_by_const(
+    result = await skill.find_songs(
         _ctx_with_songdb(songdb), min_const=12.0, max_const=13.0,
         difficulty=_resolved_difficulty("MASTER"),
     )
@@ -141,15 +141,15 @@ async def test_find_by_const_returns_sorted_results() -> None:
     assert table.row_count == result.data["count"]
 
 
-async def test_find_by_const_without_max_and_new_only_filters() -> None:
+async def test_find_songs_by_const_without_max_and_new_only_filters() -> None:
     skill = _load_skill()
     songdb = SongDbService()
     ctx = _ctx_with_songdb(songdb)
     mas = _resolved_difficulty("MASTER")
 
-    open_ended = await skill.find_by_const(ctx, min_const=12.0, difficulty=mas)
-    bounded = await skill.find_by_const(ctx, min_const=12.0, max_const=13.0, difficulty=mas)
-    new_only = await skill.find_by_const(ctx, min_const=12.0, difficulty=mas, new_only=True)
+    open_ended = await skill.find_songs(ctx, min_const=12.0, difficulty=mas)
+    bounded = await skill.find_songs(ctx, min_const=12.0, max_const=13.0, difficulty=mas)
+    new_only = await skill.find_songs(ctx, min_const=12.0, difficulty=mas, new_only=True)
 
     assert open_ended.data["count"] > bounded.data["count"]
     assert new_only.data["count"] <= open_ended.data["count"]
@@ -162,11 +162,11 @@ async def test_find_by_const_without_max_and_new_only_filters() -> None:
         assert new_only.data["count"] == 0
 
 
-async def test_find_by_version_without_difficulty_returns_all_available_charts() -> None:
+async def test_find_songs_by_version_without_difficulty_returns_all_available_charts() -> None:
     skill = _load_skill()
     songdb = SongDbService()
 
-    result = await skill.find_by_version(_ctx_with_songdb(songdb), version="LUMINOUS")
+    result = await skill.find_songs(_ctx_with_songdb(songdb), version="LUMINOUS")
 
     assert result.error is None
     assert result.data["count"] > 0
@@ -174,11 +174,11 @@ async def test_find_by_version_without_difficulty_returns_all_available_charts()
     assert result.table is not None and result.table.steps[0] == "LUMINOUS 버전"
 
 
-async def test_find_by_version_with_difficulty_filters_to_one_chart() -> None:
+async def test_find_songs_by_version_with_difficulty_filters_to_one_chart() -> None:
     skill = _load_skill()
     songdb = SongDbService()
 
-    result = await skill.find_by_version(
+    result = await skill.find_songs(
         _ctx_with_songdb(songdb), version="LUMINOUS", difficulty=_resolved_difficulty("MASTER"),
     )
 
