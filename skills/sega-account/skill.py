@@ -63,7 +63,7 @@ _LOGIN_NOTICE = (
     "- ID와 비밀번호는 저장하지 않아. 로그인하는 데 한 번 쓰고 바로 버려.\n"
     "- 로그인에 성공하면 받은 세션 쿠키(clal)만 암호화해서 보관하고, 암호화 키는 서버 안에만 있어.\n"
     "- 이 창에 쓴 내용은 채널에 남지 않고 다른 사람에게 보이지 않아. 나(AI)에게도 전달되지 않아.\n"
-    "- `/로그아웃`하면 보관한 쿠키도 지워."
+    "- 로그아웃하면 보관한 쿠키도 지워."
 )
 
 
@@ -111,7 +111,7 @@ async def start_login(ctx: ToolContext) -> discord.ui.Modal:
     return _LoginModal(ctx=ctx)
 
 
-@tool(slash="계정")
+@tool()
 async def status(ctx: ToolContext) -> ToolResult:
     """로그인 여부, CHUNITHM-NET 닉네임, 마지막 동기화 시각, 기록 공개 설정을 보여준다."""
     login_status = await ctx.chunithm_net.status(ctx.player_id)
@@ -136,7 +136,7 @@ async def status(ctx: ToolContext) -> ToolResult:
     )
 
 
-@tool(slash="기록공개", tags=["sega-linked"], mutates=True)
+@tool(tags=["sega-linked"], mutates=True)
 async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
     """기록(프로필, 베스트, 곡별 기록) 공개 여부를 켜거나 끈다."""
     await ctx.players.set_visibility(ctx.player_id, "records_public", public)
@@ -146,7 +146,7 @@ async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
     )
 
 
-@tool(slash="로그아웃", tags=["sega-linked"], mutates=True, confirm="always")
+@tool(tags=["sega-linked"], mutates=True, confirm="always")
 async def logout(ctx: ToolContext) -> ToolResult:
     """저장된 clal 쿠키를 지운다. 동기화된 기록은 남는다."""
     await ctx.chunithm_net.logout(ctx.player_id, ctx)

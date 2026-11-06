@@ -168,7 +168,7 @@ async def _changes_block(
 # ---------------------------------------------------------------- 도구
 
 
-@tool(slash="세션 목록")
+@tool()
 async def list_sessions(
     ctx: ToolContext,
     player: PlayerRef | None = None,
@@ -253,7 +253,7 @@ async def list_sessions(
     return ToolResult(data={"player_id": target.id, "sessions": items}, table=builder.build())
 
 
-@tool(slash="세션 보기")
+@tool()
 async def get_session(
     ctx: ToolContext,
     player: PlayerRef | None = None,
@@ -337,7 +337,7 @@ async def get_session(
     )
 
 
-@tool(slash="세션 삭제", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def delete_session(
     ctx: ToolContext,
     date: str | None = None,
@@ -499,7 +499,7 @@ async def _open_review(ctx: ToolContext, *, row: aiosqlite.Row) -> bool:
     return session is not None
 
 
-@tool(slash="후기")
+@tool()
 async def review_open(ctx: ToolContext, date: str | None = None, game: GameRef | None = None) -> ToolResult:
     """사용자가 직접 후기를 쓰자고 했을 때만 부른다("후기 남길게", "후기 쓰자"). "세션 보고서/리포트 써 줘·보여 줘"는 후기가 아니라 get_session이다. 세션 후기 대화를 DM으로 연다. date(ISO 날짜, YYYY-MM-DD)를 주면 그 날짜의 세션, 안 주면 가장 최근 세션이다. 이미 남긴 후기가 있으면 그 뒤에 이어서 남긴다."""
     rows = await _all_report_rows(ctx, player_id=ctx.player_id)

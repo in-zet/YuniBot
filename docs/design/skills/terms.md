@@ -82,14 +82,16 @@ services: [terms, players, notify, settings]
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | 태그 | display | confirm |
-| --- | --- | --- | --- | --- | --- | --- |
-| `explain` | 용어의 뜻, 별칭, 값, 출처 | `term` | `/용어 뜻` | 없음 | optional | never |
-| `list` | 분류별 용어 목록 (표 반환) | `category`(선택) | `/용어 목록` | 없음 | 표 | never |
-| `suggest` | 서버 은어 등록(즉시 반영) | `term`, `meaning`, `aliases` | `/용어 제안` | 없음 | optional | never |
-| `review` | 등록 끄기·되돌리기 | 제안 id, 켤지 | `/용어 반영여부` | `admin` | optional | always |
-| `alias_add` | 확인받은 난이도·랭크·램프·작곡가 별칭 저장(전역) | `kind`(난이도·랭크·램프·작곡가), `alias`, `canonical` | `/용어 별칭 추가` | 없음 | optional | never |
-| `alias_remove` | 저장된 별칭 삭제(추가한 사람과 admin만) | `kind`, `alias` | `/용어 별칭 삭제` | 없음 | optional | never |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | 태그 | display | confirm |
+| --- | --- | --- | --- | --- | --- |
+| `explain` | 용어의 뜻, 별칭, 값, 출처 | `term` | 없음 | optional | never |
+| `list` | 분류별 용어 목록 (표 반환) | `category`(선택) | 없음 | 표 | never |
+| `suggest` | 서버 은어 등록(즉시 반영) | `term`, `meaning`, `aliases` | 없음 | optional | never |
+| `review` | 등록 끄기·되돌리기 | 제안 id, 켤지 | `admin` | optional | always |
+| `alias_add` | 확인받은 난이도·랭크·램프·작곡가 별칭 저장(전역) | `kind`(난이도·랭크·램프·작곡가), `alias`, `canonical` | 없음 | optional | never |
+| `alias_remove` | 저장된 별칭 삭제(추가한 사람과 admin만) | `kind`, `alias` | 없음 | optional | never |
 
 ## 이벤트
 

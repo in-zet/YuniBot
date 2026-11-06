@@ -5,7 +5,7 @@ import enum
 import io
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, get_type_hints
 
 import aiosqlite
@@ -245,10 +245,8 @@ def render_result(result: ToolResult) -> dict[str, Any]:
 
     display = result.display
     if display is None and result.table is not None:
-        # 슬래시는 표를 보관하지 않고 바로 그린다(slash_only 칸도 보인다).
-        display = table_display(result.table, stale=result.table_stale, slash=True)
-    if display is not None and display.slash_content is not None:
-        display = replace(display, content=display.slash_content)
+        # 슬래시는 표를 보관하지 않고 바로 그린다.
+        display = table_display(result.table, stale=result.table_stale)
     if display is not None and (display.content or display.embeds or display.view is not None):
         kwargs: dict[str, Any] = {"content": display.content, "embeds": list(display.embeds)}
         if display.view is not None:

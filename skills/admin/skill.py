@@ -12,7 +12,7 @@ _UNTOGGLEABLE_SKILLS: frozenset[str] = frozenset({"admin", "account-link"})
 _MAX_COOLDOWN_SECONDS = 86_400
 
 
-@tool(slash="관리 사용량")
+@tool()
 async def usage(ctx: ToolContext) -> ToolResult:
     """이번 달 LLM 호출 수, 토큰, 추정 비용을 플레이어별로 보여준다."""
     if ctx.guild_id is None:
@@ -34,7 +34,7 @@ async def usage(ctx: ToolContext) -> ToolResult:
     )
 
 
-@tool(slash="관리 스킬")
+@tool()
 async def skills(ctx: ToolContext) -> ToolResult:
     """등록된 스킬, 켜짐 여부, 등록 실패한 스킬과 이유를 보여준다."""
     snapshot = ctx.registry_snapshot
@@ -48,10 +48,10 @@ async def skills(ctx: ToolContext) -> ToolResult:
     )
 
 
-@tool(slash="관리 스킬설정", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def toggle_skill(ctx: ToolContext, skill_name: str, enabled: bool) -> ToolResult:
     """이 서버에서 스킬을 켜거나 끈다."""
-    # admin을 끄면 /관리 전체가 "모르는 명령"이 되어 DB를 직접 고치기 전에는 되돌릴 길이 없다.
+    # admin을 끄면 관리 도구 전체를 못 쓰게 되어 DB를 직접 고치기 전에는 되돌릴 길이 없다.
     # account-link은 연결·해제의 유일한 경로다. 둘 다 끌 수 없다.
     if skill_name in _UNTOGGLEABLE_SKILLS:
         return ToolResult(error=f"'{skill_name}' 스킬은 끌 수 없어")
@@ -69,7 +69,7 @@ async def toggle_skill(ctx: ToolContext, skill_name: str, enabled: bool) -> Tool
     return ToolResult(data={"skill": skill_name, "enabled": enabled}, display=Display(ephemeral=True))
 
 
-@tool(slash="관리 태그부여", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def grant_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResult:
     """부여 태그·스킬 태그를 붙인다. 상태 태그는 거부한다."""
     assert isinstance(target, Player)
@@ -80,7 +80,7 @@ async def grant_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResult
     return ToolResult(data={"player_id": target.id, "granted": tag}, display=Display(ephemeral=True))
 
 
-@tool(slash="관리 태그회수", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def revoke_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResult:
     """부여 태그·스킬 태그를 뗀다. 상태 태그는 거부하고, 마지막 admin은 못 뗀다."""
     assert isinstance(target, Player)
@@ -95,7 +95,7 @@ async def revoke_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResul
     return ToolResult(data={"player_id": target.id, "revoked": tag}, display=Display(ephemeral=True))
 
 
-@tool(slash="관리 상한", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def set_limits(ctx: ToolContext, monthly_cost_cap: float, player_cooldown_seconds: int) -> ToolResult:
     """월 비용 상한과 플레이어별 쿨다운을 저장한다. 멘션 응답에 바로 적용된다."""
     if ctx.guild_id is None:
@@ -119,7 +119,7 @@ async def set_limits(ctx: ToolContext, monthly_cost_cap: float, player_cooldown_
     )
 
 
-@tool(slash="관리 보고채널", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def set_report_channel(ctx: ToolContext, channel: str) -> ToolResult:
     """서버 은어 자동 등록 같은, admin이 사후 검토할 일을 올릴 채널을 정한다. #채널 멘션이나
     채널 id로 준다. 빈 문자열이면 끈다(아무 데도 안 보낸다)."""
@@ -135,7 +135,7 @@ async def set_report_channel(ctx: ToolContext, channel: str) -> ToolResult:
     return ToolResult(data={"channel_id": channel_id or None}, display=Display(ephemeral=True))
 
 
-@tool(slash="관리 곡버전", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def set_song_version(ctx: ToolContext, game: str, version: str = "") -> ToolResult:
     """곡 DB가 지금 가동 중인 버전으로 보는 버전을 덮어쓴다. 신곡 판정에 쓰이고 재시작해도 남는다. maimai만 된다.
     version을 비우면 곡 DB에서 뽑은 값으로 돌아간다."""

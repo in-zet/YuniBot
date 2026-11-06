@@ -47,14 +47,16 @@ settings:
 
 ## 하는 일
 
-| 함수 | 하는 일 | 슬래시 | display | confirm |
-| --- | --- | --- | --- | --- |
-| `usage` | 기간별 LLM 호출 수, 토큰, 추정 비용, 검색 횟수. 플레이어별·스킬별로 나눔 | `/관리 사용량` | required | never |
-| `skills` | 등록된 스킬, 켜짐 여부, 등록 실패한 스킬과 이유 | `/관리 스킬` | required | never |
-| `toggle_skill` | 이 서버에서 스킬 켜기·끄기. `admin`과 `account-link` 자신은 끌 수 없다(끄면 되돌릴 길이 `/관리`나 `/연결` 밖에 없어진다) | `/관리 스킬설정` | optional | always |
-| `grant_tag` / `revoke_tag` | 부여 태그와 스킬 태그 붙이기·떼기. 상태 태그는 여기서 바꿀 수 없음 | `/관리 태그부여`, `/관리 태그회수` | optional | always |
-| `set_limits` | 월 비용 상한, 플레이어별 쿨다운 | `/관리 상한` | optional | always |
-| `set_report_channel` | admin이 사후 검토할 보고를 받을 채널 | `/관리 보고채널` | optional | always |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | display | confirm |
+| --- | --- | --- | --- |
+| `usage` | 기간별 LLM 호출 수, 토큰, 추정 비용, 검색 횟수. 플레이어별·스킬별로 나눔 | required | never |
+| `skills` | 등록된 스킬, 켜짐 여부, 등록 실패한 스킬과 이유 | required | never |
+| `toggle_skill` | 이 서버에서 스킬 켜기·끄기. `admin`과 `account-link` 자신은 끌 수 없다(끄면 되돌릴 길이 `/관리`나 `/연결` 밖에 없어진다) | optional | always |
+| `grant_tag` / `revoke_tag` | 부여 태그와 스킬 태그 붙이기·떼기. 상태 태그는 여기서 바꿀 수 없음 | optional | always |
+| `set_limits` | 월 비용 상한, 플레이어별 쿨다운 | optional | always |
+| `set_report_channel` | admin이 사후 검토할 보고를 받을 채널 | optional | always |
 
 - 모든 응답(위 여섯 함수 + confirm 프롬프트)은 본인에게만 보인다(ephemeral) — 관리 작업 자체가 다른 멤버에게 노출될 이유가 없다.
 

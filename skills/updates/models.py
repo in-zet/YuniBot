@@ -155,7 +155,7 @@ async def latest_song_snapshot(conn: aiosqlite.Connection, *, region: str) -> Sn
 
 
 async def song_snapshot_at_or_before(conn: aiosqlite.Connection, *, region: str, on_date: str) -> SnapshotRow | None:
-    """그 날짜(on_date, ISO 날짜) 당일이나 그 전의 가장 최근 저장본. `/신곡`에 날짜를 줬을 때 쓴다."""
+    """그 날짜(on_date, ISO 날짜) 당일이나 그 전의 가장 최근 저장본. `new_songs`에 날짜를 줬을 때 쓴다."""
     cursor = await conn.execute(
         f"SELECT {_SNAPSHOT_COLUMNS} FROM updates_song_snapshots WHERE region = ? AND date(checked_at) <= date(?) "
         "ORDER BY checked_at DESC LIMIT 1",

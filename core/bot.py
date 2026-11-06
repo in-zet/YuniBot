@@ -25,7 +25,6 @@ from core.db import connect_guarded
 from core.decorators import ScheduleSpec
 from core.events import EventBus, handler_kind
 from core.executor import ToolExecutor
-from core.help_slash import build_help_command
 from core.llm import LlmAdapter
 from core.llm_claude import ClaudeLlmAdapter
 from core.llm_gemini import GeminiLlmAdapter
@@ -734,7 +733,6 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
             registry=registry, settings=settings_service, players=players, game_resolver=resolve_game_name
         )
     )
-    client.tree.add_command(build_help_command(registry=registry, players=players))
 
     return client, registry, executor
 

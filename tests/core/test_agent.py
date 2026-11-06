@@ -671,9 +671,8 @@ _TABLE_SKILL_BODY = (
     "async def make(ctx: ToolContext) -> ToolResult:\n"
     '    """테스트용: 표를 만든다."""\n'
     '    builder = TableBuilder(subject="p1", unit="채보").column("song", "곡").column("score", "점수", "number")\n'
-    '    builder.column("id", "아이디", slash_only=True)\n'
     '    builder.group("A", {"평균": "1007500"})\n'
-    '    builder.row(RowRef("chunithm.chart", "secret-key"), {"song": cell("크로노"), "score": cell(1007500, "1,007,500"), "id": cell("g1")})\n'
+    '    builder.row(RowRef("chunithm.chart", "secret-key"), {"song": cell("크로노"), "score": cell(1007500, "1,007,500")})\n'
     '    builder.group("B")\n'
     '    builder.row(RowRef("chunithm.chart", "k2"), {"song": cell("B곡"), "score": cell(900000, "900,000")})\n'
     '    return ToolResult(data={}, table=builder.summary({"레이팅": "17.04"}).step("테스트").build())\n\n\n'

@@ -31,14 +31,16 @@ listens: [chunithm.song.viewed, chunithm.plan.requested]
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
-| --- | --- | --- | --- | --- | --- |
-| `set` | 메모 작성·수정·덧붙이기 | `song: SongQuery`, `difficulty`: DifficultyRef(선택), `text`, `append: bool`, `public: bool` | `/메모 쓰기` | optional | never |
-| `get` | 내 메모와 공개된 남의 메모 | `song: SongQuery`, `difficulty`: DifficultyRef(선택) | `/메모 보기` | optional | never |
-| `list` | 내 메모 목록 (표 반환) | 없음 | `/메모 목록` | 표 | never |
-| `add_notes` | 곡·채보 표에 "내 메모" 칸 더하기 (새 표 반환) | `table: TableRef`(곡 칸 필요) | 없음 | 표 | never |
-| `delete` | 메모 삭제 | `song: SongQuery`, `difficulty`: DifficultyRef(선택) | `/메모 삭제` | optional | always |
-| `delete_notes` | 작업 표 행에 달린 내 메모 일괄 삭제 | `table: TableRef`(`nonempty=[곡]`) | 없음 | optional | always |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | display | confirm |
+| --- | --- | --- | --- | --- |
+| `set` | 메모 작성·수정·덧붙이기 | `song: SongQuery`, `difficulty`: DifficultyRef(선택), `text`, `append: bool`, `public: bool` | optional | never |
+| `get` | 내 메모와 공개된 남의 메모 | `song: SongQuery`, `difficulty`: DifficultyRef(선택) | optional | never |
+| `list` | 내 메모 목록 (표 반환) | 없음 | 표 | never |
+| `add_notes` | 곡·채보 표에 "내 메모" 칸 더하기 (새 표 반환) | `table: TableRef`(곡 칸 필요) | 표 | never |
+| `delete` | 메모 삭제 | `song: SongQuery`, `difficulty`: DifficultyRef(선택) | optional | always |
+| `delete_notes` | 작업 표 행에 달린 내 메모 일괄 삭제 | `table: TableRef`(`nonempty=[곡]`) | optional | always |
 
 ## 이벤트
 

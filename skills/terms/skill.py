@@ -12,12 +12,12 @@ _T_NAME = "용어"
 _T_CATEGORY = "분류"
 
 
-@tool(slash="용어 뜻")
+@tool()
 async def explain(ctx: ToolContext, term: str, game: GameRef | None = None) -> ToolResult:
     """용어의 뜻, 별칭, 값, 출처를 보여준다."""
     explanation = await ctx.terms.explain(term, ctx)
     if explanation is None:
-        return ToolResult(error=f"'{term}'은 모르는 용어야. `/용어 제안`으로 등록을 제안할 수 있어")
+        return ToolResult(error=f"'{term}'은 모르는 용어야. 뜻을 알려 주면 바로 등록해 둘게")
 
     lines = [f"{explanation.canonical} ({explanation.category_label})"]
     if explanation.value is not None:
@@ -38,7 +38,7 @@ async def explain(ctx: ToolContext, term: str, game: GameRef | None = None) -> T
     )
 
 
-@tool(slash="용어 목록")
+@tool()
 async def list(ctx: ToolContext, category: str | None = None, game: GameRef | None = None) -> ToolResult:
     """분류별 용어 목록을 표로 보여준다. 분류를 안 주면 전부 보여준다."""
     try:
@@ -62,7 +62,7 @@ _REPORT_CHANNEL_SETTING_SKILL = "admin"
 _REPORT_CHANNEL_SETTING_NAME = "보고 채널"
 
 
-@tool(slash="용어 제안", mutates=True)
+@tool(mutates=True)
 async def suggest(ctx: ToolContext, term: str, meaning: str, aliases: str) -> ToolResult:
     """서버 은어를 등록한다. 승인을 기다리지 않고 바로 반영되고, admin의 보고 채널이
     설정돼 있으면 거기로 알린다. 부적절하면 admin이 나중에 끌 수 있다."""
@@ -92,7 +92,7 @@ async def suggest(ctx: ToolContext, term: str, meaning: str, aliases: str) -> To
 _ALIAS_KIND_NAMES = "난이도, 랭크, 램프, 작곡가"
 
 
-@tool(slash="용어 별칭 추가", mutates=True)
+@tool(mutates=True)
 async def alias_add(
     ctx: ToolContext, kind: str, alias: str, canonical: str, game: GameRef | None = None
 ) -> ToolResult:
@@ -116,7 +116,7 @@ async def alias_add(
     )
 
 
-@tool(slash="용어 별칭 삭제", mutates=True)
+@tool(mutates=True)
 async def alias_remove(ctx: ToolContext, kind: str, alias: str, game: GameRef | None = None) -> ToolResult:
     """저장된 난이도·랭크·램프·작곡가 별칭을 지운다. 추가한 사람이나 admin만 할 수 있다."""
     if kind not in ALIAS_KINDS:
@@ -132,7 +132,7 @@ async def alias_remove(ctx: ToolContext, kind: str, alias: str, game: GameRef | 
     )
 
 
-@tool(slash="용어 반영여부", tags=["admin"], mutates=True, confirm="always")
+@tool(tags=["admin"], mutates=True, confirm="always")
 async def review(ctx: ToolContext, proposal_id: str, approve: bool) -> ToolResult:
     """등록된 은어를 끄거나(approve=False, 철회) 다시 켠다(approve=True, 되돌리기)."""
     proposal = await ctx.terms.review(proposal_id, approve=approve, reviewed_by=ctx.player_id)

@@ -54,9 +54,9 @@ listens: [sega.login.expired]
 
 | 함수 | 하는 일 | 인자 | 슬래시 | 태그 | display | confirm |
 | --- | --- | --- | --- | --- | --- | --- |
-| `status` | 로그인 여부, CHUNITHM-NET 닉네임, 마지막 동기화 시각, 공개 설정 | 없음 | `/계정` | 없음 | optional | never |
-| `set_privacy` | 기록 공개 설정을 켜거나 끈다 | `public: bool` | `/기록공개` | `sega-linked` | optional | never |
-| `logout` | 쿠키 삭제 | 없음 | `/로그아웃` | `sega-linked` | required | always |
+| `status` | 로그인 여부, CHUNITHM-NET 닉네임, 마지막 동기화 시각, 공개 설정 | 없음 | 없음 | 없음 | optional | never |
+| `set_privacy` | 기록 공개 설정을 켜거나 끈다 | `public: bool` | 없음 | `sega-linked` | optional | never |
+| `logout` | 쿠키 삭제 | 없음 | 없음 | `sega-linked` | required | always |
 
 `/로그인`은 입력창을 여는 슬래시 전용 명령이고 도구가 아니다.
 

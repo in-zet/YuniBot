@@ -34,7 +34,7 @@ from services.common.notify import NotifyService
 from services.common.players import DiscordAccount, Player
 
 # DM(guild_id=None)의 쿨다운/사용량 기록에 guild_id 대신 쓰는 고정 스코프 값. 월 상한만
-# 서버별 설정(/관리 상한)이라 DM에는 적용할 상한 자체가 없다 — 쿨다운/사용량 기록은
+# 서버별 설정(admin의 set_limits)이라 DM에는 적용할 상한 자체가 없다 — 쿨다운/사용량 기록은
 # guild/DM을 가리지 않고 걸어야 하므로 이 문자열로 "서버가 아닌 대화"를 표시한다.
 _DM_SCOPE = "dm"
 
@@ -311,7 +311,7 @@ class MentionEntry:
             return
 
         # 쿨다운은 guild/DM을 가리지 않고 건다 — DM에는 서버 설정이 없으니 admin 스킬의
-        # "플레이어 쿨다운" 기본값(10초)을 그대로 쓴다. 월 상한은 서버별 설정(/관리 상한)뿐이라
+        # "플레이어 쿨다운" 기본값(10초)을 그대로 쓴다. 월 상한은 서버별 설정(admin의 set_limits)뿐이라
         # DM에는 적용할 상한이 없다 — guild_id가 있을 때만 검사한다.
         cooldown_scope = guild_id if guild_id is not None else _DM_SCOPE
         if guild_id is not None:

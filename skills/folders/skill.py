@@ -101,7 +101,7 @@ def _display_names(names: list[str]) -> str:
 # ---------------------------------------------------------------- 폴더 자체
 
 
-@tool(slash="폴더 생성", mutates=True)
+@tool(mutates=True)
 async def create_folder(ctx: ToolContext, name: str, game: GameRef | None = None) -> ToolResult:
     """새 빈 폴더를 만든다. 이미 있는 이름(대소문자 구분 안 함)이면 에러다. 이름을 사용자가
     직접 말하지 않았으면, 뒤이어 어떤 조건으로 채울지(상수·레벨·버전 등)를 보고 그에 맞는
@@ -125,7 +125,7 @@ async def create_folder(ctx: ToolContext, name: str, game: GameRef | None = None
     )
 
 
-@tool(slash="폴더 삭제", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def delete_folder(ctx: ToolContext, name: str, game: GameRef | None = None) -> ToolResult:
     """폴더와 그 안의 채보 목록·메모를 통째로 지운다. 되돌릴 수 없다."""
     assert ctx.db is not None
@@ -142,7 +142,7 @@ async def delete_folder(ctx: ToolContext, name: str, game: GameRef | None = None
     )
 
 
-@tool(slash="폴더 이름변경", mutates=True)
+@tool(mutates=True)
 async def rename_folder(ctx: ToolContext, name: str, new_name: str, game: GameRef | None = None) -> ToolResult:
     """폴더 이름을 바꾼다. 새 이름이 이미 다른 폴더가 쓰고 있으면(대소문자 구분 안 함) 에러다."""
     assert ctx.db is not None
@@ -164,7 +164,7 @@ async def rename_folder(ctx: ToolContext, name: str, new_name: str, game: GameRe
     )
 
 
-@tool(slash="폴더 목록")
+@tool()
 async def list_folders(ctx: ToolContext, game: GameRef | None = None) -> ToolResult:
     """내 폴더 목록(이름, 채보 수, 메모 유무)을 표로 보여준다."""
     assert ctx.db is not None
@@ -192,7 +192,7 @@ async def list_folders(ctx: ToolContext, game: GameRef | None = None) -> ToolRes
     return ToolResult(data={"folders": items}, table=builder.build())
 
 
-@tool(slash="폴더 보기")
+@tool()
 async def show_folder(ctx: ToolContext, name: str, game: GameRef | None = None) -> ToolResult:
     """폴더의 메모와 안에 든 채보 전체(곡, 난이도, 상수)를 표로 돌려준다."""
     assert ctx.db is not None
@@ -291,7 +291,7 @@ async def save_table(
 # ---------------------------------------------------------------- 채보 한 개씩
 
 
-@tool(slash="폴더 채보추가", mutates=True)
+@tool(mutates=True)
 async def add_chart(ctx: ToolContext, name: str, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
     """폴더에 채보 하나를 추가한다. 이미 있으면 아무것도 안 하고 그 사실만 알려준다."""
     assert isinstance(chart, ResolvedChart)
@@ -323,7 +323,7 @@ async def add_chart(ctx: ToolContext, name: str, chart: ChartRef, game: GameRef 
     )
 
 
-@tool(slash="폴더 채보삭제", mutates=True)
+@tool(mutates=True)
 async def remove_chart(ctx: ToolContext, name: str, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
     """폴더에서 채보 하나를 뺀다. 없으면 아무것도 안 하고 그 사실만 알려준다."""
     assert isinstance(chart, ResolvedChart)
@@ -477,7 +477,7 @@ def _notes_text(notes: list[str]) -> str:
 # ---------------------------------------------------------------- 메모
 
 
-@tool(slash="폴더 메모", mutates=True)
+@tool(mutates=True)
 async def set_note(
     ctx: ToolContext, name: str, text: str, append: bool = False, game: GameRef | None = None
 ) -> ToolResult:

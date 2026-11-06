@@ -44,14 +44,16 @@ tags: [sega-linked]
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
-| --- | --- | --- | --- | --- | --- |
-| `current_settings` | 지금 계정의 인게임 설정을 바로 읽어 보여줌(저장 안 함) | 없음 | `/현재설정` | required | never |
-| `change_settings` | 말한 항목만 바꾸고 전체 반영 결과를 보여줌 | 다섯 항목 전부 `str \| None = None` | `/게임설정 변경` | required | never |
-| `list_favorites` | 즐겨찾기 곡 목록(제목) (표 반환) | 없음 | `/즐겨찾기 목록` | 표 | never |
-| `add_favorite` | 즐겨찾기에 곡 추가 | `song: SongQuery` | `/즐겨찾기 추가` | optional | never |
-| `remove_favorite` | 즐겨찾기에서 곡 삭제 | `song: SongQuery` | `/즐겨찾기 삭제` | optional | never |
-| `add_favorites` | 작업 표의 곡을 즐겨찾기에 일괄 추가(이미 있는 곡은 뺌) | `table: TableRef`(`nonempty=[곡]`) | 없음 | optional | bulk |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | display | confirm |
+| --- | --- | --- | --- | --- |
+| `current_settings` | 지금 계정의 인게임 설정을 바로 읽어 보여줌(저장 안 함) | 없음 | required | never |
+| `change_settings` | 말한 항목만 바꾸고 전체 반영 결과를 보여줌 | 다섯 항목 전부 `str \| None = None` | required | never |
+| `list_favorites` | 즐겨찾기 곡 목록(제목) (표 반환) | 없음 | 표 | never |
+| `add_favorite` | 즐겨찾기에 곡 추가 | `song: SongQuery` | optional | never |
+| `remove_favorite` | 즐겨찾기에서 곡 삭제 | `song: SongQuery` | optional | never |
+| `add_favorites` | 작업 표의 곡을 즐겨찾기에 일괄 추가(이미 있는 곡은 뺌) | `table: TableRef`(`nonempty=[곡]`) | optional | bulk |
 
 모든 도구가 `cost="network"`(CHUNITHM-NET을 직접 부른다), `mutates=True`는 `change_settings`·`add_favorite`·`remove_favorite`·`add_favorites`에만 — 셋 다 요청한 본인 계정만 바꾼다(`PlayerRef` 인자 없이 `ctx.player_id`로 고정).
 

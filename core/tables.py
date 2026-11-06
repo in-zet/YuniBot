@@ -28,8 +28,6 @@ class Column:
     name: str
     label: str
     value_type: ValueType = "text"
-    # 슬래시 출력에서만 보이는 칸(다음 슬래시 명령에 타이핑할 id 등).
-    slash_only: bool = False
     # 글자 출력에서는 숨기지만 거르기·정렬·모델 요약에는 그대로 쓰는 칸.
     hidden_in_text: bool = False
     # 기본 출력에서 칸 이름 없이 값만 쓰는 칸(곡·난이도).
@@ -568,14 +566,8 @@ def _show_columns(table: WorkTable, labels: Sequence[str]) -> WorkTable:
         raise TableError("보일 칸을 하나는 골라야 한다")
     shown: set[str] = set()
     for label in labels:
-        column = _column_by_label(table, label)
-        if column.slash_only:
-            raise TableError(f"그 표에 '{label}' 칸이 없다")  # 모델에게는 슬래시 전용 칸이 보이지 않는다
-        shown.add(column.name)
-    columns = tuple(
-        column if column.slash_only else replace(column, hidden_in_text=column.name not in shown)
-        for column in table.columns
-    )
+        shown.add(_column_by_label(table, label).name)
+    columns = tuple(replace(column, hidden_in_text=column.name not in shown) for column in table.columns)
     return replace(table, columns=columns, steps=(*table.steps, "·".join(labels) + "만 보임"))
 
 
@@ -590,12 +582,11 @@ def peek_rows(table: WorkTable, *, limit: int = 10, **options: Any) -> dict[str,
         options["group_by"] = ""  # 훑어보기는 묶음과 무관하게 전체에서 정렬한다
     groups, _steps = _select_numbered(table, **options)
     flat = [item for _t, rs in groups for item in rs]
-    visible = [column for column in table.columns if not column.slash_only]
     return {
         "table": table.id,
         "matched": len(flat),
         "rows": [
-            {"number": number, "values": {column.label: row.cell(column.name).raw for column in visible}}
+            {"number": number, "values": {column.label: row.cell(column.name).raw for column in table.columns}}
             for number, row in flat[:limit]
         ],
     }
@@ -741,12 +732,12 @@ def _apply_needs(table: WorkTable, needs: TableNeeds, hints: Sequence[PartialRow
 
 
 def summarize_table(table: WorkTable, *, stale: bool = False) -> dict[str, Any]:
-    """모델이 표에 대해 받는 전부. 행 값·가리키는 것의 키·`subject`·`slash_only` 칸은 넣지 않는다."""
+    """모델이 표에 대해 받는 전부. 행 값·가리키는 것의 키·`subject`는 넣지 않는다."""
     summary: dict[str, Any] = {
         "table": table.id,
         "rows": table.row_count,
         "unit": table.unit,
-        "columns": [column.label for column in table.columns if not column.slash_only],
+        "columns": [column.label for column in table.columns],
     }
     if any(group.title is not None for group in table.groups):
         groups: list[dict[str, Any]] = []
@@ -772,18 +763,14 @@ _FORMAT_SLOT_RE = re.compile(r"\{([^{}]+)\}")
 _FILENAME_KEEP_RE = re.compile(r"[^\w.\-]+")
 
 
-def visible_columns(table: WorkTable, *, slash: bool = False) -> list[Column]:
+def visible_columns(table: WorkTable) -> list[Column]:
     """글자 출력에 보이는 칸. 그림 표도 같은 기준으로 그릴 칸을 정한다."""
-    return [
-        column
-        for column in table.columns
-        if not column.hidden_in_text and (slash or not column.slash_only)
-    ]
+    return [column for column in table.columns if not column.hidden_in_text]
 
 
-def row_text(table: WorkTable, row: Row, *, slash: bool = False) -> str:
+def row_text(table: WorkTable, row: Row) -> str:
     """행 한 줄의 글. 보일 칸만 골라, 칸이 모두 찬 첫 한 줄 서식을 쓰고, 없으면 기본 출력(칸 이름 + 값)으로 쓴다."""
-    visible = visible_columns(table, slash=slash)
+    visible = visible_columns(table)
     by_label = {column.label: column for column in visible}
     used: set[str] = set()
     line: str | None = None
@@ -821,7 +808,7 @@ def _header_lines(table: WorkTable, *, stale: bool) -> list[str]:
     return lines
 
 
-def _body_lines(table: WorkTable, *, slash: bool) -> list[str]:
+def _body_lines(table: WorkTable) -> list[str]:
     lines: list[str] = []
     number = 0
     bare_single = len(table.groups) == 1 and table.groups[0].title is None
@@ -833,7 +820,7 @@ def _body_lines(table: WorkTable, *, slash: bool) -> list[str]:
             lines.append(f"── {' · '.join(rule)} ──")
         for row in group.rows:
             number += 1
-            lines.append(f"{number}. {row_text(table, row, slash=slash)}")
+            lines.append(f"{number}. {row_text(table, row)}")
     return lines
 
 
@@ -843,11 +830,11 @@ def table_file_name(table: WorkTable) -> str:
     return f"{stem or 'table'}.txt"
 
 
-def render_text(table: WorkTable, *, stale: bool = False, slash: bool = False) -> RenderedTable:
+def render_text(table: WorkTable, *, stale: bool = False) -> RenderedTable:
     """표를 글자로 그린다. 머리말(옛 값 표시·steps·요약) 뒤에 묶음마다 표지 줄과 `번호. 행 글`이 온다.
     행이 `TABLE_FILE_ROWS`를 넘으면 머리말만 `content`에 두고 전체를 .txt 파일로 돌려준다."""
     header = _header_lines(table, stale=stale)
-    body = _body_lines(table, slash=slash)
+    body = _body_lines(table)
     if table.row_count <= TABLE_FILE_ROWS:
         return RenderedTable("\n".join([*header, *body]))
     name = table_file_name(table)
@@ -859,7 +846,7 @@ def describe_table(table: WorkTable, *, stale: bool = False) -> str:
     """살아 있는 표를 프롬프트에 한 줄로 알린다. 행 값은 넣지 않는다."""
     flag = f" {STALE_NOTE}" if stale else ""
     process = " → ".join(table.steps) if table.steps else "과정 없음"
-    labels = "·".join(column.label for column in table.columns if not column.slash_only)
+    labels = "·".join(column.label for column in table.columns)
     return f"[살아 있는 표] {table.id}{flag} — {process} ({table.row_count}{table.unit}, 칸: {labels})"
 
 
@@ -894,7 +881,6 @@ class TableBuilder:
         label: str | None = None,
         value_type: ValueType = "text",
         *,
-        slash_only: bool = False,
         hidden_in_text: bool = False,
         bare: bool = False,
         order: Sequence[str] = (),
@@ -912,7 +898,6 @@ class TableBuilder:
                 name=name,
                 label=label,
                 value_type=value_type,
-                slash_only=slash_only,
                 hidden_in_text=hidden_in_text,
                 bare=bare,
                 order=tuple(order),

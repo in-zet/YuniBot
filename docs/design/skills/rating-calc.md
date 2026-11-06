@@ -32,11 +32,13 @@ services: [terms]
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | 태그 | display | confirm |
-| --- | --- | --- | --- | --- | --- | --- |
-| `song_rating` | 상수와 점수로 곡 레이팅 | `const`, `score: ScoreRef`, `game: GameRef`(선택) | `/레이팅 계산` | 없음 | optional | never |
-| `find_const` | 곡 레이팅과 점수로 상수 거꾸로 찾기 | `rating`, `score: ScoreRef`, `game: GameRef`(선택) | `/레이팅 상수역산` | 없음 | optional | never |
-| `needed_score` | 목표 곡 레이팅에 필요한 최소 점수 | `const`, `rating`, `game: GameRef`(선택) | `/레이팅 필요점수` | 없음 | optional | never |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | 태그 | display | confirm |
+| --- | --- | --- | --- | --- | --- |
+| `song_rating` | 상수와 점수로 곡 레이팅 | `const`, `score: ScoreRef`, `game: GameRef`(선택) | 없음 | optional | never |
+| `find_const` | 곡 레이팅과 점수로 상수 거꾸로 찾기 | `rating`, `score: ScoreRef`, `game: GameRef`(선택) | 없음 | optional | never |
+| `needed_score` | 목표 곡 레이팅에 필요한 최소 점수 | `const`, `rating`, `game: GameRef`(선택) | 없음 | optional | never |
 
 `data`에는 계산한 값을 문자열(곡 레이팅, 점수 글자)과 정수(점수)로 넣는다. 유니의 말 속 숫자는 이 값과 같아야 한다.
 

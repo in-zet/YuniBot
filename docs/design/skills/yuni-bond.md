@@ -82,13 +82,15 @@ emits: [chunithm.plan.requested]
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
-| --- | --- | --- | --- | --- | --- |
-| `history` | 함께 넘은 이정표 보기 (표 반환) | `song: SongQuery`(선택), 종류(선택) | `/이정표` | 표 | never |
-| `plan` | 오늘 플레이할 곡 추리기 (표 반환) | `count`(기본 5), `arcade: ArcadeRef`(선택) | `/오늘계획` | 표 | never |
-| `promise_set` | 약속 저장 | `text`, `song: SongQuery`(선택) | 없음 | optional | never |
-| `promise_list` | 열린 약속 보기 (표 반환) | 없음 | `/약속` | 표 | never |
-| `close_promises` | 약속 닫기(여러 건 가능) | `table`(`yuni-bond.promise` 행), `kept` | 없음 | optional | never |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | display | confirm |
+| --- | --- | --- | --- | --- |
+| `history` | 함께 넘은 이정표 보기 (표 반환) | `song: SongQuery`(선택), 종류(선택) | 표 | never |
+| `plan` | 오늘 플레이할 곡 추리기 (표 반환) | `count`(기본 5), `arcade: ArcadeRef`(선택) | 표 | never |
+| `promise_set` | 약속 저장 | `text`, `song: SongQuery`(선택) | optional | never |
+| `promise_list` | 열린 약속 보기 (표 반환) | 없음 | 표 | never |
+| `close_promises` | 약속 닫기(여러 건 가능) | `table`(`yuni-bond.promise` 행), `kept` | optional | never |
 
 ## 이벤트
 

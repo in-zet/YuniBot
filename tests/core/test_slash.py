@@ -324,13 +324,6 @@ def _practice_command(tree: discord.app_commands.CommandTree[Any], sub: str) -> 
     return command
 
 
-def test_render_result_prefers_slash_content_over_content() -> None:
-    result = ToolResult(display=Display(content="멘션용", slash_content="슬래시용\nid abc"))
-
-    assert render_result(result)["content"] == "슬래시용\nid abc"
-    assert result.display is not None and result.display.content == "멘션용"  # 원본은 그대로
-
-
 def test_render_result_without_display_is_never_empty() -> None:
     # 디스코드는 content도, embeds도, view도 없는 응답을 거부한다("This interaction failed").
     kwargs = render_result(ToolResult(data={"foo": "bar"}))
@@ -351,8 +344,8 @@ def test_render_result_passes_display_through() -> None:
     assert "view" not in kwargs
 
 
-def test_render_result_draws_a_table_with_slash_only_columns_and_no_storing() -> None:
-    builder = TableBuilder(unit="개").column("name", "이름", bare=True).column("id", "아이디", slash_only=True)
+def test_render_result_draws_a_table_without_storing() -> None:
+    builder = TableBuilder(unit="개").column("name", "이름", bare=True).column("id", "아이디")
     builder.row(RowRef("k", "1"), {"name": cell("목표"), "id": cell("a2")})
     kwargs = render_result(ToolResult(table=builder.build()))
 
@@ -724,48 +717,6 @@ async def test_practice_fixture_with_only_players_gets_no_db_or_player_data(
     assert ctx.registry_snapshot is None
 
 
-async def test_real_admin_skill_receives_registry_snapshot_through_dispatch() -> None:
-    """admin은 manifest에 registry_snapshot을 선언했으니 /관리 스킬이 실제 스냅샷을 받는다."""
-    from core.registry_snapshot import build_snapshot
-    from services.common.settings import SettingsService
-
-    conn = await aiosqlite.connect(":memory:")
-    await conn.executescript(_PLAYERS_MIGRATION + Path("migrations/core/003_settings.sql").read_text())
-    await conn.commit()
-    players = PlayersService(conn)
-    registry = SkillRegistry([Path("skills/admin")])
-    registry.load()
-    assert registry.failures() == {}
-    executor = ToolExecutor(
-        resolvers=ResolverRegistry(), tag_provider=players, tag_definitions=registry.tag_definitions(),
-        services={"players": players, "settings": SettingsService(conn)},
-    )
-    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(
-        discord.Client(intents=discord.Intents.none())
-    )
-    attach_to_tree(
-        tree, build_slash_plan(registry.tool_specs()), executor=executor, db=conn,
-        registry_snapshot=build_snapshot(registry),
-    )
-    player = await players.create_player()
-    await players.link_account(player.id, "1")
-    await players.grant_tag(player.id, "admin", source="test")
-
-    group = tree.get_command("관리")
-    assert isinstance(group, discord.app_commands.Group)
-    command = group.get_command("스킬")
-    assert isinstance(command, discord.app_commands.Command)
-    interaction = _fake(1)
-    try:
-        await command.callback(interaction)  # pyright: ignore[reportCallIssue]
-    finally:
-        await conn.close()
-
-    [call] = interaction.response.calls
-    assert call.get("ephemeral") is True  # 관리 계열은 전부 본인에게만 보인다
-    assert "admin" in call["content"]
-
-
 async def test_modal_returning_slash_only_opens_modal_without_deferring() -> None:
     conn = await aiosqlite.connect(":memory:")
     await conn.executescript(_PLAYERS_MIGRATION)
@@ -827,3 +778,11 @@ async def test_modal_command_checks_the_tool_tags_and_hides_the_modal_on_denial(
         assert call["content"] == "모르는 명령이야"
     finally:
         await conn.close()
+
+
+def test_real_skills_open_only_the_essential_slash_commands() -> None:
+    # 2026-11-06 사용자 결정: 슬래시는 로그인·계정 연결·동기화만(코어의 /설정은 따로 붙는다). 나머지는 멘션으로만 쓴다.
+    registry = SkillRegistry([Path("skills")])
+    registry.load()
+    paths = {" ".join(entry.path) for entry in build_slash_plan(registry.tool_specs()).entries}
+    assert paths == {"로그인", "연결 시작", "연결 참여", "연결 목록", "연결 대표", "연결 해제", "동기화"}

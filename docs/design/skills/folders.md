@@ -60,19 +60,21 @@ goals와 이 스킬이 그대로 공유한다(새로 안 만든다).
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
-| --- | --- | --- | --- | --- | --- |
-| `create_folder` | 빈 폴더 생성 | `name: str` | `/폴더 생성` | optional | never |
-| `delete_folder` | 폴더+메모+채보 통째로 삭제 | `name: str` | `/폴더 삭제` | optional | always |
-| `rename_folder` | 폴더 이름 변경 | `name, new_name: str` | `/폴더 이름변경` | optional | never |
-| `list_folders` | 내 폴더 목록(이름·채보 수·메모 유무) (표 반환) | 없음 | `/폴더 목록` | 표 | never |
-| `show_folder` | 폴더 안의 채보 전체 (표 반환) | `name: str` | `/폴더 보기` | 표 | never |
-| `add_chart` | 채보 한 개 추가 | `name: str, chart: ChartRef` | `/폴더 채보추가` | optional | never |
-| `remove_chart` | 채보 한 개 삭제 | `name: str, chart: ChartRef` | `/폴더 채보삭제` | optional | never |
-| `add_to_folder` | 이미 있는 폴더에 작업 표의 채보 행을 일괄 추가(이미 든 것은 뺌) | `name: str, table: TableRef` | 없음 | required | bulk |
-| `remove_from_folder` | 폴더에서 작업 표의 채보 행 중 든 것만 일괄 삭제 | `name: str, table: TableRef` | 없음 | required | bulk |
-| `save_table` | 작업 표의 채보 행(곡·난이도가 찬 행)으로 **새 폴더** 만들기. 같은 이름이 있으면 에러, 칸은 저장하지 않음 | `table: TableRef`, `name: str` | 없음 | required | bulk |
-| `set_note` | 폴더 메모 설정/덧붙이기/지우기(빈 문자열) | `name: str, text: str, append=False` | `/폴더 메모` | optional | never |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | display | confirm |
+| --- | --- | --- | --- | --- |
+| `create_folder` | 빈 폴더 생성 | `name: str` | optional | never |
+| `delete_folder` | 폴더+메모+채보 통째로 삭제 | `name: str` | optional | always |
+| `rename_folder` | 폴더 이름 변경 | `name, new_name: str` | optional | never |
+| `list_folders` | 내 폴더 목록(이름·채보 수·메모 유무) (표 반환) | 없음 | 표 | never |
+| `show_folder` | 폴더 안의 채보 전체 (표 반환) | `name: str` | 표 | never |
+| `add_chart` | 채보 한 개 추가 | `name: str, chart: ChartRef` | optional | never |
+| `remove_chart` | 채보 한 개 삭제 | `name: str, chart: ChartRef` | optional | never |
+| `add_to_folder` | 이미 있는 폴더에 작업 표의 채보 행을 일괄 추가(이미 든 것은 뺌) | `name: str, table: TableRef` | required | bulk |
+| `remove_from_folder` | 폴더에서 작업 표의 채보 행 중 든 것만 일괄 삭제 | `name: str, table: TableRef` | required | bulk |
+| `save_table` | 작업 표의 채보 행(곡·난이도가 찬 행)으로 **새 폴더** 만들기. 같은 이름이 있으면 에러, 칸은 저장하지 않음 | `table: TableRef`, `name: str` | required | bulk |
+| `set_note` | 폴더 메모 설정/덧붙이기/지우기(빈 문자열) | `name: str, text: str, append=False` | optional | never |
 
 `show_folder`의 표: 가리키는 것 `chunithm.chart`, 칸 곡·난이도·상수, 표 요약 `폴더`·`메모`(있을 때), `subject`는 본인. 채보가 없는 폴더는 표 없이 안내 문구만 낸다. `save_table`은 `mutates=True`라 "동기화 전 값" 표를 받지 않고(실행기가 막는다), `TableRef`를 받으니 슬래시가 없다. 이미 있는 폴더에 표를 더하는 도구는 Part 6(데이터 바꾸기)에서 한다.
 

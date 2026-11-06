@@ -26,7 +26,7 @@ _GAME = "chunithm"
 _SETTINGS_ENTRY = "arcade.settings_entry"
 _H_DATE = "날짜"
 _REPORT_ORDER = 50
-_NO_ARCADE_HINT = "오락실을 말 안 했네. 다음 동기화 때 같이 말하거나 /오락실 방문으로 알려주면 설정을 저장해 둘게."
+_NO_ARCADE_HINT = "오락실을 말 안 했네. 다음 동기화 때 같이 말하거나 어디서 쳤는지 말해 주면 설정을 저장해 둘게."
 
 
 # ---------------------------------------------------------------- 공통 도우미
@@ -109,7 +109,7 @@ async def _apply_visit(ctx: ToolContext, arcade: Arcade, *, play_date: str | Non
 # ---------------------------------------------------------------- 도구
 
 
-@tool(slash="오락실 설정")
+@tool()
 async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     """그 오락실에서 마지막으로 저장한 설정과, 지금 계정 설정(가장 최근에 읽은 값)의 차이를 보여준다."""
     assert isinstance(arcade, Arcade)
@@ -140,7 +140,7 @@ async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     )
 
 
-@tool(slash="오락실 기록")
+@tool()
 async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     """그 오락실에서 저장된 설정 변화를 날짜순 표로 보여준다."""
     assert isinstance(arcade, Arcade)
@@ -171,7 +171,7 @@ async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     return ToolResult(data={"arcade": arcade.name, "entries": entries}, table=builder.build())
 
 
-@tool(slash="오락실 방문", tags=["sega-linked"], cost="network", mutates=True)
+@tool(tags=["sega-linked"], cost="network", mutates=True)
 async def record_visit(ctx: ToolContext, arcade: ArcadeRef, date: str | None = None) -> ToolResult:
     """오락실 방문을 남긴다("오늘 겜플에서 했어"처럼 어디서 쳤는지 말했을 때). 이름이 등록돼 있지 않으면 비슷한 이름을 짐작해 맞는지 사용자에게 먼저 묻고, 확인받으면 register_arcade로 등록한 뒤 다시 부른다. date(ISO 날짜)를 안 주면 가장 최근 세션으로 본다 — 그때만
     CHUNITHM-NET의 지금 설정을 같이 읽어 저장한다. 지난 날짜는 그날 설정을 알 수 없어
@@ -197,7 +197,7 @@ async def record_visit(ctx: ToolContext, arcade: ArcadeRef, date: str | None = N
     )
 
 
-@tool(slash="오락실 등록", mutates=True)
+@tool(mutates=True)
 async def register_arcade(ctx: ToolContext, name: str, alias: str | None = None) -> ToolResult:
     """오락실 이름이나 별칭이 등록돼 있지 않을 때, 사용자가 "그 오락실이 맞다"(또는 "새 오락실이다")고 확인한 뒤에만 부른다.
     name은 정식 이름(이미 등록된 오락실이면 그 이름 그대로), alias는 사용자가 말한 줄임말이다(정식 이름과 같으면 비운다).

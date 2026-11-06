@@ -546,7 +546,7 @@ async def test_recent_rows_keep_the_old_line_shape(skill: ModuleType) -> None:
     f = _ctx(net=_FakeChunithmNet([_recent("곡0", 1_007_500)] * 25))
     result = await skill.recent(f.ctx, count=25)
     assert result.table is not None
-    lines = render_text(result.table, slash=True)
+    lines = render_text(result.table)
     assert lines.file is not None
     body = lines.file[1].decode()
     assert "21. 곡0 MAS  1,007,500 SSS" in body and "21. 곡0 MAS  1,007,500 SSS  JC" not in body
@@ -717,15 +717,6 @@ async def test_analyze_with_table_errors_when_no_chart_has_a_record(skill: Modul
     result = await skill.analyze(f.ctx, table=_chart_table(("기록 없는 곡", "MAS")))
 
     assert result.table is None and result.error is not None and "기록" in result.error
-
-
-async def test_analyze_slash_entry_has_no_table_argument(skill: ModuleType) -> None:
-    f = _ctx(records=_FakeRecords(pbs={"me": _analyze_rows()}))
-
-    result = await skill.analyze_slash(f.ctx)
-
-    assert result.table is not None and result.table.unit == "상수대"
-    assert skill.analyze_slash.__yuni_slash_only__.slash == "분석"
 
 
 async def test_analyze_empty_range_is_a_message(skill: ModuleType) -> None:

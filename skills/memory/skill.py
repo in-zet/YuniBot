@@ -22,7 +22,7 @@ def _render(state: MemoryState) -> str:
     return f"{body}\n\n자동 저장: {'켜짐' if state.auto_save else '꺼짐'}"
 
 
-@tool(slash="메모리 보기")
+@tool()
 async def view(ctx: ToolContext) -> ToolResult:
     """유니가 이 플레이어에 대해 기억하는 내용(호칭 포함) 전문을 본인에게만 보낸다. 채널에는 보이지 않는다."""
     state = await ctx.memory.get_state(ctx.player_id)
@@ -35,7 +35,7 @@ async def view(ctx: ToolContext) -> ToolResult:
     )
 
 
-@tool(slash="메모리 지우기", mutates=True, confirm="bulk")
+@tool(mutates=True, confirm="bulk")
 async def forget(ctx: ToolContext, what: str | None = None, *, dry_run: bool = False) -> ToolResult:
     """기억한 내용에서 what에 맞는 줄을 지운다. what은 지울 줄의 내용이고, 호칭은 "호칭"이라고 준다. what을 비우면
     기억한 내용과 호칭을 전부 지운다. 2개 이상 지울 때는 실행기가 지울 개수를 보여 주고 확인을 받은 뒤에 지운다.
@@ -65,7 +65,7 @@ async def forget(ctx: ToolContext, what: str | None = None, *, dry_run: bool = F
     )
 
 
-@tool(slash="메모리 자동저장", mutates=True)
+@tool(mutates=True)
 async def set_auto(ctx: ToolContext, on: bool) -> ToolResult:
     """대화에서 자동으로 기억하는 것을 켜거나(on=True) 끈다. 꺼도 이미 기억한 내용은 남고 계속 쓰인다."""
     await ctx.memory.set_auto_save(ctx.player_id, on)

@@ -46,7 +46,7 @@ def _rating_text(profile: GameProfile, rating: Decimal) -> str:
     return song_rating_text(rating, places=profile.song_rating_places)
 
 
-@tool(slash="레이팅 계산")
+@tool()
 async def song_rating(ctx: ToolContext, const: float, score: ScoreRef, game: GameRef | None = None) -> ToolResult:
     """상수와 점수(또는 랭크 이름 — 그 랭크의 기준 점수)로 곡 레이팅을 계산한다. 곡 이름은 모른다."""
     assert isinstance(score, int)
@@ -64,7 +64,7 @@ async def song_rating(ctx: ToolContext, const: float, score: ScoreRef, game: Gam
     )
 
 
-@tool(slash="레이팅 상수역산")
+@tool()
 async def find_const(ctx: ToolContext, rating: float, score: ScoreRef, game: GameRef | None = None) -> ToolResult:
     """곡 레이팅과 점수(또는 랭크 이름)로 그 곡 레이팅이 나오는 상수를 거꾸로 찾는다. 정확히 맞는 상수가 없으면
     바로 아래·위 상수와 그 곡 레이팅을 돌려준다."""
@@ -105,7 +105,7 @@ async def find_const(ctx: ToolContext, rating: float, score: ScoreRef, game: Gam
     )
 
 
-@tool(slash="레이팅 필요점수")
+@tool()
 async def needed_score(ctx: ToolContext, const: float, rating: float, game: GameRef | None = None) -> ToolResult:
     """상수와 목표 곡 레이팅으로, 그 곡 레이팅 이상이 되는 가장 낮은 점수를 계산한다. 만점을 쳐도 못 닿으면 못 닿는다고 알려 준다."""
     if (error := _const_error(const)) is not None:

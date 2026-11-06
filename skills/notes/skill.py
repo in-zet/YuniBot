@@ -141,7 +141,7 @@ def _others_lines(others: list[dict[str, Any]], others_total: int) -> list[str]:
 # ---------------------------------------------------------------- 도구
 
 
-@tool(slash="메모 쓰기", mutates=True)
+@tool(mutates=True)
 async def set_note(
     ctx: ToolContext,
     song: SongQuery,
@@ -186,7 +186,7 @@ async def set_note(
     )
 
 
-@tool(slash="메모 보기")
+@tool()
 async def get_note(
     ctx: ToolContext, song: SongQuery, difficulty: DifficultyRef | None = None, chart_type: str | None = None,
     game: GameRef | None = None,
@@ -224,7 +224,7 @@ async def get_note(
     )
 
 
-@tool(slash="메모 목록")
+@tool()
 async def list_notes(ctx: ToolContext, game: GameRef | None = None) -> ToolResult:
     """내 메모 전체 목록을 표로 보여준다. 난이도가 빈 행은 곡 전체 메모다. 이 표로 delete_notes를 부를 수 있다."""
     assert ctx.db is not None
@@ -302,7 +302,7 @@ async def add_notes(ctx: ToolContext, table: Annotated[TableRef, TableNeeds(none
     return ToolResult(data={"count": extended.row_count, "with_note": with_note}, table=extended)
 
 
-@tool(slash="메모 삭제", mutates=True, confirm="always")
+@tool(mutates=True, confirm="always")
 async def delete(
     ctx: ToolContext, song: SongQuery, difficulty: DifficultyRef | None = None, chart_type: str | None = None,
     game: GameRef | None = None,

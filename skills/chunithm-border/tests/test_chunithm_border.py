@@ -90,7 +90,6 @@ async def test_remaining_reports_score_only_by_default() -> None:
     assert result.data["remaining_score"] == 7_500
     assert "remaining_attacks" not in result.data
     assert result.display is not None and "어택" not in (result.display.content or "")
-    assert "어택" in (result.display.slash_content or "")  # /남은어택은 어택을 명시한 명령이다
 
 
 async def test_remaining_adds_attacks_when_asked() -> None:

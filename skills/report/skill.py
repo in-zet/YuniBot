@@ -11,7 +11,7 @@ from typing import Annotated, Any, NamedTuple
 from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 from chuni_penguin.types.score import RecentScore
 
-from core.decorators import on, slash_only, tool
+from core.decorators import on, tool
 from core.events import Section, Stage
 from core.tables import (
     EMPTY_CELL,
@@ -159,7 +159,7 @@ def _metric_text(key: str, value: Decimal | None, profile: GameProfile) -> str:
 # ---------------------------------------------------------------- 도구
 
 
-@tool(slash="프로필")
+@tool()
 async def profile(ctx: ToolContext, player: PlayerRef | None = None, game: GameRef | None = None) -> ToolResult:
     """닉네임, 레이팅·베스트 평균·신곡 평균(CHUNITHM은 베스트 30·신곡 20, maimai는 구곡 35·신곡 15)의 지금 값과 마지막 동기화 시각을 보여준다. player를 비우면 본인이다."""
     target = await _target_player(ctx, player)
@@ -219,7 +219,7 @@ def _pb_row_cells(row: PbRow, rank_scores: dict[str, int], game: str) -> dict[st
     return cells
 
 
-@tool(slash="베스트")
+@tool()
 async def best(
     ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind = BestKind.BOTH, game: GameRef | None = None
 ) -> ToolResult:
@@ -461,7 +461,7 @@ def _judgement_cells(score: RecentScore) -> dict[str, Cell]:
     return {name: cell(value) for name, value in zip(_JUDGEMENT_COLUMNS, values, strict=True)}
 
 
-@tool(slash="최근", cost="network", games=["chunithm"])
+@tool(cost="network", games=["chunithm"])
 async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int = 10) -> ToolResult:
     """CHUNITHM-NET 최근 플레이 이력을 count개 표로 보여준다. 판정 수는 앞 20개에만 붙는다."""
     target = await _target_player(ctx, player)
@@ -514,7 +514,7 @@ async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int =
     )
 
 
-@tool(slash="기록")
+@tool()
 async def record(
     ctx: ToolContext, chart: ChartRef, player: PlayerRef | None = None, game: GameRef | None = None
 ) -> ToolResult:
@@ -601,18 +601,6 @@ async def analyze(
     return await _analyze(ctx, player, min_const, max_const, table)
 
 
-@slash_only(slash="분석")
-async def analyze_slash(
-    ctx: ToolContext,
-    player: PlayerRef | None = None,
-    min_const: float | None = None,
-    max_const: float | None = None,
-    game: GameRef | None = None,
-) -> ToolResult:
-    """플레이한 채보를 상수대(정수 단위)로 묶어 평균 점수와 랭크 분포를 보여준다. 상수 범위로 거를 수 있다."""
-    return await _analyze(ctx, player, min_const, max_const, None)
-
-
 async def _analyze(
     ctx: ToolContext, player: PlayerRef | None, min_const: float | None, max_const: float | None,
     table: WorkTable | None,
@@ -667,7 +655,7 @@ async def _analyze(
     )
 
 
-@tool(slash="후보곡")
+@tool()
 async def candidates(
     ctx: ToolContext,
     min_const: float | None = None,
@@ -727,7 +715,7 @@ async def candidates(
 
 def _metric_lines(deltas: RatingDeltas | None, profile: GameProfile) -> tuple[list[str], dict[str, Any]]:
     """레이팅·베스트30 평균·신곡20 평균의 (직전 →) 현재 (변화량) 줄과 data. 숫자 출처는
-    /프로필·/베스트와 같은 records.rating_deltas(동기화 시점 스냅샷)다 — 같은 시점에 리포트와
+    profile·best와 같은 records.rating_deltas(동기화 시점 스냅샷)다 — 같은 시점에 리포트와
     프로필이 다른 숫자를 보이지 않게 한다. 세션별로 나누지 않는다."""
     current: dict[str, Decimal | None] = {
         "computed_rating": deltas.computed_rating if deltas else None,

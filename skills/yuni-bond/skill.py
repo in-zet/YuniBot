@@ -86,7 +86,6 @@ _P_LINK = "채보 링크"
 _PLAN_FORMAT = "{곡} {난이도}  {목표}"
 _PROMISE_TEXT = "약속"
 _PROMISE_DATE = "날짜"
-_PROMISE_ID = "id"
 _PROMISE_FORMAT = "{약속}  ({날짜})"
 
 
@@ -510,7 +509,7 @@ def _event_line(item: dict[str, Any]) -> str:
     )
 
 
-@tool(slash="이정표")
+@tool()
 async def history(ctx: ToolContext, song: SongQuery | None = None, kind: str | None = None) -> ToolResult:
     """유니와 함께 넘은 이정표를 날짜와 함께 보여 준다: 처음 만난 날(first_met), 상수별 1호(const_first — 상수마다 처음
     트리플·트플플·풀콤·올저), 레이팅 성·단계 달성(rating_star), 레이팅 층 달성(rating_floor), To-Do 달성(goal_done),
@@ -629,7 +628,7 @@ async def _chart_url(ctx: ToolContext, title: str, difficulty: str) -> str | Non
     return ctx.songdb.chart_link(song, chart).url if chart is not None else None
 
 
-@tool(slash="오늘계획")
+@tool()
 async def plan(ctx: ToolContext, count: int = _PLAN_DEFAULT_COUNT, arcade: ArcadeRef | None = None) -> ToolResult:
     """오늘 플레이할 곡을 추린다. 가까운 To-Do를 후보로 하고, 그 곡에 남긴 메모와 채보 링크를 붙인다.
     count는 후보 수(1~10), arcade는 갈 오락실이다."""
@@ -740,7 +739,7 @@ async def promise_set(ctx: ToolContext, text: str, song: SongQuery | None = None
     )
 
 
-@tool(slash="약속")
+@tool()
 async def promise_list(ctx: ToolContext) -> ToolResult:
     """내 열린 약속을 표로 보여 준다. 이 표로 close_promises를 불러 닫는다."""
     rows = await _open_promises(_db(ctx), ctx.player_id, limit=_OPEN_PROMISE_CAP)
@@ -762,7 +761,6 @@ async def promise_list(ctx: ToolContext) -> ToolResult:
     builder.column(_PROMISE_TEXT)
     tc.add_columns(builder, tc.SONG, hidden_in_text=(tc.SONG,))
     builder.column(_PROMISE_DATE)
-    builder.column(_PROMISE_ID, slash_only=True)
     builder.row_formats([_PROMISE_FORMAT])
     builder.step("열린 약속 (최근순)")
     for item in items:
@@ -772,7 +770,6 @@ async def promise_list(ctx: ToolContext) -> ToolResult:
                 _PROMISE_TEXT: cell(item["text"]),
                 tc.SONG: tc.song_cell(item.get("song_title")),
                 _PROMISE_DATE: cell(item["created_on"], item["date_label"]),
-                _PROMISE_ID: cell(item["id"]),
             },
         )
     return ToolResult(data={"count": len(items)}, table=builder.build())

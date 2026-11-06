@@ -1209,8 +1209,7 @@ async def test_no_table_is_stored_when_there_is_no_channel(tmp_path: Path) -> No
 def _store_with_bound_table(*, stale: bool = False) -> TableStore:
     store = TableStore()
     builder = TableBuilder(subject="p1", unit="채보").column("song", "곡").column("score", "점수", "number")
-    builder.column("id", "아이디", slash_only=True)
-    builder.row(RowRef("k", "1"), {"song": cell("A"), "score": cell(1), "id": cell("g1")})
+    builder.row(RowRef("k", "1"), {"song": cell("A"), "score": cell(1)})
     builder.steps(["15.0 상수 MAS", "내 점수"])
     _ = store.put("p1", "c1", builder.build(), now=0, stale=stale)
     store.bind("p1", "c1", "t1", "m100")

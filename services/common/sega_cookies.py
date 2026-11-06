@@ -28,7 +28,7 @@ class SegaCookieStore:
 
     async def expire(self, player_id: str, ctx: ToolContext | None) -> None:
         """인증 실패(쿠키 만료) 처리: sega-linked를 떼고 sega.login.expired를 낸다.
-        이벤트의 대상은 쿠키 주인(player_id)이다 — /최근처럼 요청한 사람과 쿠키 주인이 다를
+        이벤트의 대상은 쿠키 주인(player_id)이다 — 최근 기록 조회(report.recent)처럼 요청한 사람과 쿠키 주인이 다를
         수 있으므로 ctx.emit(요청한 사람 기준) 대신 버스에 대상 플레이어를 직접 넘긴다."""
         await self._players.revoke_status_tag(player_id, "sega-linked")
         if ctx is not None:

@@ -153,8 +153,7 @@ def add_columns(
     """공통 칸을 주어진 순서대로 표 만들기에 더한다."""
     for column in common_columns(*names, hidden_in_text=hidden_in_text, game=game):
         builder.column(
-            column.name, column.label, column.value_type, slash_only=column.slash_only,
-            hidden_in_text=column.hidden_in_text, bare=column.bare, order=column.order,
+            column.name, column.label, column.value_type, hidden_in_text=column.hidden_in_text, bare=column.bare, order=column.order,
         )
     return builder
 

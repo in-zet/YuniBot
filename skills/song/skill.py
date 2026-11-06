@@ -62,7 +62,7 @@ def _const_text(const: object) -> str:
     return "계산 불가" if const is None else str(const)
 
 
-@tool(slash="곡")
+@tool()
 async def info(ctx: ToolContext, song: SongQuery, game: GameRef | None = None) -> ToolResult:
     """곡 정보와 난이도별 채보(상수, 노트 수)를 보여준다."""
     assert isinstance(song, SongRecord)
@@ -119,13 +119,12 @@ def _search_columns(game: str) -> tuple[str, ...]:
 # 검색 결과 표의 기본 칸은 곡·난이도·상수다. 나머지는 표에 있어도 글자 출력과 그림에서 숨기고, 물었을 때만
 # `table_query`의 `columns`로 보인다(2026-10-22 결정).
 _SEARCH_HIDDEN = (tc.LEVEL, tc.NOTE_COUNT, tc.VERSION, tc.ARTIST)
-_NO_ARTIST_SONGS = "해당 작곡가의 곡이 없어."
 
 
-def _none_found(message: str, **data: Any) -> ToolResult:
-    """결과가 없을 때. 안내는 슬래시에만 보이고, 멘션에서는 유니가 `count: 0`을 보고 직접 말한다.
-    표시물로 붙이면 유니의 말 뒤에 엉뚱한 문장이 덧붙는다(실기 2026-10-30)."""
-    return ToolResult(data={"count": 0, **data}, display=Display(slash_content=message))
+def _none_found(**data: Any) -> ToolResult:
+    """결과가 없을 때. 유니가 `count: 0`을 보고 직접 말한다 — 안내 문장을 표시물로 붙이면 유니의 말 뒤에
+    엉뚱한 문장이 덧붙는다(실기 2026-10-30)."""
+    return ToolResult(data={"count": 0, **data})
 
 
 def _note_range_text(min_notes: int | None, max_notes: int | None) -> str | None:
@@ -152,7 +151,7 @@ def _chart_table(hits: list[ConstRangeHit], conditions: list[str | None], game: 
     return builder.build()
 
 
-@tool(slash="상수")
+@tool()
 async def find_by_const(
     ctx: ToolContext, min_const: float, difficulty: DifficultyRef,
     max_const: float | None = None, new_only: bool = False, game: GameRef | None = None,
@@ -164,12 +163,12 @@ async def find_by_const(
         min_const=min_const, max_const=max_const, difficulty=short_code, new_only=new_only
     )
     if not hits:
-        return _none_found("해당 범위의 채보가 없어.")
+        return _none_found()
     conditions = [tc.const_range_text(min_const, max_const), short_code, "신곡만" if new_only else None]
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions, ctx.game))
 
 
-@tool(slash="버전")
+@tool()
 async def find_by_version(
     ctx: ToolContext, version: str, difficulty: DifficultyRef | None = None, game: GameRef | None = None
 ) -> ToolResult:
@@ -182,7 +181,7 @@ async def find_by_version(
         versions = profile_for(ctx.game).version_order
         if version not in versions:
             return ToolResult(error=f"'{version}'은 곡 DB의 버전 이름이 아니야. 버전 이름: {', '.join(versions)}")
-        return _none_found("해당 버전의 채보가 없어.")
+        return _none_found()
     return ToolResult(
         data={"count": len(hits)}, table=_chart_table(hits, [f"{version} 버전", short_code], ctx.game)
     )
@@ -202,7 +201,7 @@ async def find_linked_verse(
     except ValueError:
         return ToolResult(error=f"그런 게이트는 없어. 게이트: {', '.join(ctx.songdb.linked_verse_gates())}")
     if not hits:
-        return _none_found("해당하는 해금곡 채보가 없어.")
+        return _none_found()
     builder = TableBuilder(unit="채보")
     columns = _search_columns(ctx.game)
     tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game)
@@ -219,7 +218,7 @@ async def find_linked_verse(
     return ToolResult(data={"count": len(hits), "songs": len({h.song.title for h in hits})}, table=builder.build())
 
 
-@tool(slash="검색")
+@tool()
 async def find_songs(
     ctx: ToolContext,
     min_const: float | None = None,
@@ -241,7 +240,7 @@ async def find_songs(
     title은 곡명에 들어 있는 글자(부분 일치), exclude_title은 곡명에 없어야 하는 글자다. 둘 다 전각·반각, 대소문자, 공백, 가운뎃점(・) 차이를
     무시한다. 곡 DB의 제목은 원제(일본어·영어)라서 한글로는 안 맞는다 — 한글로 들은 이름은 아는 원제 글자로 바꿔 준다("플랑드르"면 "フランドール").
     "최종귀축" 같은 한글 표기는 "最終鬼畜"처럼 한자로 바꿔 준다. 못 바꾸겠으면 되묻기 전에 아는 글자로 먼저 찾아 본다.
-    `/상수`·`/버전`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
+    `find_by_const`·`find_by_version`은 조건 하나(+난이도)만 받으니, 조건을 두 개 이상 동시에 걸 때만 이걸 쓴다.
     "마스터나 울티마"처럼 난이도를 둘 말했으면 difficulty와 other_difficulty에 하나씩 준다(둘 중 어느 쪽이든 맞는 채보).
     난이도가 셋 이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 min_difficulty/max_difficulty를 준다(BASIC<ADVANCED<EXPERT<MASTER<ULTIMA).
     조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다.
@@ -267,7 +266,7 @@ async def find_songs(
     except ValueError as exc:
         return ToolResult(error=str(exc))
     if not hits:
-        return _none_found("조건에 맞는 채보가 없어.")
+        return _none_found()
     conditions = [
         tc.const_range_text(min_const, max_const),
         f"레벨 {level}" if level else None,
@@ -282,7 +281,7 @@ async def find_songs(
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions, ctx.game))
 
 
-@tool(slash="작곡가")
+@tool()
 async def find_by_artist(
     ctx: ToolContext, artist: str, difficulty: DifficultyRef | None = None, game: GameRef | None = None
 ) -> ToolResult:
@@ -295,13 +294,13 @@ async def find_by_artist(
     if not songs:
         similar = similar_names(artist, ctx.songdb.all_artists(), limit=3, cutoff=0.6)
         if similar:
-            return _none_found(f"{_NO_ARTIST_SONGS} 비슷한 작곡가: {', '.join(similar)}", similar_artists=similar)
+            return _none_found(similar_artists=similar)
 
     identity = tc.identity_columns(ctx.game)
     if short_code is None:
         columns = (*identity, tc.ARTIST, tc.VERSION)
         if not songs:
-            return _none_found(_NO_ARTIST_SONGS)
+            return _none_found()
         builder = TableBuilder(unit="곡")
         tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game).step(condition)
         for song in songs:
@@ -316,7 +315,7 @@ async def find_by_artist(
         if chart_record.difficulty == short_code
     ]
     if not charts:
-        return _none_found(_NO_ARTIST_SONGS)
+        return _none_found()
     builder = TableBuilder(unit="채보")
     tc.add_columns(builder, *columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game).step(f"{condition} {short_code}")
     for song, chart_record in charts:
@@ -451,7 +450,7 @@ def _row_key(row: Row) -> tuple[str, str]:
     return title, code
 
 
-@tool(slash="별칭 추가", mutates=True)
+@tool(mutates=True)
 async def alias_add(ctx: ToolContext, song: SongQuery, alias: str, game: GameRef | None = None) -> ToolResult:
     """곡 별칭을 봇 전역으로 등록한다(모든 서버·모든 플레이어에게 적용). 사용자가 그 곡이 맞다고 확인한 뒤에만 부른다."""
     assert isinstance(song, SongRecord)
@@ -466,7 +465,7 @@ async def alias_add(ctx: ToolContext, song: SongQuery, alias: str, game: GameRef
     )
 
 
-@tool(slash="별칭 삭제", mutates=True)
+@tool(mutates=True)
 async def alias_remove(ctx: ToolContext, alias: str, game: GameRef | None = None) -> ToolResult:
     """별칭을 지운다. 추가한 사람이나 admin만 할 수 있다."""
     row = await ctx.songdb.get_alias(alias=alias)

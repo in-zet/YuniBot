@@ -74,13 +74,15 @@ listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.view
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
-| --- | --- | --- | --- | --- | --- |
-| `get_settings` | 그 오락실의 마지막 설정과 지금 계정 설정의 차이 | `arcade: ArcadeRef` | `/오락실 설정` | optional | never |
-| `history` | 그 오락실의 설정 변화 (표 반환) | `arcade: ArcadeRef` | `/오락실 기록` | 표 | never |
-| `record_visit` | 세션에 오락실 방문을 남기고 지금 설정을 저장. 도구 태그 sega-linked, cost network | `arcade: ArcadeRef`, 날짜(기본 최근 세션) | `/오락실 방문` | optional | never |
-| `register_arcade` | 확인받은 오락실을 등록하고 말한 줄임말을 별칭으로 저장(있으면 별칭만 더함). 서버 공유 데이터라 등록한 사람·시각을 남긴다 | `name`, `alias`(선택) | `/오락실 등록` | optional | never |
-| `set_privacy` | 방문 기록과 설정 공개 여부 | `public: bool` | 없음 | optional | never |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | display | confirm |
+| --- | --- | --- | --- | --- |
+| `get_settings` | 그 오락실의 마지막 설정과 지금 계정 설정의 차이 | `arcade: ArcadeRef` | optional | never |
+| `history` | 그 오락실의 설정 변화 (표 반환) | `arcade: ArcadeRef` | 표 | never |
+| `record_visit` | 세션에 오락실 방문을 남기고 지금 설정을 저장. 도구 태그 sega-linked, cost network | `arcade: ArcadeRef`, 날짜(기본 최근 세션) | optional | never |
+| `register_arcade` | 확인받은 오락실을 등록하고 말한 줄임말을 별칭으로 저장(있으면 별칭만 더함). 서버 공유 데이터라 등록한 사람·시각을 남긴다 | `name`, `alias`(선택) | optional | never |
+| `set_privacy` | 방문 기록과 설정 공개 여부 | `public: bool` | optional | never |
 
 `record_visit` 도구와 `on_sync_reported`(동기화 때 이미 오락실을 말한 경우)는 "방문을 남기고, 최근 세션이면 설정을 읽어 저장하는" 같은 내부 함수를 같이 쓴다.
 설정 읽기는 가장 최근 세션에만 한다(`records.latest_session`과 비교). 지난 날짜에 오락실을 채우는 경우는 그날 설정을 알 수 없으므로 방문만 남긴다.

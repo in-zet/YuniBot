@@ -110,9 +110,6 @@ class Display:
     # 본인에게만 보여야 하는 내용. 멘션 응답은 채널 답장이라 ephemeral이 없으므로, 이 표시물은 채널에
     # 붙이지 않고 요청한 플레이어에게 DM으로 보낸다(content만). 슬래시는 ephemeral을 따로 켠다.
     private: bool = False
-    # 슬래시에서만 쓰는 본문. 있으면 슬래시 응답이 content 대신 이것을 보낸다(멘션은 content만 쓴다).
-    # 다음 슬래시 명령에 타이핑할 id처럼 사람이 직접 봐야 하지만 멘션 답에는 군더더기인 것을 담는다.
-    slash_content: str | None = None
     # 메시지에 첨부할 파일. 본문이 2000자를 넘어 나뉘어도 첫 조각에 붙는다.
     files: list[DisplayFile] = field(default_factory=list)
 
@@ -178,8 +175,8 @@ STANDARD_REF_TYPES: frozenset[type] = frozenset(
 )
 
 
-def table_display(table: WorkTable, *, stale: bool = False, slash: bool = False) -> Display:
+def table_display(table: WorkTable, *, stale: bool = False) -> Display:
     """표를 글자로 그려 표시물로 만든다. 멘션 응답과 슬래시가 같은 함수를 쓴다."""
-    rendered = render_text(table, stale=stale, slash=slash)
+    rendered = render_text(table, stale=stale)
     files = [DisplayFile(rendered.file[0], rendered.file[1])] if rendered.file is not None else []
     return Display(content=rendered.content, files=files)

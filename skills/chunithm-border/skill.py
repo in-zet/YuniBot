@@ -25,7 +25,7 @@ _DEFAULT_BORDER_RANKS: tuple[tuple[str, int], ...] = (
 )
 
 
-@tool(slash="보더")
+@tool()
 async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None) -> ToolResult:
     """곡과 난이도의 랭크별 허용 어택 개수를 계산한다. 랭크를 안 주면 SSS+/SSS/SS+/SS 네 개를 모두 보여준다."""
     assert isinstance(chart, ResolvedChart)
@@ -47,7 +47,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
     )
 
 
-@tool(slash="남은어택", tags=["chunithm-synced"])
+@tool(tags=["chunithm-synced"])
 async def remaining(
     ctx: ToolContext, chart: ChartRef, rank: RankRef, include_attacks: bool = False
 ) -> ToolResult:
@@ -77,15 +77,10 @@ async def remaining(
     head = f"{chart.song.title} {chart.chart.difficulty} — "
     if already_achieved:
         content = f"{head}이미 {rank.canonical}를 달성했어."
-        slash_content = None
     else:
         content = f"{head}{rank.canonical}까지 {remaining_score}점" + (f" ({attacks}어택)." if include_attacks else ".")
-        # /남은어택은 이름부터 어택을 명시한 명령이라 슬래시에서는 어택을 같이 보여 준다.
-        slash_content = f"{head}{rank.canonical}까지 {remaining_score}점 ({attacks}어택)."
 
-    return ToolResult(
-        data=data, display=Display(content=content, slash_content=slash_content), display_mode="optional"
-    )
+    return ToolResult(data=data, display=Display(content=content), display_mode="optional")
 
 
 _CHART_NEEDS = TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])

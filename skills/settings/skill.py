@@ -45,7 +45,7 @@ async def _write_favorites(ctx: ToolContext, ids: list[int]) -> ToolResult | Non
     return None
 
 
-@tool(slash="현재설정", cost="network")
+@tool(cost="network")
 async def current_settings(ctx: ToolContext) -> ToolResult:
     """지금 계정의 인게임 설정을 CHUNITHM-NET에서 바로 읽어 보여준다."""
     try:
@@ -65,7 +65,7 @@ async def current_settings(ctx: ToolContext) -> ToolResult:
     )
 
 
-@tool(slash="게임설정 변경", cost="network", mutates=True)
+@tool(cost="network", mutates=True)
 async def change_settings(
     ctx: ToolContext,
     speed: str | None = None,
@@ -104,7 +104,7 @@ async def change_settings(
     )
 
 
-@tool(slash="즐겨찾기 목록", cost="network")
+@tool(cost="network")
 async def list_favorites(ctx: ToolContext) -> ToolResult:
     """지금 즐겨찾기로 등록된 곡 목록을 표로 보여준다. 다른 곡 표를 즐겨찾기에 더할 때는 add_favorites를 쓴다."""
     try:
@@ -139,7 +139,7 @@ async def list_favorites(ctx: ToolContext) -> ToolResult:
     return ToolResult(data={"titles": titles}, table=builder.build())
 
 
-@tool(slash="즐겨찾기 추가", cost="network", mutates=True)
+@tool(cost="network", mutates=True)
 async def add_favorite(ctx: ToolContext, song: SongQuery) -> ToolResult:
     """즐겨찾기에 곡 하나를 더한다."""
     assert isinstance(song, SongRecord)
@@ -164,7 +164,7 @@ async def add_favorite(ctx: ToolContext, song: SongQuery) -> ToolResult:
     )
 
 
-@tool(slash="즐겨찾기 삭제", cost="network", mutates=True)
+@tool(cost="network", mutates=True)
 async def remove_favorite(ctx: ToolContext, song: SongQuery) -> ToolResult:
     """즐겨찾기에서 곡 하나를 뺀다."""
     assert isinstance(song, SongRecord)

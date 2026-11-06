@@ -194,6 +194,14 @@ class _FakeNotify:
         return f"<@{player_id}> {content}"
 
 
+
+def _goals(*goal_ids: str) -> WorkTable:
+    """모델 도구에 넘길 목표 표. 행이 목표를 가리키기만 한다(슬래시 입구를 지운 뒤 2026-11-06)."""
+    builder = TableBuilder(unit="목표").column("goal", "목표")
+    for goal_id in goal_ids:
+        builder.row(RowRef("goals.goal", goal_id), {"goal": cell(goal_id)})
+    return builder.build()
+
 def _ctx(
     *, player_id: str = "p1", tags: frozenset[str] = frozenset(), db: aiosqlite.Connection,
     records: _FakeRecords | None = None, songdb: _FakeSongDb | None = None,
@@ -290,7 +298,7 @@ async def test_set_rating_goal_once_per_player(skill: ModuleType, db: aiosqlite.
 
     second = await skill.set_goal(ctx, skill.GoalKind.RATING, target_value=17.5)
     assert second.error is not None
-    assert "목표 수정" in second.error
+    assert "고치" in second.error
 
 
 async def test_set_rating_goal_without_sync_history_errors(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -480,7 +488,7 @@ async def test_list_returns_own_goals(skill: ModuleType, db: aiosqlite.Connectio
     # 표로 나온다(코어가 마지막 표를 붙이므로 [[show]]를 빼먹어도 목록이 붙는다).
     assert result.table is not None and result.table.subject == ctx.player_id
     assert result.data == {"player_id": me.id, "count": 1}  # 목표 id·값은 data에 없고 표에만 있다
-    assert result.table.rows[0].ref == RowRef("goals.goal", result.table.rows[0].cell("id").raw)
+    assert result.table.rows[0].ref.kind == "goals.goal"
     assert result.display is None
 
 
@@ -532,8 +540,8 @@ async def test_progress_of_other_players_goal_follows_goal_public_flag(skill: Mo
     private = await skill.set_goal(other_ctx, skill.GoalKind.FREEFORM, description="비공개")
     me = await players.create_player()
     me_ctx = _ctx(db=db, player_id=me.id, tags=frozenset(), players=players)
-    assert (await skill.progress(me_ctx, public.data["goal_id"])).error is None
-    assert (await skill.progress(me_ctx, private.data["goal_id"])).error is not None
+    assert (await skill.goal_progress(me_ctx, _goals(public.data["goal_id"]))).error is None
+    assert (await skill.goal_progress(me_ctx, _goals(private.data["goal_id"]))).error is not None
 
 
 async def test_update_changes_status_and_due_at(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -541,7 +549,7 @@ async def test_update_changes_status_and_due_at(skill: ModuleType, db: aiosqlite
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
     goal_id = created.data["goal_id"]
 
-    result = await skill.update(ctx, goal_id, status=skill.GoalStatus.STOPPED, due_at="2026-12-31")
+    result = await skill.update_goal(ctx, _goals(goal_id), status=skill.GoalStatus.STOPPED, due_at="2026-12-31")
     assert result.error is None
     goal = await skill.models.fetch_goal(db, goal_id)
     assert goal.status == "stopped"
@@ -552,11 +560,12 @@ async def test_update_via_executor_with_raw_string_enum_args(
     skill: ModuleType, db: aiosqlite.Connection
 ) -> None:
     """set_goal과 같은 종류의 버그: status/duration_tag도 LLM 경로에선 원문 문자열로 온다."""
-    ctx = _ctx(db=db, tags=frozenset())
+    executor, store = _table_exec()
+    ctx = await _player_ctx(db)
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
-    outcome = await _executor().invoke(
-        skill.update.__yuni_slash_only__, ctx,
-        {"goal_id": created.data["goal_id"], "status": "stopped", "duration_tag": "short"},
+    ctx, _table = await _goal_table(skill, db, store, ctx)
+    outcome = await executor.invoke(
+        skill.update_goal.__yuni_tool__, ctx, {"table": "t1", "status": "stopped", "duration_tag": "short"}
     )
     assert outcome.result is not None and outcome.result.error is None
     goal = await skill.models.fetch_goal(db, created.data["goal_id"])
@@ -573,7 +582,7 @@ async def test_update_target_score_resolves_rank_name_to_correct_score(
     created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
     goal_id = created.data["goal_id"]
 
-    result = await skill.update(ctx, goal_id, target_score=1_007_500)
+    result = await skill.update_goal(ctx, _goals(goal_id), target_score=1_007_500)
     assert result.error is None
     goal = await skill.models.fetch_goal(db, goal_id)
     assert goal.target_value == 1_007_500.0
@@ -590,7 +599,7 @@ async def test_update_rejects_target_value_alone_on_song_goal(
     created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
     goal_id = created.data["goal_id"]
 
-    result = await skill.update(ctx, goal_id, target_value=1_000_000.0)
+    result = await skill.update_goal(ctx, _goals(goal_id), target_value=1_000_000.0)
 
     assert result.error is not None
     goal = await skill.models.fetch_goal(db, goal_id)
@@ -602,7 +611,7 @@ async def test_update_rejects_both_target_value_and_target_score(
 ) -> None:
     ctx = _ctx(db=db, tags=frozenset())
     created = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("곡A"), target_score=1_000_000)
-    result = await skill.update(ctx, created.data["goal_id"], target_value=1_005_000, target_score=1_007_500)
+    result = await skill.update_goal(ctx, _goals(created.data["goal_id"]), target_value=1_005_000, target_score=1_007_500)
     assert result.error is not None
 
 
@@ -611,7 +620,7 @@ async def test_update_rejects_target_score_on_non_song_goal(
 ) -> None:
     ctx = _ctx(db=db, tags=frozenset())
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
-    result = await skill.update(ctx, created.data["goal_id"], target_score=1_007_500)
+    result = await skill.update_goal(ctx, _goals(created.data["goal_id"]), target_score=1_007_500)
     assert result.error is not None
 
 
@@ -621,7 +630,7 @@ async def test_update_rejects_other_players_goal(skill: ModuleType, db: aiosqlit
     goal_id = created.data["goal_id"]
 
     other_ctx = _ctx(db=db, player_id="p2", tags=frozenset())
-    result = await skill.update(other_ctx, goal_id, status=skill.GoalStatus.STOPPED)
+    result = await skill.update_goal(other_ctx, _goals(goal_id), status=skill.GoalStatus.STOPPED)
     assert result.error is not None
 
 
@@ -633,7 +642,7 @@ async def test_progress_shows_history(skill: ModuleType, db: aiosqlite.Connectio
         db, id="prog1", goal_id=goal_id, sync_id="sync1", recorded_at="2026-10-17T00:00:00+00:00",
         value=990_000.0, achievement_ratio=0.5,
     )
-    result = await skill.progress(ctx, goal_id)
+    result = await skill.goal_progress(ctx, _goals(goal_id))
     assert result.error is None
     assert len(result.data["history"]) == 1
     assert result.data["history"][0]["value"] == 990_000.0
@@ -645,7 +654,7 @@ async def test_delete_removes_own_goals_only(skill: ModuleType, db: aiosqlite.Co
     other_ctx = _ctx(db=db, player_id="p2", tags=frozenset())
     theirs = await skill.set_goal(other_ctx, skill.GoalKind.FREEFORM, description="연습2")
 
-    result = await skill.delete(ctx, f"{mine.data['goal_id']},{theirs.data['goal_id']}")
+    result = await skill.delete_goals(ctx, _goals(mine.data["goal_id"], theirs.data["goal_id"]))
     assert result.error is None
     assert result.data["deleted_count"] == 1
     assert await skill.models.fetch_goal(db, mine.data["goal_id"]) is None
@@ -742,9 +751,11 @@ async def test_todo_add_stores_canonical_chart_identity(skill: ModuleType, db: a
 
 
 async def test_delete_via_executor_single_goal_runs_without_confirm(skill: ModuleType, db: aiosqlite.Connection) -> None:
-    ctx = _ctx(db=db, tags=frozenset())
+    executor, store = _table_exec()
+    ctx = await _player_ctx(db)
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
-    outcome = await _executor().invoke(skill.delete.__yuni_slash_only__, ctx, {"goal_ids": created.data["goal_id"]})
+    ctx, _table = await _goal_table(skill, db, store, ctx)
+    outcome = await executor.invoke(skill.delete_goals.__yuni_tool__, ctx, {"table": "t1"})
     assert outcome.needs_confirm is False
     assert outcome.result is not None and outcome.result.data["deleted_count"] == 1
     assert await skill.models.fetch_goal(db, created.data["goal_id"]) is None
@@ -753,18 +764,17 @@ async def test_delete_via_executor_single_goal_runs_without_confirm(skill: Modul
 async def test_delete_via_executor_many_goals_needs_confirm_before_deleting(
     skill: ModuleType, db: aiosqlite.Connection
 ) -> None:
-    ctx = _ctx(db=db, tags=frozenset())
+    executor, store = _table_exec()
+    ctx = await _player_ctx(db)
     a = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습1")
     b = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습2")
-    executor = _executor()
-    outcome = await executor.invoke(
-        skill.delete.__yuni_slash_only__, ctx, {"goal_ids": f"{a.data['goal_id']},{b.data['goal_id']}"}
-    )
+    ctx, _table = await _goal_table(skill, db, store, ctx)
+    outcome = await executor.invoke(skill.delete_goals.__yuni_tool__, ctx, {"table": "t1"})
     assert outcome.needs_confirm is True
     assert outcome.confirm_token is not None
     assert await skill.models.fetch_goal(db, a.data["goal_id"]) is not None  # 아직 안 지웠다
 
-    result = await executor.confirm(outcome.confirm_token, confirmed=True, player_id="p1")
+    result = await executor.confirm(outcome.confirm_token, confirmed=True, player_id=ctx.player_id)
     assert result.data["deleted_count"] == 2
     assert await skill.models.fetch_goal(db, a.data["goal_id"]) is None
     assert await skill.models.fetch_goal(db, b.data["goal_id"]) is None
@@ -794,7 +804,7 @@ async def test_todo_done_marks_achieved_and_emits_event(skill: ModuleType, db: a
 
     ctx.event_bus.register_notify("chunithm.goal.completed", owner_skill="goals", fn=_on_completed, skill_services=[])
 
-    result = await skill.todo_done(ctx, goal_id)
+    result = await skill.complete_todos(ctx, _goals(goal_id))
     assert result.error is None
     await ctx.event_bus.drain()
     assert len(received) == 1
@@ -836,8 +846,8 @@ async def test_model_tools_have_table_arg_and_no_slash(skill: ModuleType) -> Non
     for name in ("update_goal", "goal_progress", "delete_goals", "complete_todos"):
         spec = getattr(skill, name).__yuni_tool__
         assert spec.slash is None
-    for name, slash in (("update", "목표 수정"), ("progress", "목표 진행"), ("delete", "목표 삭제"), ("todo_done", "투두 완료")):
-        assert getattr(skill, name).__yuni_slash_only__.slash == slash
+    # 목표 슬래시 입구는 지웠다(2026-11-06 — 슬래시는 꼭 필요한 것만 남긴다).
+    assert not any(hasattr(getattr(skill, name), "__yuni_slash_only__") for name in dir(skill))
 
 
 async def test_delete_goals_removes_only_the_numbered_rows(skill: ModuleType, db: aiosqlite.Connection) -> None:
@@ -1304,7 +1314,7 @@ async def test_progress_projects_rating_with_todos(skill: ModuleType, db: aiosql
     todo = await skill.set_goal(ctx, skill.GoalKind.SONG, chart=_chart("높은곡"), target_score=1_007_500)
     assert todo.error is None
 
-    result = await skill.progress(ctx, rating_goal.data["goal_id"])
+    result = await skill.goal_progress(ctx, _goals(rating_goal.data["goal_id"]))
     assert result.error is None
     assert result.data["projected_rating"] == "7.8500"
     assert result.display is not None and "예상 레이팅 7.85" in (result.display.content or "")
@@ -1333,9 +1343,8 @@ async def test_list_goals_shows_rating_goal_achievement_ratio_and_remaining(
     assert content.splitlines()[-1] == (
         "1. [진행 중] 레이팅 17.0000  달성률 50.00% · 현재 16.9000 · 남은 0.1000 (곡 레이팅 합 5.0000)"
     )
-    # I8: id는 슬래시 출력에만 있다(멘션 답에는 안 보인다).
+    # I8: id는 출력에 없다(행이 가리키는 것으로만 갖는다).
     assert created.data["goal_id"] not in content
-    assert created.data["goal_id"] in render_text(result.table, slash=True).content
 
 
 async def test_progress_computes_ratio_for_fresh_rating_goal_without_progress_rows(
@@ -1346,7 +1355,7 @@ async def test_progress_computes_ratio_for_fresh_rating_goal_without_progress_ro
     created = await skill.set_goal(ctx, skill.GoalKind.RATING, target_value=17.0, due_at="2099-12-31")
     records.deltas["p1"] = _deltas("16.85", "16.80")
 
-    result = await skill.progress(ctx, created.data["goal_id"])
+    result = await skill.goal_progress(ctx, _goals(created.data["goal_id"]))
     assert result.data["history"] == []
     assert Decimal(result.data["achievement_ratio"]) == Decimal("0.25")
     assert result.data["remaining"] == "0.1500"
@@ -1359,7 +1368,7 @@ async def test_progress_without_due_date_omits_pace(skill: ModuleType, db: aiosq
     records = _FakeRecords(deltas={"p1": _deltas("16.80")})
     ctx = _ctx(db=db, tags=_SYNCED, records=records)
     created = await skill.set_goal(ctx, skill.GoalKind.RATING, target_value=17.0)
-    result = await skill.progress(ctx, created.data["goal_id"])
+    result = await skill.goal_progress(ctx, _goals(created.data["goal_id"]))
     assert result.data["pace"] is None
 
 
@@ -1367,7 +1376,7 @@ async def test_song_goal_summary_has_remaining_score(skill: ModuleType, db: aios
     records = _FakeRecords(pbs={"p1": [_pb("곡A", "MAS", 1_000_000, "SS", 15.0, "14.0")]})
     ctx = _ctx(db=db, tags=frozenset(), records=records)
     created = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
-    result = await skill.progress(ctx, created.data["goal_id"])
+    result = await skill.goal_progress(ctx, _goals(created.data["goal_id"]))
     assert result.data["remaining_score"] == 7_500
     assert result.data["current_value"] == "1000000"
 
@@ -1394,14 +1403,13 @@ async def test_set_overpower_goal_rejects_target_not_above_current(skill: Module
 # ---------------------------------------------------------------- I8: id 보이기
 
 
-async def test_todo_list_shows_goal_id_only_in_slash_content(skill: ModuleType, db: aiosqlite.Connection) -> None:
+async def test_todo_list_keeps_goal_id_out_of_the_output(skill: ModuleType, db: aiosqlite.Connection) -> None:
     ctx = _ctx(db=db, tags=frozenset())
     created = await skill.todo_add(ctx, _chart("곡A"), 1_007_500)
     result = await skill.todo_list(ctx)
     assert result.table is not None
     assert result.table.rows[0].ref == RowRef("goals.goal", created.data["goal_id"])
     assert created.data["goal_id"] not in render_text(result.table).content
-    assert created.data["goal_id"] in render_text(result.table, slash=True).content
     assert "id" not in summarize_table(result.table)["columns"]  # 모델 요약에도 id 칸이 없다
 
 
@@ -1418,13 +1426,13 @@ async def test_delete_also_removes_progress_rows_and_detaches_children(skill: Mo
         db, id="prog1", goal_id=parent.data["goal_id"], sync_id=None, recorded_at="2026-10-17T00:00:00+00:00",
         value=None, achievement_ratio=None,
     )
-    await skill.delete(ctx, parent.data["goal_id"])
+    await skill.delete_goals(ctx, _goals(parent.data["goal_id"]))
     assert await skill.models.list_progress(db, parent.data["goal_id"]) == []
     child_row = await skill.models.fetch_goal(db, child.data["goal_id"])
     assert child_row is not None and child_row.parent_goal_id is None
 
 
-async def test_parent_goal_must_be_my_own_and_not_form_a_cycle(skill: ModuleType, db: aiosqlite.Connection) -> None:
+async def test_parent_goal_must_be_my_own(skill: ModuleType, db: aiosqlite.Connection) -> None:
     mine = _ctx(db=db, tags=frozenset())
     other = _ctx(db=db, tags=frozenset(), player_id="p2")
     others_goal = await skill.set_goal(other, skill.GoalKind.FREEFORM, description="남의 목표")
@@ -1436,11 +1444,8 @@ async def test_parent_goal_must_be_my_own_and_not_form_a_cycle(skill: ModuleType
         mine, skill.GoalKind.FREEFORM, description="남의 밑", parent_goal_id=others_goal.data["goal_id"]
     )
     missing = await skill.set_goal(mine, skill.GoalKind.FREEFORM, description="없는 밑", parent_goal_id="nope")
-    cycle = await skill.update(mine, top.data["goal_id"], parent_goal_id=child.data["goal_id"])
-    itself = await skill.update(mine, top.data["goal_id"], parent_goal_id=top.data["goal_id"])
-    foreign_update = await skill.update(mine, top.data["goal_id"], parent_goal_id=others_goal.data["goal_id"])
 
-    assert all(r.error is not None for r in (foreign, missing, cycle, itself, foreign_update))
+    assert all(r.error is not None for r in (foreign, missing))
     # 남의 목표는 내 목표가 걸려 있지 않으니, 상대가 지워도 내 행이 바뀌지 않는다.
     top_row = await skill.models.fetch_goal(db, top.data["goal_id"])
     assert top_row is not None and top_row.parent_goal_id is None
@@ -1464,11 +1469,11 @@ async def test_update_changes_notify_offsets_and_can_turn_them_off(skill: Module
     ctx = _ctx(db=db, tags=frozenset())
     created = await skill.set_goal(ctx, skill.GoalKind.FREEFORM, description="연습")
     goal_id = created.data["goal_id"]
-    assert (await skill.update(ctx, goal_id, notify_offsets="3,0")).error is None
+    assert (await skill.update_goal(ctx, _goals(goal_id), notify_offsets="3,0")).error is None
     assert (await skill.models.fetch_goal(db, goal_id)).notify_offsets == [3, 0]
-    assert (await skill.update(ctx, goal_id, notify_offsets="")).error is None
+    assert (await skill.update_goal(ctx, _goals(goal_id), notify_offsets="")).error is None
     assert (await skill.models.fetch_goal(db, goal_id)).notify_offsets == []
-    assert (await skill.update(ctx, goal_id, notify_offsets="내일")).error is not None
+    assert (await skill.update_goal(ctx, _goals(goal_id), notify_offsets="내일")).error is not None
 
 
 # ---------------------------------------------------------------- 2차: 램프 곡 목표(풀콤보/올 저스티스)
@@ -1603,7 +1608,7 @@ async def test_other_players_public_goal_hides_progress_when_records_private(
     row = listed.table.rows[0]
     assert row.cell("달성률").raw is None and row.cell("남은 양").raw is None  # 비공개면 원래 값 None
 
-    progress = await skill.progress(me_ctx, goal_id)
+    progress = await skill.goal_progress(me_ctx, _goals(goal_id))
     assert progress.error is None
     assert progress.data["current_value"] is None and progress.data["achievement_ratio"] is None
     assert progress.data["history"] == [] and progress.data.get("projected_rating") is None
@@ -1622,7 +1627,7 @@ async def test_other_players_public_goal_shows_progress_when_records_public(
     assert listed.table.rows[0].cell("달성률").raw == 0.5
     assert "현재 16.9000" in render_text(listed.table).content
     assert "달성률 50.00%" in render_text(listed.table).content
-    progress = await skill.progress(me_ctx, goal_id)
+    progress = await skill.goal_progress(me_ctx, _goals(goal_id))
     assert progress.data["current_value"] == "16.90"
 
 
@@ -1677,7 +1682,7 @@ async def test_early_achievement_cancels_pending_schedules(skill: ModuleType, db
     goal_id = created.data["goal_id"]
     assert await skill.models.list_schedules(db, goal_id)
 
-    await skill.todo_done(ctx, goal_id)
+    await skill.complete_todos(ctx, _goals(goal_id))
     assert await skill.models.list_schedules(db, goal_id) == []
 
 
@@ -1687,7 +1692,7 @@ async def test_update_due_at_reschedules_final_deadline(skill: ModuleType, db: a
     goal_id = created.data["goal_id"]
     old_final = (await skill.models.list_schedules(db, goal_id, kind="final_deadline"))[0]
 
-    await skill.update(ctx, goal_id, due_at="2050-06-15")
+    await skill.update_goal(ctx, _goals(goal_id), due_at="2050-06-15")
     finals = await skill.models.list_schedules(db, goal_id, kind="final_deadline")
     assert len(finals) == 1
     assert finals[0].schedule_id != old_final.schedule_id  # 옛 예약은 취소되고 새로 걸렸다
@@ -1708,7 +1713,7 @@ async def test_update_status_stopped_cancels_schedules(skill: ModuleType, db: ai
     goal_id = created.data["goal_id"]
     assert await skill.models.list_schedules(db, goal_id)
 
-    await skill.update(ctx, goal_id, status=skill.GoalStatus.STOPPED)
+    await skill.update_goal(ctx, _goals(goal_id), status=skill.GoalStatus.STOPPED)
     assert await skill.models.list_schedules(db, goal_id) == []
 
 
@@ -1719,7 +1724,7 @@ async def test_delete_cancels_schedules(skill: ModuleType, db: aiosqlite.Connect
     schedule_ids = [row.schedule_id for row in await skill.models.list_schedules(db, goal_id)]
     assert schedule_ids
 
-    await skill.delete(ctx, goal_id)
+    await skill.delete_goals(ctx, _goals(goal_id))
     assert await skill.models.list_schedules(db, goal_id) == []
     for sid in schedule_ids:
         cursor = await db.execute("SELECT 1 FROM schedule_once WHERE id = ?", (sid,))
@@ -1779,7 +1784,7 @@ async def test_final_deadline_handler_noop_if_already_resolved(
     ctx = _ctx(db=db, tags=frozenset(), notify=notify)
     created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2020-01-01")
     goal_id = created.data["goal_id"]
-    await skill.todo_done(ctx, goal_id)  # 기한 전에 이미 끝남
+    await skill.complete_todos(ctx, _goals(goal_id))  # 기한 전에 이미 끝남
 
     await skill.on_final_deadline(ctx, {"goal_id": goal_id})
 
@@ -1804,7 +1809,7 @@ async def test_notify_due_handler_skips_already_resolved_goal(skill: ModuleType,
     ctx = _ctx(db=db, tags=frozenset(), notify=notify)
     created = await skill.todo_add(ctx, chart=_chart("곡A"), target_score=1_007_500, due_at="2099-12-31")
     goal_id = created.data["goal_id"]
-    await skill.todo_done(ctx, goal_id)
+    await skill.complete_todos(ctx, _goals(goal_id))
 
     await skill.on_notify_due(ctx, {"goal_id": goal_id, "offset_days": 0})
     assert notify.dms == [] and notify.posts == []
@@ -1829,7 +1834,7 @@ async def test_list_goals_table_columns_and_line_shapes(skill: ModuleType, db: a
     table = result.table
     assert table is not None
     assert [c.label for c in table.columns] == [
-        "유형", "곡", "난이도", "목표", "상태", "진행", "달성률", "남은 양", "기한", "공개", "id",
+        "유형", "곡", "난이도", "목표", "상태", "진행", "달성률", "남은 양", "기한", "공개",
     ]
     song, free = table.rows
     assert song.cell("유형").text == "곡" and song.cell("곡").raw == "곡A" and song.cell("난이도").text == "MAS"
@@ -1871,7 +1876,7 @@ async def test_todo_list_score_goal_line_and_cells(skill: ModuleType, db: aiosql
     table = result.table
     assert table is not None and table.subject == "p1"
     assert [c.label for c in table.columns] == [
-        "곡", "난이도", "상수", "점수", "목표 점수", "남은 점수", "목표 램프", "현재 램프", "id",
+        "곡", "난이도", "상수", "점수", "목표 점수", "남은 점수", "목표 램프", "현재 램프",
     ]
     row = table.rows[0]
     assert row.cell("점수").raw == 1_000_000 and row.cell("목표 점수").raw == 1_007_500

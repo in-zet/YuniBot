@@ -101,12 +101,14 @@ emits: [chunithm.session.closed, chunithm.session.viewed]
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | display | confirm |
-| --- | --- | --- | --- | --- | --- |
-| `list` | 세션 목록 (표 반환) | 날짜 또는 기간, `arcade: ArcadeRef`(선택), `player: PlayerRef` | `/세션 목록` | 표 | never |
-| `get` | 세션 하나 불러오기(후기 포함) | 날짜, `arcade: ArcadeRef`(선택), `latest: bool`, `player: PlayerRef` | `/세션 보기` | required | never |
-| `review_open` | 후기 스레드 열기 | 날짜(기본 최근) | `/후기` | optional | never |
-| `delete` | 내 세션 지우기 | 날짜 또는 기간 | `/세션 삭제` | optional | always |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | display | confirm |
+| --- | --- | --- | --- | --- |
+| `list` | 세션 목록 (표 반환) | 날짜 또는 기간, `arcade: ArcadeRef`(선택), `player: PlayerRef` | 표 | never |
+| `get` | 세션 하나 불러오기(후기 포함) | 날짜, `arcade: ArcadeRef`(선택), `latest: bool`, `player: PlayerRef` | required | never |
+| `review_open` | 후기 스레드 열기 | 날짜(기본 최근) | optional | never |
+| `delete` | 내 세션 지우기 | 날짜 또는 기간 | optional | always |
 
 후기의 종결은 코어의 대화 스레드가 처리하므로 닫는 도구는 두지 않는다. 후기를 공개로 바꾸는 것은 `get`의 버튼으로 한다.
 

@@ -90,15 +90,16 @@ listens: [chunithm.sync.completed]
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | display |
-| --- | --- | --- | --- | --- |
-| `profile` | 프로필 | `player: PlayerRef`(기본 나) | `/프로필` | optional |
-| `best` | 베스트 30, 신곡 20 (표 반환) | `player: PlayerRef`, `kind`(best/new/둘 다) | `/베스트` | 표 |
-| `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만. 표 반환) | `player: PlayerRef`, `count` | `/최근` | 표 |
-| `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | `/기록` | optional |
-| `analyze` | 상수대별 평균, 랭크 분포 (표 반환). 표를 주면 그 표의 채보만으로 통계 | `player: PlayerRef`, 상수 범위(선택), `table: TableRef \| None`(선택, 곡·난이도 필요) | 없음 | 표 |
-| `analyze_slash` | `analyze`의 슬래시 입구(표 없음) | `player: PlayerRef`, 상수 범위(선택) | `/분석`(`@slash_only`) | 표 |
-| `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count` | `/후보곡` | 표 |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | display |
+| --- | --- | --- | --- |
+| `profile` | 프로필 | `player: PlayerRef`(기본 나) | optional |
+| `best` | 베스트 30, 신곡 20 (표 반환) | `player: PlayerRef`, `kind`(best/new/둘 다) | 표 |
+| `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만. 표 반환) | `player: PlayerRef`, `count` | 표 |
+| `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | optional |
+| `analyze` | 상수대별 평균, 랭크 분포 (표 반환). 표를 주면 그 표의 채보만으로 통계 | `player: PlayerRef`, 상수 범위(선택), `table: TableRef \| None`(선택, 곡·난이도 필요) | 표 |
+| `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count` | 표 |
 
 | `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty`·`other_difficulty: DifficultyRef`(선택, 난이도 둘), `min_difficulty`/`max_difficulty: DifficultyRef`(선택, 난이도 범위), `only_played`(기본 꺼짐), `new_only`(기본 꺼짐, 신곡만), `table: TableRef`(선택, 다른 도구가 찾은 표를 상수표로 가공만) | `table` 줄 땐 Row(곡·난이도) | 표 |
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |

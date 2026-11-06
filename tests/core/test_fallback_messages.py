@@ -16,9 +16,10 @@ _ALL: dict[str, Messages] = {
 }
 
 
-def test_fallback_messages_mention_slash_command_path() -> None:
+def test_fallback_messages_do_not_point_to_slash_commands() -> None:
+    # 슬래시는 꼭 필요한 것만 남겨(2026-11-06) 장애 때 쓸 다른 길이 없다 — 다시 부르라고만 한다.
     for message in (*LLM_FAILURE_MESSAGES, *MONTHLY_CAP_REACHED_MESSAGES):
-        assert "/" in message  # 슬래시 명령은 계속 쓸 수 있다는 안내가 있어야 한다
+        assert "/" not in message and "슬래시" not in message
 
 
 @pytest.mark.parametrize("name", sorted(_ALL))

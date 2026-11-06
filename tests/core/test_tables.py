@@ -477,9 +477,9 @@ def test_table_needs_normalizes_sequences_to_tuples() -> None:
 
 
 def test_summarize_table_gives_the_model_only_what_it_may_see() -> None:
-    builder = TableBuilder(subject="p1", unit="채보").column("song", "곡").column("id", "아이디", slash_only=True)
-    builder.group("15.5", {"평균": "15.5"}).row(RowRef("k", "secret"), {"song": cell("A"), "id": cell("g1")})
-    builder.group("15.0").row(RowRef("k", "secret2"), {"song": cell("B"), "id": cell("g2")})
+    builder = TableBuilder(subject="p1", unit="채보").column("song", "곡")
+    builder.group("15.5", {"평균": "15.5"}).row(RowRef("k", "secret"), {"song": cell("A")})
+    builder.group("15.0").row(RowRef("k", "secret2"), {"song": cell("B")})
     table = dataclasses.replace(builder.summary({"레이팅": "16.98"}).steps(["15 이상", "내 점수"]).build(), id="t3")
 
     summary = summarize_table(table)
@@ -505,24 +505,24 @@ def _score_table() -> WorkTable:
     """상수 묶음 둘. 점수 없는 행 하나(5번)."""
     builder = TableBuilder(subject="p1", unit="채보")
     builder.column("song", "곡", bare=True).column("const", "상수", "number").column("score", "점수", "ScoreRef")
-    builder.column("lamp", "램프", "LampRef").column("id", "아이디", slash_only=True)
+    builder.column("lamp", "램프", "LampRef")
     builder.group("15.5", {"평균": "x"})
     rows = [
-        ("A", 15.5, 1_005_000, "FULL COMBO", "g1"),
-        ("B", 15.5, 990_000, None, "g2"),
-        ("C", 15.5, 1_008_000, "ALL JUSTICE", "g3"),
+        ("A", 15.5, 1_005_000, "FULL COMBO"),
+        ("B", 15.5, 990_000, None),
+        ("C", 15.5, 1_008_000, "ALL JUSTICE"),
     ]
-    for key, (song, const, score, lamp, gid) in enumerate(rows, start=1):
+    for key, (song, const, score, lamp) in enumerate(rows, start=1):
         builder.row(
             RowRef("chunithm.chart", str(key)),
             {
                 "song": cell(song), "const": cell(const, f"{const}"), "score": cell(score, f"{score:,}"),
-                "lamp": cell(lamp), "id": cell(gid),
+                "lamp": cell(lamp),
             },
         )
     builder.group("15.0")
-    builder.row(RowRef("chunithm.chart", "4"), {"song": cell("D"), "const": cell(15.0, "15.0"), "score": cell(1_000_000, "1,000,000"), "lamp": cell("FULL COMBO"), "id": cell("g4")})
-    builder.row(RowRef("chunithm.chart", "5"), {"song": cell("E"), "const": cell(15.0, "15.0"), "score": cell(None, "점수 없음"), "lamp": cell(None), "id": cell("g5")})
+    builder.row(RowRef("chunithm.chart", "4"), {"song": cell("D"), "const": cell(15.0, "15.0"), "score": cell(1_000_000, "1,000,000"), "lamp": cell("FULL COMBO")})
+    builder.row(RowRef("chunithm.chart", "5"), {"song": cell("E"), "const": cell(15.0, "15.0"), "score": cell(None, "점수 없음"), "lamp": cell(None)})
     return builder.summary({"합": "1"}).step("원본").build()
 
 
@@ -732,19 +732,15 @@ def test_peek_rows_rejects_group_by_and_exclude() -> None:
 # ---- 글자 출력 (row_text / render_text) ----
 
 
-def _fmt_table(*, formats: tuple[str, ...] = (), slash_only: bool = True) -> WorkTable:
+def _fmt_table(*, formats: tuple[str, ...] = ()) -> WorkTable:
     builder = TableBuilder(unit="채보")
     builder.column("song", "곡", bare=True).column("diff", "난이도", bare=True).column("const", "상수")
     builder.column("score", "점수").column("goal", "목표 점수").column("left", "남은 점수")
     builder.column("pub", "공개", hidden_in_text=True)
-    if slash_only:
-        builder.column("id", "아이디", slash_only=True)
     cells = {
         "song": cell("크로노"), "diff": cell("MAS"), "const": cell(15.2, "15.2"), "score": cell(1_005_000, "1,005,000"),
         "goal": cell(1_007_500, "1,007,500"), "left": cell(2_500, "2,500"), "pub": cell(True, "공개"),
     }
-    if slash_only:
-        cells["id"] = cell("g7")
     builder.row(RowRef("k", "1"), cells)
     builder.row(RowRef("k", "2"), {"song": cell("모모"), "diff": cell("EXP"), "const": cell(14.0, "14.0")})
     return dataclasses.replace(builder.build(), row_formats=formats)
@@ -757,12 +753,9 @@ def test_row_text_default_output_names_columns_and_skips_empty_ones() -> None:
     assert row_text(table, second) == "모모  EXP  상수 14.0"  # 비어 있는 칸은 `-` 없이 뺀다
 
 
-def test_row_text_hides_hidden_in_text_and_shows_slash_only_only_for_slash() -> None:
+def test_row_text_hides_hidden_in_text_columns() -> None:
     table = _fmt_table()
-    first = table.rows[0]
-    assert "공개" not in row_text(table, first) and "g7" not in row_text(table, first)
-    assert row_text(table, first, slash=True).endswith("아이디 g7")
-    assert "공개" not in row_text(table, first, slash=True)
+    assert "공개" not in row_text(table, table.rows[0])
 
 
 FORMATS = ("{곡} {난이도} {상수}  {점수} → {목표 점수}  (남은 {남은 점수}점)", "{곡} {난이도} {상수}")
@@ -790,9 +783,8 @@ def test_row_text_falls_back_to_default_when_no_format_fits_or_names_unknown_col
 
 
 def test_row_text_format_cannot_use_columns_hidden_from_this_output() -> None:
-    table = _fmt_table(formats=("{곡} {아이디}", "{곡}"))
-    assert row_text(table, table.rows[0]).startswith("크로노  ")  # 슬래시가 아니면 {아이디}가 있는 서식은 건너뛴다
-    assert row_text(table, table.rows[0], slash=True).startswith("크로노 g7")
+    table = _fmt_table(formats=("{곡} {공개}", "{곡}"))
+    assert row_text(table, table.rows[0]).startswith("크로노  ")  # 숨긴 칸 {공개}가 있는 서식은 건너뛴다
 
 
 def _numbered_table(count: int, *, titled: bool = True, steps: tuple[str, ...] = ("15.0 상수 MAS",)) -> WorkTable:
@@ -858,12 +850,6 @@ def test_table_file_name_falls_back_to_table_txt() -> None:
     assert table_file_name(_numbered_table(1, steps=("점수<SSS",))) == "점수SSS.txt"
 
 
-def test_render_text_slash_shows_slash_only_columns() -> None:
-    table = _fmt_table()
-    assert "아이디 g7" not in render_text(table).content
-    assert "아이디 g7" in render_text(table, slash=True).content
-
-
 def test_numbers_in_text_file_and_rows_point_at_the_same_rows() -> None:
     table = _numbered_table(TABLE_FILE_ROWS + 3, titled=False)
     file = render_text(table).file
@@ -887,9 +873,9 @@ def test_discard_and_drop_channel() -> None:
     assert store.ids("p1", "c2") == ["t1"]
 
 
-def test_describe_table_lists_steps_unit_and_visible_columns_only() -> None:
-    builder = TableBuilder(unit="채보").column("song", "곡").column("id", "아이디", slash_only=True)
-    builder.row(RowRef("k", "1"), {"song": cell("A"), "id": cell("g")})
+def test_describe_table_lists_steps_unit_and_columns() -> None:
+    builder = TableBuilder(unit="채보").column("song", "곡")
+    builder.row(RowRef("k", "1"), {"song": cell("A")})
     table = dataclasses.replace(builder.steps(["15 이상", "내 점수"]).build(), id="t3")
     assert describe_table(table) == "[살아 있는 표] t3 — 15 이상 → 내 점수 (1채보, 칸: 곡)"
     assert describe_table(table, stale=True).startswith("[살아 있는 표] t3 (동기화 전 값) — ")
@@ -1079,8 +1065,6 @@ def test_columns_errors() -> None:
         select_rows(table, columns=[])
     with pytest.raises(TableError, match="'없음' 칸이 없다"):
         select_rows(table, columns=["곡", "없음"])
-    with pytest.raises(TableError, match="'아이디' 칸이 없다"):
-        select_rows(table, columns=["아이디"])  # 슬래시 전용 칸은 모델에게 보이지 않는다
 
 
 def test_distinct_by_keeps_the_first_row_of_the_sorted_order_across_groups() -> None:

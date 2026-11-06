@@ -250,7 +250,7 @@ async def test_find_by_artist_with_difficulty_returns_chart_rows() -> None:
     assert table.column_by_name(tc.CONST) is not None
 
 
-async def test_find_by_artist_no_match_shows_empty_message() -> None:
+async def test_find_by_artist_no_match_has_no_display() -> None:
     skill = _load_skill()
     songdb = SongDbService()
 
@@ -258,8 +258,8 @@ async def test_find_by_artist_no_match_shows_empty_message() -> None:
 
     assert result.error is None
     assert result.data["count"] == 0
-    # 멘션 답 뒤에 붙지 않게 안내는 슬래시 본문에만 둔다(실기 2026-10-30)
-    assert result.display is not None and result.display.content is None and "없어" in (result.display.slash_content or "")
+    # 멘션 답 뒤에 엉뚱한 안내가 붙지 않게 표시물을 내지 않는다(실기 2026-10-30) — 유니가 count를 보고 말한다
+    assert result.display is None
 
 
 async def test_find_songs_combines_const_and_note_count() -> None:
@@ -287,7 +287,7 @@ async def test_find_songs_without_any_filter_is_rejected() -> None:
     assert result.error is not None
 
 
-async def test_find_songs_no_match_shows_empty_message() -> None:
+async def test_find_songs_no_match_has_no_display() -> None:
     skill = _load_skill()
     songdb = SongDbService()
 
@@ -295,8 +295,8 @@ async def test_find_songs_no_match_shows_empty_message() -> None:
 
     assert result.error is None
     assert result.data["count"] == 0
-    # 멘션 답 뒤에 붙지 않게 안내는 슬래시 본문에만 둔다(실기 2026-10-30)
-    assert result.display is not None and result.display.content is None and "없어" in (result.display.slash_content or "")
+    # 멘션 답 뒤에 엉뚱한 안내가 붙지 않게 표시물을 내지 않는다(실기 2026-10-30) — 유니가 count를 보고 말한다
+    assert result.display is None
 
 
 async def test_find_songs_by_title_part_ignores_width_case_and_dots() -> None:

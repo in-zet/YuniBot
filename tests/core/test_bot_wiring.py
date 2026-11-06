@@ -647,7 +647,8 @@ async def test_build_client_registers_usage_service(tmp_path: Path) -> None:
     client, _registry, executor = await build_client(config)
     try:
         assert "usage" in executor.services
-        assert client.tree.get_command("도움말") is not None
+        # 코어 슬래시는 /설정만 남는다(2026-11-06 결정 — /도움말을 지웠다). 이 시험의 스킬 폴더는 시험용이다.
+        assert client.tree.get_command("설정") is not None and client.tree.get_command("도움말") is None
     finally:
         await client.close()
 

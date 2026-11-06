@@ -371,4 +371,4 @@ def test_login_modal_explains_how_credentials_are_handled() -> None:
     assert len(texts) == 1
     assert "암호화" in texts[0]
     assert "저장하지 않아" in texts[0]
-    assert "/로그아웃" in texts[0]
+    assert "로그아웃하면" in texts[0]

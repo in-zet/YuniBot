@@ -45,12 +45,14 @@ services: [songdb, records]
 
 ## 도구
 
-| 함수 | 하는 일 | 인자 | 슬래시 | 태그 | display | confirm |
-| --- | --- | --- | --- | --- | --- | --- |
-| `lookup` | 랭크별 허용 어택 개수 | `chart: ChartRef`, `rank`: RankRef(선택) | `/보더` | 없음 | optional | never |
-| `remaining` | 내 최고 점수에서 목표 랭크까지 남은 점수(질문에 어택을 명시했을 때만 어택도) | `chart: ChartRef`, `rank`: RankRef, `include_attacks: bool = False` | `/남은어택` | `chunithm-synced` | optional | never |
-| `add_borders` | 채보 표에 "<랭크> 허용 어택" 칸 더하기 | `table: TableRef`(곡·난이도 필요), `rank`: RankRef | 없음 | 없음 | 표 | never |
-| `add_remaining` | 채보 표에 "<랭크>까지 남은 점수" 칸 더하기 | `table: TableRef`(곡·난이도 필요), `rank`: RankRef | 없음 | `chunithm-synced` | 표 | never |
+슬래시 명령은 2026-11-06에 꼭 필요한 것만 남기고 지웠다(`00-core.md` "두 갈래 길").
+
+| 함수 | 하는 일 | 인자 | 태그 | display | confirm |
+| --- | --- | --- | --- | --- | --- |
+| `lookup` | 랭크별 허용 어택 개수 | `chart: ChartRef`, `rank`: RankRef(선택) | 없음 | optional | never |
+| `remaining` | 내 최고 점수에서 목표 랭크까지 남은 점수(질문에 어택을 명시했을 때만 어택도) | `chart: ChartRef`, `rank`: RankRef, `include_attacks: bool = False` | `chunithm-synced` | optional | never |
+| `add_borders` | 채보 표에 "<랭크> 허용 어택" 칸 더하기 | `table: TableRef`(곡·난이도 필요), `rank`: RankRef | 없음 | 표 | never |
+| `add_remaining` | 채보 표에 "<랭크>까지 남은 점수" 칸 더하기 | `table: TableRef`(곡·난이도 필요), `rank`: RankRef | `chunithm-synced` | 표 | never |
 
 `data`에는 랭크별 허용 어택, 남은 점수를 계산한 값으로 넣는다(남은 어택은 `include_attacks`일 때만). 유니가 직접 빼거나 나누지 않는다.
 
@@ -75,7 +77,7 @@ services: [songdb, records]
 - 보더는 저스티스 0, 미스 0 기준의 허용 어택 개수만 말한다.
 - 랭크 하나만 물으면 말로 답하고 표시물은 붙이지 않는다. 여러 랭크를 묻거나 "보더 보여 줘"라고 하면 붙인다.
 - 표시물을 붙이면 숫자를 다시 나열하지 말고, 눈에 띄는 점 하나만 짚는다.
-- 남은 점수를 물으면 점수로만 답한다. 질문에 "어택"이 있을 때만 `include_attacks`를 켜 남은 어택도 말한다(남은 점수와 함께). `/남은어택`은 이름부터 어택을 명시한 명령이라 슬래시 본문(`slash_content`)에는 어택이 항상 붙는다(사용자 결정 2026-10-20: 어택은 질문에 명시했을 때만).
+- 남은 점수를 물으면 점수로만 답한다. 질문에 "어택"이 있을 때만 `include_attacks`를 켜 남은 어택도 말한다(남은 점수와 함께). (사용자 결정 2026-10-20: 어택은 질문에 명시했을 때만. 어택을 늘 붙이던 `/남은어택` 슬래시 본문은 2026-11-06에 지웠다.)
 - 노트 수가 없는 채보는 계산 불가라고 말한다.
 
 ## 테스트

@@ -308,7 +308,7 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
 # ---------------------------------------------------------------- 도구
 
 
-@tool(slash="업데이트 일정")
+@tool()
 async def next(ctx: ToolContext, region: Region) -> ToolResult:
     """알려진 다음 업데이트 날짜와 공지 링크. region은 intl(국제판)·jp(일본판)."""
     try:
@@ -332,7 +332,7 @@ async def next(ctx: ToolContext, region: Region) -> ToolResult:
     )
 
 
-@tool(slash="신곡")
+@tool()
 async def new_songs(ctx: ToolContext, region: Region, date: str | None = None) -> ToolResult:
     """최근 업데이트의 추가·삭제 곡. region은 intl(국제판)·jp(일본판). date(ISO, YYYY-MM-DD)를
     주면 그 날짜 당일이나 그 전의 가장 최근 저장본을 본다."""
@@ -383,7 +383,7 @@ async def new_songs(ctx: ToolContext, region: Region, date: str | None = None) -
     return ToolResult(data=data, table=builder.build())
 
 
-@tool(slash="업데이트 설정", tags=["admin"], mutates=True, confirm="always")
+@tool(tags=["admin"], mutates=True, confirm="always")
 async def configure(
     ctx: ToolContext,
     channel: str | None = None,

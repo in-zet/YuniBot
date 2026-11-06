@@ -9,7 +9,7 @@ from core.permissions import TagRequirement, check_tags
 from core.registry import LoadedSkill, SkillRegistry
 from core.tool_types import ToolContext, ToolResult
 
-# 못 하는 일(00-core.md "할 수 있는 일 안내"). 도움말과 list_capabilities가 같은 목록을 쓴다.
+# 못 하는 일(00-core.md "할 수 있는 일 안내"). list_capabilities가 쓴다.
 NOT_SUPPORTED: tuple[str, ...] = (
     "일본판 계정 동기화",
     "멘션 없는 대화에 끼어들기",
@@ -19,25 +19,6 @@ NOT_SUPPORTED: tuple[str, ...] = (
 )
 NOT_SUPPORTED_TEXT = "아직 못 하는 일도 있어: " + ", ".join(NOT_SUPPORTED) + "."
 
-# 분류마다 한 줄. 분류 목록은 core/manifest.py의 VALID_CATEGORIES와 같아야 한다(시험이 확인한다).
-CATEGORY_BLURBS: dict[str, str] = {
-    "계정 연결": "게임 NET 로그인, 기록 공개 설정, 디코 부계정 연결",
-    "곡 정보": "곡 상수, 노트 수, 채보 링크, 랭크 보더",
-    "기록과 리포트": "레이팅, 베스트, 최근 플레이, 동기화, 표 그림",
-    "목표": "레이팅이나 곡별 목표와 기한, 진행률",
-    "세션과 후기": "지난 플레이 세션 다시 보기, 후기 남기기",
-    "오락실": "오락실별 게임 설정, 인게임 설정과 즐겨찾기",
-    "메모": "곡이나 채보에 메모 남기기",
-    "알림": "업데이트 일정, 신곡, 알림 켜고 끄기",
-    "질문 답변": "츄니즘 용어와 공략 질문",
-    "메모리": "내가 기억하는 내용 보기, 지우기",
-    "이정표": "함께 넘은 이정표 돌아보기, 오늘 칠 곡 고르기, 약속",
-    "관리": "사용량, 서버별 스킬 설정, 태그 (관리자 전용)",
-    "폴더": "채보를 폴더로 모아 관리하기",
-    "유니 설정": "유니와 나비, Linked VERSE 이야기",
-}
-
-_EXAMPLES_PER_SKILL = 2
 _COMMANDS_PER_GROUP = 8
 
 
@@ -45,7 +26,6 @@ _COMMANDS_PER_GROUP = 8
 class CapabilityEntry:
     name: str
     summary: str
-    examples: list[str]
     commands: list[str]
 
 
@@ -105,7 +85,6 @@ def collect_capabilities(
             CapabilityEntry(
                 name=manifest.name,
                 summary=manifest.summary or manifest.description,
-                examples=list(manifest.examples[:_EXAMPLES_PER_SKILL]),
                 commands=_usable_commands(skill, player_tags),
             )
         )
@@ -118,7 +97,7 @@ def collect_capabilities(
 def build_capabilities_text(
     *, registry: SkillRegistry, player_tags: set[str], tag_definitions: dict[str, DefinedTag], category: str | None
 ) -> str:
-    """모델에게 주는 안내(list_capabilities의 data). 플레이어에게 보이는 글은 build_help_*가 만든다."""
+    """모델에게 주는 안내(list_capabilities의 data)."""
     found = collect_capabilities(registry=registry, player_tags=player_tags, category=category)
     lines: list[str] = []
     for cat, entries in sorted(found.by_category.items()):
@@ -135,46 +114,6 @@ def build_capabilities_text(
         lines.append(NOT_SUPPORTED_TEXT)
 
     return "\n".join(lines) if lines else "지금 쓸 수 있는 기능이 없어."
-
-
-HELP_INTRO = (
-    "안녕, 나는 유니야! 츄니즘 기록이랑 곡 정보를 같이 챙겨 주는 서포터지~\n"
-    "나를 멘션하거나 내 메시지에 답장해서 편하게 말을 걸어 줘. 슬래시 명령(`/`)은 나를 거치지 않고 바로 돼!"
-)
-_HELP_MENU_GUIDE = "아래 메뉴에서 분류를 고르면 어떻게 말하고 무슨 명령을 쓰는지 알려 줄게."
-
-
-def help_categories(found: Capabilities) -> list[str]:
-    """도움말에 보일 분류 이름(선언된 순서대로, 보일 스킬이 있는 것만)."""
-    return [cat for cat in CATEGORY_BLURBS if cat in found.by_category]
-
-
-def build_help_overview(found: Capabilities) -> str:
-    lines = [HELP_INTRO]
-    if found.locked_hints:
-        lines.append("")
-        lines.append("**더 쓰고 싶다면**")
-        lines.extend(f"- {hint}" for hint in found.locked_hints)
-    lines.append("")
-    lines.extend(f"- **{cat}**: {CATEGORY_BLURBS[cat]}" for cat in help_categories(found))
-    lines.append("")
-    lines.append(_HELP_MENU_GUIDE)
-    lines.append(NOT_SUPPORTED_TEXT)
-    return "\n".join(lines)
-
-
-def build_help_category(found: Capabilities, category: str) -> str:
-    entries = found.by_category.get(category, [])
-    if not entries:
-        return "그 분류는 지금 보여 줄 게 없어."
-    lines = [f"**{category}**"]
-    for entry in entries:
-        lines.append(f"- {entry.summary}")
-        if entry.examples:
-            lines.append("  이렇게 말해 봐: " + " / ".join(f"\"{example}\"" for example in entry.examples))
-        if entry.commands:
-            lines.append(f"  명령: {format_commands(entry.commands)}")
-    return "\n".join(lines)
 
 
 async def build_capabilities_result(ctx: ToolContext, *, category: str | None) -> ToolResult:

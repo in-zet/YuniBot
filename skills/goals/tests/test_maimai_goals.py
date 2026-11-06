@@ -17,7 +17,7 @@ import pytest
 
 from core.events import EventBus
 from core.scheduler import Scheduler
-from core.tables import TableBuilder, render_text
+from core.tables import RowRef, TableBuilder, cell, render_text
 from core.tool_types import ToolContext
 from services.common.players import PlayersService
 from services.common.settings import SettingsService
@@ -260,14 +260,15 @@ async def test_scheduled_notice_computes_with_the_goals_own_game(skill, world, d
 # ---------------------------------------------------------------- 코드 검토(2026-10-31) 수정
 
 
-async def test_slash_update_resolves_the_score_with_the_goals_own_game(skill, world) -> None:
+async def test_update_goal_resolves_the_score_with_the_goals_own_game(skill, world) -> None:
     """주 게임이 CHUNITHM이어도 maimai 목표의 점수는 maimai 기준으로 해석한다(SSS+ = 100.5%)."""
     await skill.todo_add(world.ctx(), chart=world.chart("Fresh", "DX"), target_score=1_005_000)
     [goal] = await skill.models.list_goals_for_player(world.db, world.player_id)
     chunithm_terms = TermsService(profile_for("chunithm").terms_path, game="chunithm")
     ctx = replace(world.ctx(game="chunithm"), services={**world.ctx().services, "terms": chunithm_terms})
 
-    result = await skill.update(ctx, goal.id, target_score="SSS+")
+    builder = TableBuilder(unit="목표").column("goal", "목표").row(RowRef("goals.goal", goal.id), {"goal": cell(goal.id)})
+    result = await skill.update_goal(ctx, builder.build(), target_score="SSS+")
 
     assert result.error is None
     [updated] = await skill.models.list_goals_for_player(world.db, world.player_id)

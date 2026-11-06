@@ -628,10 +628,9 @@ async def test_promise_lifecycle(skill: ModuleType, db: aiosqlite.Connection) ->
     assert table is not None and table.subject == "p1" and table.unit == "약속"
     [row] = table.rows
     assert row.ref == RowRef("yuni-bond.promise", saved.data["id"])
-    assert not row.cell("곡").filled and row.cell("id").text == saved.data["id"]
+    assert not row.cell("곡").filled
     assert render_text(table).content.splitlines()[-1].startswith("1. 다음엔 크로노 연습할게  (")
-    assert saved.data["id"] not in render_text(table).content  # id는 슬래시 출력에만
-    assert saved.data["id"] in render_text(table, slash=True).content
+    assert saved.data["id"] not in render_text(table).content  # id는 행이 가리키는 것으로만 갖는다
 
     closed = await skill.close_promises(_ctx(db), listed.table)
     assert closed.error is None
