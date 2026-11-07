@@ -1141,6 +1141,21 @@ async def test_const_table_takes_a_table_from_another_tool(skill: ModuleType) ->
     assert len(table.groups) > 1 or len({h.chart.const for h in hits if h.chart.const is not None}) <= 1
 
 
+async def test_const_table_applies_const_range_to_a_given_table_too(skill: ModuleType) -> None:
+    """2026-11-07: table과 상수 범위를 같이 주면 둘 다 적용한다 — 상수 범위를 const_table에 넣어도 조용히 빠지지 않는다."""
+    songdb = _real_songdb()
+    hits = songdb.find_songs(min_const=14.9, max_const=15.1, difficulty="MAS")
+    assert {h.chart.const for h in hits} >= {14.9, 15.0, 15.1}
+    f = _ctx(records=_FakeRecords(), songdb=songdb)
+
+    result = await skill.const_table(f.ctx, table=_plain_table(hits, "chunithm"), min_const=15.0, max_const=15.0)
+
+    table = result.table
+    assert table is not None
+    assert set(_row_keys(table)) == {(h.song.title, "MAS") for h in hits if h.chart.const == 15.0}
+    assert table.steps[0] == "15.0~15.0 상수"
+
+
 async def test_const_table_keeps_new_song_and_two_difficulty_filters_from_the_table(skill: ModuleType) -> None:
     """2026-11-06: 신곡·난이도 둘 같은 조건은 const_table 인자가 아니라 find_songs가 거른 표로 받는다 — 표의 채보만 나온다."""
     songdb = _real_songdb()

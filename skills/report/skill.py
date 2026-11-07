@@ -329,8 +329,9 @@ async def const_table(
     비운다("15 이상"). "15대"는 15.0~15.9다. 난이도를 말하지 않았으면 비워 모든 난이도를 보인다. 상수 범위도 다른
     조건도 안 말했으면 되묻는다(0부터 전부로 지어내지 않는다).
     그 밖의 조건(신곡, 난이도 둘 이상·범위, 레벨·버전·노트 수·곡명)이 하나라도 있으면 먼저 find_songs로 그 조건
-    전부(상수 범위·난이도 포함)의 표를 만들고 그 표를 table에 줘라 — find_songs+add_scores로 이어 붙이지 않는다(상수
-    묶음·정렬이 없어진다). table을 주면 min_const 등 검색 인자는 안 쓰니 비워 둔다(이미 find_songs에서 걸렀으니).
+    전부의 표를 만들고 그 표를 table에 줘라 — find_songs+add_scores로 이어 붙이지 않는다(상수 묶음·정렬이 없어진다).
+    table과 min_const/max_const를 같이 주면 둘 다 적용한다(표의 채보 중 그 상수 범위만). difficulty는 table과 같이 쓰지
+    않는다 — 난이도는 find_songs에서 거른다.
     기록 없는 채보도 기본으로 넣고(기록 없음), 사람이 "점수 있는 것만"이라고 했을 때만 only_played를 켠다. 누구 기록인지 말하지 않았으면 player를
     비운다. 그림("상수표 그림으로")은 이 표를 table_image에 넘긴다."""
     target = await _target_player(ctx, player)
@@ -339,7 +340,11 @@ async def const_table(
     code: str | None = None
     if table is not None:
         assert isinstance(table, WorkTable)
-        hits = _hits_from_table(ctx, table)
+        hits = [
+            hit for hit in _hits_from_table(ctx, table)
+            if hit.chart.const is not None and min_const <= hit.chart.const
+            and (max_const is None or hit.chart.const <= max_const)
+        ]
     else:
         code = tc.difficulty_code(difficulty)
         hits = ctx.songdb.find_songs(min_const=min_const, max_const=max_const, difficulty=code)
@@ -370,7 +375,8 @@ async def const_table(
     tc.add_columns(builder, *identity, *_CONST_TABLE_TAIL, game=ctx.game)
     builder.step(" ".join(
         part for part in (
-            tc.const_range_text(None if table is not None else min_const, max_const), code,
+            # table 경로의 min_const 기본값 0은 "범위 안 줌"이라 steps에 쓰지 않는다.
+            tc.const_range_text(None if table is not None and not min_const else min_const, max_const), code,
         )
         if part
     ))
@@ -574,8 +580,11 @@ async def analyze(
     table: Annotated[TableRef | None, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])] = None,
     game: GameRef | None = None,
 ) -> ToolResult:
-    """플레이한 채보를 상수대(정수 단위)로 묶어 평균 점수와 랭크 분포를 보여준다. 상수 범위로 거를 수 있다.
-    표를 주면 그 표의 채보만으로 통계를 낸다("이 폴더 랭크 분포"). 기록이 없는 채보는 세지 않는다."""
+    """플레이한 채보를 상수대(정수 단위)로 묶어 평균 점수와 랭크 분포를 보여준다. 기록이 없는 채보는 세지 않는다.
+    조건이 상수 범위뿐이면 min_const/max_const로 바로 낸다(table을 비운다, 표 없이 쓰면 내 전체 기록).
+    그 밖의 조건(신곡, 레벨, 버전, 난이도, 노트 수, 곡명)이 하나라도 있으면 먼저 find_songs로 그 조건 전부의 표를 만들고
+    그 표를 table에 줘라. 폴더처럼 이미 있는 표도 table로 준다("이 폴더 랭크 분포"). table과 min_const/max_const를 같이
+    주면 둘 다 적용한다."""
     assert table is None or isinstance(table, WorkTable)
     return await _analyze(ctx, player, min_const, max_const, table)
 
@@ -645,8 +654,9 @@ async def candidates(
 ) -> ToolResult:
     """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 표로 보여준다. 기준 점수(CHUNITHM SSS, maimai SSS+)를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. CHUNITHM은 SSS까지 남은 점수를 붙인다.
     조건이 상수 범위뿐이면 min_const/max_const로 바로 찾는다(table을 비운다).
-    그 밖의 조건(신곡, 레벨, 버전, 난이도, 노트 수, 곡명)이 하나라도 있으면 먼저 find_songs로 그 조건 전부(상수 범위 포함)의
-    표를 만들고 그 표를 table에 줘라 — 그 표의 채보 안에서만 고른다. table을 주면 min_const/max_const는 비운다."""
+    그 밖의 조건(신곡, 레벨, 버전, 난이도, 노트 수, 곡명)이 하나라도 있으면 먼저 find_songs로 그 조건 전부의
+    표를 만들고 그 표를 table에 줘라 — 그 표의 채보 안에서만 고른다. table과 min_const/max_const를 같이 주면 둘 다
+    적용한다."""
     charts = None
     if table is not None:
         assert isinstance(table, WorkTable)

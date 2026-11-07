@@ -101,7 +101,7 @@ listens: [chunithm.sync.completed]
 | `analyze` | 상수대별 평균, 랭크 분포 (표 반환). 표를 주면 그 표의 채보만으로 통계 | `player: PlayerRef`, 상수 범위(선택), `table: TableRef \| None`(선택, 곡·난이도 필요) | 표 |
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count`, `table: TableRef`(선택, `find_songs`가 거른 표 — 그 채보 안에서만 고른다) | 표 |
 
-| `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty: DifficultyRef`(선택, 하나), `only_played`(기본 꺼짐), `table: TableRef`(선택, `find_songs`가 찾은 표를 상수표로 가공만 — 신곡·난이도 둘 이상·레벨 등 그 밖의 조건은 이쪽) | `table` 줄 땐 Row(곡·난이도) | 표 |
+| `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty: DifficultyRef`(선택, 하나), `only_played`(기본 꺼짐), `table: TableRef`(선택, `find_songs`가 찾은 표를 상수표로 가공만 — 신곡·난이도 둘 이상·레벨 등 그 밖의 조건은 이쪽, 상수 범위와 같이 주면 둘 다 적용) | `table` 줄 땐 Row(곡·난이도) | 표 |
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
@@ -184,3 +184,8 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 
 ## 후보곡이 표를 받는다 (2026-11-07)
 - `candidates`는 상수 범위만 받아서 "레벨 14 곡 중 후보곡"·"신곡 중 후보곡"의 조건이 조용히 버려졌다(평가는 `candidates`가 불렸는지만 봐서 못 잡았다). `const_table`(2026-11-06)과 같은 방식으로 선택 인자 `table`을 더했다: `find_songs`가 거른 표의 (곡, 채보 종류, 난이도)를 `records.candidates(charts=...)`에 넘기고, 서비스는 그 채보 안에서만 고른다. 프레임·상승폭 계산은 그대로다. 표를 받으면 `steps`에 "받은 표의 채보 안에서"를 붙인다.
+
+## 상수 범위는 남기고 표와 같이 받으면 둘 다 적용 (2026-11-07, 사용자 결정 "B")
+- 처음 계획은 `analyze`에서도 상수 범위를 지우는 것이었지만, `const_table`·`candidates`·`analyze` 모두 상수 범위로 바로 찾는 길을 남겼다. "15.0~15.5 상수표"·"15대 랭크 분포" 같은 흔한 질문이 도구 한 번으로 끝난다.
+- 대신 상수 범위가 `find_songs`와 이 도구들 양쪽에 있어도 결과가 같게 했다: `table`과 `min_const`/`max_const`를 같이 주면 세 도구 모두 둘 다 적용한다. `candidates`·`analyze`는 원래 그랬고, `const_table`은 `table` 경로에서 상수 범위를 조용히 무시하던 것을 고쳤다(`table` 경로의 `min_const` 기본값 0은 범위로 치지 않아 `steps`에 안 쓴다).
+- 세 도구 설명과 `SKILL.md`는 같은 규칙 하나로 맞췄다: 조건이 상수 범위(상수표는 + 난이도 하나)뿐이면 바로, 그 밖의 조건이 하나라도 있으면 `find_songs` 표를 `table`로.

@@ -65,7 +65,10 @@ SCENARIOS: tuple[Scenario, ...] = (
         must_call=("song_find_songs", "report_candidates"),
     ),
     Scenario(name="분석/상수대", question="15대 상수 랭크 분포 보여줘", must_call_any=("report_analyze",)),
-    Scenario(name="분석/레벨 조건", question="레벨 14 마스터 랭크 분포 보여줘", must_call_any=("report_analyze",)),
+    Scenario(
+        name="분석/레벨 조건", question="레벨 14 마스터 랭크 분포 보여줘",
+        must_call=("song_find_songs", "report_analyze"),
+    ),
     # "신곡"은 뜻이 둘이다 — 업데이트 일정의 신곡과 지금 버전의 신곡.
     Scenario(
         name="신곡/업데이트 일정", question="다음 업데이트 신곡 뭐 나와?",
