@@ -99,7 +99,7 @@ listens: [chunithm.sync.completed]
 | `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만. 표 반환) | `player: PlayerRef`, `count` | 표 |
 | `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | optional |
 | `analyze` | 상수대별 평균, 랭크 분포 (표 반환). 표를 주면 그 표의 채보만으로 통계 | `player: PlayerRef`, 상수 범위(선택), `table: TableRef \| None`(선택, 곡·난이도 필요) | 표 |
-| `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count` | 표 |
+| `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count`, `table: TableRef`(선택, `find_songs`가 거른 표 — 그 채보 안에서만 고른다) | 표 |
 
 | `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty: DifficultyRef`(선택, 하나), `only_played`(기본 꺼짐), `table: TableRef`(선택, `find_songs`가 찾은 표를 상수표로 가공만 — 신곡·난이도 둘 이상·레벨 등 그 밖의 조건은 이쪽) | `table` 줄 땐 Row(곡·난이도) | 표 |
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
@@ -181,3 +181,6 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 - **조건 인자 줄이기(2026-11-06)**: `other_difficulty`·`min_difficulty`/`max_difficulty`·`new_only`를 지웠다. 같은 조건이 `find_songs`와 이 도구 두 군데 있어 모델이 어느 쪽에 넣을지 갈렸다(평가에서 "신곡 마스터·울티마 상수표"를 두 방식으로 섞어 불렀다). 이제 바로 찾는 길은 상수 범위와 난이도 하나뿐이고, 그 밖의 조건은 `find_songs`가 거른 표를 `table`로 받는다. 위 두 항목(신곡만·난이도 둘·범위, 2026-11-05)을 대체한다.
 
 - **상수·곡 레이팅은 읽을 때 지금 곡 DB 상수로 다시 계산한다**(2026-10-22): `records_pb`에 저장된 상수·곡 레이팅은 동기화 때의 값이라, Chunimaru 갱신으로 상수가 바뀌면 곡 DB와 어긋난다(HERA 15.0→15.1인데 저장된 곡 레이팅 17.09). `RecordsService._current`가 읽는 모든 길(`pb_row`·`pb_rows_for`·`all_pb_rows`)에서 점수는 그대로 두고 상수·레이팅만 다시 구한다. 동기화는 점수가 오른 채보만 행을 쓰므로, 저장값도 `_refresh_stored_ratings`로 맞춘다(점수 불변 채보 포함). 동기화 로그 스냅샷(`rating_deltas`)은 그 시점 값 그대로다.
+
+## 후보곡이 표를 받는다 (2026-11-07)
+- `candidates`는 상수 범위만 받아서 "레벨 14 곡 중 후보곡"·"신곡 중 후보곡"의 조건이 조용히 버려졌다(평가는 `candidates`가 불렸는지만 봐서 못 잡았다). `const_table`(2026-11-06)과 같은 방식으로 선택 인자 `table`을 더했다: `find_songs`가 거른 표의 (곡, 채보 종류, 난이도)를 `records.candidates(charts=...)`에 넘기고, 서비스는 그 채보 안에서만 고른다. 프레임·상승폭 계산은 그대로다. 표를 받으면 `steps`에 "받은 표의 채보 안에서"를 붙인다.

@@ -640,10 +640,20 @@ async def candidates(
     min_const: float | None = None,
     max_const: float | None = None,
     count: int = 10,
+    table: Annotated[TableRef | None, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])] = None,
     game: GameRef | None = None,
 ) -> ToolResult:
-    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 표로 보여준다. 기준 점수(CHUNITHM SSS, maimai SSS+)를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. CHUNITHM은 SSS까지 남은 점수를 붙인다. 상수 범위로 거를 수 있다."""
-    hits = await ctx.records.candidates(ctx.player_id, min_const=min_const, max_const=max_const, count=max(1, count))
+    """내 레이팅을 올릴 후보곡을 상승폭이 큰 순으로 표로 보여준다. 기준 점수(CHUNITHM SSS, maimai SSS+)를 냈을 때 곡 레이팅이 내 프레임 3~8위 레이팅 사이가 되는 채보만 나온다. CHUNITHM은 SSS까지 남은 점수를 붙인다.
+    조건이 상수 범위뿐이면 min_const/max_const로 바로 찾는다(table을 비운다).
+    그 밖의 조건(신곡, 레벨, 버전, 난이도, 노트 수, 곡명)이 하나라도 있으면 먼저 find_songs로 그 조건 전부(상수 범위 포함)의
+    표를 만들고 그 표를 table에 줘라 — 그 표의 채보 안에서만 고른다. table을 주면 min_const/max_const는 비운다."""
+    charts = None
+    if table is not None:
+        assert isinstance(table, WorkTable)
+        charts = {tc.row_chart_key(row) for row in table.rows}
+    hits = await ctx.records.candidates(
+        ctx.player_id, min_const=min_const, max_const=max_const, count=max(1, count), charts=charts
+    )
     if not hits:
         return ToolResult(
             data={"min_const": min_const, "max_const": max_const, "count": 0},
@@ -666,6 +676,8 @@ async def candidates(
     builder.column(_UPSIDE, value_type="number")
     builder.row_formats(formats)
     builder.step(" ".join(["레이팅 후보곡 (상승폭 큰 순)", *_const_range_texts(min_const, max_const)]))
+    if table is not None:
+        builder.step("받은 표의 채보 안에서")
     unknown = sum(1 for h in hits if h.remaining_score is None)
     if with_remaining and unknown:
         # 노트 수를 몰라 남은 점수를 못 구한 채보는 그 칸이 비어 줄에서 빠진다. 빠졌다는 사실은 여기서 알린다.

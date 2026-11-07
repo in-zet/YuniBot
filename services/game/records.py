@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
@@ -773,13 +773,15 @@ class RecordsService:
         return self._frames(await self.all_pb_rows(player_id))
 
     async def candidates(
-        self, player_id: str, *, min_const: float | None, max_const: float | None, count: int
+        self, player_id: str, *, min_const: float | None, max_const: float | None, count: int,
+        charts: Collection[tuple[str, str, str]] | None = None,
     ) -> list[CandidateHit]:
         """레이팅을 올릴 후보곡. 상수 범위 안에서 지금 프레임(베스트30/신곡20, records_pb
         기준) 밖에 있는 채보 중, 기준 점수(프로필의 candidate_target_score: CHUNITHM SSS, maimai
         SSS+)를 냈을 때의 곡 레이팅이 그 채보가 속할 프레임의 3~8위 레이팅 사이(`_candidate_band`)인
         것만, 그 점수를 냈을 때 프레임 최저점을 얼마나 넘는지 내림차순으로 count개까지 돌려준다.
-        상승폭이 0 이하인 채보는 뺀다. 안 친 채보는 현재 점수 0으로 본다."""
+        상승폭이 0 이하인 채보는 뺀다. 안 친 채보는 현재 점수 0으로 본다. charts를 주면 그 (곡, 채보 종류, 난이도)
+        채보 안에서만 고른다(다른 도구가 거른 표를 받을 때, 2026-11-07)."""
         rows = await self.all_pb_rows(player_id)
         best, new = self._frames(rows)
         frame_keys = {_row_key(r) for r in (*best, *new)}
@@ -796,7 +798,7 @@ class RecordsService:
             for hit in self._songdb.find_by_const(min_const=low, max_const=high, difficulty=code):
                 key = (hit.song.title, hit.chart.chart_type, code)
                 const = hit.chart.const
-                if key in frame_keys or const is None:
+                if key in frame_keys or const is None or (charts is not None and key not in charts):
                     continue
                 is_new = self._songdb.is_new_for(hit.song.title)
                 floor = new_floor if is_new else best_floor

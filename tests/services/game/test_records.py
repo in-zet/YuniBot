@@ -1289,3 +1289,17 @@ def test_session_state_saved_before_chart_type_existed_still_decodes() -> None:
     state = msgspec.json.decode(old, type=records_module.SessionState)
 
     assert state.chart_updates[0].chart_type == ""
+
+
+async def test_candidates_with_charts_stay_inside_those_charts(conn) -> None:
+    """2026-11-07: 다른 도구가 거른 표의 채보(charts)를 주면 그 안에서만 고른다."""
+    songdb = SongDbService()
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+    await service.save_sync(player_id, snapshot_from_fetch(_fixture_fetch()), ctx)
+    every = await service.candidates(player_id, min_const=14.0, max_const=17.0, count=500)
+    assert len(every) >= 3
+    picked = {(h.song_title, h.chart_type, h.difficulty) for h in every[1:3]}
+
+    hits = await service.candidates(player_id, min_const=None, max_const=None, count=500, charts=picked)
+
+    assert {(h.song_title, h.chart_type, h.difficulty) for h in hits} == picked

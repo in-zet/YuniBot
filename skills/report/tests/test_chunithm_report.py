@@ -140,10 +140,11 @@ class _FakeRecords:
         return self.frames.get(player_id, ([], []))
 
     async def candidates(
-        self, player_id: str, *, min_const: float | None, max_const: float | None, count: int
+        self, player_id: str, *, min_const: float | None, max_const: float | None, count: int,
+        charts: Any = None,
     ) -> list[CandidateHit]:
         self.candidate_calls.append(
-            {"player_id": player_id, "min_const": min_const, "max_const": max_const, "count": count}
+            {"player_id": player_id, "min_const": min_const, "max_const": max_const, "count": count, "charts": charts}
         )
         return self.hits[:count]
 
@@ -753,7 +754,7 @@ async def test_candidates_passes_range_and_count_for_self(skill: ModuleType) -> 
 
     result = await skill.candidates(f.ctx, min_const=14.5, max_const=15.5, count=5)
 
-    assert f.records.candidate_calls == [{"player_id": "me", "min_const": 14.5, "max_const": 15.5, "count": 5}]
+    assert f.records.candidate_calls == [{"player_id": "me", "min_const": 14.5, "max_const": 15.5, "count": 5, "charts": None}]
     table = result.table
     assert table is not None and table.subject == "me"
     assert [r.cell("곡").raw for r in table.rows] == ["곡 A", "곡 B"]  # 순서는 상승폭 큰 순 그대로
@@ -767,6 +768,19 @@ async def test_candidates_passes_range_and_count_for_self(skill: ModuleType) -> 
         "2. 곡 B MAS 15.0  현재 1,000,000  상승폭 +0.30",
     ]
     assert result.data["count"] == 2 and "candidates" not in result.data
+
+
+async def test_candidates_passes_the_charts_of_a_given_table(skill: ModuleType) -> None:
+    """2026-11-07: 신곡·레벨 같은 조건은 find_songs가 거른 표로 받아, 그 표의 채보만 후보 계산에 넘긴다."""
+    songdb = _real_songdb()
+    hits = songdb.find_songs(min_const=15.0, max_const=15.0, difficulty="MAS")[:2]
+    assert len(hits) == 2
+    f = _ctx(records=_FakeRecords(hits=[_hit("곡 A", "0.50")]), songdb=songdb)
+
+    result = await skill.candidates(f.ctx, table=_plain_table(hits, "chunithm"))
+
+    assert f.records.candidate_calls[0]["charts"] == {(h.song.title, h.chart.chart_type, "MAS") for h in hits}
+    assert result.table is not None and "받은 표의 채보 안에서" in result.table.steps
 
 
 async def test_candidates_empty(skill: ModuleType) -> None:

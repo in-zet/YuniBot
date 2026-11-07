@@ -54,10 +54,16 @@ SCENARIOS: tuple[Scenario, ...] = (
         shown_from=("song_find_songs",),
     ),
     Scenario(name="검색/버전", question="LUMINOUS PLUS 버전 곡 다 보여 줘", shown_from=_SEARCH),
-    # 후보곡·분석 — 기록 없는 평가 플레이어라 표가 안 나올 수 있어 호출만 본다.
+    # 후보곡·분석 — 기록 없는 평가 플레이어라 표가 안 나올 수 있어 호출만 본다. 상수 범위 밖의 조건은 find_songs 표로 받는다.
     Scenario(name="후보곡/상수 범위", question="15.0~15.5에서 레이팅 올릴 후보곡 뽑아줘", must_call_any=("report_candidates",)),
-    Scenario(name="후보곡/레벨 조건", question="레벨 14 곡 중에 레이팅 올릴 후보곡 뽑아줘", must_call_any=("report_candidates",)),
-    Scenario(name="후보곡/신곡", question="신곡 중에서 레이팅 올릴 후보곡 보여줘", must_call_any=("report_candidates",)),
+    Scenario(
+        name="후보곡/레벨 조건", question="레벨 14 곡 중에 레이팅 올릴 후보곡 뽑아줘",
+        must_call=("song_find_songs", "report_candidates"),
+    ),
+    Scenario(
+        name="후보곡/신곡", question="신곡 중에서 레이팅 올릴 후보곡 보여줘",
+        must_call=("song_find_songs", "report_candidates"),
+    ),
     Scenario(name="분석/상수대", question="15대 상수 랭크 분포 보여줘", must_call_any=("report_analyze",)),
     Scenario(name="분석/레벨 조건", question="레벨 14 마스터 랭크 분포 보여줘", must_call_any=("report_analyze",)),
     # "신곡"은 뜻이 둘이다 — 업데이트 일정의 신곡과 지금 버전의 신곡.
