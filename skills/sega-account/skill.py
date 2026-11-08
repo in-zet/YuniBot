@@ -148,7 +148,8 @@ async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
 
 @tool(tags=["sega-linked"], mutates=True, confirm="always")
 async def logout(ctx: ToolContext) -> ToolResult:
-    """저장된 clal 쿠키를 지운다. 동기화된 기록은 남는다."""
+    """저장된 clal 쿠키를 지운다. 동기화된 기록은 남는다. "로그아웃"·"세가 로그아웃"·"쿠키 지워"처럼 분명히 말했을 때만
+    부른다 — 멘션에서는 확인 없이 바로 실행된다. "계정 끊어줘"·"연결 해제"처럼 무엇을 끊는지 애매하면 부르지 말고 묻는다."""
     await ctx.chunithm_net.logout(ctx.player_id, ctx)
     return ToolResult(data={"logged_out": True}, display=Display(content="로그아웃했어. 보관하던 쿠키는 지웠고, 모아 둔 기록은 그대로 남아 있어.", ephemeral=True))
 

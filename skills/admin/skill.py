@@ -96,27 +96,34 @@ async def revoke_tag(ctx: ToolContext, target: PlayerRef, tag: str) -> ToolResul
 
 
 @tool(mutates=True, confirm="always")
-async def set_limits(ctx: ToolContext, monthly_cost_cap: float, player_cooldown_seconds: int) -> ToolResult:
-    """월 비용 상한과 플레이어별 쿨다운을 저장한다. 멘션 응답에 바로 적용된다."""
+async def set_limits(
+    ctx: ToolContext, monthly_cost_cap: float | None = None, player_cooldown_seconds: int | None = None
+) -> ToolResult:
+    """월 비용 상한(달러)과 플레이어별 쿨다운(초)을 저장한다. 멘션 응답에 바로 적용된다. 바꾸라고 한 값만 주고
+    나머지는 비운다(비운 값은 그대로 둔다)."""
     if ctx.guild_id is None:
         return ToolResult(error="서버 안에서만 쓸 수 있어")
+    if monthly_cost_cap is None and player_cooldown_seconds is None:
+        return ToolResult(error="바꿀 값(월 비용 상한이나 쿨다운)을 하나 이상 알려 줘")
     # 0 이하·무한·NaN 상한은 모든 멘션을 한도 문구로 막고, 음수나 하루를 넘는 쿨다운은 쿨다운을 없애거나 영구로 만든다.
-    if not math.isfinite(monthly_cost_cap) or monthly_cost_cap <= 0:
+    if monthly_cost_cap is not None and (not math.isfinite(monthly_cost_cap) or monthly_cost_cap <= 0):
         return ToolResult(error="월 비용 상한은 0보다 큰 숫자여야 해")
-    if not 0 <= player_cooldown_seconds <= _MAX_COOLDOWN_SECONDS:
+    if player_cooldown_seconds is not None and not 0 <= player_cooldown_seconds <= _MAX_COOLDOWN_SECONDS:
         return ToolResult(error=f"쿨다운은 0초에서 {_MAX_COOLDOWN_SECONDS}초(하루) 사이여야 해")
-    await ctx.settings.set_value(
-        scope="guild", scope_id=ctx.guild_id, skill="admin", name="월 비용 상한",
-        value=monthly_cost_cap, updated_by=ctx.player_id,
-    )
-    await ctx.settings.set_value(
-        scope="guild", scope_id=ctx.guild_id, skill="admin", name="플레이어 쿨다운",
-        value=player_cooldown_seconds, updated_by=ctx.player_id,
-    )
-    return ToolResult(
-        data={"monthly_cost_cap": monthly_cost_cap, "player_cooldown_seconds": player_cooldown_seconds},
-        display=Display(ephemeral=True),
-    )
+    changed: dict[str, float | int] = {}
+    if monthly_cost_cap is not None:
+        await ctx.settings.set_value(
+            scope="guild", scope_id=ctx.guild_id, skill="admin", name="월 비용 상한",
+            value=monthly_cost_cap, updated_by=ctx.player_id,
+        )
+        changed["monthly_cost_cap"] = monthly_cost_cap
+    if player_cooldown_seconds is not None:
+        await ctx.settings.set_value(
+            scope="guild", scope_id=ctx.guild_id, skill="admin", name="플레이어 쿨다운",
+            value=player_cooldown_seconds, updated_by=ctx.player_id,
+        )
+        changed["player_cooldown_seconds"] = player_cooldown_seconds
+    return ToolResult(data=changed, display=Display(ephemeral=True))
 
 
 @tool(mutates=True, confirm="always")

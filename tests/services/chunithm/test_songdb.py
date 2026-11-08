@@ -440,7 +440,7 @@ async def test_resolve_without_conn_ignores_server_alias(songdb: SongDbService) 
     # conn 없이 만든 서비스는(이 모듈의 대부분 테스트처럼) 서버 별칭 기능이 아예 없다 —
     # 그래도 전역 해석은 그대로 동작해야 한다.
     with pytest.raises(ResolutionError, match="찾지 못함"):
-        await songdb.resolve("크로노", _CTX)
+        await songdb.resolve("브브크크", _CTX)
 
 
 async def test_add_and_resolve_server_alias(songdb_with_conn: SongDbService) -> None:
@@ -712,3 +712,18 @@ async def test_unlisted_song_stops_being_new_when_the_current_version_moves_on(s
     songdb._apply_chunimaru(sample)
 
     assert songdb.is_new_for(unlisted.title) is False
+
+
+def test_ko_alias_titles_all_exist_in_songdb(songdb: SongDbService) -> None:
+    """song_aliases_ko.yaml의 제목이 곡 DB 제목과 글자까지 같아야 한다(오타가 나면 조용히 빠지므로 대조한다)."""
+    from services.chunithm.songdb import (
+        _load_ko_aliases,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    titles = [t for t, _aliases in _load_ko_aliases(Path("services/chunithm/data/song_aliases_ko.yaml"))]
+    assert [t for t in titles if songdb.song_by_title(t) is None] == []
+
+
+async def test_resolve_by_ko_alias(songdb: SongDbService) -> None:
+    song = await songdb.resolve("완성 염상", _CTX)
+    assert song.title == "宛城、炎上！！"

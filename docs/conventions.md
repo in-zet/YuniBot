@@ -46,7 +46,7 @@ tests/                 코어·서비스 시험(스킬 시험은 각 스킬의 t
 - 계약 시험은 모든 스킬에 자동으로 돈다: manifest, 도구 스키마, 이름과 슬래시 중복, docstring, 선언하지 않은 서비스 사용, 테이블 접두사, 마이그레이션 파일 이름.
 - 도구 함수의 docstring은 모델에게 가는 도구 설명이다. 계획·이력 이야기를 쓰지 않는다.
 - CHUNITHM-NET 파서는 `docs/reference/`의 저장본으로 시험한다. 실제 사이트에 접속하는 시험은 만들지 않는다.
-- LLM을 부르는 시험은 기본 실행에서 뺀다. 도구 선택·해석 평가는 `scripts/eval_agent.py`(스킬 `examples` + `scripts/eval_scenarios.py`의 시나리오 — 불린 도구와 보인 표의 출처를 본다, LLM 키 필요).
+- LLM을 부르는 시험은 기본 실행에서 뺀다. 도구 선택·해석 평가는 `scripts/eval_agent.py`(스킬 `examples` + `scripts/eval_scenarios.py`의 시나리오 — 불린 도구와 보인 표의 출처를 본다, LLM 키 필요). 평가 플레이어는 지어낸 츄니즘 기록과 폴더 "연습"을 받아 서버 안에서 묻는다(2026-11-08).
 
 ## 5. 주석
 

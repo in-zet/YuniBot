@@ -90,6 +90,15 @@ async def test_explain_known_term(terms: TermsService) -> None:
 
     assert result.error is None
     assert result.data["canonical"] == "SSS+"
+    assert "트플플" in result.data["aliases"]
+
+
+async def test_explain_gives_the_model_the_meaning_too(terms: TermsService) -> None:
+    # 뜻은 표시물만이 아니라 data에도 있어야 모델이 그걸로 답한다.
+    skill = _load_skill()
+    result = await skill.explain(_ctx(terms), term="오버파워")
+
+    assert result.data["meaning"]
 
 
 async def test_explain_unknown_term_is_an_error(terms: TermsService) -> None:

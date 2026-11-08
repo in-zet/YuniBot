@@ -5,6 +5,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import aiosqlite
@@ -46,6 +47,15 @@ _CORE_TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in [*CORE_T
 # 이번 턴에서 heavy 스킬(manifest.weight == "heavy")의 도구를 처음 부르기 직전에 한 번
 # 불린다 — core/mention.py가 이걸로 "확인하고 있다"를 시간 기다리지 않고 바로 보낸다.
 OnHeavyCall = Callable[[], Awaitable[None]]
+
+_WEEKDAYS = "월화수목금토일"
+
+
+def today_line(now: datetime | None = None) -> str:
+    """프롬프트 맥락에 넣는 오늘 날짜(서버 지역 시각 — 운영은 TZ=Asia/Tokyo, 한국과 같은 UTC+9). 없으면 "12월 말까지"·
+    "다음 주 금요일" 같은 상대 날짜를 풀지 못해 되묻는다(2026-11-07 탐색: 상대 날짜 목표 36번 중 22번 실패)."""
+    today = (now or datetime.now(UTC)).astimezone().date()
+    return f"오늘 날짜: {today.isoformat()} ({_WEEKDAYS[today.weekday()]}요일)"
 
 
 @dataclass(slots=True, kw_only=True)
@@ -139,7 +149,14 @@ class AgentLoop:
                 for spec in skill.code.tools:
                     if spec.name == fn_name:
                         return spec, skill.manifest.name
-        return None
+        # 모델이 스킬 접두어를 빼고 부르면(`image_table_image` 대신 지침 글 그대로 `table_image`) 그 이름의 스킬 도구가
+        # 하나뿐일 때 그것으로 본다 — 없는 도구 오류로 왕복을 한 번 더 쓰던 것(2026-11-07 탐색: 그림 요청 27번 중 11번).
+        # 권한·확인 검사는 실행기가 똑같이 한다.
+        bare = [
+            (spec, skill.manifest.name)
+            for skill in self._registry_skills() for spec in skill.code.tools if spec.name == tool_name
+        ]
+        return bare[0] if len(bare) == 1 else None
 
     def _requires_admin(self, spec: ToolSpec, skill_name: str | None) -> bool:
         if "admin" in spec.tags or "admin" in spec.tags_any:
@@ -212,7 +229,9 @@ class AgentLoop:
         thread_end: ThreadEndRequest | None = None,
     ) -> AgentTurnResult:
         """thread_end가 있으면 대화 스레드 안의 응답이다 — 모델에게 end_conversation 도구가 보이고, 부르면 thread_end가 켜진다."""
-        result = AgentTurnResult(seen_text=user_text)
+        date_line = today_line()
+        # 날짜 줄은 모델이 본 글이라 숫자 대조에서 맞는 숫자로 친다("2026년 12월 31일까지"를 위반으로 잡지 않게).
+        result = AgentTurnResult(seen_text=f"{date_line}\n{user_text}")
         # 코어 도구 전용 내부 키(manifest.services 선언 대상이 아니다): table_query/table_peek이 쓴다.
         services: dict[str, object] = {
             **ctx.services,
@@ -238,7 +257,7 @@ class AgentLoop:
             channel_id=ctx.channel_id,
         )
 
-        prompt_context_snippets = [*prompt_context_snippets, *await self._skill_prompt_snippets(ctx)]
+        prompt_context_snippets = [date_line, *prompt_context_snippets, *await self._skill_prompt_snippets(ctx)]
         # 메시지에 스킬의 `triggers` 낱말이 있으면 모델이 open_skill을 부르기 전에 미리 펼친다(왕복 절약).
         for name in self._prompt.triggered_skills(user_text, player_tags=set(ctx.tags)):
             skill_state.open(name)

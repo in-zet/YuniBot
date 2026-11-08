@@ -26,6 +26,7 @@ _SEED_PATH = (
     / "third_party" / "chuni_penguin" / "database" / "seeds" / "songs.json"
 )
 _LINKED_VERSE_PATH = Path(__file__).parent / "data" / "linked_verse.yaml"
+_KO_ALIASES_PATH = Path(__file__).parent / "data" / "song_aliases_ko.yaml"
 _MAX_CANDIDATES = 8
 
 # 기본 게임(츄니즘)의 값. 스킬이 게임을 고르게 되기 전까지 스킬과 표 모듈이 이 이름으로 가져다 쓴다.
@@ -55,6 +56,12 @@ def _load_linked_verse(path: Path) -> list[tuple[str, list[str]]]:
     """(게이트, 곡 제목들)을 파일 순서대로. 이 파일이 Linked VERSE 해금곡의 유일한 출처다."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
     return [(item["gate"], list(item["songs"])) for item in raw]
+
+
+def _load_ko_aliases(path: Path) -> list[tuple[str, list[str]]]:
+    """(곡 제목, 한글 별칭들)을 파일 순서대로."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+    return [(str(item["title"]), [str(a) for a in item["aliases"]]) for item in raw]
 
 
 def _note_count(chart: dict[str, Any]) -> int | None:
@@ -128,12 +135,17 @@ class SongDbService(SongDb):
         *,
         conn: aiosqlite.Connection | None = None,
         linked_verse_path: Path = _LINKED_VERSE_PATH,
+        ko_aliases_path: Path = _KO_ALIASES_PATH,
         profile: GameProfile = CHUNITHM,
     ) -> None:
         # Chunimaru가 아직 한 번도 안 덧씌워졌으면 시드 자신의 available 플래그로
         # 근사한다(완벽하지 않지만 기동 중 네트워크 장애에도 안 죽게 하는 하한선이다).
         raw = json.loads(seed_path.read_text(encoding="utf-8"))
         songs = _load_seed(seed_path)
+        # 한글 별칭은 시드 별칭 뒤에 붙인다 — 곡 찾기(`resolve`)와 곡명 검색이 시드 별칭과 똑같이 본다.
+        for title, aliases in _load_ko_aliases(ko_aliases_path):
+            if title in songs:
+                songs[title].aliases = (*songs[title].aliases, *aliases)
         super().__init__(
             conn=conn, profile=profile, songs=songs, available={e["title"] for e in raw if e.get("available")}
         )

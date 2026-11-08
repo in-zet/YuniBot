@@ -78,6 +78,7 @@
 - canonical: "WORLD'S END"
   category: difficulty
   aliases: [월드엔드, 월엔, WE]
+  meaning: BASIC~ULTIMA와 따로 있는 특수 난이도. 레벨 숫자 대신 기믹을 나타내는 한자 한 글자와 별(1~5개)로 표시하고, 상수가 없어 레이팅에 들어가지 않는다. 곡 검색에서는 난이도로 고른다.
 - canonical: "AJC"
   category: lamp
   value: 1010000
@@ -113,3 +114,8 @@
   aliases: [링크드 버스, 링크드버스, 링버, LinkedVERSE]
   meaning: CHUNITHM X-VERSE에서 시작한 해금 시스템(수록 버전 이름이 아니다). 시대별 게이트(ORIGIN~VERSE)를 열면 곡이 하나씩 풀리고, 이어서 전도 악곡·RE:VERSE·UNIVERSE·ENDING 단계가 있다. 해금곡은 X-VERSE와 X-VERSE-X 수록곡에 흩어져 있다. 곡 목록은 song의 find_linked_verse로 본다. 국제판은 온라인 기능이 빠지고 일부 게이트 조건이 단순 플레이로 바뀌어 있다.
   source: 나무위키 Linked VERSE (2026-10-21 확인)
+- canonical: "레이팅"
+  category: concept
+  aliases: [레이팅 계산, 레이팅 계산 방식, 곡 레이팅, 플레이어 레이팅]
+  meaning: "곡 레이팅은 채보 상수와 점수로 정한다. 1,009,000점 이상이면 상수+2.15, 1,007,500점부터 상수+2.00에 100점마다 0.01, 1,005,000점부터 상수+1.50에 50점마다 0.01, 1,000,000점부터 상수+1.00에 100점마다 0.01, 975,000점부터 상수+0.00에 250점마다 0.01을 더한다. 그 아래는 900,000점에서 상수-5.00까지 줄고, 800,000점에서 그 절반, 500,000점에서 0이 된다. 곡 레이팅은 소수 둘째 자리에서 버린다. 플레이어 레이팅은 베스트 30곡과 신곡 20곡의 곡 레이팅 합을 50으로 나눈 값이다. 특정 상수·점수의 곡 레이팅은 rating-calc로 계산한다."
+  source: vendored chuni_penguin calculate_rating과 records_calc.overall_rating을 옮겨 적음(2026-11-08)

@@ -195,6 +195,24 @@ async def test_set_limits_stores_guild_scoped_values(admin_env) -> None:
     ) == 5
 
 
+async def test_set_limits_changes_only_the_given_value(admin_env) -> None:
+    # "월 상한 20달러로"에 쿨다운을 되묻지 않게 한쪽만 받는다. 안 준 값은 그대로 둔다.
+    skill, _, settings, make_ctx = admin_env
+    ctx = make_ctx("admin1", guild_id="g1")
+    await skill.set_limits(ctx, monthly_cost_cap=25.0, player_cooldown_seconds=5)
+
+    result = await skill.set_limits(ctx, monthly_cost_cap=20.0)
+
+    assert result.data == {"monthly_cost_cap": 20.0}
+    assert await settings.get_value(
+        scope="guild", scope_id="g1", skill="admin", name="월 비용 상한", default=0.0
+    ) == 20.0
+    assert await settings.get_value(
+        scope="guild", scope_id="g1", skill="admin", name="플레이어 쿨다운", default=0
+    ) == 5
+    assert (await skill.set_limits(ctx)).error is not None
+
+
 @pytest.mark.parametrize(
     ("cap", "cooldown"),
     [(0.0, 5), (-1.0, 5), (float("nan"), 5), (float("inf"), 5), (25.0, -1), (25.0, 86_401)],

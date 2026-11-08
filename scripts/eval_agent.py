@@ -2,8 +2,9 @@
 키가 필요하고 비용이 든다. uv run pytest에는 수집되지 않는다.
 
 운영과 같은 배선(core.bot.build_client)을 임시 DB로 띄워 실제 서비스·도구·표 보관소를 그대로 쓴다.
-운영 DB(DB_PATH)는 건드리지 않는다. 곡 DB는 운영처럼 기동 때 받아 온다. 평가 플레이어는 기록이 없고
-CHUNITHM-NET에 접속하지 않는다.
+운영 DB(DB_PATH)는 건드리지 않는다. 곡 DB는 운영처럼 기동 때 받아 온다. 평가 플레이어는 CHUNITHM-NET에 접속하지 않고,
+대신 시작할 때 지어낸 츄니즘 기록(곡 DB의 채보에 정해진 점수를 돌려 준다)과 폴더 "연습"을 받아 서버(`_EVAL_GUILD`) 안에서
+묻는다 — 기록·폴더·서버가 없으면 베스트 → 그림, 폴더 → 분석, 서버 설정 같은 흐름이 앞 단계에서 끊겨 판정할 수 없다(2026-11-07 탐색).
 
 두 묶음:
 - examples: 스킬 `examples` 질문마다 그 스킬의 도구가 한 번이라도 불렸는지.
@@ -23,6 +24,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
 
+from chuni_penguin.types import ClearLamp, ComboLamp, Rank
+
 from core.agent import AgentLoop, AgentTurnResult
 from core.bot import YuniClient, build_client
 from core.config import CoreConfig, load_config
@@ -40,8 +43,15 @@ from core.tables import TableError, parse_table_arg
 from core.tool_types import ToolContext, ToolResult
 from scripts.eval_scenarios import SCENARIOS, Scenario
 from services.common.players import PlayersService
+from services.game.records import RecordsService
+from services.game.songdb import SongDb
+from services.game.sync_types import ChartPlay, ProfileSnapshot, SyncSnapshot
 
 _EVAL_CHANNEL = "eval"
+_EVAL_GUILD = "eval-guild"
+_FIXTURE_FOLDER = "연습"
+# 지어낸 기록의 점수를 이 순서로 돌려 준다 — SSS+부터 S 아래까지 랭크가 고루 섞이게.
+_FIXTURE_SCORES = (1_009_400, 1_008_200, 1_007_600, 1_006_100, 1_004_200, 1_001_300, 996_500, 988_000, 979_000, 962_000)
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -141,6 +151,10 @@ class _TracingAgentLoop(AgentLoop):
         self._current: tuple[str, dict[str, Any]] | None = None
 
     async def _invoke(self, ctx: ToolContext, tool_name: str, args: dict[str, Any], **kwargs: Any) -> ToolResult:  # type: ignore[override]
+        # 접두어 없이 부른 이름(`table_image`)은 코어가 실제로 실행할 도구 이름으로 적는다 — 판정은 실행된 도구를 본다.
+        found = self._find_spec(tool_name)
+        if found is not None and found[1] is not None:
+            tool_name = f"{found[1]}_{found[0].name}"
         self._current = (tool_name, dict(args))
         self.trace.calls.append(self._current)
         return await super()._invoke(ctx, tool_name, args, **kwargs)
@@ -156,6 +170,47 @@ class _TracingAgentLoop(AgentLoop):
         return kept
 
 
+def _fixture_play(title: str, difficulty: str, score: int) -> ChartPlay:
+    combo = ComboLamp.all_justice if score >= 1_009_000 else ComboLamp.full_combo if score >= 1_007_500 else ComboLamp.none
+    return ChartPlay(
+        song_title=title, difficulty=difficulty, score=score, rank=str(Rank.from_score(score)),
+        clear_lamp=str(ClearLamp.clear), combo_lamp=str(combo),
+    )
+
+
+async def seed_fixture(
+    *, executor: ToolExecutor, loop: AgentLoop, player_id: str, tags: frozenset[str],
+) -> int:
+    """평가 플레이어에게 츄니즘 기록과 폴더를 준다. 상수 13.0~15.7 익스퍼트·마스터·울티마 채보를 하나 걸러 하나씩
+    `_FIXTURE_SCORES`를 돌려 가며 기록하고(동기화와 같은 `save_sync` — 베스트·신곡 프레임은 서비스가 짠다),
+    폴더 "연습"에 마스터 몇 개를 넣는다. 넣은 기록 수를 돌려준다."""
+    songdb = cast("SongDb", executor.services["songdb"])
+    records = cast("RecordsService", executor.services["records"])
+    hits = sorted(
+        songdb.find_songs(min_const=13.0, max_const=15.7, difficulty=("EXP", "MAS", "ULT")),
+        key=lambda hit: (hit.song.title, hit.chart.difficulty),
+    )
+    plays = [
+        _fixture_play(hit.song.title, hit.chart.difficulty, _FIXTURE_SCORES[i % len(_FIXTURE_SCORES)])
+        for i, hit in enumerate(hits[::2])
+    ]
+    ctx = ToolContext(player_id=player_id, tags=tags, services={}, event_bus=executor.event_bus)
+    await records.save_sync(player_id, SyncSnapshot(profile=ProfileSnapshot(username="EVAL"), all_plays=plays), ctx)
+    folder_ctx = ToolContext(
+        player_id=player_id, tags=tags, services={}, event_bus=executor.event_bus, guild_id=_EVAL_GUILD,
+        tables=executor.tables, channel_id=_EVAL_CHANNEL,
+    )
+    await loop._invoke(folder_ctx, "folders_create_folder", {"name": _FIXTURE_FOLDER})  # pyright: ignore[reportPrivateUsage]
+    # SSS 아래 마스터 여섯 개 — "연습 폴더 랭크 분포"·"연습 폴더 SSS 목표"가 고를 거리가 있게.
+    for play in [play for play in plays if play.difficulty == "MAS" and play.score < 1_007_500][:6]:
+        result = await loop._invoke(  # pyright: ignore[reportPrivateUsage]
+            folder_ctx, "folders_add_chart", {"name": _FIXTURE_FOLDER, "chart": f"{play.song_title} MASTER"}
+        )
+        if result.error is not None:
+            print(f"[준비] 폴더에 '{play.song_title}'를 못 넣었다: {result.error}")
+    return len(plays)
+
+
 async def _run_turn(
     *, config: CoreConfig, llm: LlmAdapter, prompt: PromptAssembler, executor: ToolExecutor, client: YuniClient,
     registry: SkillRegistry, player_id: str, tags: frozenset[str], question: str,
@@ -168,6 +223,7 @@ async def _run_turn(
     ctx = ToolContext(
         player_id=player_id, tags=tags, services={}, event_bus=executor.event_bus,
         usage=cast("Any", executor.services["usage"]), tables=executor.tables, channel_id=_EVAL_CHANNEL,
+        guild_id=_EVAL_GUILD,
     )
     state = SkillLoadState(mode=config.skill_loading_mode, known_skills={s.manifest.name for s in registry.enabled_skills()})
     started = time.monotonic()
@@ -212,7 +268,6 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
     players = cast("PlayersService", executor.services["players"])
     player = await players.create_player()
     tags = all_manifest_tags(registry)
-    print(f"모델 {config.llm_provider}/{config.agent_model} · 모드 {config.skill_loading_mode}")
 
     jobs: list[tuple[str, str, str, EvalCase | Scenario]] = []
     if args.suite in ("all", "examples"):
@@ -224,6 +279,13 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
 
     reports: dict[str, EvalReport] = {"examples": EvalReport(), "scenarios": EvalReport()}
     try:
+        # 준비가 실패해도 아래 finally가 DB 연결을 닫게 try 안에서 한다(안 닫으면 프로세스가 끝나지 않는다).
+        seeding_loop = AgentLoop(
+            llm=llm, executor=executor, prompt=prompt, model=config.agent_model, thinking_level=config.thinking_level,
+            max_tool_calls=config.max_tool_calls_per_turn, max_tokens=config.max_tokens_per_turn, db=client.conn,
+        )
+        seeded = await seed_fixture(executor=executor, loop=seeding_loop, player_id=player.id, tags=tags)
+        print(f"모델 {config.llm_provider}/{config.agent_model} · 모드 {config.skill_loading_mode} · 지어낸 기록 {seeded}개")
         for suite, label, question, case in jobs:
             for attempt in range(args.repeat):
                 result, trace, elapsed = await _run_turn(

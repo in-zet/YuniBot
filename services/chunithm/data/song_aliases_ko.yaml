@@ -1,0 +1,59 @@
+# services/chunithm/data/song_aliases_ko.yaml
+# 곡 제목의 한글 별칭(발음 옮김·한자 읽기·우리말 번역). 시드에는 영어·일본어 별칭만 있어서 "라미아"·"완성 염상"처럼
+# 한글로 부르면 모델이 제목을 짐작해 옮겨 적다 틀렸다(2026-11-07 탐색). 이 별칭은 시드 별칭과 같이 곡 찾기·곡명 검색에 쓰인다.
+# 커뮤니티 줄임말처럼 어느 곡인지 사람마다 다를 수 있는 말은 넣지 않는다 — 그런 말은 서버 별칭(`alias_add`)으로 등록한다.
+# 제목은 songdb의 곡 제목과 글자까지 같아야 한다 — tests/services/chunithm/test_songdb.py가 대조한다.
+- title: World Vanquisher
+  aliases: [월드 뱅퀴셔, 월드뱅퀴셔]
+- title: Chronomia
+  aliases: [크로노미아]
+- title: Wizdomiot
+  aliases: [위즈도미엇]
+- title: GIGA BLAST
+  aliases: [기가 블래스트, 기가블래스트, 지가 블래스트]
+- title: GIGA DRIVE
+  aliases: [기가 드라이브, 기가드라이브]
+- title: Ascension to Heaven
+  aliases: [아센션 투 헤븐, 어센션 투 헤븐]
+- title: "TiamaT:F minor"
+  aliases: [티아매트, 티아마트]
+- title: Contrapasso -inferno-
+  aliases: [콘트라파쏘, 콘트라파소]
+- title: LAMIA
+  aliases: [라미아]
+- title: 可愛くてごめん
+  aliases: [카와이쿠테 고멘, 귀여워서 미안]
+- title: 宛城、炎上！！
+  aliases: [완성 염상, 완성염상]
+- title: Halcyon
+  aliases: [할시온]
+- title: Xevel
+  aliases: [제벨]
+- title: Aleph-0
+  aliases: [알레프 제로, 알레프제로]
+- title: Gate of Fate
+  aliases: [게이트 오브 페이트]
+- title: ouroboros -twin stroke of the end-
+  aliases: [우로보로스]
+- title: FREEDOM DiVE
+  aliases: [프리덤 다이브, 프리덤다이브]
+- title: エンドマークに希望と涙を添えて
+  aliases: [엔드마크]
+- title: ひれ伏せ愚民どもっ！
+  aliases: [히레후세]
+- title: ジングルベル
+  aliases: [징글벨]
+- title: Climax
+  aliases: [클라이맥스]
+- title: Black Lotus
+  aliases: [블랙 로터스, 블랙로터스]
+- title: DESTRUCTION 3,2,1
+  aliases: [디스트럭션 321, 디스트럭션]
+- title: UltraNeon
+  aliases: [울트라네온, 울트라 네온]
+- title: INFiNiTE ENERZY -Overdoze-
+  aliases: [인피니트 에너지]
+- title: The Darkness of Valhalla
+  aliases: [다크니스 오브 발할라]
+- title: Rebellion
+  aliases: [리벨리온]

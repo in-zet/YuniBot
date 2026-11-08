@@ -32,6 +32,8 @@ async def explain(ctx: ToolContext, term: str, game: GameRef | None = None) -> T
         data={
             "canonical": explanation.canonical, "category": explanation.category_label,
             "value": explanation.value, "scope": explanation.scope,
+            # 뜻은 표시물에만 있으면 모델이 못 보고 웹 검색으로 넘어간다(2026-11-07 탐색: "오버파워가 뭔데" 3번 중 2번).
+            "meaning": explanation.meaning, "aliases": [*explanation.aliases],
         },
         display=Display(content="\n".join(lines)),
         display_mode="optional",

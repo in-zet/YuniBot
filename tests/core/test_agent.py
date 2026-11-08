@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from core.agent import AgentLoop
+from core.agent import AgentLoop, today_line
 from core.executor import ToolExecutor
 from core.llm import (
     FunctionCallRequest,
@@ -273,6 +274,56 @@ async def test_agent_loop_rejects_call_beyond_per_tool_cap_but_keeps_turn_going(
     assert result.hit_tool_call_cap is False
     assert "error" not in seen_function_responses[0]
     assert "error" in seen_function_responses[1]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_resolves_a_tool_called_without_its_skill_prefix(tmp_path: Path) -> None:
+    # 지침 글의 이름 그대로 `do_search`라고 불러도, 그 이름의 스킬 도구가 하나뿐이면 그 도구를 실행한다.
+    skills_root = tmp_path / "skills"
+    write_skill(skills_root, "capped-search", _CAPPED_TOOL_BODY)
+    registry = SkillRegistry([Path("skills"), skills_root])
+    registry.load()
+    call = GenerationTurn(
+        content=LlmContent(role="model", parts=[]),
+        function_calls=[FunctionCallRequest(call_id="1", name="do_search", args={})],
+    )
+    responses: list[dict[str, object]] = []
+
+    def script(
+        model: str, system: str, contents: list[LlmContent], tools: list[ToolDeclaration]
+    ) -> GenerationTurn:
+        for part in contents[-1].parts:
+            if part.function_response is not None:
+                responses.append(part.function_response.response)
+        return call if not responses else _say("끝냈다")
+
+    loop = AgentLoop(
+        llm=FakeLlmAdapter(script), executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    await loop.run(ctx=_ctx(), skill_state=_state(registry, mode="full"), user_text="검색해줘", prompt_context_snippets=[])
+    assert responses == [{"ok": True}]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_puts_today_in_the_prompt_and_accepts_its_numbers() -> None:
+    # "연말까지" 같은 상대 날짜를 풀 수 있게 오늘 날짜를 맥락에 넣는다. 그 날짜를 말해도 숫자 위반이 아니다.
+    registry = _registry()
+    today = datetime.now(UTC).astimezone().date()
+    llm = FakeLlmAdapter([_say(f"기한은 {today.year}-12-31로 할게")])
+    loop = AgentLoop(
+        llm=llm, executor=_executor(registry),
+        prompt=PromptAssembler(rules_text="규칙", persona_text="말투", registry=registry),
+        model="gemini-3.8-flash", thinking_level="low", max_tool_calls=5, max_tokens=50000,
+    )
+    result = await loop.run(ctx=_ctx(), skill_state=_state(registry), user_text="연말까지 목표", prompt_context_snippets=[])
+    assert f"오늘 날짜: {today.isoformat()}" in llm.calls[0][1]
+    assert result.numeric_retried is False
+
+
+def test_today_line_names_the_weekday() -> None:
+    assert today_line(datetime(2026, 11, 8, 12, 0, tzinfo=UTC)) == "오늘 날짜: 2026-11-08 (일요일)"
 
 
 @pytest.mark.asyncio
