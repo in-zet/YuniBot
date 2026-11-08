@@ -17,6 +17,7 @@ from services.game.songdb import (
     SdvxinMapping,
     SongDb,
     SongRecord,
+    alias_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,10 +59,17 @@ def _load_linked_verse(path: Path) -> list[tuple[str, list[str]]]:
     return [(item["gate"], list(item["songs"])) for item in raw]
 
 
-def _load_ko_aliases(path: Path) -> list[tuple[str, list[str]]]:
-    """(곡 제목, 한글 별칭들)을 파일 순서대로."""
+def _load_ko_aliases(path: Path) -> list[tuple[str, list[str], dict[str, str]]]:
+    """(곡 제목, 한글 별칭들, 채보 별칭(`alias_key` → 난이도 코드))을 파일 순서대로. 채보 별칭도 별칭들에 같이 넣는다."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
-    return [(str(item["title"]), [str(a) for a in item["aliases"]]) for item in raw]
+    loaded: list[tuple[str, list[str], dict[str, str]]] = []
+    for item in raw:
+        chart_aliases: dict[str, list[str]] = item.get("chart_aliases") or {}
+        aliases = [str(a) for a in item.get("aliases") or ()]
+        aliases += [str(a) for names in chart_aliases.values() for a in names]
+        by_alias = {alias_key(str(a)): str(code) for code, names in chart_aliases.items() for a in names}
+        loaded.append((str(item["title"]), aliases, by_alias))
+    return loaded
 
 
 def _note_count(chart: dict[str, Any]) -> int | None:
@@ -144,10 +152,13 @@ class SongDbService(SongDb):
         songs = _load_seed(seed_path)
         # 한글 별칭은 시드 별칭 뒤에 붙인다 — 곡 찾기(`resolve`)와 곡명 검색이 시드 별칭과 똑같이 본다.
         # 시드에 없는 곡(Chunimaru로 나중에 들어오는 곡)은 `_apply_chunimaru`가 만들 때 붙인다.
-        self._ko_aliases = {title: tuple(aliases) for title, aliases in _load_ko_aliases(ko_aliases_path)}
+        ko_aliases = _load_ko_aliases(ko_aliases_path)
+        self._ko_aliases = {title: tuple(aliases) for title, aliases, _ in ko_aliases}
+        self._ko_alias_difficulty = {title: by_alias for title, _, by_alias in ko_aliases}
         for title, aliases in self._ko_aliases.items():
             if title in songs:
                 songs[title].aliases = (*songs[title].aliases, *aliases)
+                songs[title].alias_difficulty = dict(self._ko_alias_difficulty[title])
         super().__init__(
             conn=conn, profile=profile, songs=songs, available={e["title"] for e in raw if e.get("available")}
         )
@@ -248,6 +259,7 @@ class SongDbService(SongDb):
                 new_songs[title] = SongRecord(
                     title=title,
                     aliases=self._ko_aliases.get(title, ()),
+                    alias_difficulty=dict(self._ko_alias_difficulty.get(title, {})),
                     artist=entry.get("artist", ""),
                     id=entry.get("idx", -1),
                     charts={

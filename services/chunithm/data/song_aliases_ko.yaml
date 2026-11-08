@@ -1,12 +1,16 @@
 # services/chunithm/data/song_aliases_ko.yaml
 # 곡 제목의 한글 별칭. 사용자가 준 목록(2026-11-08, 상수 15.0 이상 곡)이다. 시드에는 영어·일본어 별칭만 있어서
 # 한글로 부르면 모델이 제목을 짐작해 옮기다 틀렸다. 이 별칭은 시드 별칭과 같이 곡 찾기·곡명 검색에 쓰인다.
-# "(울티마만)"이라고 받은 별칭은 지금 곡 단위로만 붙는다(채보를 고르지는 않는다) — 줄 끝 주석으로 남긴다.
+# 채보 하나를 가리키는 별칭("(울티마만)"이라고 받은 것)은 chart_aliases에 난이도 코드별로 적는다. 곡 찾기는 다른 별칭과
+# 같고, 난이도를 따로 말하지 않은 채보 찾기에서만 그 난이도를 고른다("쿠로디닉" → Melodiniq ULTIMA).
+# 별칭은 대소문자와 띄어쓰기를 무시하고 비교한다.
 # 제목은 곡 DB(시드나 Chunimaru)의 곡 제목과 글자까지 같아야 한다 — tests/services/chunithm/test_songdb.py가 대조한다.
 - title: "Melodiniq"
-  aliases: ["멜로디닉", "메로디닉", "쿠로디닉"]  # 울티마만: 쿠로디닉
+  aliases: ["멜로디닉", "메로디닉"]
+  chart_aliases: {ULT: ["쿠로디닉"]}
 - title: "YOUNITHM"
-  aliases: ["유니즘", "유니듬", "유니클로", "유니쿠로"]  # 울티마만: 유니클로, 유니쿠로
+  aliases: ["유니즘", "유니듬"]
+  chart_aliases: {ULT: ["유니클로", "유니쿠로"]}
 - title: "創 -汝ら新世界へ歩む者なり-"
   aliases: ["츠쿠리", "쯔꾸리", "츠꾸리", "짭노리"]
 - title: "Crossmythos Rhapsodia"

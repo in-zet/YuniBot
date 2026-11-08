@@ -41,6 +41,11 @@ def _const_descending(hit: ConstRangeHit) -> tuple[bool, float, str]:
     return (hit.chart.const is None, -(hit.chart.const or 0.0), hit.song.title)
 
 
+def alias_key(text: str) -> str:
+    """별칭 비교용 글. 대소문자와 띄어쓰기를 무시한다("킬링 리듬"과 "킬링리듬"은 같은 별칭 — 2026-11-08 사용자 결정)."""
+    return "".join(text.split()).lower()
+
+
 def chart_key(chart_type: str, difficulty: str) -> str:
     """`SongRecord.charts`의 키. 채보 종류가 없는 게임(츄니즘)은 난이도 코드 그대로("MAS"), 있는 게임은
     "DX:MAS"처럼 종류:난이도다."""
@@ -87,6 +92,9 @@ class SongRecord:
     jacket: str | None = None
     # Chunimaru가 준 재킷 전체 주소. CHUNITHM-NET에서 못 받을 때(사이트 장애 등) 대신 받는다.
     jacket_fallback: str | None = None
+    # 채보 하나를 가리키는 별칭(`alias_key` → 난이도 코드, 예: "쿠로디닉" → ULT). 이 별칭은 `aliases`에도 들어 있어
+    # 곡 찾기는 똑같이 되고, 난이도를 따로 말하지 않은 채보 찾기(`ChartRefResolver`)만 이 난이도를 고른다.
+    alias_difficulty: dict[str, str] = field(default_factory=dict)
 
 
 def _select_charts(song: SongRecord, codes: list[str] | None, chart_type: str | None) -> list[ChartRecord]:
@@ -140,22 +148,22 @@ class SongDb:
             if song.title == text:
                 return song
 
+        key = alias_key(text)
         if self._conn is not None:
-            server_alias = await self.get_alias(alias=text)
+            server_alias = await self._find_server_alias(key)
             if server_alias is not None:
                 song = self._songs.get(server_alias.song_title)
                 if song is not None and song.title in self._available_intl:
                     return song
 
         for song in available_songs:
-            if text.lower() in (a.lower() for a in song.aliases):
+            if key in (alias_key(a) for a in song.aliases):
                 return song
 
-        lowered = text.lower()
         candidates = [
             song.title
             for song in available_songs
-            if lowered in song.title.lower() or any(lowered in a.lower() for a in song.aliases)
+            if key in alias_key(song.title) or any(key in alias_key(a) for a in song.aliases)
         ]
         if candidates:
             raise ResolutionError(candidates=candidates[:_MAX_CANDIDATES])
@@ -168,7 +176,7 @@ class SongDb:
     async def add_alias(self, *, alias: str, song_title: str, added_by: str) -> None:
         assert self._conn is not None
         alias = alias.lower()
-        existing = await self.get_alias(alias=alias)
+        existing = await self._find_server_alias(alias_key(alias))
         if existing is not None:
             if existing.song_title != song_title:
                 raise ValueError(f"'{alias}'는 이미 '{existing.song_title}'에 쓰인 별칭이다")
@@ -193,17 +201,30 @@ class SongDb:
         await self._conn.commit()
 
     def _find_global_name_conflict(self, alias_lower: str, song_title: str) -> str | None:
-        """alias_lower(이미 소문자)가 song_title이 아닌 다른 곡의 정식 제목이나 전역(시드)
+        """alias_lower가 띄어쓰기를 빼고 비교해 song_title이 아닌 다른 곡의 정식 제목이나 전역(시드)
         별칭과 겹치면 그 다른 곡의 제목을 돌려준다(없으면 None). resolve()의 정식 제목/
         전역 별칭 티어가 보는 것과 같은 대상(available_songs)만 본다 — 국제판에 없는 곡의
         이름은 resolve()가 그 티어에서 아예 보지 않으므로 실제로 겹칠 위험이 없다.
         같은 곡 자신의 제목/별칭과 겹치는 것은 충돌로 보지 않는다(허용)."""
+        key = alias_key(alias_lower)
         for title, song in self._songs.items():
             if title == song_title or title not in self._available_intl:
                 continue
-            if title.lower() == alias_lower or alias_lower in (a.lower() for a in song.aliases):
+            if alias_key(title) == key or key in (alias_key(a) for a in song.aliases):
                 return title
         return None
+
+    async def _find_server_alias(self, key: str) -> AliasRow | None:
+        """서버 별칭 중 띄어쓰기를 빼면 key(`alias_key`)와 같은 것. 지우기(`get_alias`)는 저장된 글자 그대로 찾는다."""
+        assert self._conn is not None
+        cursor = await self._conn.execute(
+            "SELECT alias, song_title, added_by FROM songdb_aliases WHERE game = ? AND REPLACE(alias, ' ', '') = ?",
+            (self._profile.game, key),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return AliasRow(alias=row["alias"], song_title=row["song_title"], added_by=row["added_by"])
 
     async def get_alias(self, *, alias: str) -> AliasRow | None:
         assert self._conn is not None

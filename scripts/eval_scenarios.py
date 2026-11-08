@@ -117,6 +117,8 @@ SCENARIOS: tuple[Scenario, ...] = (
     # 한글 곡명 — 한글 별칭으로 곡을 찾는다(곡 정보 도구든 곡명 검색이든).
     Scenario(name="한글곡명/줄임말", question="월뱅 마스터 상수", must_call_any=("song_chart", "song_info", "song_find_songs")),
     Scenario(name="한글곡명/발음", question="라미아 마스터 상수", must_call_any=("song_chart", "song_info", "song_find_songs")),
+    # 채보 하나를 가리키는 별칭("쿠로디닉" = Melodiniq ULTIMA)은 채보 찾기로 넘겨야 그 난이도가 골라진다.
+    Scenario(name="한글곡명/채보 별칭", question="쿠로디닉 상수 몇이야", must_call=("song_chart",)),
     # 관리 — 바꾸라고 한 값만 바꾼다.
     Scenario(name="관리/상한 하나", question="월 비용 상한 20달러로 바꿔줘", must_call=("admin_set_limits",)),
     # 기록·폴더가 있어야 끝까지 가는 흐름(평가 플레이어는 지어낸 기록과 폴더 "연습"을 받는다).

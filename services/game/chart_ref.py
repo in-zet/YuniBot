@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from core.resolvers import ResolutionError
 from core.tool_types import ToolContext
-from services.game.songdb import ChartRecord, SongDb, SongRecord
+from services.game.songdb import ChartRecord, SongDb, SongRecord, alias_key
 from services.game.terms import TermsService
 
 
@@ -33,6 +33,7 @@ class ChartRefResolver:
         # 난이도 토큰처럼 보이는 단어로 시작/끝나는 곡 제목이 있다 — 토큰을
         # 먼저 떼어내 버리면 그런 곡을 못 찾는다. 전체 문자열이 그대로 곡
         # 하나로 풀리면 그게 맞는 답이니 토큰 떼기를 시도하지 않는다.
+        song_query = text
         try:
             song = await self._songdb.resolve(text, ctx)
         except ResolutionError:
@@ -55,6 +56,9 @@ class ChartRefResolver:
             song_query = " ".join(tokens) if tokens else text
             song = await self._songdb.resolve(song_query, ctx)
 
+        # 채보 하나를 가리키는 별칭("쿠로디닉" → ULT)은 난이도를 따로 말하지 않았을 때만 그 난이도를 고른다.
+        if difficulty_code is None:
+            difficulty_code = song.alias_difficulty.get(alias_key(song_query))
         return ResolvedChart(
             song=song, chart=self._pick_chart(song, difficulty_code, chart_type)
         )

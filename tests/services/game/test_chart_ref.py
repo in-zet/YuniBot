@@ -82,6 +82,26 @@ async def test_chunimaru_reported_chart_becomes_available() -> None:
     assert resolved.chart.difficulty == "WE"
 
 
+async def test_chart_alias_picks_its_difficulty(resolver: ChartRefResolver) -> None:
+    resolved = await resolver.resolve("쿠로디닉", _CTX)
+    assert (resolved.song.title, resolved.chart.difficulty) == ("Melodiniq", "ULT")
+
+
+async def test_chart_alias_ignores_spaces(resolver: ChartRefResolver) -> None:
+    resolved = await resolver.resolve("유니 쿠로", _CTX)
+    assert (resolved.song.title, resolved.chart.difficulty) == ("YOUNITHM", "ULT")
+
+
+async def test_spoken_difficulty_wins_over_chart_alias(resolver: ChartRefResolver) -> None:
+    resolved = await resolver.resolve("쿠로디닉 마스", _CTX)
+    assert resolved.chart.difficulty == "MAS"
+
+
+async def test_song_alias_without_difficulty_keeps_the_default(resolver: ChartRefResolver) -> None:
+    resolved = await resolver.resolve("멜로디닉", _CTX)
+    assert resolved.chart.difficulty == "MAS"
+
+
 # --- maimai: 채보 종류(STD/DX) -------------------------------------------------
 
 

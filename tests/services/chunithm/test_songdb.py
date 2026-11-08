@@ -476,6 +476,21 @@ async def test_add_alias_already_used_for_different_song_raises(songdb_with_conn
         await songdb_with_conn.add_alias(alias="크로노", song_title="Reach For The Stars", added_by="p2")
 
 
+async def test_server_alias_ignores_spaces(songdb_with_conn: SongDbService) -> None:
+    await songdb_with_conn.add_alias(alias="크로 노", song_title="B.B.K.K.B.K.K.", added_by="p1")
+
+    assert (await songdb_with_conn.resolve("크로노", _CTX)).title == "B.B.K.K.B.K.K."
+    with pytest.raises(ValueError, match="이미"):
+        await songdb_with_conn.add_alias(alias="크로노", song_title="Reach For The Stars", added_by="p2")
+
+
+async def test_server_alias_cannot_shadow_a_global_alias_written_with_other_spacing(
+    songdb_with_conn: SongDbService,
+) -> None:
+    with pytest.raises(ValueError, match="이미"):
+        await songdb_with_conn.add_alias(alias="월 뱅", song_title="B.B.K.K.B.K.K.", added_by="p1")
+
+
 async def test_get_and_remove_alias(songdb_with_conn: SongDbService) -> None:
     await songdb_with_conn.add_alias(alias="크로노", song_title="B.B.K.K.B.K.K.", added_by="p1")
 
@@ -720,10 +735,16 @@ def test_ko_alias_titles_all_exist_in_songdb(songdb: SongDbService) -> None:
         _load_ko_aliases,  # pyright: ignore[reportPrivateUsage]
     )
 
-    titles = [t for t, _aliases in _load_ko_aliases(Path("services/chunithm/data/song_aliases_ko.yaml"))]
+    loaded = _load_ko_aliases(Path("services/chunithm/data/song_aliases_ko.yaml"))
+    titles = [t for t, _aliases, _by_alias in loaded]
     # 시드 이후에 나와 Chunimaru로만 들어오는 곡(2026-11-08 Chunimaru 응답에서 확인)
     chunimaru_only = {"狂命"}
     assert [t for t in titles if songdb.song_by_title(t) is None] == sorted(chunimaru_only)
+    # 채보 별칭의 난이도는 그 곡에 실제로 있는 채보여야 한다.
+    for title, _aliases, by_alias in loaded:
+        song = songdb.song_by_title(title)
+        if song is not None:
+            assert set(by_alias.values()) <= set(song.charts), title
 
 
 async def test_resolve_by_ko_alias(songdb: SongDbService) -> None:
@@ -738,3 +759,14 @@ async def test_song_added_by_chunimaru_gets_its_ko_aliases_too(songdb: SongDbSer
 
     song = await songdb.resolve("광명", _CTX)
     assert song.title == "狂命"
+
+
+async def test_alias_ignores_spaces(songdb: SongDbService) -> None:
+    song = await songdb.resolve("월 뱅", _CTX)
+    assert song.title == (await songdb.resolve("월뱅", _CTX)).title
+
+
+async def test_chart_alias_still_finds_the_song(songdb: SongDbService) -> None:
+    song = await songdb.resolve("쿠로디닉", _CTX)
+    assert song.title == "Melodiniq"
+    assert song.alias_difficulty == {"쿠로디닉": "ULT"}
