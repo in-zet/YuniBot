@@ -664,11 +664,6 @@ async def candidates(
     hits = await ctx.records.candidates(
         ctx.player_id, min_const=min_const, max_const=max_const, count=max(1, count), charts=charts
     )
-    if not hits:
-        return ToolResult(
-            data={"min_const": min_const, "max_const": max_const, "count": 0},
-            display=Display(content="지금 조건으로는 레이팅을 올릴 후보곡이 없어."),
-        )
     game_profile = _profile(ctx)
     # 달성률로 말하는 게임(maimai)은 "남은 점수"가 점수 차이가 아니라 노트 가중치에 달려 있어 이 칸을 두지 않는다.
     with_remaining = not game_profile.score_is_percent
@@ -688,6 +683,13 @@ async def candidates(
     builder.step(" ".join(["레이팅 후보곡 (상승폭 큰 순)", *_const_range_texts(min_const, max_const)]))
     if table is not None:
         builder.step("받은 표의 채보 안에서")
+    if not hits:
+        # 0채보라도 표를 돌려준다. 표가 없으면 턴의 마지막 표(앞서 만든 find_songs 표)가 후보곡처럼 보인다.
+        return ToolResult(
+            data={"min_const": min_const, "max_const": max_const, "count": 0},
+            table=builder.build(),
+            display=Display(content="지금 조건으로는 레이팅을 올릴 후보곡이 없어."),
+        )
     unknown = sum(1 for h in hits if h.remaining_score is None)
     if with_remaining and unknown:
         # 노트 수를 몰라 남은 점수를 못 구한 채보는 그 칸이 비어 줄에서 빠진다. 빠졌다는 사실은 여기서 알린다.

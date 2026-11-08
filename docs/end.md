@@ -13,7 +13,7 @@ docker compose up -d --build               # 운영 기동(미니 PC)
 - **`basedpyright`를 `--level error` 없이 돌리지 않는다.** 그냥 돌리면 경고 4천여 개, 약 650KB가 출력돼 그대로 컨텍스트를 채운다(2026-10-18 실측). 통과 기준은 "오류 0개"다.
 - 작업 중에는 바꾼 곳의 시험만 돌린다(`uv run pytest -q skills/sync/tests` 같은 식). 전체 시험·린트·타입 검사는 작업 단위를 마칠 때 한 번 돌린다.
 - 출력이 길 것 같으면 `| tail -20`처럼 끝만 본다. 실패하면 그 시험만 `-x -q`로 다시 돌린다.
-- 해석 평가(`PYTHONPATH=.:third_party uv run python3 scripts/eval_agent.py`)는 운영과 같은 모델(`.env`의 `LLM_PROVIDER`·`AGENT_MODEL`)을 실제로 부른다. 도구 인자·도구 설명(docstring)·`SKILL.md`·`prompts/`를 바꾼 작업 단위는 커밋 전에 돌려 실패가 늘지 않았는지 본다(2026-11-05 사용자 결정 — 해석 문제를 잡는 데는 토큰을 써도 된다). 답이 흔들리므로 `--repeat 3`으로 본다. 새로 발견한 오해석은 `scripts/eval_scenarios.py`에 시나리오로 더한다.
+- 해석 평가(`PYTHONPATH=.:third_party uv run python3 scripts/eval_agent.py`)는 운영과 같은 모델(`.env`의 `LLM_PROVIDER`·`AGENT_MODEL`)을 실제로 부른다. 도구 인자·도구 설명(docstring)·`SKILL.md`·`prompts/`를 바꾼 작업 단위는 커밋 전에 **바꾼 것과 관련된 시나리오·예시만** `--only`로 골라 `--repeat 3`으로 돌린다. 전체 평가(`--suite all`)는 사용자가 시킬 때만 돌린다(2026-11-08 사용자 결정 — 최근 7일 토큰 1.6억. 2026-11-05의 "바꿀 때마다 전체 평가"를 대체한다). 관련 시나리오가 없으면 하나 더해서 그것만 돌린다. 새로 발견한 오해석은 `scripts/eval_scenarios.py`에 시나리오로 더한다.
 - 실패하면 실패한 그대로 보고한다. 스킵한 검증이 있으면 무엇을 왜 스킵했는지 명시한다.
 - 디스코드에서 사람이 확인해야 할 것은 "실기 테스트로 확인할 것"으로 보고하고 `docs/plan.md` §4에 미확인으로 적는다.
 

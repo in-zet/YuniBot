@@ -789,7 +789,8 @@ async def test_candidates_empty(skill: ModuleType) -> None:
     result = await skill.candidates(f.ctx)
 
     assert result.error is None
-    assert result.table is None
+    # 빈 표라도 돌려줘야 턴의 마지막 표가 앞서 만든 검색 표로 남지 않는다.
+    assert result.table is not None and result.table.row_count == 0
     assert result.data["count"] == 0
     assert "없" in _content(result)
 
