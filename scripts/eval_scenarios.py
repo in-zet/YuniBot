@@ -115,7 +115,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         name="용어/오버파워", question="오버파워가 뭔데", must_call=("terms_explain",), must_not_call=("web-qa_search",),
     ),
     # 한글 곡명 — 한글 별칭으로 곡을 찾는다(곡 정보 도구든 곡명 검색이든).
-    Scenario(name="한글곡명/한자 읽기", question="완성 염상 마스터 상수", must_call_any=("song_chart", "song_info", "song_find_songs")),
+    Scenario(name="한글곡명/줄임말", question="월뱅 마스터 상수", must_call_any=("song_chart", "song_info", "song_find_songs")),
     Scenario(name="한글곡명/발음", question="라미아 마스터 상수", must_call_any=("song_chart", "song_info", "song_find_songs")),
     # 관리 — 바꾸라고 한 값만 바꾼다.
     Scenario(name="관리/상한 하나", question="월 비용 상한 20달러로 바꿔줘", must_call=("admin_set_limits",)),

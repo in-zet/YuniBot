@@ -143,7 +143,9 @@ class SongDbService(SongDb):
         raw = json.loads(seed_path.read_text(encoding="utf-8"))
         songs = _load_seed(seed_path)
         # 한글 별칭은 시드 별칭 뒤에 붙인다 — 곡 찾기(`resolve`)와 곡명 검색이 시드 별칭과 똑같이 본다.
-        for title, aliases in _load_ko_aliases(ko_aliases_path):
+        # 시드에 없는 곡(Chunimaru로 나중에 들어오는 곡)은 `_apply_chunimaru`가 만들 때 붙인다.
+        self._ko_aliases = {title: tuple(aliases) for title, aliases in _load_ko_aliases(ko_aliases_path)}
+        for title, aliases in self._ko_aliases.items():
             if title in songs:
                 songs[title].aliases = (*songs[title].aliases, *aliases)
         super().__init__(
@@ -241,11 +243,11 @@ class SongDbService(SongDb):
             if song is None:
                 # Chunimaru에만 있는 곡 — 시드에 없어도 SongRecord를 새로 만든다.
                 # 아니면 SongQuery로 못 찾고, 베스트/신곡 목록에 떠도 상수를 못 찾는다.
-                # 별칭과 노트 수는 Chunimaru가 주지 않으므로 비워 둔다(노트 수 없음 →
-                # 허용 어택 "계산 불가").
+                # 별칭과 노트 수는 Chunimaru가 주지 않는다 — 별칭은 한글 별칭 자료만 붙이고, 노트 수는
+                # 비워 둔다(노트 수 없음 → 허용 어택 "계산 불가").
                 new_songs[title] = SongRecord(
                     title=title,
-                    aliases=(),
+                    aliases=self._ko_aliases.get(title, ()),
                     artist=entry.get("artist", ""),
                     id=entry.get("idx", -1),
                     charts={

@@ -1,59 +1,411 @@
 # services/chunithm/data/song_aliases_ko.yaml
-# 곡 제목의 한글 별칭(발음 옮김·한자 읽기·우리말 번역). 시드에는 영어·일본어 별칭만 있어서 "라미아"·"완성 염상"처럼
-# 한글로 부르면 모델이 제목을 짐작해 옮겨 적다 틀렸다(2026-11-07 탐색). 이 별칭은 시드 별칭과 같이 곡 찾기·곡명 검색에 쓰인다.
-# 커뮤니티 줄임말처럼 어느 곡인지 사람마다 다를 수 있는 말은 넣지 않는다 — 그런 말은 서버 별칭(`alias_add`)으로 등록한다.
-# 제목은 songdb의 곡 제목과 글자까지 같아야 한다 — tests/services/chunithm/test_songdb.py가 대조한다.
-- title: World Vanquisher
-  aliases: [월드 뱅퀴셔, 월드뱅퀴셔]
-- title: Chronomia
-  aliases: [크로노미아]
-- title: Wizdomiot
-  aliases: [위즈도미엇]
-- title: GIGA BLAST
-  aliases: [기가 블래스트, 기가블래스트, 지가 블래스트]
-- title: GIGA DRIVE
-  aliases: [기가 드라이브, 기가드라이브]
-- title: Ascension to Heaven
-  aliases: [아센션 투 헤븐, 어센션 투 헤븐]
+# 곡 제목의 한글 별칭. 사용자가 준 목록(2026-11-08, 상수 15.0 이상 곡)이다. 시드에는 영어·일본어 별칭만 있어서
+# 한글로 부르면 모델이 제목을 짐작해 옮기다 틀렸다. 이 별칭은 시드 별칭과 같이 곡 찾기·곡명 검색에 쓰인다.
+# "(울티마만)"이라고 받은 별칭은 지금 곡 단위로만 붙는다(채보를 고르지는 않는다) — 줄 끝 주석으로 남긴다.
+# 제목은 곡 DB(시드나 Chunimaru)의 곡 제목과 글자까지 같아야 한다 — tests/services/chunithm/test_songdb.py가 대조한다.
+- title: "Melodiniq"
+  aliases: ["멜로디닉", "메로디닉", "쿠로디닉"]  # 울티마만: 쿠로디닉
+- title: "YOUNITHM"
+  aliases: ["유니즘", "유니듬", "유니클로", "유니쿠로"]  # 울티마만: 유니클로, 유니쿠로
+- title: "創 -汝ら新世界へ歩む者なり-"
+  aliases: ["츠쿠리", "쯔꾸리", "츠꾸리", "짭노리"]
+- title: "Crossmythos Rhapsodia"
+  aliases: ["랩소디아"]
+- title: "Forsaken Tale"
+  aliases: ["포세이큰"]
+- title: "The Metaverse -First story of the SeelischTact-"
+  aliases: ["메타버스"]
+- title: "祈 -我ら神祖と共に歩む者なり-"
+  aliases: ["이노리"]
+- title: "Sweet & Sour"
+  aliases: ["새콤달콤", "스윗사워"]
+- title: "PANDORA PARADOXXX"
+  aliases: ["판파라", "판도라"]
+- title: "Verse X"
+  aliases: ["버섹스"]
+- title: "Garakuta Doll Play (sasakure.UK clutter remix)"
+  aliases: ["가라쿠타리믹스"]
+- title: "神鳴"
+  aliases: ["카미나리"]
+- title: "Aether Crest: Celestial"
+  aliases: ["셀레스탈"]
+- title: "Chaotic Ørder"
+  aliases: ["카오틱오더"]
+- title: "DA'AT -The First Seeker of Souls-"
+  aliases: ["다아트"]
+- title: "Daphnis"
+  aliases: ["다프니스"]
+- title: "MALKUTH -The Last Ruler of Terrestrials-"
+  aliases: ["말쿠트"]
+- title: "Ultimate Force"
+  aliases: ["얼티밋포스"]
+- title: "グラウンドスライダー協奏曲第一番「風唄」"
+  aliases: ["풍패"]
+- title: "業 -善なる神とこの世の悪について-"
+  aliases: ["카르마"]
+- title: "Deep Blue"
+  aliases: ["딥블루"]
+- title: "To：Be Continued"
+  aliases: ["투비컨"]
+- title: "月葬"
+  aliases: ["월장"]
+- title: "MegiddØ"
+  aliases: ["메기도"]
+- title: "μ3"
+  aliases: ["뮤쓰리", "뮤3"]
+- title: "Tuatha Dé Danann"
+  aliases: ["다난"]
+- title: "Phantom Crisis"
+  aliases: ["판크라"]
+- title: "Tru'nembra"
+  aliases: ["트루넴브라"]
+- title: "Makear"
+  aliases: ["마키아"]
+- title: "ピアノ協奏曲第１番”蠍火”"
+  aliases: ["혈화"]
+- title: "混沌を越えし我らが神聖なる調律主を讃えよ"
+  aliases: ["조율주", "혼돈"]
+- title: "World Vanquisher"
+  aliases: ["월뱅"]
+- title: "Λzure Vixen"
+  aliases: ["아주르"]
+- title: "ラストピースに祝福と栄光を"
+  aliases: ["라스트피스"]
+- title: "宿星審判"
+  aliases: ["수성심판", "숙성심판"]
+- title: "Aleph-0"
+  aliases: ["알레프"]
+- title: "OUTRAGE"
+  aliases: ["아웃레이지"]
+- title: "輪廻玲々"
+  aliases: ["윤회영영", "윤회영령"]
+- title: "轆轤首"
+  aliases: ["로쿠로쿠비"]
+- title: "DOMiNUS_GRAiL"
+  aliases: ["도미너스"]
+- title: "Rebellion"
+  aliases: ["리벨리온"]
+- title: "Crush the Dystopia"
+  aliases: ["디스토피아"]
+- title: "βlαnoir"
+  aliases: ["브라노와르", "브라느와르", "브라노아르", "블라노아르"]
+- title: "DESTRUCTION 3,2,1"
+  aliases: ["디스트럭션"]
+- title: "Everything Will Be One"
+  aliases: ["월뱅2"]
+- title: "macrocosmos"
+  aliases: ["매크로코스모스"]
+- title: "ENDYMION"
+  aliases: ["엔디미온"]
+- title: "怒槌"
+  aliases: ["이카즈치"]
+- title: "Acid God"
+  aliases: ["산신"]
+- title: "Theatore Creatore"
+  aliases: ["테아크리"]
+- title: "luna blu"
+  aliases: ["루나블루"]
+- title: "What's up? Pop!"
+  aliases: ["왓츠업팝", "왓첩팝"]
+- title: "キミとボクへの葬送歌"
+  aliases: ["장송곡"]
+- title: "ANU"
+  aliases: ["아누"]
+- title: "LibrariA"
+  aliases: ["도서관"]
+- title: "The Devil Incarnate"
+  aliases: ["데빌인카"]
+- title: "Killing Rhythm"
+  aliases: ["킬링리듬"]
+- title: "Disruptor Array"
+  aliases: ["디스럽터"]
+- title: "リ・フィクション・O"
+  aliases: ["리픽션오"]
+- title: "Strange Love"
+  aliases: ["스트레인지러브"]
+- title: "HeinousЯeaper"
+  aliases: ["헤이너스"]
+- title: "Trrricksters!!"
+  aliases: ["트릭스터"]
+- title: "LAMIA"
+  aliases: ["라미아"]
+- title: "sølips"
+  aliases: ["솔립스"]
 - title: "TiamaT:F minor"
-  aliases: [티아매트, 티아마트]
-- title: Contrapasso -inferno-
-  aliases: [콘트라파쏘, 콘트라파소]
-- title: LAMIA
-  aliases: [라미아]
-- title: 可愛くてごめん
-  aliases: [카와이쿠테 고멘, 귀여워서 미안]
-- title: 宛城、炎上！！
-  aliases: [완성 염상, 완성염상]
-- title: Halcyon
-  aliases: [할시온]
-- title: Xevel
-  aliases: [제벨]
-- title: Aleph-0
-  aliases: [알레프 제로, 알레프제로]
-- title: Gate of Fate
-  aliases: [게이트 오브 페이트]
-- title: ouroboros -twin stroke of the end-
-  aliases: [우로보로스]
-- title: FREEDOM DiVE
-  aliases: [프리덤 다이브, 프리덤다이브]
-- title: エンドマークに希望と涙を添えて
-  aliases: [엔드마크]
-- title: ひれ伏せ愚民どもっ！
-  aliases: [히레후세]
-- title: ジングルベル
-  aliases: [징글벨]
-- title: Climax
-  aliases: [클라이맥스]
-- title: Black Lotus
-  aliases: [블랙 로터스, 블랙로터스]
-- title: DESTRUCTION 3,2,1
-  aliases: [디스트럭션 321, 디스트럭션]
-- title: UltraNeon
-  aliases: [울트라네온, 울트라 네온]
-- title: INFiNiTE ENERZY -Overdoze-
-  aliases: [인피니트 에너지]
-- title: The Darkness of Valhalla
-  aliases: [다크니스 오브 발할라]
-- title: Rebellion
-  aliases: [리벨리온]
+  aliases: ["티아마트", "티아멧", "티아맛"]
+- title: "POTENTIAL"
+  aliases: ["포텐셜"]
+- title: "Stardust:RAY"
+  aliases: ["스타더스트레이"]
+- title: "玩具狂奏曲 -終焉-"
+  aliases: ["완구광주곡"]
+- title: "X7124"
+  aliases: ["엑스트라"]
+- title: "Tachy∅n"
+  aliases: ["타키온"]
+- title: "parvorbital"
+  aliases: ["파보비탈"]
+- title: "Air"
+  aliases: ["에어"]
+- title: "Vampire"
+  aliases: ["벰파이어"]
+- title: "hyperreality"
+  aliases: ["초현실"]
+- title: "Marigold"
+  aliases: ["메리골드"]
+- title: "I Wanna"
+  aliases: ["아워나", "아이워나"]
+- title: "AiAe"
+  aliases: ["아이아이", "ㅏㅣㅏㅣ"]
+- title: "Love & Justice"
+  aliases: ["럽저"]
+- title: "神威"
+  aliases: ["카무이"]
+- title: "Kaleidoscope"
+  aliases: ["칼레", "칼레이도"]
+- title: "蜘蛛の糸"
+  aliases: ["거미줄"]
+- title: "ΩΩPARTS"
+  aliases: ["오파츠"]
+- title: "〚回帰〛 ～Scherzo ~フォルトゥーナの悪戯~"
+  aliases: ["회귀"]
+- title: "Finite"
+  aliases: ["파이나이트"]
+- title: "MarbleBlue."
+  aliases: ["마블블루"]
+- title: "★LittlE HearTs★"
+  aliases: ["리틀하츠"]
+- title: "雪男"
+  aliases: ["유키오토코", "설남"]
+- title: "Galaxy Collapse"
+  aliases: ["갤콜"]
+- title: "零號車輛"
+  aliases: ["영호열차"]
+- title: "Contrapasso -inferno-"
+  aliases: ["콘트라파소"]
+- title: "Reverberate"
+  aliases: ["깡통"]
+- title: "otorii INNOVATED -[i]3-"
+  aliases: ["오토리"]
+- title: "MeteorSnow"
+  aliases: ["운석눈"]
+- title: "Invisible Frenzy"
+  aliases: ["인비프레"]
+- title: "ZegalltA"
+  aliases: ["제갈타"]
+- title: "Dengeki Tube"
+  aliases: ["덴게키"]
+- title: "《破滅》 ～ Rhapsody for The End"
+  aliases: ["파멸"]
+- title: "狂命"
+  aliases: ["광명"]
+- title: "Parousia"
+  aliases: ["파라우시아"]
+- title: "Elemental Creation"
+  aliases: ["엘레크리", "원소창조"]
+- title: "BlythE"
+  aliases: ["블라이스"]
+- title: "Halcyon"
+  aliases: ["할시온"]
+- title: "Philosopher"
+  aliases: ["철학자"]
+- title: "患部で止まってすぐ溶ける～狂気の優曇華院"
+  aliases: ["환부"]
+- title: "DataErr0r"
+  aliases: ["데이터에러"]
+- title: "Gate of Fate"
+  aliases: ["게오페"]
+- title: "SON OF SUN"
+  aliases: ["추장"]
+- title: "ERIS -Legend of Gaidelia-"
+  aliases: ["에리스"]
+- title: "HERA"
+  aliases: ["헤라"]
+- title: "Rrhar'il"
+  aliases: ["르하일"]
+- title: "マシンガンポエムドール"
+  aliases: ["머신건"]
+- title: "Giselle"
+  aliases: ["지젤"]
+- title: "Re：End of a Dream"
+  aliases: ["리엔드"]
+- title: "チューリングの跡"
+  aliases: ["튜링"]
+- title: "Odin"
+  aliases: ["오딘"]
+- title: "ARAIS"
+  aliases: ["아라이스"]
+- title: "Singularity"
+  aliases: ["싱귤러리티", "특이점"]
+- title: "躯樹の墓守"
+  aliases: ["묘지기"]
+- title: "Beenden"
+  aliases: ["베엔덴"]
+- title: "Viyella's Scream"
+  aliases: ["비옐라스크림"]
+- title: "其のエメラルドを見よ"
+  aliases: ["에메랄드"]
+- title: "A Site De La Rue"
+  aliases: ["데라루"]
+- title: "アポカリプスに反逆の焔を焚べろ"
+  aliases: ["아포칼립스"]
+- title: "Viyella's Tears"
+  aliases: ["비옐라눈물"]
+- title: "小悪魔の遊園地"
+  aliases: ["소악마"]
+- title: "Mutation"
+  aliases: ["뮤테이션"]
+- title: "幻想即興曲"
+  aliases: ["환상즉흥곡"]
+- title: "Latent Kingdom"
+  aliases: ["레이턴트"]
+- title: "黎命に殉ず"
+  aliases: ["여명"]
+- title: "ひつぎとふたご"
+  aliases: ["히츠기"]
+- title: "YURUSHITE"
+  aliases: ["유루시테"]
+- title: "End Time"
+  aliases: ["엔탐"]
+- title: "並行天涯"
+  aliases: ["병행천애"]
+- title: "A c i - L"
+  aliases: ["아시엘"]
+- title: "Big Bang"
+  aliases: ["빅뱅"]
+- title: "《創造》 ～ Cries, beyond The End"
+  aliases: ["창조"]
+- title: "Surveiller et punir"
+  aliases: ["푸니르"]
+- title: "Schrecklicher Aufstand"
+  aliases: ["독일인"]
+- title: "脳天直撃"
+  aliases: ["뇌천직격"]
+- title: "A Man In The Mirror"
+  aliases: ["거울남"]
+- title: "GIGA BLAST"
+  aliases: ["기가블"]
+- title: "Lips XTC -Sorist Remix-"
+  aliases: ["립스틱"]
+- title: "Xevel"
+  aliases: ["제벨"]
+- title: "RE:UNION -Duo Blade Against-"
+  aliases: ["리유니온"]
+- title: "Armageddon"
+  aliases: ["아마겟돈"]
+- title: "赤壁、大炎上！！"
+  aliases: ["대염상"]
+- title: "GIGA DRIVE"
+  aliases: ["기가드"]
+- title: "チュウニペンギンのテーマ～左下より愛をこめて～"
+  aliases: ["츄니펭귄"]
+- title: "Unwelcome School"
+  aliases: ["몰루", "언웰컴"]
+- title: "Oshama Scramble!"
+  aliases: ["오샤마"]
+- title: "taboo tears you up"
+  aliases: ["타부"]
+- title: "タイガーランペイジ"
+  aliases: ["타이거램페이지"]
+- title: "脳漿炸裂ガール"
+  aliases: ["뇌장"]
+- title: "魔理沙は大変なものを盗んでいきました"
+  aliases: ["마리사"]
+- title: "L9"
+  aliases: ["엘구"]
+- title: "ジングルベル"
+  aliases: ["징글벨"]
+- title: "PRIVATE SERVICE"
+  aliases: ["프라이빗"]
+- title: "きゅうくらりん"
+  aliases: ["큐쿠라린", "두근어질"]
+- title: "Re:Still"
+  aliases: ["리스틸"]
+- title: "Wizdomiot"
+  aliases: ["위즈도미앗"]
+- title: "最終鬼畜妹フランドール・S (Chroma Remix)"
+  aliases: ["플랑드르크로마"]
+- title: "ビッグブリッヂの死闘 -シアトリズムFFAC Arrange- from FFV"
+  aliases: ["빅브릿지"]
+- title: "≠彡\"/了→"
+  aliases: ["키미투어"]
+- title: "宵の平安京 Stargazer"
+  aliases: ["스타게이저"]
+- title: "Aiolos"
+  aliases: ["아이올로스"]
+- title: "Synthesis."
+  aliases: ["신서시스", "신더시스"]
+- title: "ホーリーサンバランド"
+  aliases: ["홀리삼바"]
+- title: "MARENOL"
+  aliases: ["마레놀"]
+- title: "Angel dust"
+  aliases: ["엔젤더스트"]
+- title: "Igallta"
+  aliases: ["이갈타"]
+- title: "ALTER EGO"
+  aliases: ["얼터에고"]
+- title: "封焔の135秒"
+  aliases: ["봉염"]
+- title: "超最終鬼畜妹フランドール・S"
+  aliases: ["플랑드르"]
+- title: "Cult future"
+  aliases: ["컬트퓨쳐"]
+- title: "Ascension to Heaven"
+  aliases: ["어센션"]
+- title: "Ré：Ré"
+  aliases: ["리리"]
+- title: "The Music of Violent Eating"
+  aliases: ["폭식"]
+- title: "Climax"
+  aliases: ["클라이맥스"]
+- title: "eden"
+  aliases: ["에덴"]
+- title: "Black MInD"
+  aliases: ["블랙마인드"]
+- title: "TEmPTaTiON"
+  aliases: ["템테이션"]
+- title: "ニルヴの心臓"
+  aliases: ["니르브"]
+- title: "Opfer"
+  aliases: ["오퍼"]
+- title: "PhenomenoN"
+  aliases: ["페노메논"]
+- title: "あの日、あの部屋で、あったこと"
+  aliases: ["그날그방"]
+- title: "Iudicium"
+  aliases: ["루디시움"]
+- title: "Devastating Blaster"
+  aliases: ["데바스테"]
+- title: "Falsum Atlantis."
+  aliases: ["팔섬"]
+- title: "FREEDOM DiVE"
+  aliases: ["프다"]
+- title: "淵底のグレイ・ユークロニア"
+  aliases: ["유크로니아"]
+- title: "Blazing:Storm"
+  aliases: ["블레이징"]
+- title: "盟月"
+  aliases: ["맹월"]
+- title: "Blackmagik Blazing"
+  aliases: ["블랙매직"]
+- title: "電光石火"
+  aliases: ["전광석화"]
+- title: "Glorious Crown (tpz over-Over-OVERCUTE REMIX)"
+  aliases: ["글크"]
+- title: "神威 (NAOKI × ZPP MIX)"
+  aliases: ["카무이나오키"]
+- title: "竹"
+  aliases: ["타케"]
+- title: "neu"
+  aliases: ["네우"]
+- title: "宛城、炎上！！"
+  aliases: ["염상", "엔죠"]
+- title: "エンドマークに希望と涙を添えて"
+  aliases: ["엔드마크"]
+- title: "QZKago Requiem"
+  aliases: ["큐즈카고"]
+- title: "Garakuta Doll Play"
+  aliases: ["가라쿠타"]
+- title: "Megameteor"
+  aliases: ["메가메테오"]

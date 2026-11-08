@@ -721,9 +721,20 @@ def test_ko_alias_titles_all_exist_in_songdb(songdb: SongDbService) -> None:
     )
 
     titles = [t for t, _aliases in _load_ko_aliases(Path("services/chunithm/data/song_aliases_ko.yaml"))]
-    assert [t for t in titles if songdb.song_by_title(t) is None] == []
+    # 시드 이후에 나와 Chunimaru로만 들어오는 곡(2026-11-08 Chunimaru 응답에서 확인)
+    chunimaru_only = {"狂命"}
+    assert [t for t in titles if songdb.song_by_title(t) is None] == sorted(chunimaru_only)
 
 
 async def test_resolve_by_ko_alias(songdb: SongDbService) -> None:
-    song = await songdb.resolve("완성 염상", _CTX)
+    song = await songdb.resolve("염상", _CTX)
     assert song.title == "宛城、炎上！！"
+
+
+async def test_song_added_by_chunimaru_gets_its_ko_aliases_too(songdb: SongDbService) -> None:
+    data = json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8"))
+    data["songs"].append({"title": "狂命", "charts": {"MAS": {"const": 15.2}}})
+    songdb._apply_chunimaru(data)  # pyright: ignore[reportPrivateUsage]
+
+    song = await songdb.resolve("광명", _CTX)
+    assert song.title == "狂命"
