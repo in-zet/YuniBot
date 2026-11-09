@@ -1183,9 +1183,11 @@ async def test_const_table_only_played_difficulty_and_open_ended_range(skill: Mo
     assert _row_keys(played.table) == [(hit.song.title, "MAS")]
     assert played.table.steps == ("15.5 이상 상수 MAS", "내 점수", "점수 있는 것만")
     empty = await skill.const_table(_ctx(records=_FakeRecords(), songdb=songdb).ctx, min_const=15.5, only_played=True)
-    assert empty.table is None and "점수가 있는 채보가 없어" in _content(empty)
+    # 0채보라도 빈 표를 돌려줘야 턴의 마지막 표가 앞서 만든 검색 표로 남지 않는다.
+    assert empty.table is not None and empty.table.row_count == 0 and "점수가 있는 채보가 없어" in _content(empty)
     nothing = await skill.const_table(f.ctx, min_const=99.0)
-    assert nothing.table is None and "해당 범위의 채보가 없어" in _content(nothing)
+    assert nothing.table is not None and nothing.table.row_count == 0
+    assert "해당 범위의 채보가 없어" in _content(nothing)
 
 
 async def test_const_table_other_player_needs_public_records(skill: ModuleType) -> None:

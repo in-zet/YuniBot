@@ -351,12 +351,6 @@ async def const_table(
     pbs = await ctx.records.pb_rows_for(target.id, [_hit_key(hit) for hit in hits])
     if only_played:
         hits = [hit for hit in hits if _hit_key(hit) in pbs]
-    if not hits:
-        return ToolResult(
-            data={"count": 0},
-            display=Display(content="점수가 있는 채보가 없어." if only_played else "해당 범위의 채보가 없어."),
-        )
-
     difficulty_rank = {name: index for index, name in enumerate(_profile(ctx).long_to_short)}
 
     def order(hit: ConstRangeHit) -> tuple[float, int, int, str, str]:
@@ -383,6 +377,13 @@ async def const_table(
     builder.step(await _owner_label(ctx, target))
     if only_played:
         builder.step("점수 있는 것만")
+    if not hits:
+        # 0채보라도 표를 돌려준다. 표가 없으면 턴의 마지막 표(앞서 만든 find_songs 표)가 상수표처럼 보인다.
+        return ToolResult(
+            data={"count": 0},
+            table=builder.build(),
+            display=Display(content="점수가 있는 채보가 없어." if only_played else "해당 범위의 채보가 없어."),
+        )
     current: float | None = None
     for hit in sorted(hits, key=order):
         if hit.chart.const != current:
