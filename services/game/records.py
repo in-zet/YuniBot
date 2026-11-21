@@ -243,17 +243,18 @@ class WhatIfChart:
     song_title: str
     difficulty: str
     chart_type: str = ""
-    const: float | None
     current_score: int | None  # 기록이 없으면 None
-    current_rating: Decimal | None
     assumed_score: int
-    assumed_rating: Decimal | None  # 상수를 모르면 None(계산 불가)
-    applied: bool  # 가정 점수가 지금 점수보다 높아 기록을 바꿨나
+    assumed_lamp: str | None  # 가정한 콤보 램프(없으면 None)
+    applied: bool  # 가정이 기록을 바꿨나(점수가 오르거나 램프가 좋아졌나)
     frame: str | None  # 가정한 뒤 들어간 프레임("best"/"new"), 밖이면 None
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
 class WhatIfResult:
+    best: list[PbRow]  # 가정을 반영한 베스트 프레임(레이팅 내림차순)
+    new: list[PbRow]
+    assumed_keys: frozenset[ChartKey]  # 가정으로 바뀐 채보. 이 채보의 랭크는 비어 있다(부르는 쪽이 점수로 채운다).
     charts: list[WhatIfChart]
     before: FrameMetrics
     after: FrameMetrics
@@ -802,44 +803,47 @@ class RecordsService:
         latest_sync_summary/candidates가 쓰는 _frames와 같은 계산이라 숫자가 어긋나지 않는다."""
         return self._frames(await self.all_pb_rows(player_id))
 
-    async def what_if(self, player_id: str, assumed: Sequence[tuple[ChartKey, int]]) -> WhatIfResult:
-        """채보마다 가정 점수를 냈다고 치고 프레임과 전체 레이팅을 다시 계산한다. 아무것도 저장하지 않는다.
-        PB는 오르기만 하므로 가정 점수가 지금 점수 이하인 채보는 그대로 둔다. 같은 채보를 여러 번 주면
-        가장 높은 점수를 쓴다."""
+    async def what_if(
+        self, player_id: str, assumed: Sequence[tuple[ChartKey, int, str | None]]
+    ) -> WhatIfResult:
+        """채보마다 (점수, 콤보 램프)를 냈다고 치고 프레임과 전체 레이팅을 다시 계산한다. 아무것도 저장하지 않는다.
+        PB처럼 점수와 램프는 각각 좋은 쪽만 남는다 — 지금보다 낮은 가정은 반영되지 않는다. 같은 채보를 여러 번 주면
+        차례로 겹쳐 반영한다."""
         rows = await self.all_pb_rows(player_id)
         by_key = {_row_key(r): r for r in rows}
         merged = dict(by_key)
-        for key, score in assumed:
-            if key in merged and merged[key].score >= score:
-                continue
+        lamp_order = self._profile.combo_lamp_order
+        for key, score, lamp in assumed:
             title, chart_type, difficulty = key
+            base = merged.get(key)
+            best_score = max(score, base.score) if base is not None else score
+            base_lamp = base.combo_lamp if base is not None else ""
+            best_lamp = lamp if lamp and lamp_order.get(lamp, 0) > lamp_order.get(base_lamp, 0) else base_lamp
+            if base is not None and best_score == base.score and best_lamp == base_lamp:
+                continue
             const = self._songdb.const_for(title, difficulty, chart_type)
             merged[key] = PbRow(
-                song_title=title, chart_type=chart_type, difficulty=difficulty, score=score, rank="",
-                clear_lamp="", combo_lamp="", chain_lamp="", const=const,
-                rating=self._profile.chart_rating(score, const), session_id=None, updated_at="",
+                song_title=title, chart_type=chart_type, difficulty=difficulty, score=best_score,
+                rank=base.rank if base is not None and best_score == base.score else "",
+                clear_lamp=base.clear_lamp if base is not None else "", combo_lamp=best_lamp,
+                chain_lamp=base.chain_lamp if base is not None else "", const=const,
+                rating=self._profile.song_rating(best_score, const, best_lamp), session_id=None, updated_at="",
             )
-        before = self._metrics(*self._frames(rows))
         best, new = self._frames(list(merged.values()))
-        after = self._metrics(best, new)
         frame_of = {_row_key(r): "best" for r in best} | {_row_key(r): "new" for r in new}
-
-        charts: list[WhatIfChart] = []
-        for key, score in assumed:
-            title, chart_type, difficulty = key
-            current = by_key.get(key)
-            const = self._songdb.const_for(title, difficulty, chart_type)
-            charts.append(
-                WhatIfChart(
-                    song_title=title, chart_type=chart_type, difficulty=difficulty, const=const,
-                    current_score=current.score if current is not None else None,
-                    current_rating=current.rating if current is not None else None,
-                    assumed_score=score, assumed_rating=self._profile.chart_rating(score, const),
-                    applied=current is None or score > current.score,
-                    frame=frame_of.get(key),
-                )
+        changed = frozenset(key for key, row in merged.items() if by_key.get(key) is not row)
+        charts = [
+            WhatIfChart(
+                song_title=key[0], chart_type=key[1], difficulty=key[2],
+                current_score=by_key[key].score if key in by_key else None,
+                assumed_score=score, assumed_lamp=lamp or None, applied=key in changed, frame=frame_of.get(key),
             )
-        return WhatIfResult(charts=charts, before=before, after=after)
+            for key, score, lamp in assumed
+        ]
+        return WhatIfResult(
+            best=best, new=new, assumed_keys=changed, charts=charts,
+            before=self._metrics(*self._frames(rows)), after=self._metrics(best, new),
+        )
 
     def _metrics(self, best: list[PbRow], new: list[PbRow]) -> FrameMetrics:
         return FrameMetrics(
@@ -976,7 +980,7 @@ class RecordsService:
 
     def _rating_of(self, play: ChartPlay) -> Decimal | None:
         const = self._songdb.const_for(play.song_title, play.difficulty, play.chart_type)
-        return self._profile.chart_rating(play.score, const)
+        return self._profile.song_rating(play.score, const, play.combo_lamp)
 
     def _overall(self, best: Sequence[Decimal | None], new: Sequence[Decimal | None]) -> Decimal | None:
         """전체 레이팅. 합산·나눗셈·자리수는 게임 프로필의 규칙이다."""
@@ -1008,14 +1012,14 @@ class RecordsService:
         const = self._songdb.const_for(row.song_title, row.difficulty, row.chart_type)
         if const is None:
             return row
-        return replace(row, const=const, rating=self._profile.chart_rating(row.score, const))
+        return replace(row, const=const, rating=self._profile.song_rating(row.score, const, row.combo_lamp))
 
     async def _refresh_stored_ratings(self, player_id: str) -> None:
         """저장된 상수·곡 레이팅을 지금 곡 DB 기준으로 맞춘다. `_upsert_pb`는 점수가 오른 채보만 쓰므로,
         점수가 그대로인 채보의 상수가 바뀌어도 저장값은 옛것으로 남는다. 읽을 때 `_current`가 다시 계산하니
         숫자는 어긋나지 않고, 이 갱신은 저장값을 정직하게 두려는 것이다. 커밋은 부르는 쪽이 한다."""
         cursor = await self._conn.execute(
-            "SELECT song_title, chart_type, difficulty, score, const, rating FROM records_pb "
+            "SELECT song_title, chart_type, difficulty, score, combo_lamp, const, rating FROM records_pb "
             "WHERE player_id = ? AND game = ?",
             (player_id, self._game),
         )
@@ -1023,7 +1027,7 @@ class RecordsService:
             const = self._songdb.const_for(row["song_title"], row["difficulty"], row["chart_type"])
             if const is None:
                 continue
-            rating = _rating_str(self._profile.chart_rating(row["score"], const))
+            rating = _rating_str(self._profile.song_rating(row["score"], const, row["combo_lamp"]))
             if row["const"] == const and row["rating"] == rating:
                 continue
             await self._conn.execute(
@@ -1052,7 +1056,7 @@ class RecordsService:
         세션·시각)를 한 단위로 바꾼다 — "이 기록을 언제 세웠나"(session_id/updated_at)는
         세션·리포트 스킬이 쓰는 정보다. (상수, 레이팅)을 돌려준다."""
         const = self._songdb.const_for(play.song_title, play.difficulty, play.chart_type)
-        rating = self._profile.chart_rating(play.score, const)
+        rating = self._profile.song_rating(play.score, const, play.combo_lamp)
         await self._conn.execute(
             "INSERT INTO records_pb (player_id, game, song_title, chart_type, difficulty, score, rank, "
             "clear_lamp, combo_lamp, chain_lamp, dx_score, const, rating, session_id, updated_at) "

@@ -1,6 +1,7 @@
 # services/maimai/profile.py
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 from services.game.profile import GameProfile
@@ -50,6 +51,8 @@ MAIMAI = GameProfile(
     score_is_percent=True,
     # 레이팅은 구곡 35 + 신곡 15의 곡 레이팅(정수) 합이다. 나누지 않는다.
     chart_rating=chart_rating,
+    # 레이팅 대상 채보가 AP·AP+면 곡 레이팅 +1(일본판 CiRCLE부터, 사용자 결정 2026-11-21 — 근거는 RemyWiki·Gamerch).
+    lamp_rating_bonus={"AP": Decimal(1), "AP+": Decimal(1)},
     song_rating_places=0,
     rating_divisor=1,
     overall_places=0,

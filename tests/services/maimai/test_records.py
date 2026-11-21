@@ -177,12 +177,61 @@ async def test_second_sync_reports_chart_type_in_diff_and_raises_lamps(conn, son
     [update] = diff.chart_updates
     assert (update.song_title, update.chart_type, update.difficulty) == ("Fresh", "DX", "MAS")
     assert update.old_score == 1_001_000 and update.new_score == 1_005_000
-    assert update.new_rating == Decimal(335) and update.old_rating == Decimal(322)  # 21.6 × 14.9 × 1.001
+    # 새 기록은 AP라 +1(2026-11-21). 옛 기록은 FC라 보너스가 없다.
+    assert update.new_rating == Decimal(336) and update.old_rating == Decimal(322)  # 21.6 × 14.9 × 1.001
     assert [(c.song_title, c.chart_type, c.old_combo_lamp, c.new_combo_lamp) for c in diff.lamp_changes] == [
         ("Old Both", "DX", "", "FC+")
     ]
     row = await service.pb_row(player_id, song_title="Fresh", difficulty="MAS", chart_type="DX")
     assert row is not None and (row.combo_lamp, row.chain_lamp, row.dx_score) == ("AP", "FS", 2100)
+
+
+async def test_all_perfect_adds_one_to_the_song_rating(conn, songdb) -> None:
+    """2026-11-21 사용자 결정: AP·AP+는 곡 레이팅 +1(일본판 CiRCLE부터). FC+·싱크에는 보너스가 없다."""
+    _, player_id, ctx, service = await _setup(conn, songdb)
+    plays = (
+        _play("Old Std", "STD", 1_005_000, combo_lamp="AP+"),  # 279 + 1
+        _play("Old Both", "DX", 1_000_000, combo_lamp="FC+", chain_lamp="FDX"),  # 295
+        _play("Fresh", "DX", 1_005_000, combo_lamp="AP"),  # 335 + 1
+    )
+
+    result = await service.save_sync(player_id, _snapshot(*plays, displayed=911), ctx)
+
+    assert result.computed_rating == Decimal(911)
+    assert result.rating_mismatch is False
+    rows = {r.song_title: r.rating for r in await service.all_pb_rows(player_id)}
+    assert rows == {"Old Std": Decimal(280), "Old Both": Decimal(295), "Fresh": Decimal(336)}
+
+
+async def test_lamp_only_all_perfect_raises_the_stored_rating(conn, songdb, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb)
+    _freeze_now(monkeypatch, _T1)
+    await service.save_sync(player_id, _snapshot(*_BASE_PLAYS), ctx)
+
+    _freeze_now(monkeypatch, _T2)
+    result = await service.save_sync(
+        player_id, _snapshot(_BASE_PLAYS[0], _play("Old Both", "DX", 1_000_000, combo_lamp="AP"), _BASE_PLAYS[2]), ctx
+    )
+
+    assert result.computed_rating == Decimal(910)
+    row = await service.pb_row(player_id, song_title="Old Both", difficulty="MAS", chart_type="DX")
+    assert row is not None and row.rating == Decimal(296)
+
+
+async def test_what_if_all_perfect_adds_the_bonus(conn, songdb) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb)
+    await service.save_sync(player_id, _snapshot(*_BASE_PLAYS), ctx)
+    key = ("Old Both", "DX", "MAS")
+
+    lamp_only = await service.what_if(player_id, [(key, 1_000_000, "AP")])
+    with_score = await service.what_if(player_id, [(key, 1_005_000, "AP")])
+    worse_lamp = await service.what_if(player_id, [(key, 1_000_000, "FC")])
+
+    assert lamp_only.charts[0].applied and lamp_only.after.computed_rating == Decimal(910)
+    row = next(r for r in with_score.best if (r.song_title, r.chart_type, r.difficulty) == key)
+    assert row.combo_lamp == "AP" and row.rating == Decimal(int(Decimal("22.4") * Decimal("13.7") * Decimal("1.005")) + 1)
+    # 지금 램프가 없어도 FC 가정은 램프만 오른다 — 보너스가 없어 레이팅은 그대로다.
+    assert worse_lamp.charts[0].applied and worse_lamp.after == worse_lamp.before
 
 
 async def test_candidates_use_chart_type_and_target_rating(conn, tmp_path) -> None:

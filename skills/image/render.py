@@ -83,6 +83,9 @@ _LAMP_LABELS = {
     "AJC": "AJC", "ALL JUSTICE": "AJ", "FULL COMBO": "FC",
     "AP+": "AP+", "AP": "AP", "FC+": "FC+", "FC": "FC",  # maimai 콤보 램프(조회 키가 비면 FC만 칩이 빠진다)
 }
+# 가정 레이팅표에서 가정으로 바뀐 채보(2026-11-21 사용자 결정: 재킷은 그대로, 청록 테두리 + 난이도 밑 "가정" 칩).
+_ASSUMED_OUTLINE = (40, 220, 210)
+_ASSUMED_CHIP = (20, 160, 150)
 _LAMP_COLORS = {
     "AJC": (255, 215, 70), "AJ": (255, 140, 60), "FC": (70, 200, 110),
     "AP+": (255, 215, 70), "AP": (255, 140, 60), "FC+": (70, 200, 110),
@@ -592,7 +595,9 @@ def _draw_band(draw: ImageDraw.ImageDraw, width: int, y: int, segment: Segment, 
 # ---------------------------------------------------------------- 그릴 칸
 
 # 전용 자리와 서식이 있는 칸. 이 밖에 보이는 칸은 범용 칸이다.
-_SLOT_COLUMNS = frozenset({tc.SONG, tc.CHART_TYPE, tc.DIFFICULTY, tc.LAMP, tc.CONST, tc.RATING, tc.SCORE, tc.RANK})
+_SLOT_COLUMNS = frozenset(
+    {tc.SONG, tc.CHART_TYPE, tc.DIFFICULTY, tc.LAMP, tc.CONST, tc.RATING, tc.SCORE, tc.RANK, tc.ASSUMED}
+)
 CARD_EXTRA_MAX = 4  # 카드 한 장에 더할 수 있는 범용 칸 줄 수(2026-10-22 결정)
 LIST_EXTRA_MAX = 4  # 목록 한 줄에 더할 수 있는 범용 칸 수. 정해진 칸이 자리를 차지하면 이보다 적다
 # 그림에서만 줄여 쓰는 범용 칸 라벨(2026-10-22). 글자 출력과 `table_query columns`의 칸 이름은 그대로다.
@@ -722,6 +727,18 @@ def _draw_difficulty(
         )
 
 
+def _is_assumed(row: Row, names: frozenset[str]) -> bool:
+    return tc.ASSUMED in names and tc.ASSUMED in row.cells and row.cell(tc.ASSUMED).filled
+
+
+def _outline_color(row: Row, names: frozenset[str]) -> tuple[int, int, int]:
+    """카드·목록 외곽선 색. 가정한 채보는 청록, 아니면 램프 색(없으면 회색)."""
+    if _is_assumed(row, names):
+        return _ASSUMED_OUTLINE
+    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if tc.LAMP in names and row.cell(tc.LAMP).filled else None
+    return _LAMP_COLORS[lamp] if lamp is not None else _CARD_OUTLINE
+
+
 def _draw_lamp(draw: ImageDraw.ImageDraw, xy: tuple[int, int], row: Row) -> int | None:
     lamp = row.cell(tc.LAMP)
     label = _LAMP_LABELS.get(lamp.text) if lamp.filled else None
@@ -842,16 +859,17 @@ def _draw_card(
     canvas.alpha_composite(card, (x, y))
 
     draw = ImageDraw.Draw(canvas, "RGBA")
-    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if tc.LAMP in names and row.cell(tc.LAMP).filled else None
     draw.rounded_rectangle(
         (x, y, x + _CARD_W - 1, y + lines.height - 1), radius=_CARD_RADIUS,
-        outline=_LAMP_COLORS[lamp] if lamp is not None else _CARD_OUTLINE, width=_LAMP_BORDER,
+        outline=_outline_color(row, names), width=_LAMP_BORDER,
     )
     badge_end = _number_badge(draw, (x + _CHIP_INSET, y + _CHIP_INSET), number, table_number)
     if tc.LAMP in names:
         _draw_lamp(draw, (badge_end + 4, y + _CHIP_INSET), row)
     if tc.DIFFICULTY in names:
         _draw_difficulty(draw, (x + _CARD_W - _CHIP_INSET, y + _CHIP_INSET), row, names)
+    if _is_assumed(row, names):
+        _chip(draw, (x + _CARD_W - _CHIP_INSET, y + _CHIP_INSET + _fs(24)), tc.ASSUMED, _ASSUMED_CHIP, size=11, right_aligned=True)
 
     left, right = x + _CARD_PAD, x + _CARD_W - _CARD_PAD
     cy = y + _INFO_TOP
@@ -972,10 +990,9 @@ def _draw_list_row(
     background.putalpha(ImageChops.multiply(background.getchannel("A"), mask))
     canvas.alpha_composite(background, (_MARGIN, y))
     draw = ImageDraw.Draw(canvas, "RGBA")
-    lamp = _LAMP_LABELS.get(row.cell(tc.LAMP).text) if tc.LAMP in names and row.cell(tc.LAMP).filled else None
     draw.rounded_rectangle(
         (_MARGIN, y, _MARGIN + row_w - 1, y + row_h - 1), radius=_LIST_RADIUS,
-        outline=_LAMP_COLORS[lamp] if lamp is not None else _CARD_OUTLINE, width=_LAMP_BORDER,
+        outline=_outline_color(row, names), width=_LAMP_BORDER,
     )
     if table_number == number:
         draw.text((_MARGIN + 14, y + 26), f"#{number}", font=_font(13, True), fill=_MUTED)
@@ -1020,6 +1037,8 @@ def _draw_list_row(
         cursor = _chip(
             draw, (cursor, y + 48), _difficulty_label(row, names), _DIFFICULTY_COLORS.get(code.text, (90, 90, 110))
         ) + 10
+    if _is_assumed(row, names):
+        cursor = _chip(draw, (cursor, y + 48), tc.ASSUMED, _ASSUMED_CHIP) + 10
     if tc.CONST in names and row.cell(tc.CONST).text:
         draw.text((cursor, y + 51), f"상수 {row.cell(tc.CONST).text}", font=_font(13, False), fill=_MUTED)
 

@@ -1015,21 +1015,32 @@ async def test_what_if_raises_frames_without_saving(conn, monkeypatch) -> None:
     best, _ = await service.current_frames(player_id)
     top = best[0]
     top_key = (top.song_title, top.chart_type, top.difficulty)
-    lower = (top.song_title, top.chart_type, top.difficulty), top.score - 1  # 지금 점수보다 낮은 가정
 
-    result = await service.what_if(player_id, [(top_key, 1_010_000), lower])
+    # 같은 채보를 낮은 점수로 한 번 더 줘도 높은 쪽이 남는다.
+    result = await service.what_if(player_id, [(top_key, 1_010_000, None), (top_key, top.score - 1, None)])
 
     assert await _pb_rows(conn, player_id) == before_rows
     summary = await service.latest_sync_summary(player_id)
     assert summary is not None and result.before.computed_rating == summary.computed_rating
-    raised, kept = result.charts
-    assert raised.applied and raised.frame == "best" and raised.current_score == top.score
-    assert raised.assumed_rating == service._profile.chart_rating(1_010_000, top.const)  # pyright: ignore[reportPrivateUsage]
-    assert not kept.applied
+    assert result.assumed_keys == {top_key}
+    raised = next(r for r in result.best if (r.song_title, r.chart_type, r.difficulty) == top_key)
+    assert raised.score == 1_010_000 and raised.rank == ""
+    assert [c.applied for c in result.charts] == [True, True] and result.charts[0].frame == "best"
     assert result.after.computed_rating is not None and result.before.computed_rating is not None
-    assert raised.assumed_rating is not None and top.rating is not None
-    gain = (raised.assumed_rating - top.rating) / 50
-    assert result.after.computed_rating == result.before.computed_rating + gain
+    assert raised.rating is not None and top.rating is not None
+    assert result.after.computed_rating == result.before.computed_rating + (raised.rating - top.rating) / 50
+    assert len(result.best) == 30 and len(result.new) == 20
+
+
+async def test_what_if_lower_than_the_record_changes_nothing(conn, monkeypatch) -> None:
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    await service.save_sync(player_id, snapshot_from_fetch(_fixture_fetch()), ctx)
+    top = (await service.current_frames(player_id))[0][0]
+
+    result = await service.what_if(player_id, [((top.song_title, top.chart_type, top.difficulty), top.score - 1, None)])
+
+    assert not result.charts[0].applied and result.assumed_keys == frozenset()
+    assert result.after == result.before
 
 
 async def test_what_if_on_a_chart_never_played_enters_the_frame_only_when_high_enough(conn) -> None:
@@ -1043,12 +1054,13 @@ async def test_what_if_on_a_chart_never_played_enters_the_frame_only_when_high_e
     )
     key = (hit.song.title, hit.chart.chart_type, "MAS")
 
-    high, low = (await service.what_if(player_id, [(key, 1_009_000)])), (await service.what_if(player_id, [(key, 500_000)]))
+    high = await service.what_if(player_id, [(key, 1_009_000, None)])
+    low = await service.what_if(player_id, [(key, 500_000, None)])
 
     assert high.charts[0].current_score is None and high.charts[0].frame == "best"
     assert high.after.computed_rating is not None and high.before.computed_rating is not None
     assert high.after.computed_rating > high.before.computed_rating
-    assert low.charts[0].frame is None and low.after == low.before
+    assert low.charts[0].applied and low.charts[0].frame is None and low.after == low.before
 
 
 async def test_diff_cache_keeps_only_newest(conn, monkeypatch) -> None:

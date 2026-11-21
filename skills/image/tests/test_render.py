@@ -398,9 +398,14 @@ def test_icon_with_frame_only_or_character_only_or_failed_character() -> None:
     assert _rgb(character_only, 3, 60) == (255, 0, 0)  # 틀이 없으면 상자를 가득 채운다
 
 
-def _card_png(difficulty: str = "MAS", lamp: str | None = None, rank: str = "SSS") -> Image.Image:
+def _card_png(
+    difficulty: str = "MAS", lamp: str | None = None, rank: str = "SSS", assumed: str | None = None,
+    layout: str = "card",
+) -> Image.Image:
     builder = TableBuilder(subject=None, unit="채보")
     tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
+    if assumed is not None:
+        builder.column(tc.ASSUMED)
     builder.step("테스트 표")
     builder.row(
         tc.chart_ref("곡 0", difficulty),
@@ -412,9 +417,10 @@ def _card_png(difficulty: str = "MAS", lamp: str | None = None, rank: str = "SSS
             tc.RANK: tc.rank_cell(rank, {rank: 1_007_500}),
             tc.LAMP: tc.lamp_cell(lamp),
             tc.RATING: cell(16.0, "16.00"),
+            **({tc.ASSUMED: cell(assumed) if assumed else cell(None, "")} if assumed is not None else {}),
         },
     )
-    (_, data), = render.render_pages(builder.build(), layout="card", jackets={"곡 0": _png("white")})
+    (_, data), = render.render_pages(builder.build(), layout=layout, jackets={"곡 0": _png("white")})
     return Image.open(io.BytesIO(data)).convert("RGB")
 
 
@@ -474,6 +480,28 @@ def test_lamp_adds_thin_border_with_lamp_color(lamp: str, label: str) -> None:
 
     assert edge(with_lamp) == render._LAMP_COLORS[label]
     assert edge(without) != render._LAMP_COLORS[label]
+
+
+def test_assumed_card_gets_teal_border_over_the_lamp_color_and_no_extra_line() -> None:
+    """2026-11-21 사용자 결정: 가정한 채보는 재킷 그대로, 청록 테두리 + 난이도 밑 "가정" 칩. 램프 칩은 그대로 번호 옆."""
+    assumed = _card_png(lamp="ALL JUSTICE", assumed="가정 ALL JUSTICE")
+    plain = _card_png(lamp="ALL JUSTICE", assumed="")
+
+    def edge(image: Image.Image) -> object:
+        return image.getpixel((render._MARGIN + 1, _card_top(image) + 100))
+
+    assert edge(assumed) == render._ASSUMED_OUTLINE
+    assert edge(plain) == render._LAMP_COLORS["AJ"]
+    assert assumed.size == plain.size  # 가정 칸은 범용 칸 줄을 더하지 않는다
+    assert assumed.tobytes() != plain.tobytes()
+
+
+def test_assumed_list_row_gets_teal_border() -> None:
+    image = _card_png(lamp="FULL COMBO", assumed="가정", layout="list")
+    plain = _card_png(lamp="FULL COMBO", layout="list")
+
+    assert image.size == plain.size
+    assert image.tobytes() != plain.tobytes()
 
 
 def test_title_gradient_reaches_higher_up_the_jacket() -> None:

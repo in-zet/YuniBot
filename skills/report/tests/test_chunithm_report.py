@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -113,9 +113,9 @@ class _FakeRecords:
     candidate_calls: list[dict[str, Any]] = field(default_factory=list)
     profiles: dict[str, PlayerProfile] = field(default_factory=dict)
     what_if_result: WhatIfResult | None = None
-    what_if_calls: list[list[tuple[tuple[str, str, str], int]]] = field(default_factory=list)
+    what_if_calls: list[list[tuple[tuple[str, str, str], int, str | None]]] = field(default_factory=list)
 
-    async def what_if(self, player_id: str, assumed: list[tuple[tuple[str, str, str], int]]) -> WhatIfResult:
+    async def what_if(self, player_id: str, assumed: list[tuple[tuple[str, str, str], int, str | None]]) -> WhatIfResult:
         self.what_if_calls.append(list(assumed))
         assert self.what_if_result is not None
         return self.what_if_result
@@ -812,33 +812,60 @@ def _metrics(rating: str, best: str, new: str) -> FrameMetrics:
     return FrameMetrics(computed_rating=Decimal(rating), best30_average=Decimal(best), new20_average=Decimal(new))
 
 
-async def test_what_if_passes_charts_and_scores_and_shows_the_change(skill: ModuleType) -> None:
-    """2026-11-21: 6곡 가정 점수를 곡마다 따로 계산하다 도구 호출 상한에 걸렸다. 한 번에 받아 표 하나로 낸다."""
-    result_data = WhatIfResult(
+def _what_if_result() -> WhatIfResult:
+    raised = replace(_pb("Chronomia", "MAS", 1_009_000, "", 14.8, "16.95"), combo_lamp="ALL JUSTICE")
+    return WhatIfResult(
+        best=[raised, _pb("곡 B", "MAS", 1_009_500, "SSS+", 14.8, "16.95")],
+        new=[_pb("곡 N", "MAS", 1_007_500, "SSS", 15.0, "17.00")],
+        assumed_keys=frozenset({("Chronomia", "", "MAS")}),
         charts=[
-            WhatIfChart(song_title="Chronomia", difficulty="MAS", const=14.8, current_score=1_000_000,
-                        current_rating=Decimal("16.80"), assumed_score=1_009_000,
-                        assumed_rating=Decimal("16.95"), applied=True, frame="best"),
-            WhatIfChart(song_title="곡 B", difficulty="MAS", const=14.8, current_score=1_009_500,
-                        current_rating=Decimal("16.95"), assumed_score=1_005_000,
-                        assumed_rating=Decimal("16.80"), applied=False, frame="best"),
+            WhatIfChart(song_title="Chronomia", difficulty="MAS", current_score=1_000_000, assumed_score=1_009_000,
+                        assumed_lamp="ALL JUSTICE", applied=True, frame="best"),
+            WhatIfChart(song_title="곡 B", difficulty="MAS", current_score=1_009_500, assumed_score=1_005_000,
+                        assumed_lamp=None, applied=False, frame="best"),
+            WhatIfChart(song_title="곡 C", difficulty="MAS", current_score=None, assumed_score=900_000,
+                        assumed_lamp=None, applied=True, frame=None),
         ],
         before=_metrics("16.9480", "17.0216", "16.8375"),
         after=_metrics("16.9510", "17.0266", "16.8375"),
     )
-    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, what_if_result=result_data))
 
-    result = await skill.what_if(f.ctx, charts=[_chart(), _chart("곡 B")], scores=[1_009_000, 1_005_000])
 
-    assert f.records.what_if_calls == [[(("Chronomia", "", "MAS"), 1_009_000), (("곡 B", "", "MAS"), 1_005_000)]]
+async def test_what_if_draws_the_whole_frame_table_with_assumed_marks(skill: ModuleType) -> None:
+    """2026-11-21: 가정 레이팅표는 가정한 곡만이 아니라 베스트·신곡 프레임 전체다. 가정으로 바뀐 채보에만 "가정" 표시."""
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, what_if_result=_what_if_result()))
+
+    result = await skill.what_if(
+        f.ctx, charts=[_chart(), _chart("곡 B"), _chart("곡 C")], scores=[1_009_000, 1_005_000, 900_000],
+        lamps=["올저", "", ""],
+    )
+
+    assert f.records.what_if_calls == [[
+        (("Chronomia", "", "MAS"), 1_009_000, "ALL JUSTICE"),
+        (("곡 B", "", "MAS"), 1_005_000, None),
+        (("곡 C", "", "MAS"), 900_000, None),
+    ]]
     table = result.table
-    assert table is not None and table.row_count == 2
-    assert table.summary["레이팅"] == "16.9480 → 16.9510  (+0.0030)"
-    assert table.rows[0].cell("가정 곡 레이팅").text == "16.95"
-    assert table.rows[0].cell("프레임").text == "베스트 30"
-    assert "그대로" in table.rows[1].cell("프레임").text
+    assert table is not None and table.row_count == 3
+    assert table.summary["레이팅"] == "16.9510"
+    assert table.summary["지금 레이팅"] == "16.9480 (+0.0030)"
+    assert table.summary["프레임 밖 가정"] == "1채보"
+    assert table.summary["지금 기록이 더 좋아 그대로"] == "1채보"
+    first, second, _ = table.rows
+    assert first.cell("가정").text == "가정 ALL JUSTICE" and not second.cell("가정").filled
+    assert first.cell("랭크").text == "SSS+"  # 가정 점수로 정한 랭크
+    lines = render_text(table).content.splitlines()
+    assert any("곡 레이팅 16.95  (가정 ALL JUSTICE)" in line and "Chronomia" in line for line in lines)
+    assert any("곡 B" in line and "가정" not in line for line in lines)
     assert result.data["change"]["computed_rating"] == "+0.0030"
-    assert result.data["charts"][1]["applied"] is False
+
+
+async def test_what_if_rejects_a_lamp_that_is_not_a_combo_lamp(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, what_if_result=_what_if_result()))
+
+    result = await skill.what_if(f.ctx, charts=[_chart()], scores=[1_009_000], lamps=["클리어"])
+
+    assert result.error is not None and f.records.what_if_calls == []
 
 
 async def test_what_if_needs_as_many_scores_as_charts(skill: ModuleType) -> None:
