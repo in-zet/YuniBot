@@ -3,7 +3,7 @@
 
 운영과 같은 배선(core.bot.build_client)을 임시 DB로 띄워 실제 서비스·도구·표 보관소를 그대로 쓴다.
 운영 DB(DB_PATH)는 건드리지 않는다. 곡 DB는 운영처럼 기동 때 받아 온다. 평가 플레이어는 CHUNITHM-NET에 접속하지 않고,
-대신 시작할 때 지어낸 츄니즘 기록(곡 DB의 채보에 정해진 점수를 돌려 준다)과 폴더 "연습"을 받아 서버(`_EVAL_GUILD`) 안에서
+대신 시작할 때 지어낸 츄니즘·maimai 기록(곡 DB의 채보에 정해진 점수를 돌려 준다)과 폴더 "연습"을 받아 서버(`_EVAL_GUILD`) 안에서
 묻는다 — 기록·폴더·서버가 없으면 베스트 → 그림, 폴더 → 분석, 서버 설정 같은 흐름이 앞 단계에서 끊겨 판정할 수 없다(2026-11-07 탐색).
 
 두 묶음:
@@ -46,12 +46,20 @@ from services.common.players import PlayersService
 from services.game.records import RecordsService
 from services.game.songdb import SongDb
 from services.game.sync_types import ChartPlay, ProfileSnapshot, SyncSnapshot
+from services.game.terms import TermsService
 
 _EVAL_CHANNEL = "eval"
 _EVAL_GUILD = "eval-guild"
 _FIXTURE_FOLDER = "연습"
 # 지어낸 기록의 점수를 이 순서로 돌려 준다 — SSS+부터 S 아래까지 랭크가 고루 섞이게.
 _FIXTURE_SCORES = (1_009_400, 1_008_200, 1_007_600, 1_006_100, 1_004_200, 1_001_300, 996_500, 988_000, 979_000, 962_000)
+
+
+# maimai 지어낸 기록: (달성률 ×10000, 콤보 램프)를 이 순서로 돌려 준다 — AP 보너스가 붙는 채보도 섞이게.
+_MAIMAI_FIXTURE_PLAYS = (
+    (1_006_000, "AP+"), (1_005_000, "AP"), (1_002_000, "FC+"), (996_000, "FC"),
+    (991_000, ""), (982_000, "FC"), (971_000, ""), (945_000, ""),
+)
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -121,6 +129,11 @@ def judge_scenario(scenario: Scenario, trace: TurnTrace) -> list[str]:
         problems.append(f"{'/'.join(scenario.must_call_any)} 중 아무것도 안 불렸다")
     problems.extend(f"{name}이 안 불렸다" for name in scenario.must_call if name not in called)
     problems.extend(f"{name}이 불렸다" for name in scenario.must_not_call if name in called)
+    for tool_name, arg, text in scenario.must_args:
+        values = [args.get(arg) for name, args in trace.calls if name == tool_name]
+        joined = [" ".join(map(str, v)) if isinstance(v, list) else str(v or "") for v in values]
+        if not any(option in value for value in joined for option in text.split("|")):
+            problems.append(f"{tool_name}의 {arg}에 '{text}'가 없다(받은 값: {values})")
     if scenario.shown_from:
         if not trace.shown_table_ids:
             problems.append("보인 표가 없다")
@@ -211,6 +224,31 @@ async def seed_fixture(
     return len(plays)
 
 
+async def seed_maimai_fixture(*, executor: ToolExecutor, player_id: str, tags: frozenset[str]) -> int:
+    """평가 플레이어에게 maimai 기록을 준다. 상수 12.0~14.9 마스터·리마스터 채보를 하나 걸러 하나씩
+    `_MAIMAI_FIXTURE_PLAYS`를 돌려 가며 기록한다(`save_sync`). 넣은 기록 수를 돌려준다."""
+    services = executor._game_services["maimai"]  # pyright: ignore[reportPrivateUsage]
+    songdb = cast("SongDb", services["songdb"])
+    records = cast("RecordsService", services["records"])
+    terms = cast("TermsService", services["terms"])
+    rank_scores = terms.rank_scores()
+    hits = sorted(
+        songdb.find_songs(min_const=12.0, max_const=14.9, difficulty=("MAS", "REM")),
+        key=lambda hit: (hit.song.title, hit.chart.chart_type, hit.chart.difficulty),
+    )
+    plays: list[ChartPlay] = []
+    for i, hit in enumerate(hits[::2]):
+        score, lamp = _MAIMAI_FIXTURE_PLAYS[i % len(_MAIMAI_FIXTURE_PLAYS)]
+        rank = max((value, name) for name, value in rank_scores.items() if value <= score)[1]
+        plays.append(ChartPlay(
+            song_title=hit.song.title, difficulty=hit.chart.difficulty, chart_type=hit.chart.chart_type,
+            score=score, rank=rank, combo_lamp=lamp,
+        ))
+    ctx = ToolContext(player_id=player_id, tags=tags, services={}, event_bus=executor.event_bus, game="maimai")
+    await records.save_sync(player_id, SyncSnapshot(profile=ProfileSnapshot(username="EVAL"), all_plays=plays), ctx)
+    return len(plays)
+
+
 async def _run_turn(
     *, config: CoreConfig, llm: LlmAdapter, prompt: PromptAssembler, executor: ToolExecutor, client: YuniClient,
     registry: SkillRegistry, player_id: str, tags: frozenset[str], question: str,
@@ -285,7 +323,11 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
             max_tool_calls=config.max_tool_calls_per_turn, max_tokens=config.max_tokens_per_turn, db=client.conn,
         )
         seeded = await seed_fixture(executor=executor, loop=seeding_loop, player_id=player.id, tags=tags)
-        print(f"모델 {config.llm_provider}/{config.agent_model} · 모드 {config.skill_loading_mode} · 지어낸 기록 {seeded}개")
+        seeded_maimai = await seed_maimai_fixture(executor=executor, player_id=player.id, tags=tags)
+        print(
+            f"모델 {config.llm_provider}/{config.agent_model} · 모드 {config.skill_loading_mode} · "
+            f"지어낸 기록 츄니즘 {seeded}개 · maimai {seeded_maimai}개"
+        )
         for suite, label, question, case in jobs:
             for attempt in range(args.repeat):
                 result, trace, elapsed = await _run_turn(

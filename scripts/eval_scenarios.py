@@ -5,6 +5,8 @@ shown_from: 사용자에게 보인 표(그림으로 그렸으면 그 표, 아니
 must_call_any: 이 중 하나는 불려야 한다.
 must_call: 전부 불려야 한다.
 must_not_call: 하나도 불리면 안 된다.
+must_args: (도구, 인자, 글자) — 그 도구를 부른 호출 중 하나는 그 인자 값(목록이면 항목을 이어 붙인 글)에 그 글자가 들어 있어야 한다.
+           글자는 "|"로 나눠 여러 개를 줄 수 있다(하나만 들어 있으면 된다).
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ class Scenario:
     must_call_any: tuple[str, ...] = ()
     must_call: tuple[str, ...] = ()
     must_not_call: tuple[str, ...] = ()
+    must_args: tuple[tuple[str, str, str], ...] = ()
 
 
 _CONST_TABLE = ("report_const_table",)
@@ -132,6 +135,17 @@ SCENARIOS: tuple[Scenario, ...] = (
         question="메기도 1003866, 아이워나 1007270, 유루시테 1005039, 라미아 1005536, 도미너스 1003258을 가정한 레이팅표 그려줘",
         shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
         must_not_call=("rating-calc_song_rating",),
+    ),
+    # 마이마이 — 평가 플레이어는 지어낸 maimai 기록도 받는다(AP·AP+가 섞여 AP 보너스 계산도 거친다).
+    Scenario(
+        name="마이/베스트 그림", question="마이마이 내 베스트 그림으로 뽑아 줘",
+        shown_from=("report_best",), must_call=("image_table_image",),
+    ),
+    Scenario(
+        name="마이/AP 가정 레이팅표",
+        question="마이마이에서 PANDORA PARADOXXX 100.6% 올퍼로 치면 레이팅표 어떻게 돼? 그려줘",
+        shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
+        must_args=(("report_what_if", "lamps", "AP|퍼"),),
     ),
     Scenario(
         name="기록/폴더 분석", question="연습 폴더 랭크 분포 보여줘",

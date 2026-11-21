@@ -49,6 +49,14 @@ def test_judge_scenario_must_and_must_not_call() -> None:
     assert judge_scenario(scenario, TurnTrace(calls=[("d", {})]))
 
 
+def test_judge_scenario_must_args_looks_inside_list_values() -> None:
+    scenario = Scenario(name="s", question="q", must_args=(("w", "lamps", "AP|퍼"),))
+    assert judge_scenario(scenario, TurnTrace(calls=[("w", {"lamps": ["", "AP"]})])) == []
+    assert judge_scenario(scenario, TurnTrace(calls=[("w", {"lamps": ["올퍼"]})])) == []
+    assert judge_scenario(scenario, TurnTrace(calls=[("w", {"lamps": ["FC"]})]))
+    assert judge_scenario(scenario, TurnTrace(calls=[("w", {}), ("x", {"lamps": ["AP"]})]))
+
+
 def test_input_table_ids_reads_table_args_only() -> None:
     assert _input_table_ids({"table": "t3:2,4", "rank": "SSS", "min_const": 15.0}) == ["t3"]
 
