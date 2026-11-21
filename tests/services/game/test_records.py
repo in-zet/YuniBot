@@ -1007,6 +1007,50 @@ async def test_candidates_stay_in_rank_3_to_8_band_exclude_frame_and_sort_by_ups
         assert hit.remaining_score == (expected[0] if expected else None)
 
 
+async def test_what_if_raises_frames_without_saving(conn, monkeypatch) -> None:
+    """2026-11-21: "~점을 가정한 레이팅표". 가정 점수로 프레임을 다시 짜고, 기록은 바꾸지 않는다."""
+    _, player_id, ctx, service = await _setup(conn, songdb=_songdb_with_fixture_new20(monkeypatch))
+    await service.save_sync(player_id, snapshot_from_fetch(_fixture_fetch()), ctx)
+    before_rows = await _pb_rows(conn, player_id)
+    best, _ = await service.current_frames(player_id)
+    top = best[0]
+    top_key = (top.song_title, top.chart_type, top.difficulty)
+    lower = (top.song_title, top.chart_type, top.difficulty), top.score - 1  # 지금 점수보다 낮은 가정
+
+    result = await service.what_if(player_id, [(top_key, 1_010_000), lower])
+
+    assert await _pb_rows(conn, player_id) == before_rows
+    summary = await service.latest_sync_summary(player_id)
+    assert summary is not None and result.before.computed_rating == summary.computed_rating
+    raised, kept = result.charts
+    assert raised.applied and raised.frame == "best" and raised.current_score == top.score
+    assert raised.assumed_rating == service._profile.chart_rating(1_010_000, top.const)  # pyright: ignore[reportPrivateUsage]
+    assert not kept.applied
+    assert result.after.computed_rating is not None and result.before.computed_rating is not None
+    assert raised.assumed_rating is not None and top.rating is not None
+    gain = (raised.assumed_rating - top.rating) / 50
+    assert result.after.computed_rating == result.before.computed_rating + gain
+
+
+async def test_what_if_on_a_chart_never_played_enters_the_frame_only_when_high_enough(conn) -> None:
+    songdb = SongDbService()
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+    await service.save_sync(player_id, snapshot_from_fetch(_fixture_fetch()), ctx)
+    played = {(r.song_title, r.chart_type, r.difficulty) for r in await service.all_pb_rows(player_id)}
+    hit = next(
+        h for h in songdb.find_by_const(min_const=15.4, max_const=15.7, difficulty="MAS")
+        if (h.song.title, h.chart.chart_type, "MAS") not in played
+    )
+    key = (hit.song.title, hit.chart.chart_type, "MAS")
+
+    high, low = (await service.what_if(player_id, [(key, 1_009_000)])), (await service.what_if(player_id, [(key, 500_000)]))
+
+    assert high.charts[0].current_score is None and high.charts[0].frame == "best"
+    assert high.after.computed_rating is not None and high.before.computed_rating is not None
+    assert high.after.computed_rating > high.before.computed_rating
+    assert low.charts[0].frame is None and low.after == low.before
+
+
 async def test_diff_cache_keeps_only_newest(conn, monkeypatch) -> None:
     monkeypatch.setattr(records_module, "_DIFF_CACHE_LIMIT", 2)
     _, player_id, ctx, service = await _setup(conn)

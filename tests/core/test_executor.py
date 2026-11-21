@@ -73,6 +73,12 @@ async def tags_any_tool(ctx: ToolContext) -> ToolResult:
     return ToolResult(data={})
 
 
+@tool()
+async def lookup_many(ctx: ToolContext, charts: list[ChartRef]) -> ToolResult:
+    """채보 여러 개를 받는 도구."""
+    return ToolResult(data={"charts": charts})
+
+
 class _FakeChartResolver:
     async def resolve(self, raw: object, ctx: ToolContext) -> dict[str, str]:
         if raw == "크로노":
@@ -118,6 +124,38 @@ async def test_invoke_resolution_failure_returns_error() -> None:
     assert outcome.result is not None
     assert outcome.result.error is not None
     assert "크로노" in outcome.result.error
+
+
+@pytest.mark.asyncio
+async def test_list_of_ref_args_are_resolved_one_by_one() -> None:
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(lookup_many.__yuni_tool__, ctx, {"charts": ["크로노", "크로노"]})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None
+    assert outcome.result.data["charts"] == [{"song": "크로노"}, {"song": "크로노"}]
+
+
+@pytest.mark.asyncio
+async def test_list_of_ref_args_name_the_item_that_failed() -> None:
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(lookup_many.__yuni_tool__, ctx, {"charts": ["크로노", "없는곡"]})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and outcome.result.error is not None
+    assert "'없는곡'" in outcome.result.error and "크로노" in outcome.result.error
+
+
+@pytest.mark.asyncio
+async def test_list_of_ref_args_must_be_a_list() -> None:
+    executor, _ = _make_executor()
+    ctx = ToolContext(player_id="p1", tags=frozenset(), services={})
+
+    outcome = await executor.invoke(lookup_many.__yuni_tool__, ctx, {"charts": "크로노"})  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert outcome.result is not None and "목록" in (outcome.result.error or "")
 
 
 @pytest.mark.asyncio

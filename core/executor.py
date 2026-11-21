@@ -239,6 +239,13 @@ class ToolExecutor:
                     return ExecutionOutcome(result=ToolResult(error=str(exc)))
                 resolved[arg.name] = table_arg.table
                 stale_input = stale_input or table_arg.stale
+            elif arg.ref_item is not None:
+                if not isinstance(raw_value, list):
+                    return ExecutionOutcome(result=ToolResult(error=f"인자 '{arg.name}'는 목록이어야 해"))
+                outcome = await self._resolve_ref_list(spec, ctx, arg, raw_value)
+                if isinstance(outcome, ExecutionOutcome):
+                    return outcome
+                resolved[arg.name] = outcome
             elif arg.is_ref_type:
                 # 세 경우를 구분한다. 어느 쪽이든 날것 예외를 호출자(슬래시/LLM 루프)에 흘려보내지 않는다.
                 # 1) 해석기 미등록: get()/resolve()를 부르기 전에 확인해 바로 에러 결과로.
@@ -286,6 +293,31 @@ class ToolExecutor:
             if result.display is not None and result.display.content:
                 result.display.content = f"{result.display.content}\n({fallback_note})"
         return ExecutionOutcome(result=result, stale_input=stale_input)
+
+    async def _resolve_ref_list(
+        self, spec: ToolSpec | SlashOnlySpec, ctx: ToolContext, arg: ArgSpec, raw_items: list[Any]
+    ) -> list[Any] | ExecutionOutcome:
+        """`list[표준 인자 타입]` 인자를 항목마다 해석한다. 실패하면 어느 항목인지 붙여 하나의 오류로 돌려준다
+        (인자 하나짜리 해석과 같은 세 경우 구분)."""
+        assert arg.ref_item is not None
+        if not self._resolvers.is_registered(arg.ref_item):
+            return ExecutionOutcome(result=ToolResult(error=f"{arg.ref_item.__name__}에 등록된 해석기가 없다"))
+        resolver = self._resolvers.get(arg.ref_item)
+        values: list[Any] = []
+        for raw in raw_items:
+            try:
+                values.append(await resolver.resolve(raw, ctx))
+            except ResolutionError as exc:
+                return ExecutionOutcome(result=ToolResult(error=f"'{raw}': {exc}"))
+            except Exception as exc:
+                logger.exception(
+                    "resolver for %s raised unexpectedly (tool '%s', arg '%s')",
+                    arg.ref_item.__name__,
+                    spec.name,
+                    arg.name,
+                )
+                return ExecutionOutcome(result=ToolResult(error=f"인자 '{arg.name}'의 '{raw}' 해석 중 오류: {exc}"))
+        return values
 
     def _hold(
         self,

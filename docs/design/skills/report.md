@@ -102,6 +102,7 @@ listens: [chunithm.sync.completed]
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count`, `table: TableRef`(선택, `find_songs`가 거른 표 — 그 채보 안에서만 고른다) | 표 |
 
 | `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty: DifficultyRef`(선택, 하나), `only_played`(기본 꺼짐), `table: TableRef`(선택, `find_songs`가 찾은 표를 상수표로 가공만 — 신곡·난이도 둘 이상·레벨 등 그 밖의 조건은 이쪽, 상수 범위와 같이 주면 둘 다 적용) | `table` 줄 땐 Row(곡·난이도) | 표 |
+| `what_if` | 가정 레이팅표: 채보마다 그 점수를 냈다고 치고 곡 레이팅·프레임·전체 레이팅 변화를 계산한 표(표 반환, 기록은 안 바꾼다) | `charts: list[ChartRef]`, `scores: list[ScoreRef]`(같은 순서·같은 개수) | 없음 | 표 |
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
@@ -189,3 +190,8 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 - 처음 계획은 `analyze`에서도 상수 범위를 지우는 것이었지만, `const_table`·`candidates`·`analyze` 모두 상수 범위로 바로 찾는 길을 남겼다. "15.0~15.5 상수표"·"15대 랭크 분포" 같은 흔한 질문이 도구 한 번으로 끝난다.
 - 대신 상수 범위가 `find_songs`와 이 도구들 양쪽에 있어도 결과가 같게 했다: `table`과 `min_const`/`max_const`를 같이 주면 세 도구 모두 둘 다 적용한다. `candidates`·`analyze`는 원래 그랬고, `const_table`은 `table` 경로에서 상수 범위를 조용히 무시하던 것을 고쳤다(`table` 경로의 `min_const` 기본값 0은 범위로 치지 않아 `steps`에 안 쓴다).
 - 세 도구 설명과 `SKILL.md`는 같은 규칙 하나로 맞췄다: 조건이 상수 범위(상수표는 + 난이도 하나)뿐이면 바로, 그 밖의 조건이 하나라도 있으면 `find_songs` 표를 `table`로.
+
+## 가정 레이팅표 `what_if` (2026-11-21, 사용자 결정 "2번")
+- "메기도 1003866, 아이워나 1007270 … 을 가정한 레이팅표"가 곡마다 `song_info`·`song_chart`·`song_rating`을 따로 불러 도구 호출 상한(10)에 걸렸다. `song_rating`을 여러 개 받게 하는 안은 상수를 찾는 호출이 그대로 남고 전체 레이팅을 못 내서 고르지 않았다.
+- 채보 목록과 점수 목록을 한 번에 받는다(코어가 `list[ChartRef]`·`list[ScoreRef]`를 항목마다 해석한다). `records.what_if`가 PB에 가정 점수를 덧씌워 `_frames`로 프레임을 다시 짜고, 전체 레이팅·두 평균을 `latest_sync_summary`와 같은 계산으로 낸다. PB는 오르기만 하므로 지금 점수 이하의 가정은 반영하지 않고 "지금 점수가 더 높아 그대로"라고 표에 적는다.
+- 표: 칸 곡·난이도·상수·현재 점수·가정 점수·현재 곡 레이팅·가정 곡 레이팅·프레임(가정 뒤 들어간 프레임, 밖이면 "밖"). 표 요약에 레이팅·베스트·신곡 평균의 "지금 → 가정 (변화량)". 그림은 이 표를 `table_image`에 넘긴다.

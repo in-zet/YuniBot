@@ -126,6 +126,13 @@ SCENARIOS: tuple[Scenario, ...] = (
         name="기록/베스트 그림", question="내 베스트 그림으로 뽑아 줘",
         shown_from=("report_best",), must_call=("image_table_image",),
     ),
+    # 여러 곡의 가정 점수는 what_if 한 번에 — 곡마다 찾다가 도구 호출 상한에 걸렸다(2026-11-21).
+    Scenario(
+        name="기록/가정 레이팅표 그림",
+        question="메기도 1003866, 아이워나 1007270, 유루시테 1005039, 라미아 1005536, 도미너스 1003258을 가정한 레이팅표 그려줘",
+        shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
+        must_not_call=("rating-calc_song_rating",),
+    ),
     Scenario(
         name="기록/폴더 분석", question="연습 폴더 랭크 분포 보여줘",
         shown_from=("report_analyze",), must_call=("folders_show_folder",),

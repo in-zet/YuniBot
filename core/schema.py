@@ -32,6 +32,8 @@ class ArgSpec:
     required: bool
     default: Any = None
     is_ref_type: bool = False
+    # `list[표준 인자 타입]`이면 그 항목 타입. 실행기가 항목마다 해석기를 부른다.
+    ref_item: type | None = None
     # TableRef 인자가 Annotated로 선언한 필요한 것. 선언이 없으면 None.
     table_needs: TableNeeds | None = None
 
@@ -54,11 +56,19 @@ def _unwrap_optional(py_type: Any) -> tuple[Any, bool]:
 
 
 def is_list_type(py_type: Any) -> bool:
-    """`list[기본 타입]` 또는 `list[TypedDict]`. 모델이 번호 목록이나 조건 목록을 넘기는 데 쓴다."""
+    """`list[기본 타입]`, `list[TypedDict]` 또는 `list[표준 인자 타입]`. 모델이 번호 목록·조건 목록·채보 목록을 넘기는 데 쓴다."""
     if get_origin(py_type) is not list:
         return False
     (item,) = get_args(py_type) or (None,)
-    return item in _PRIMITIVES or is_typeddict(item)
+    return item in _PRIMITIVES or is_typeddict(item) or _ref_item(py_type) is not None
+
+
+def _ref_item(py_type: Any) -> type | None:
+    """`list[표준 인자 타입]`의 항목 타입. 표 인자(TableRef)는 목록으로 받지 않는다."""
+    if get_origin(py_type) is not list:
+        return None
+    (item,) = get_args(py_type) or (None,)
+    return item if item in STANDARD_REF_TYPES and item is not TableRef else None
 
 
 def _strip_annotated(py_type: Any) -> tuple[Any, list[Any]]:
@@ -110,6 +120,7 @@ def build_arg_schema(fn: Callable[..., Any]) -> ArgSchema:
                 required=not (has_default or is_optional),
                 default=None if param.default is inspect.Parameter.empty else param.default,
                 is_ref_type=is_ref_type,
+                ref_item=_ref_item(py_type),
                 table_needs=table_needs,
             )
         )

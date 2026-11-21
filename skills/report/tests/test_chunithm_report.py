@@ -26,6 +26,7 @@ from services.game.records import (
     CandidateHit,
     ChartUpdate,
     FrameExit,
+    FrameMetrics,
     PbRow,
     PlayerProfile,
     RatingDeltas,
@@ -33,6 +34,8 @@ from services.game.records import (
     SyncDiff,
     SyncLogSummary,
     UnchangedPlay,
+    WhatIfChart,
+    WhatIfResult,
 )
 from services.game.songdb import ChartRecord, SongRecord
 from services.game.terms import TermsService
@@ -109,6 +112,13 @@ class _FakeRecords:
     diffs: dict[str, SyncDiff] = field(default_factory=dict)
     candidate_calls: list[dict[str, Any]] = field(default_factory=list)
     profiles: dict[str, PlayerProfile] = field(default_factory=dict)
+    what_if_result: WhatIfResult | None = None
+    what_if_calls: list[list[tuple[tuple[str, str, str], int]]] = field(default_factory=list)
+
+    async def what_if(self, player_id: str, assumed: list[tuple[tuple[str, str, str], int]]) -> WhatIfResult:
+        self.what_if_calls.append(list(assumed))
+        assert self.what_if_result is not None
+        return self.what_if_result
 
     async def player_profile(self, player_id: str) -> PlayerProfile | None:
         return self.profiles.get(player_id)
@@ -793,6 +803,59 @@ async def test_candidates_empty(skill: ModuleType) -> None:
     assert result.table is not None and result.table.row_count == 0
     assert result.data["count"] == 0
     assert "없" in _content(result)
+
+
+# ---------------------------------------------------------------- 가정 레이팅표
+
+
+def _metrics(rating: str, best: str, new: str) -> FrameMetrics:
+    return FrameMetrics(computed_rating=Decimal(rating), best30_average=Decimal(best), new20_average=Decimal(new))
+
+
+async def test_what_if_passes_charts_and_scores_and_shows_the_change(skill: ModuleType) -> None:
+    """2026-11-21: 6곡 가정 점수를 곡마다 따로 계산하다 도구 호출 상한에 걸렸다. 한 번에 받아 표 하나로 낸다."""
+    result_data = WhatIfResult(
+        charts=[
+            WhatIfChart(song_title="Chronomia", difficulty="MAS", const=14.8, current_score=1_000_000,
+                        current_rating=Decimal("16.80"), assumed_score=1_009_000,
+                        assumed_rating=Decimal("16.95"), applied=True, frame="best"),
+            WhatIfChart(song_title="곡 B", difficulty="MAS", const=14.8, current_score=1_009_500,
+                        current_rating=Decimal("16.95"), assumed_score=1_005_000,
+                        assumed_rating=Decimal("16.80"), applied=False, frame="best"),
+        ],
+        before=_metrics("16.9480", "17.0216", "16.8375"),
+        after=_metrics("16.9510", "17.0266", "16.8375"),
+    )
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, what_if_result=result_data))
+
+    result = await skill.what_if(f.ctx, charts=[_chart(), _chart("곡 B")], scores=[1_009_000, 1_005_000])
+
+    assert f.records.what_if_calls == [[(("Chronomia", "", "MAS"), 1_009_000), (("곡 B", "", "MAS"), 1_005_000)]]
+    table = result.table
+    assert table is not None and table.row_count == 2
+    assert table.summary["레이팅"] == "16.9480 → 16.9510  (+0.0030)"
+    assert table.rows[0].cell("가정 곡 레이팅").text == "16.95"
+    assert table.rows[0].cell("프레임").text == "베스트 30"
+    assert "그대로" in table.rows[1].cell("프레임").text
+    assert result.data["change"]["computed_rating"] == "+0.0030"
+    assert result.data["charts"][1]["applied"] is False
+
+
+async def test_what_if_needs_as_many_scores_as_charts(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}))
+
+    result = await skill.what_if(f.ctx, charts=[_chart(), _chart("곡 B")], scores=[1_009_000])
+
+    assert result.error is not None and "개수" in result.error
+    assert f.records.what_if_calls == []
+
+
+async def test_what_if_needs_a_sync(skill: ModuleType) -> None:
+    f = _ctx()
+
+    result = await skill.what_if(f.ctx, charts=[_chart()], scores=[1_009_000])
+
+    assert result.error is not None and "동기화" in result.error
 
 
 # ---------------------------------------------------------------- 동기화 리포트 조각

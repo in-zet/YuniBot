@@ -59,3 +59,16 @@ def test_game_ref_is_a_string_the_model_fills_only_when_the_user_named_a_game() 
     assert prop["type"] == "string"
     assert "말하지 않았으면" in prop["description"]
     assert decl.parameters_json_schema["required"] == []
+
+
+@tool()
+async def _with_chart_list(ctx: ToolContext, charts: list[ChartRef]) -> ToolResult:
+    """채보 목록을 받는 예시 도구."""
+    return ToolResult()
+
+
+def test_list_of_ref_type_is_an_array_of_strings() -> None:
+    decl = build_tool_declaration(_with_chart_list.__yuni_tool__, skill_name="report")  # pyright: ignore[reportFunctionMemberAccess]
+
+    assert decl.parameters_json_schema["properties"]["charts"] == {"type": "array", "items": {"type": "string"}}
+    assert decl.parameters_json_schema["required"] == ["charts"]

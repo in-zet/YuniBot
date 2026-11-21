@@ -30,6 +30,7 @@ from core.tool_types import (
     Display,
     GameRef,
     PlayerRef,
+    ScoreRef,
     TableRef,
     ToolContext,
     ToolResult,
@@ -46,6 +47,7 @@ from services.game.rating_format import (
 )
 from services.game.records import (
     ChartUpdate,
+    FrameMetrics,
     PbRow,
     RatingDeltas,
     SyncDiff,
@@ -712,6 +714,101 @@ async def candidates(
         data={"min_const": min_const, "max_const": max_const, "count": len(hits)},
         table=builder.build(),
     )
+
+
+_CURRENT_SCORE = "현재 점수"
+_ASSUMED_SCORE = "가정 점수"
+_CURRENT_RATING = "현재 곡 레이팅"
+_ASSUMED_RATING = "가정 곡 레이팅"
+_FRAME = "프레임"
+_NOT_APPLIED = "(지금 점수가 더 높아 그대로)"
+
+
+def _what_if_metric(key: str, before: FrameMetrics, after: FrameMetrics, profile: GameProfile) -> str:
+    old, new = getattr(before, key), getattr(after, key)
+    places = profile.overall_places if key == "computed_rating" else None
+    return f"{_metric_text(key, old, profile)} → {_metric_text(key, new, profile)}  ({_delta(new, old, places=places)})"
+
+
+@tool()
+async def what_if(
+    ctx: ToolContext, charts: list[ChartRef], scores: list[ScoreRef], game: GameRef | None = None
+) -> ToolResult:
+    """채보마다 그 점수를 냈다고 가정한 레이팅표. 채보별 상수·현재/가정 점수·현재/가정 곡 레이팅·들어갈 프레임과,
+    가정한 뒤 전체 레이팅·베스트·신곡 평균이 지금에서 얼마로 바뀌는지를 표로 돌려준다. 기록은 바꾸지 않는다.
+    charts에 채보 이름("메기도 마스", "크로노스")을, scores에 같은 순서로 점수(또는 랭크 이름)를 준다.
+    여러 곡이어도 한 번에 부른다 — 곡마다 song_info·song_chart를 따로 부르지 않는다."""
+    if not charts:
+        return ToolResult(error="가정할 채보를 하나 이상 줘.")
+    if len(charts) != len(scores):
+        return ToolResult(error=f"채보 {len(charts)}개와 점수 {len(scores)}개의 개수가 달라. 같은 순서로 하나씩 줘.")
+    summary = await ctx.records.latest_sync_summary(ctx.player_id)
+    if summary is None:
+        return ToolResult(error=_NOT_SYNCED_ERROR)
+    resolved = [c for c in charts if isinstance(c, ResolvedChart)]
+    assert len(resolved) == len(charts)
+    assumed = [
+        ((c.song.title, c.chart.chart_type, c.chart.difficulty), score)
+        for c, score in zip(resolved, scores, strict=True)
+        if isinstance(score, int)
+    ]
+    result = await ctx.records.what_if(ctx.player_id, assumed)
+    game_profile = _profile(ctx)
+    percent = game_profile.score_is_percent
+    frame_labels = {"best": game_profile.best_label, "new": game_profile.new_label}
+
+    builder = TableBuilder(subject=ctx.player_id, unit="채보")
+    tc.add_columns(builder, *tc.identity_columns(ctx.game), tc.CONST, game=ctx.game)
+    builder.column(_CURRENT_SCORE, value_type="ScoreRef")
+    builder.column(_ASSUMED_SCORE, value_type="ScoreRef")
+    builder.column(_CURRENT_RATING, value_type="number")
+    builder.column(_ASSUMED_RATING, value_type="number")
+    builder.column(_FRAME)
+    head = tc.identity_format(ctx.game)
+    builder.row_formats([(
+        f"{head} {{상수}}  {{{_CURRENT_SCORE}}} → {{{_ASSUMED_SCORE}}}  "
+        f"곡 레이팅 {{{_CURRENT_RATING}}} → {{{_ASSUMED_RATING}}}  {{{_FRAME}}}"
+    )])
+    builder.step("가정한 점수로 계산한 레이팅표 (기록은 그대로)")
+    labels = _metric_labels(game_profile)
+    builder.summary({labels[key].strip(): _what_if_metric(key, result.before, result.after, game_profile) for key in labels})
+
+    places = game_profile.song_rating_places
+    for item in result.charts:
+        has_record = item.current_score is not None
+        frame = frame_labels[item.frame] if item.frame else "밖"
+        cells = {
+            **tc.identity_cells(item.song_title, item.chart_type, item.difficulty, ctx.game),
+            tc.CONST: tc.const_cell(item.const),
+            _CURRENT_SCORE: tc.score_cell(item.current_score, percent=percent),
+            _ASSUMED_SCORE: tc.score_cell(item.assumed_score, percent=percent),
+            _CURRENT_RATING: tc.rating_cell(item.current_rating, has_record=has_record, places=places),
+            _ASSUMED_RATING: tc.rating_cell(item.assumed_rating, places=places),
+            _FRAME: cell(frame if item.applied else f"{frame} {_NOT_APPLIED}"),
+        }
+        builder.row(tc.chart_ref(item.song_title, item.difficulty, item.chart_type), cells)
+
+    data: dict[str, Any] = {
+        "player_id": ctx.player_id,
+        "before": {k: _metric_text(k, getattr(result.before, k), game_profile) for k in labels},
+        "after": {k: _metric_text(k, getattr(result.after, k), game_profile) for k in labels},
+        "change": {
+            k: _delta(getattr(result.after, k), getattr(result.before, k),
+                      places=game_profile.overall_places if k == "computed_rating" else None)
+            for k in labels
+        },
+        "charts": [
+            {
+                "song_title": item.song_title, "difficulty": item.difficulty, "const": item.const,
+                "current_score": item.current_score, "assumed_score": item.assumed_score,
+                "current_rating": None if item.current_rating is None else _song_rating(item.current_rating, game_profile),
+                "assumed_rating": _song_rating(item.assumed_rating, game_profile),
+                "applied": item.applied, "frame": item.frame,
+            }
+            for item in result.charts
+        ],
+    }
+    return ToolResult(data=data, table=builder.build())
 
 
 # ---------------------------------------------------------------- 동기화 리포트 조각

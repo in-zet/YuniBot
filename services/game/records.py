@@ -229,6 +229,36 @@ class CandidateHit:
     remaining_score: int | None  # SSS 기준, 노트 수 없으면 None
 
 
+@dataclass(slots=True, kw_only=True, frozen=True)
+class FrameMetrics:
+    """전체 레이팅과 두 프레임 평균(`latest_sync_summary`와 같은 계산)."""
+
+    computed_rating: Decimal | None
+    best30_average: Decimal | None
+    new20_average: Decimal | None
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class WhatIfChart:
+    song_title: str
+    difficulty: str
+    chart_type: str = ""
+    const: float | None
+    current_score: int | None  # 기록이 없으면 None
+    current_rating: Decimal | None
+    assumed_score: int
+    assumed_rating: Decimal | None  # 상수를 모르면 None(계산 불가)
+    applied: bool  # 가정 점수가 지금 점수보다 높아 기록을 바꿨나
+    frame: str | None  # 가정한 뒤 들어간 프레임("best"/"new"), 밖이면 None
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class WhatIfResult:
+    charts: list[WhatIfChart]
+    before: FrameMetrics
+    after: FrameMetrics
+
+
 def _frame_sort_key(row: PbRow) -> tuple[bool, Decimal, str, str, str]:
     # 레이팅 내림차순. 레이팅을 모르는 채보는 맨 뒤로, 동점은 제목·채보 종류·난이도 순으로 고정한다.
     return (row.rating is None, -(row.rating or Decimal(0)), row.song_title, row.chart_type, row.difficulty)
@@ -688,14 +718,14 @@ class RecordsService:
         row = await cursor.fetchone()
         if row is None:
             return None
-        best, new = self._frames(await self.all_pb_rows(player_id))
+        metrics = self._metrics(*self._frames(await self.all_pb_rows(player_id)))
         # 전체 레이팅도 두 평균처럼 지금 시점이다 — 로그의 값은 동기화 때 얼어 있어, 곡 DB 상수가 바뀌거나
         # 버전이 바뀌어 신곡 프레임이 비어도 그대로이기 때문이다(2026-10-22).
         return SyncLogSummary(
             nickname=row["nickname"],
-            computed_rating=self._overall([r.rating for r in best], [r.rating for r in new]),
-            best30_average=average_rating([r.rating for r in best]),
-            new20_average=average_rating([r.rating for r in new]),
+            computed_rating=metrics.computed_rating,
+            best30_average=metrics.best30_average,
+            new20_average=metrics.new20_average,
             last_synced_at=row["synced_at"],
         )
 
@@ -771,6 +801,52 @@ class RecordsService:
         """지금 시점 (베스트30, 신곡20). 제목 순이 아니라 프레임 순(레이팅 내림차순)이다 —
         latest_sync_summary/candidates가 쓰는 _frames와 같은 계산이라 숫자가 어긋나지 않는다."""
         return self._frames(await self.all_pb_rows(player_id))
+
+    async def what_if(self, player_id: str, assumed: Sequence[tuple[ChartKey, int]]) -> WhatIfResult:
+        """채보마다 가정 점수를 냈다고 치고 프레임과 전체 레이팅을 다시 계산한다. 아무것도 저장하지 않는다.
+        PB는 오르기만 하므로 가정 점수가 지금 점수 이하인 채보는 그대로 둔다. 같은 채보를 여러 번 주면
+        가장 높은 점수를 쓴다."""
+        rows = await self.all_pb_rows(player_id)
+        by_key = {_row_key(r): r for r in rows}
+        merged = dict(by_key)
+        for key, score in assumed:
+            if key in merged and merged[key].score >= score:
+                continue
+            title, chart_type, difficulty = key
+            const = self._songdb.const_for(title, difficulty, chart_type)
+            merged[key] = PbRow(
+                song_title=title, chart_type=chart_type, difficulty=difficulty, score=score, rank="",
+                clear_lamp="", combo_lamp="", chain_lamp="", const=const,
+                rating=self._profile.chart_rating(score, const), session_id=None, updated_at="",
+            )
+        before = self._metrics(*self._frames(rows))
+        best, new = self._frames(list(merged.values()))
+        after = self._metrics(best, new)
+        frame_of = {_row_key(r): "best" for r in best} | {_row_key(r): "new" for r in new}
+
+        charts: list[WhatIfChart] = []
+        for key, score in assumed:
+            title, chart_type, difficulty = key
+            current = by_key.get(key)
+            const = self._songdb.const_for(title, difficulty, chart_type)
+            charts.append(
+                WhatIfChart(
+                    song_title=title, chart_type=chart_type, difficulty=difficulty, const=const,
+                    current_score=current.score if current is not None else None,
+                    current_rating=current.rating if current is not None else None,
+                    assumed_score=score, assumed_rating=self._profile.chart_rating(score, const),
+                    applied=current is None or score > current.score,
+                    frame=frame_of.get(key),
+                )
+            )
+        return WhatIfResult(charts=charts, before=before, after=after)
+
+    def _metrics(self, best: list[PbRow], new: list[PbRow]) -> FrameMetrics:
+        return FrameMetrics(
+            computed_rating=self._overall([r.rating for r in best], [r.rating for r in new]),
+            best30_average=average_rating([r.rating for r in best]),
+            new20_average=average_rating([r.rating for r in new]),
+        )
 
     async def candidates(
         self, player_id: str, *, min_const: float | None, max_const: float | None, count: int,
