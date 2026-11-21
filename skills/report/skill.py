@@ -226,9 +226,15 @@ def _pb_row_cells(row: PbRow, rank_scores: dict[str, int], game: str) -> dict[st
 
 @tool()
 async def best(
-    ctx: ToolContext, player: PlayerRef | None = None, kind: BestKind = BestKind.BOTH, game: GameRef | None = None
+    ctx: ToolContext,
+    player: PlayerRef | None = None,
+    kind: BestKind = BestKind.BOTH,
+    version: str | None = None,
+    game: GameRef | None = None,
 ) -> ToolResult:
-    """베스트 30과 신곡 20 표(maimai는 구곡 35와 신곡 15)에 채보, 점수, 곡 레이팅, 전체 레이팅 기여도를 담아 돌려준다. kind는 best(베스트·구곡), new(신곡), both(둘 다)."""
+    """베스트 30과 신곡 20 표(maimai는 구곡 35와 신곡 15)에 채보, 점수, 곡 레이팅, 전체 레이팅 기여도를 담아 돌려준다. kind는 best(베스트·구곡), new(신곡), both(둘 다).
+    version에 곡 DB의 버전 이름(츄니즘 "X-VERSE", maimai "PRiSM" 등)을 주면 이전 버전 기준 레이팅표다 — 지금 기록·상수·레이팅
+    공식 그대로, 그 버전 곡을 신곡으로, 그 전 곡을 베스트(구곡)로 나누고 그때 없던 곡은 뺀다. 표 요약에 "지금 레이팅"도 같이 있다."""
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
         return target
@@ -236,30 +242,55 @@ async def best(
         kind = BestKind(kind)
     except ValueError:
         return ToolResult(error="kind는 best, new, both 중 하나여야 해.")
-    best_rows, new_rows = await ctx.records.current_frames(target.id)
-    if not best_rows and not new_rows:
-        return ToolResult(error=_NOT_SYNCED_ERROR)
+    game_profile = _profile(ctx)
+    if version is not None and version not in game_profile.version_order:
+        return ToolResult(error=f"'{version}'은 곡 DB의 버전 이름이 아니야. 버전 이름: {', '.join(game_profile.version_order)}")
     summary = await ctx.records.latest_sync_summary(target.id)
     if summary is None:
         return ToolResult(error=_NOT_SYNCED_ERROR)
+    as_of = await ctx.records.frames_as_of(target.id, version) if version is not None else None
+    if as_of is not None:
+        best_rows, new_rows = as_of.best, as_of.new
+        best_average, new_average = as_of.metrics.best30_average, as_of.metrics.new20_average
+        rating = as_of.metrics.computed_rating
+    else:
+        best_rows, new_rows = await ctx.records.current_frames(target.id)
+        if not best_rows and not new_rows:
+            return ToolResult(error=_NOT_SYNCED_ERROR)
+        best_average, new_average = summary.best30_average, summary.new20_average
+        rating = summary.computed_rating
     profile_row = await ctx.records.player_profile(target.id)
-    game_profile = _profile(ctx)
 
     # 변화량은 여기서 안 보여준다 — profile()과 같은 이유(동기화 리포트 전용).
     frames: list[tuple[str, list[PbRow], Decimal | None]] = []
     if kind in (BestKind.BEST, BestKind.BOTH):
-        frames.append((game_profile.best_label, best_rows, summary.best30_average))
+        frames.append((game_profile.best_label, best_rows, best_average))
     if kind in (BestKind.NEW, BestKind.BOTH):
-        frames.append((game_profile.new_label, new_rows, summary.new20_average))
+        frames.append((game_profile.new_label, new_rows, new_average))
 
     header: dict[str, str] = {"닉네임": summary.nickname or "(닉네임 없음)"}
     if profile_row is not None and profile_row.level is not None:
         header["레벨"] = str(profile_row.level)
-    header["레이팅"] = _overall(summary.computed_rating, game_profile)
-    return ToolResult(
-        data={"player_id": target.id, "kind": kind.value, "computed_rating": _overall(summary.computed_rating, game_profile)},
-        table=_frame_table(ctx, target.id, frames, header),
-    )
+    if version is not None:
+        header["기준 버전"] = version
+    header["레이팅"] = _overall(rating, game_profile)
+    data: dict[str, Any] = {"player_id": target.id, "kind": kind.value, "computed_rating": _overall(rating, game_profile)}
+    if as_of is not None:
+        header["지금 레이팅"] = _overall(as_of.current.computed_rating, game_profile)
+        if as_of.excluded:
+            header["그때 없던 곡이라 뺀 기록"] = f"{as_of.excluded}채보"
+    table = _frame_table(ctx, target.id, frames, header)
+    if as_of is not None:
+        table = replace(
+            table,
+            steps=(f"{version} 기준 레이팅표 (기록·상수·레이팅 공식은 지금, 나중에 추가된 채보는 못 가림)", *table.steps),
+        )
+        data |= {
+            "version": version,
+            "current_computed_rating": _overall(as_of.current.computed_rating, game_profile),
+            "excluded_records": as_of.excluded,
+        }
+    return ToolResult(data=data, table=table)
 
 
 def _frame_table(

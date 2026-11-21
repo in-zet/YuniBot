@@ -330,3 +330,15 @@ def test_plus_version_songs_share_the_new_song_set_with_their_base_version(tmp_p
     assert not db.is_new_for("Both Charts")  # 다른 세대(maimai DX)는 신곡이 아니다
     db.set_current_version("maimai DX")
     assert db.is_new_for("Both Charts") and not db.is_new_for("Base Release")
+
+
+def test_is_new_as_of_groups_plus_versions_but_drops_songs_released_after(db: MaimaiSongDbService) -> None:
+    # 이전 버전 레이팅표(2026-11-21): 기준 버전 뒤의 곡은 None(그때 없던 곡), PLUS는 같은 세대로 신곡.
+    assert db.is_new_as_of("Newest", "CiRCLE PLUS") is True
+    assert db.is_new_as_of("Newest", "CiRCLE") is None
+    assert db.is_new_as_of("Both Charts", "PRiSM") is False
+    assert db.is_new_as_of("Both Charts", "maimai DX PLUS") is True
+    assert db.is_new_as_of("Both Charts", "FiNALE") is None
+    assert db.is_new_as_of("STD Only", "FiNALE") is False
+    assert db.is_new_as_of("Link", "maimai PLUS") is True  # DX 전에는 PLUS도 따로다
+    assert db.is_new_as_of("Unknown Title", "PRiSM") is None

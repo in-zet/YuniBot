@@ -260,6 +260,16 @@ class WhatIfResult:
     after: FrameMetrics
 
 
+@dataclass(slots=True, kw_only=True, frozen=True)
+class AsOfFrames:
+    """이전 버전 기준 레이팅표(`frames_as_of`). 기록·상수·레이팅 공식은 지금 것이고 베스트·신곡 구분만 그 버전 기준이다."""
+    best: list[PbRow]
+    new: list[PbRow]
+    metrics: FrameMetrics  # 그 버전 기준
+    current: FrameMetrics  # 지금 기준
+    excluded: int  # 그때 없던 곡(또는 수록 버전을 모르는 곡)이라 뺀 기록 수
+
+
 def _frame_sort_key(row: PbRow) -> tuple[bool, Decimal, str, str, str]:
     # 레이팅 내림차순. 레이팅을 모르는 채보는 맨 뒤로, 동점은 제목·채보 종류·난이도 순으로 고정한다.
     return (row.rating is None, -(row.rating or Decimal(0)), row.song_title, row.chart_type, row.difficulty)
@@ -803,6 +813,17 @@ class RecordsService:
         latest_sync_summary/candidates가 쓰는 _frames와 같은 계산이라 숫자가 어긋나지 않는다."""
         return self._frames(await self.all_pb_rows(player_id))
 
+    async def frames_as_of(self, player_id: str, version: str) -> AsOfFrames:
+        """이전 버전 기준 (베스트, 신곡) 프레임. 지금 기록·상수·레이팅 공식으로 계산하되 곡을 그 버전 기준으로
+        신곡·구곡으로 나누고, 그때 없던 곡은 뺀다(2026-11-21). 나중에 추가된 채보는 자료가 없어 못 뺀다."""
+        rows = await self.all_pb_rows(player_id)
+        best, new = self._frames(rows, as_of=version)
+        excluded = sum(1 for r in rows if self._songdb.is_new_as_of(r.song_title, version) is None)
+        return AsOfFrames(
+            best=best, new=new, metrics=self._metrics(best, new), current=self._metrics(*self._frames(rows)),
+            excluded=excluded,
+        )
+
     async def what_if(
         self, player_id: str, assumed: Sequence[tuple[ChartKey, int, str | None]]
     ) -> WhatIfResult:
@@ -1036,13 +1057,20 @@ class RecordsService:
                 (const, rating, player_id, self._game, row["song_title"], row["chart_type"], row["difficulty"]),
             )
 
-    def _frames(self, rows: list[PbRow]) -> tuple[list[PbRow], list[PbRow]]:
+    def _frames(self, rows: list[PbRow], *, as_of: str | None = None) -> tuple[list[PbRow], list[PbRow]]:
         """records_pb 행들로 (베스트30, 신곡20) 프레임을 다시 계산한다. 신곡 여부는
-        songdb.is_new_for로 판정한다."""
+        songdb.is_new_for로 판정한다. as_of(버전 이름)를 주면 그 버전 기준으로 판정하고(`is_new_as_of`)
+        그때 없던 곡은 뺀다."""
         best: list[PbRow] = []
         new: list[PbRow] = []
         for row in sorted(rows, key=_frame_sort_key):
-            if self._songdb.is_new_for(row.song_title):
+            is_new = (
+                self._songdb.is_new_for(row.song_title) if as_of is None
+                else self._songdb.is_new_as_of(row.song_title, as_of)
+            )
+            if is_new is None:
+                continue
+            if is_new:
                 if len(new) < self._profile.new_frame_size:
                     new.append(row)
             elif len(best) < self._profile.best_frame_size:

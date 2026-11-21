@@ -1359,3 +1359,27 @@ async def test_candidates_with_charts_stay_inside_those_charts(conn) -> None:
     hits = await service.candidates(player_id, min_const=None, max_const=None, count=500, charts=picked)
 
     assert {(h.song_title, h.chart_type, h.difficulty) for h in hits} == picked
+
+
+async def test_frames_as_of_splits_by_that_version_and_drops_later_songs(conn) -> None:
+    """2026-11-21: 이전 버전 레이팅표. 지금 기록·상수로, 그 버전 곡을 신곡·그 전 곡을 베스트로 나누고 그 뒤 곡은 뺀다."""
+    songdb = SongDbService()
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+    await service.save_sync(player_id, snapshot_from_fetch(_fixture_fetch()), ctx)
+    rows = await service.all_pb_rows(player_id)
+    order = songdb.profile.version_order
+    played = sorted({
+        order.index(song.version) for r in rows
+        if (song := songdb._songs.get(r.song_title)) is not None and song.version in order  # pyright: ignore[reportPrivateUsage]
+    })
+    base = order[played[len(played) // 2]]
+
+    result = await service.frames_as_of(player_id, base)
+
+    assert all(songdb.is_new_as_of(r.song_title, base) is False for r in result.best)
+    assert all(songdb.is_new_as_of(r.song_title, base) is True for r in result.new)
+    later = sum(1 for r in rows if songdb.is_new_as_of(r.song_title, base) is None)
+    assert result.excluded == later > 0
+    summary = await service.latest_sync_summary(player_id)
+    assert summary is not None and result.current.computed_rating == summary.computed_rating
+    assert result.metrics.computed_rating is not None and result.best

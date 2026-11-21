@@ -147,6 +147,15 @@ SCENARIOS: tuple[Scenario, ...] = (
         shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
         must_args=(("report_what_if", "lamps", "AP|퍼"),),
     ),
+    # 이전 버전 기준 레이팅표 — best의 version으로 한 번에(2026-11-21).
+    Scenario(
+        name="기록/이전 버전 레이팅표 그림", question="엑스버스 기준으로 내 레이팅표 그려줘",
+        shown_from=("report_best",), must_call=("image_table_image",), must_args=(("report_best", "version", "X-VERSE"),),
+    ),
+    Scenario(
+        name="마이/이전 버전 레이팅표", question="마이마이 프리즘 때 기준으로 레이팅표 보여줘",
+        shown_from=("report_best",), must_args=(("report_best", "version", "PRiSM"),),
+    ),
     Scenario(
         name="기록/폴더 분석", question="연습 폴더 랭크 분포 보여줘",
         shown_from=("report_analyze",), must_call=("folders_show_folder",),

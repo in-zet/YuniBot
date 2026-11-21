@@ -234,6 +234,15 @@ class MaimaiSongDbService(SongDb):
         except OSError:
             logger.warning("maimai 현재 버전 덮어쓰기를 저장하지 못했다", exc_info=True)
 
+    def is_new_as_of(self, title: str, version: str) -> bool | None:
+        """기준 버전에서의 신곡 판정. 지금 신곡 판정처럼 maimai DX부터는 PLUS를 같은 세대로 묶는다 — 다만 기준 버전보다
+        뒤에 나온 곡(PRiSM 기준이면 PRiSM PLUS 곡)은 그때 없던 곡이라 None이다."""
+        prefix = self._prefix_of.get(title)
+        base = _NAME_TO_PREFIX.get(version)
+        if prefix is None or base is None or prefix > base:
+            return None
+        return _same_generation(prefix, base)
+
     def version_names(self) -> list[str]:
         """덮어쓸 수 있는 버전 이름(출시 순서)."""
         return list(_NAME_TO_PREFIX)

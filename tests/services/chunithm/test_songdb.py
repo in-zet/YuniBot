@@ -770,3 +770,13 @@ async def test_chart_alias_still_finds_the_song(songdb: SongDbService) -> None:
     song = await songdb.resolve("쿠로디닉", _CTX)
     assert song.title == "Melodiniq"
     assert song.alias_difficulty == {"쿠로디닉": "ULT"}
+
+
+async def test_is_new_as_of_counts_only_that_version_and_drops_later_songs(songdb: SongDbService) -> None:
+    # 이전 버전 레이팅표(2026-11-21): 그 버전 곡만 신곡, 그 전은 구곡, 그 뒤 곡은 None(그때 없던 곡).
+    by_version = {song.version: title for title, song in songdb._songs.items() if song.version}
+    verse, x_verse, luminous = by_version["VERSE"], by_version["X-VERSE"], by_version["LUMINOUS"]
+    assert songdb.is_new_as_of(verse, "VERSE") is True
+    assert songdb.is_new_as_of(luminous, "VERSE") is False
+    assert songdb.is_new_as_of(x_verse, "VERSE") is None
+    assert songdb.is_new_as_of("존재하지않는곡", "VERSE") is None

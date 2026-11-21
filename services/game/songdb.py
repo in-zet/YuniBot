@@ -288,6 +288,19 @@ class SongDb:
         song = self._songs.get(title)
         return song.is_new if song is not None else False
 
+    def is_new_as_of(self, title: str, version: str) -> bool | None:
+        """기준 버전(`version`)에서 그 곡이 신곡이면 True, 구곡이면 False, 그때 없던 곡(뒤 버전이거나 수록 버전을
+        모름)이면 None. 이전 버전 레이팅표가 쓴다(2026-11-21). 츄니즘은 그 버전 곡만 신곡이다 — 지금 Chunimaru의
+        신곡 표시도 지금 버전 곡에만 붙어 있다. 채보 단위 추가 시점(나중에 붙은 ULTIMA 등)은 자료가 없어 못 가린다."""
+        song = self._songs.get(title)
+        order = self._profile.version_order
+        if song is None or song.version not in order or version not in order:
+            return None
+        song_index, base_index = order.index(song.version), order.index(version)
+        if song_index > base_index:
+            return None
+        return song_index == base_index
+
     def find_by_const(
         self, *, min_const: float, max_const: float | None = None, difficulty: str | None = None,
         new_only: bool = False, chart_type: str | None = None,

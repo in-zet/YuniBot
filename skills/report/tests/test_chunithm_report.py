@@ -23,6 +23,7 @@ from services.common.players import Player
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.records import (
+    AsOfFrames,
     CandidateHit,
     ChartUpdate,
     FrameExit,
@@ -114,6 +115,13 @@ class _FakeRecords:
     profiles: dict[str, PlayerProfile] = field(default_factory=dict)
     what_if_result: WhatIfResult | None = None
     what_if_calls: list[list[tuple[tuple[str, str, str], int, str | None]]] = field(default_factory=list)
+    as_of: AsOfFrames | None = None
+    as_of_calls: list[str] = field(default_factory=list)
+
+    async def frames_as_of(self, player_id: str, version: str) -> AsOfFrames:
+        self.as_of_calls.append(version)
+        assert self.as_of is not None
+        return self.as_of
 
     async def what_if(self, player_id: str, assumed: list[tuple[tuple[str, str, str], int, str | None]]) -> WhatIfResult:
         self.what_if_calls.append(list(assumed))
@@ -409,6 +417,40 @@ async def test_best_kind_new_only(skill: ModuleType) -> None:
     assert result.table is not None
     assert [g.title for g in result.table.groups] == ["신곡 20"]
     assert _titles_of(result.table) == ["신곡 C"]
+
+
+async def test_best_as_of_version_uses_old_frames_and_shows_current_rating(skill: ModuleType) -> None:
+    best_rows, new_rows = _frames()
+    as_of = AsOfFrames(
+        best=[*best_rows, *new_rows], new=[],
+        metrics=FrameMetrics(computed_rating=Decimal("16.5000"), best30_average=Decimal("16.8267"), new20_average=None),
+        current=FrameMetrics(
+            computed_rating=Decimal("16.9400"), best30_average=Decimal("17.0200"), new20_average=Decimal("16.8300")
+        ),
+        excluded=3,
+    )
+    records = _FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, as_of=as_of)
+    f = _ctx(records=records)
+
+    result = await skill.best(f.ctx, version="X-VERSE")
+
+    assert result.error is None and records.as_of_calls == ["X-VERSE"]
+    table = result.table
+    assert table is not None
+    assert _titles_of(table) == ["곡 A", "곡 B", "신곡 C"]
+    assert table.summary["기준 버전"] == "X-VERSE"
+    assert table.summary["레이팅"] == "16.5000" and table.summary["지금 레이팅"] == "16.9400"
+    assert table.summary["그때 없던 곡이라 뺀 기록"] == "3채보"
+    assert table.steps[0].startswith("X-VERSE 기준 레이팅표")
+    assert result.data["version"] == "X-VERSE" and result.data["excluded_records"] == 3
+
+
+async def test_best_unknown_version_is_error(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}))
+
+    result = await skill.best(f.ctx, version="엑스버스")
+
+    assert result.error is not None and "X-VERSE" in result.error
 
 
 async def test_best_invalid_kind_is_error(skill: ModuleType) -> None:
