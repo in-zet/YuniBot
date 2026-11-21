@@ -62,13 +62,13 @@
   aliases: []
 - canonical: "MASTER"
   category: difficulty
-  aliases: [마스, MAS]
+  aliases: [마스, 마스터, MAS]
 - canonical: "EXPERT"
   category: difficulty
   aliases: [엑스퍼, 엑스퍼트, EXP]
 - canonical: "ADVANCED"
   category: difficulty
-  aliases: [어드, 어드밴스, ADV]
+  aliases: [어드, 어드밴스, 어드밴스드, ADV]
 - canonical: "BASIC"
   category: difficulty
   aliases: [베이직, BAS]

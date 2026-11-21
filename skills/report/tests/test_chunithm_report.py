@@ -913,10 +913,45 @@ async def test_what_if_rejects_a_lamp_that_is_not_a_combo_lamp(skill: ModuleType
 async def test_what_if_needs_as_many_scores_as_charts(skill: ModuleType) -> None:
     f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}))
 
-    result = await skill.what_if(f.ctx, charts=[_chart(), _chart("곡 B")], scores=[1_009_000])
+    result = await skill.what_if(f.ctx, charts=[_chart(), _chart("곡 B"), _chart("곡 C")], scores=[1_009_000, 1_005_000])
 
-    assert result.error is not None and "개수" in result.error
+    assert result.error is not None and "짝" in result.error
     assert f.records.what_if_calls == []
+
+
+async def test_what_if_one_score_and_lamp_apply_to_every_chart(skill: ModuleType) -> None:
+    """2026-11-21: 50채보를 늘어놓다 개수를 틀려 상한에 걸렸다 — 하나만 주면 모든 채보에 적용한다."""
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, what_if_result=_what_if_result()))
+
+    result = await skill.what_if(f.ctx, charts=[_chart(), _chart("곡 B")], scores=[1_009_000], lamps=["올저"])
+
+    assert result.error is None
+    assert f.records.what_if_calls == [[
+        (("Chronomia", "", "MAS"), 1_009_000, "ALL JUSTICE"), (("곡 B", "", "MAS"), 1_009_000, "ALL JUSTICE"),
+    ]]
+
+
+async def test_what_if_takes_every_chart_of_a_table_and_ajc_needs_no_score(skill: ModuleType) -> None:
+    """"지금 레이팅표 전부 AJC": 표를 통째로 받고, 점수가 정해진 램프(AJC = 1010000)는 점수를 따로 안 받는다."""
+    records = _FakeRecords(frames={"me": _frames()}, summaries={"me": _SUMMARY}, what_if_result=_what_if_result())
+    f = _ctx(records=records)
+    frame_table = (await skill.best(f.ctx)).table
+
+    result = await skill.what_if(f.ctx, table=frame_table, lamps=["AJC"])
+
+    assert result.error is None
+    assert records.what_if_calls == [[
+        (("곡 A", "", "MAS"), 1_010_000, "AJC"), (("곡 B", "", "MAS"), 1_010_000, "AJC"),
+        (("신곡 C", "", "EXP"), 1_010_000, "AJC"),
+    ]]
+
+
+async def test_what_if_lamp_without_a_fixed_score_needs_scores(skill: ModuleType) -> None:
+    f = _ctx(records=_FakeRecords(summaries={"me": _SUMMARY}, what_if_result=_what_if_result()))
+
+    result = await skill.what_if(f.ctx, charts=[_chart()], lamps=["올저"])
+
+    assert result.error is not None and "점수" in result.error and f.records.what_if_calls == []
 
 
 async def test_what_if_needs_a_sync(skill: ModuleType) -> None:

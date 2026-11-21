@@ -136,6 +136,19 @@ SCENARIOS: tuple[Scenario, ...] = (
         shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
         must_not_call=("rating-calc_song_rating",),
     ),
+    # "마스터"를 난이도로 못 읽어 곡을 못 찾았다(2026-11-21).
+    Scenario(
+        name="기록/가정 마스터 표기",
+        question="유니즘 마스터, 울티마 모두 트플플, 멜로디닉 마스터, 울티마 모두 트플플을 가정한 레이팅표 그려줘",
+        shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
+    ),
+    # 레이팅표 50채보를 늘어놓다 개수를 틀리고 상한에 걸렸다(2026-11-21) — 표를 통째로 넘긴다. AJC는 되묻지 않는다.
+    Scenario(
+        name="기록/레이팅표 전부 AJC",
+        question="지금 레이팅표에 있는 곡이 전부 AJC라고 가정해서 레이팅표 그려줘",
+        shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
+        must_args=(("report_what_if", "table", "t"),),
+    ),
     # 마이마이 — 평가 플레이어는 지어낸 maimai 기록도 받는다(AP·AP+가 섞여 AP 보너스 계산도 거친다).
     Scenario(
         name="마이/베스트 그림", question="마이마이 내 베스트 그림으로 뽑아 줘",
@@ -143,7 +156,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario(
         name="마이/AP 가정 레이팅표",
-        question="마이마이에서 PANDORA PARADOXXX 100.6% 올퍼로 치면 레이팅표 어떻게 돼? 그려줘",
+        question="마이마이에서 PANDORA PARADOXXX 리마스터 100.6% 올퍼로 치면 레이팅표 어떻게 돼? 그려줘",
         shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
         must_args=(("report_what_if", "lamps", "AP|퍼"),),
     ),

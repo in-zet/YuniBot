@@ -102,7 +102,7 @@ listens: [chunithm.sync.completed]
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count`, `table: TableRef`(선택, `find_songs`가 거른 표 — 그 채보 안에서만 고른다) | 표 |
 
 | `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty: DifficultyRef`(선택, 하나), `only_played`(기본 꺼짐), `table: TableRef`(선택, `find_songs`가 찾은 표를 상수표로 가공만 — 신곡·난이도 둘 이상·레벨 등 그 밖의 조건은 이쪽, 상수 범위와 같이 주면 둘 다 적용) | `table` 줄 땐 Row(곡·난이도) | 표 |
-| `what_if` | 가정 레이팅표: 채보마다 그 점수(와 콤보 램프)를 냈다고 치고 다시 짠 베스트·신곡 프레임 표 전체(표 반환, 기록은 안 바꾼다) | `charts: list[ChartRef]`, `scores: list[ScoreRef]`, `lamps: list[str]`(선택, 같은 순서·같은 개수, 안 말한 채보는 "") | 없음 | 표 |
+| `what_if` | 가정 레이팅표: 채보마다 그 점수(와 콤보 램프)를 냈다고 치고 다시 짠 베스트·신곡 프레임 표 전체(표 반환, 기록은 안 바꾼다) | `charts: list[ChartRef]`·`table: TableRef`(둘 중 하나 이상, 표면 그 표의 채보 전부), `scores: list[ScoreRef]`, `lamps: list[str]`(같은 순서·같은 개수, 하나만 주면 모든 채보에, 안 말한 채보는 "") | 없음 | 표 |
 | `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
@@ -204,6 +204,8 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 - 판정은 곡 DB의 `is_new_as_of(곡, 버전)` — 신곡 True·구곡 False·그때 없던 곡 None. 츄니즘은 그 버전 곡만 신곡(지금 Chunimaru 신곡 표시도 Mate 곡에만 붙어 있음을 2026-11-21 실데이터로 확인). maimai는 지금 판정처럼 DX부터 PLUS를 같은 세대로 묶되, 기준 버전 뒤의 PLUS 곡은 뺀다(PRiSM 기준이면 PRiSM 곡만 신곡).
 - **채보 단위는 못 가린다**: 나중에 추가된 ULTIMA·Re:MASTER·옛 곡의 DX 채보는 츄니즘 시드·Chunimaru·otoge-db 어디에도 추가 시점이 없다(otoge-db 날짜는 곡 단위이고 `date_updated`는 상수 수정에도 바뀐다). 사용자 결정 "1번" — 곡 단위로만 빼고 표 단계 줄에 적는다. 채보 추가 버전 목록을 손으로 만드는 안은 보류.
 - 표 요약: 기준 버전 · 레이팅(그 버전 기준) · 지금 레이팅 · 그때 없던 곡이라 뺀 기록 수. `records.frames_as_of`가 `_frames(as_of=…)`로 계산한다.
+
+- **2026-11-21 고침(실기 "레이팅표 전부 AJC")**: 모델이 레이팅표 50채보를 늘어놓다 개수를 틀리고(44·50·49채보에 점수 48·45개) 토큰·도구 호출 상한에 걸렸다. 이제 표(`table`)를 통째로 받고, `scores`·`lamps`를 하나만 주면 모든 채보에 적용하며, 점수가 정해진 램프(츄니즘 AJC = 1010000, 사전의 `value`)는 `scores`를 비워도 그 점수다. 점수가 안 정해진 램프(AJ·AP)만 주면 점수를 달라는 오류다.
 
 ## maimai AP 보너스 (2026-11-21, 사용자 결정)
 - 레이팅 대상 채보가 AP·AP+면 곡 레이팅 +1(일본판 CiRCLE부터, RemyWiki "Achieving an ALL PERFECT(+) gives 1 bonus rating"·Gamerch "ALL PERFECT以上 … 1ポイント加算"). FC·FC+·싱크는 보너스 없음. 세가 공식 페이지 본문은 확인하지 못했다.

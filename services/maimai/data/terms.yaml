@@ -61,19 +61,19 @@
   aliases: []
 - canonical: "MASTER"
   category: difficulty
-  aliases: [MAS]
+  aliases: [마스, 마스터, MAS]
 - canonical: "EXPERT"
   category: difficulty
-  aliases: [EXP]
+  aliases: [엑스퍼, 엑스퍼트, EXP]
 - canonical: "ADVANCED"
   category: difficulty
-  aliases: [ADV]
+  aliases: [어드, 어드밴스, 어드밴스드, ADV]
 - canonical: "BASIC"
   category: difficulty
-  aliases: [BAS]
+  aliases: [베이직, BAS]
 - canonical: "Re:MASTER"
   category: difficulty
-  aliases: [REM]
+  aliases: [리마스, 리마스터, 리마, REM]
 - canonical: "UTAGE"
   category: difficulty
   aliases: [UTA, 宴]

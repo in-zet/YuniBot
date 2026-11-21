@@ -781,31 +781,52 @@ def _change_text(key: str, before: FrameMetrics, after: FrameMetrics, profile: G
 @tool()
 async def what_if(
     ctx: ToolContext,
-    charts: list[ChartRef],
-    scores: list[ScoreRef],
+    charts: list[ChartRef] | None = None,
+    scores: list[ScoreRef] | None = None,
     lamps: list[str] | None = None,
+    table: Annotated[TableRef | None, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])] = None,
     game: GameRef | None = None,
 ) -> ToolResult:
     """점수를 가정한 레이팅표. 채보마다 그 점수(와 콤보 램프)를 냈다고 치고 다시 짠 베스트·신곡 프레임 표 전체를
     돌려준다. 가정으로 바뀐 채보에는 "가정" 표시가 붙고, 표 요약의 레이팅은 가정 뒤 값, "지금 레이팅"과 변화량도 같이 있다.
     기록은 바꾸지 않는다. charts에 채보 이름("메기도 마스", "크로노스")을, scores에 같은 순서로 점수(또는 랭크 이름)를 준다.
     lamps는 램프도 가정할 때만 같은 순서로 준다("AP", "올퍼" 등, 램프를 안 말한 채보는 ""). maimai는 AP·AP+에 곡 레이팅 +1이 붙는다.
-    여러 곡이어도 한 번에 부른다 — 곡마다 song_info·song_chart·song_rating을 따로 부르지 않는다."""
-    if not charts:
-        return ToolResult(error="가정할 채보를 하나 이상 줘.")
-    lamp_texts = list(lamps) if lamps else [""] * len(charts)
-    if not len(charts) == len(scores) == len(lamp_texts):
+    여러 곡이어도 한 번에 부른다 — 곡마다 song_info·song_chart·song_rating을 따로 부르지 않는다.
+    이미 있는 표의 채보 전부를 가정하려면("지금 레이팅표 전부 AJC") 채보를 늘어놓지 말고 그 표 id를 table에 준다(charts와 같이 주면 둘 다).
+    scores·lamps를 하나만 주면 모든 채보에 같이 적용한다. 점수가 정해진 램프(츄니즘 AJC = 1010000)는 scores를 비워도 그 점수다."""
+    assert table is None or isinstance(table, WorkTable)
+    keys: list[ChartKey] = [
+        (c.song.title, c.chart.chart_type, c.chart.difficulty) for c in charts or [] if isinstance(c, ResolvedChart)
+    ]
+    if table is not None:
+        keys.extend(tc.row_chart_key(row) for row in table.rows)
+    keys = list(dict.fromkeys(keys))
+    if not keys:
+        return ToolResult(error="가정할 채보를 하나 이상 주거나(charts) 표를 줘(table).")
+    score_values = [s for s in scores or [] if isinstance(s, int)]
+    lamp_texts = list(lamps or [])
+    if len(score_values) == 1:
+        score_values *= len(keys)
+    if len(lamp_texts) == 1:
+        lamp_texts *= len(keys)
+    if score_values and len(score_values) != len(keys):
         return ToolResult(
-            error=f"채보 {len(charts)}개, 점수 {len(scores)}개, 램프 {len(lamp_texts)}개의 개수가 달라. 같은 순서로 하나씩 줘."
+            error=f"채보 {len(keys)}개에 점수 {len(score_values)}개라 짝이 안 맞아. 모두 같은 점수면 하나만, 아니면 같은 순서로 하나씩 줘."
+        )
+    if lamp_texts and len(lamp_texts) != len(keys):
+        return ToolResult(
+            error=f"채보 {len(keys)}개에 램프 {len(lamp_texts)}개라 짝이 안 맞아. 모두 같은 램프면 하나만, 아니면 같은 순서로 하나씩 줘."
         )
     summary = await ctx.records.latest_sync_summary(ctx.player_id)
     if summary is None:
         return ToolResult(error=_NOT_SYNCED_ERROR)
     game_profile = _profile(ctx)
     lamp_codes: list[str | None] = []
-    for text in lamp_texts:
+    lamp_scores: list[int | None] = []
+    for text in lamp_texts or [""] * len(keys):
         if not text.strip():
             lamp_codes.append(None)
+            lamp_scores.append(None)
             continue
         try:
             lamp = await ctx.terms.resolve_lamp(text, ctx)
@@ -814,11 +835,13 @@ async def what_if(
         if lamp.canonical not in game_profile.combo_lamp_order:
             return ToolResult(error=f"'{text}': 콤보 램프(풀콤·올퍼펙트 같은 것)만 가정할 수 있어.")
         lamp_codes.append(lamp.canonical)
-    assumed = [
-        ((c.song.title, c.chart.chart_type, c.chart.difficulty), score, lamp)
-        for c, score, lamp in zip(charts, scores, lamp_codes, strict=True)
-        if isinstance(c, ResolvedChart) and isinstance(score, int)
-    ]
+        lamp_scores.append(lamp.min_score)
+    assumed: list[tuple[ChartKey, int, str | None]] = []
+    for index, (key, lamp) in enumerate(zip(keys, lamp_codes, strict=True)):
+        score = score_values[index] if score_values else lamp_scores[index]
+        if score is None:
+            return ToolResult(error=f"'{lamp or key[0]}'만으로는 점수가 안 정해져. 가정할 점수(scores)도 줘.")
+        assumed.append((key, score, lamp))
     result = await ctx.records.what_if(ctx.player_id, assumed)
 
     rank_scores = ctx.terms.rank_scores()
@@ -850,8 +873,8 @@ async def what_if(
         header["프레임 밖 가정"] = f"{len(outside)}채보"
     if kept:
         header["지금 기록이 더 좋아 그대로"] = f"{len(kept)}채보"
-    table = _frame_table(ctx, ctx.player_id, frames, header, assumed=marks)
-    table = replace(table, steps=("점수를 가정한 레이팅표 (기록은 그대로)", *table.steps))
+    frame_table = _frame_table(ctx, ctx.player_id, frames, header, assumed=marks)
+    frame_table = replace(frame_table, steps=("점수를 가정한 레이팅표 (기록은 그대로)", *frame_table.steps))
 
     labels = _metric_labels(game_profile)
     data: dict[str, Any] = {
@@ -859,16 +882,24 @@ async def what_if(
         "before": {k: _metric_text(k, getattr(before, k), game_profile) for k in labels},
         "after": {k: _metric_text(k, getattr(after, k), game_profile) for k in labels},
         "change": {k: _change_text(k, before, after, game_profile) for k in labels},
-        "charts": [
+    }
+    # 표 전체를 가정하면 채보가 수십 개라 data에는 개수만 둔다(채보별 값은 표에 있다).
+    if len(result.charts) <= _WHAT_IF_DATA_CHARTS:
+        data["charts"] = [
             {
                 "song_title": item.song_title, "difficulty": item.difficulty, "current_score": item.current_score,
                 "assumed_score": item.assumed_score, "assumed_lamp": item.assumed_lamp,
                 "applied": item.applied, "frame": item.frame,
             }
             for item in result.charts
-        ],
-    }
-    return ToolResult(data=data, table=table)
+        ]
+    else:
+        data["assumed_charts"] = len(result.charts)
+        data["applied_charts"] = sum(1 for item in result.charts if item.applied)
+    return ToolResult(data=data, table=frame_table)
+
+
+_WHAT_IF_DATA_CHARTS = 10
 
 
 # ---------------------------------------------------------------- 동기화 리포트 조각

@@ -358,6 +358,8 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
                     print("        (숫자 규칙 위반으로 한 번 다시 썼다)")
                 for problem in problems:
                     print(f"        - {problem}")
+                if problems and not assembled.numeric_violation:
+                    print(f"        답: {assembled.text[:300]!r}")
                 await asyncio.sleep(1)
     finally:
         await llm.aclose()

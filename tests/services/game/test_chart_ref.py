@@ -20,6 +20,13 @@ async def test_difficulty_suffix_is_parsed_out(resolver: ChartRefResolver) -> No
     assert resolved.chart.difficulty == "MAS"
 
 
+async def test_full_korean_master_is_a_difficulty(resolver: ChartRefResolver) -> None:
+    # 2026-11-21 실기: "유니즘 마스터"가 "마스터"를 난이도로 못 읽어 통째로 곡 이름으로 찾다 실패했다.
+    resolved = await resolver.resolve("유니즘 마스터", _CTX)
+    assert resolved.song.title == "YOUNITHM"
+    assert resolved.chart.difficulty == "MAS"
+
+
 async def test_difficulty_prefix_is_parsed_out(resolver: ChartRefResolver) -> None:
     resolved = await resolver.resolve("마스 B.B.K.K.B.K.K.", _CTX)
     assert resolved.song.title == "B.B.K.K.B.K.K."
