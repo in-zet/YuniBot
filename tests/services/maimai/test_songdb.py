@@ -166,6 +166,10 @@ def test_a_version_with_only_a_few_early_songs_does_not_become_current(tmp_path:
     db = MaimaiSongDbService(path)
     assert db.current_version() == "CiRCLE PLUS"
     assert db.is_new_for("Newest") and db.is_new_for("Last Version")
+    assert db.is_new_for("Early")  # 먼저 풀린 곡은 신곡으로 친다(사용자 결정 2026-11-22)
+    db.set_current_version("CiRCLE")  # 덮어쓰면 그 세대만 신곡이다
+    assert db.is_new_for("Newest") and not db.is_new_for("Early")
+    db.set_current_version("maimai DX")
     assert not db.is_new_for("Early")
 
 

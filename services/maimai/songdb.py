@@ -123,9 +123,17 @@ def _same_generation(prefix: str, current: str | None) -> bool:
     return prefix == current
 
 
+def _is_new(prefix: str, current: str | None, latest: str | None) -> bool:
+    """지금 신곡 판정. 현 버전 세대의 곡 + 현 버전을 덮어쓰지 않았을 때 현 버전보다 뒤에 먼저 풀린 곡(사용자 결정
+    2026-11-22 — 270 곡 하나가 CiRCLE PLUS 중에 먼저 풀렸을 때 신곡으로 친다)."""
+    if _same_generation(prefix, current):
+        return True
+    return latest is not None and current == latest and prefix > latest
+
+
 def _latest_prefix(prefixes: Iterable[str]) -> str | None:
     """현 버전 = 국제판 곡이 `_MIN_CURRENT_VERSION_SONGS`곡 이상인 버전 중 가장 큰 것. 그보다 큰 버전의 곡은 먼저 풀린
-    곡으로 보고 경고만 남긴다. 어느 버전도 그만큼 안 되면(작은 표본) 그냥 가장 큰 버전이다."""
+    곡으로 보고(신곡으로 친다) 경고만 남긴다. 어느 버전도 그만큼 안 되면(작은 표본) 그냥 가장 큰 버전이다."""
     counts = Counter(prefixes)
     if not counts:
         return None
@@ -174,7 +182,7 @@ def _load(entries: list[dict[str, Any]], *, override_prefix: str | None = None) 
     latest = _latest_prefix(prefix_of[title] for title in available)
     current = override_prefix or latest
     for title, song in songs.items():
-        song.is_new = _same_generation(prefix_of[title], current)
+        song.is_new = _is_new(prefix_of[title], current, latest)
     return _Loaded(songs=songs, available=available, prefix_of=prefix_of, latest_prefix=latest)
 
 
@@ -238,7 +246,7 @@ class MaimaiSongDbService(SongDb):
         self._save_override(name)
         current = self._override_prefix or self._latest_prefix
         for title, song in self._songs.items():
-            song.is_new = _same_generation(self._prefix_of[title], current)
+            song.is_new = _is_new(self._prefix_of[title], current, self._latest_prefix)
 
     def _saved_override(self) -> str | None:
         """재시작해도 남도록 파일에 둔 덮어쓴 버전. 없거나 모르는 이름이면 None."""
