@@ -27,6 +27,7 @@ VALID_CATEGORIES: frozenset[str] = frozenset(
         "관리",
         "폴더",
         "유니 설정",
+        "사용법",
     }
 )
 # 등록된 게임 이름. 새 게임을 services/game/registry.py에 등록할 때 여기에도 더한다.

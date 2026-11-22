@@ -121,7 +121,7 @@ skills/chunithm-border/
 | `summary` | 아니오 | 할 수 있는 일 안내(`list_capabilities`)가 플레이어에게 전할 한두 문장. 유니 말투로 쓴다("~해 줄게"). `description`은 모델에게 주는 선택 기준이라 플레이어용 글이 아니다. 비우면 `description`을 쓴다(2026-10-21). |
 | `examples` | 예 | 이 스킬을 골라야 하는 질문 예시 2\~3개. 선택 정확도 시험에도 쓴다. |
 | `triggers` | 아니오 | 메시지에 들어 있으면 코어가 이 스킬을 미리 펼치는 낱말 목록("스킬 불러오기"). 소문자 부분 문자열로 비교한다. 넓게 잡아도 손해는 펼친 지침 분량뿐이다. 계약 테스트가 들어 있는 스킬에 `triggers`가 있는지 확인한다. |
-| `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 이정표, 관리, 폴더, 유니 설정 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
+| `category` | 예 | 안내에 쓰는 분류. 계정 연결, 곡 정보, 기록과 리포트, 목표, 세션과 후기, 오락실, 메모, 알림, 질문 답변, 메모리, 이정표, 관리, 폴더, 유니 설정, 사용법 중 하나. 새 분류가 필요하면 이 목록에 먼저 더한다. |
 | `games` | 예 | 이 스킬이 다루는 게임 목록(예: `[chunithm]`). 게임과 무관한 스킬은 빈 목록 `[]`이다. 등록되지 않은 게임 이름은 거부한다("여러 게임" 절). |
 | `version` | 예 | 스킬 버전. 바꾼 것을 추적한다. |
 | `services` | 예 | 쓰는 서비스 목록. 예: `songdb`, `chunithm_net`, `players`. 선언하지 않은 서비스는 못 쓴다. 코어 전용 맥락(`db` 원시 DB 연결, `player_data` 스킬 테이블 전체의 플레이어 데이터 집계·삭제, `registry_snapshot` 스킬 등록 현황, `usage` LLM 사용량, `tables` 작업 표 보관소 — 동기화 저장 뒤 `mark_stale`을 부르는 스킬만)도 같은 방식으로 여기 적어야 받는다(account-link, admin처럼 꼭 필요한 공통 스킬만). |
@@ -708,6 +708,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [updates](skills/updates.md) | 츄니즘 | 국제판·일본판 업데이트 알림, 신곡 | 없음. 설정만 `admin` |
 | [folders](skills/folders.md) | 츄니즘 | 채보를 모은 이름 붙인 폴더 생성·조회, 표로 일괄 추가/삭제, 메모 | 없음 |
 | [yuni-lore](skills/yuni-lore.md) | 공통 | 유니·나비·Linked VERSE 설정집을 구간별로 읽어 답하기(결말은 스포일러 확인 후) | 없음 |
+| [tutorial](skills/tutorial.md) | 공통 | 처음 쓰는 사람에게 DM 대화형 튜토리얼(주 게임·로그인·기본 명령), 주 게임 저장 | 없음 |
 | [web-qa](skills/web-qa.md) | 츄니즘 | 용어 사전에 없는 일반 질문을 검색해 출처와 함께 답하기 | 없음 |
 | [rating-calc](skills/rating-calc.md) | 공통 | 상수·랭크로 곡 레이팅 계산, 곡 레이팅에서 상수 역산, 필요 점수 | 없음 |
 

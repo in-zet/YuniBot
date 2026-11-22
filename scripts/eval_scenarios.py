@@ -105,6 +105,18 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(name="계정/모호한 해제", question="계정 끊어줘", must_not_call=("sega-account_logout",)),
     Scenario(name="계정/연결 해제", question="연결 해제", must_not_call=("sega-account_logout",)),
     Scenario(name="계정/분명한 로그아웃", question="세가 로그아웃", must_call=("sega-account_logout",)),
+    # 튜토리얼 — 허락을 받기 전에는 DM을 열지 않는다(2026-11-22). 구체적인 질문은 튜토리얼 없이 답한다.
+    Scenario(
+        name="튜토리얼/허락 먼저", question="나 이거 처음 쓰는데 어떻게 쓰는 거야?",
+        must_not_call=("tutorial_tutorial_start",),
+    ),
+    Scenario(
+        name="튜토리얼/DM으로 해 달라", question="처음 써 보는데 DM으로 튜토리얼 진행해 줘",
+        must_call=("tutorial_tutorial_start",),
+    ),
+    Scenario(
+        name="튜토리얼/구체적 질문", question="동기화는 어떻게 해?", must_not_call=("tutorial_tutorial_start",),
+    ),
     # 약속과 기억 — 앞으로 할 일은 약속, 지금의 사실은 기억.
     Scenario(name="약속/약속해", question="약속해, 다음에 Chronomia 연습할게", must_call=("yuni-bond_promise_set",)),
     Scenario(
