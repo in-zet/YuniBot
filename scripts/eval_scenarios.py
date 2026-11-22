@@ -150,6 +150,16 @@ SCENARIOS: tuple[Scenario, ...] = (
         must_call_any=("image_table_image", "report_best"),
     ),
     Scenario(
+        name="튜토리얼/주 게임 답에 한 단계만",
+        question="츄니즘이야",
+        context=_tutorial_context(
+            "[지금까지의 대화] 유니: 안녕! 나는 유니야. 이 대화는 요약해서 기억해 둘게. 주로 치는 게임이 뭐야? "
+            "(이 플레이어는 이미 로그인·동기화를 마쳤다)"
+        ),
+        must_call=("tutorial_tutorial_set_main_game",),
+        must_not_call=("report_best", "image_table_image", "sync_sync_run"),
+    ),
+    Scenario(
         name="튜토리얼/구체적 질문", question="동기화는 어떻게 해?", must_not_call=("tutorial_tutorial_start",),
     ),
     # 약속과 기억 — 앞으로 할 일은 약속, 지금의 사실은 기억.

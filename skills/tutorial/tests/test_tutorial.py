@@ -91,6 +91,9 @@ async def test_start_opens_a_dm_thread_with_the_guided_steps(db: aiosqlite.Conne
     positions = [guidance.index(step) for step in order]
     assert positions == sorted(positions)
     # 2026-11-22 실기: 애매한 답("다")에 안내를 건너뛰고 바로 닫았다 — 안내는 필수이고 같은 턴에 닫지 않는다.
+    # 2026-11-22 실기: 한 턴에 저장·상태·레이팅표 그리기를 이어 하다 토큰 상한에 걸렸다 — 한 턴에 한 단계, 불필요한 open_skill 없음.
+    assert "한 턴에 한 단계만 한다" in guidance and "다시 펼치지 않는다" in guidance
+    assert "open_skill로 tutorial을 펼친다" not in guidance
     assert "⑥ 기본 명령 안내 — 반드시 한다" in guidance and "⑥과 같은 턴에 대화를 끝내지 않는다" in guidance
 
 

@@ -324,3 +324,37 @@ async def test_same_player_requests_run_one_after_another() -> None:
 async def test_different_players_requests_do_not_wait_for_each_other() -> None:
     events = await _run_two_turns(("p1", "p2"))
     assert events[:2] == ["시작 A", "시작 B"]
+
+
+@pytest.mark.asyncio
+async def test_mention_entry_drops_displays_when_the_token_cap_cut_the_answer_short() -> None:
+    from core.agent import AgentTurnResult
+    from core.fallback_messages import LLM_FAILURE_MESSAGES
+    from core.tool_types import Display, DisplayFile
+
+    class _CutAgent:
+        async def run(self, **_: object) -> AgentTurnResult:
+            return AgentTurnResult(
+                hit_token_cap=True, token_cap_interrupted=True, text=None,
+                required_displays=[Display(content="목록", files=[DisplayFile(name="표.txt", data=b"x")])],
+            )
+
+    entry = MentionEntry(
+        agent=_CutAgent(),  # pyright: ignore[reportArgumentType]
+        players=_FakePlayers(), notify=NotifyService.__new__(NotifyService),
+        cooldown=CooldownTracker(), settings=_FakeSettings(), usage=_FakeUsage(),
+        bot_discord_id="bot", agent_model="gemini-3.8-flash", memory=_FakeMemory(), event_bus=EventBus(),
+        known_skill_names=set(), skill_loading_mode="instructions",
+    )
+    sent: list[tuple[str, list[object]]] = []
+
+    class _NoopTyping:
+        async def __aenter__(self): return None
+        async def __aexit__(self, *exc): return None
+
+    trigger = ChannelMessage(message_id="1", author_discord_id="p1", is_bot=False, content="질문", mentions_bot=True)
+    await entry.handle(
+        trigger=trigger, history=[trigger], guild_id="g1", now=datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC),
+        send=lambda text, displays: sent.append((text, list(displays))) or _noop(), typing=_NoopTyping(),
+    )
+    assert len(sent) == 1 and sent[0][0] in LLM_FAILURE_MESSAGES and sent[0][1] == []

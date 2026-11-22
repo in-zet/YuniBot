@@ -448,6 +448,12 @@ class MentionEntry:
             await reply(pick(TOOL_CALL_CAP_MESSAGES), [])
             return
 
+        if result.token_cap_interrupted:
+            # 토큰 상한에 걸려 답이 끝나지 않았다. 그 전에 모인 표시물(예: 그리려던 표의 글 첨부)만 덩그러니 나가지 않게
+            # 안내 한 줄만 보낸다(2026-11-22 실기 — 튜토리얼에서 베스트 표 첨부 파일이 먼저 올라갔다).
+            await reply(pick(LLM_FAILURE_MESSAGES), [])
+            return
+
         assembled = assemble_response(result)
         # private 표시물(본인에게만 보여야 하는 내용)은 채널 답장에 붙이지 않고 DM으로 보낸다.
         public_displays: list[Display] = []

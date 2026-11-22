@@ -73,6 +73,8 @@ class AgentTurnResult:
     usage: UsageInfo = field(default_factory=lambda: UsageInfo(input_tokens=0, output_tokens=0))
     hit_tool_call_cap: bool = False
     hit_token_cap: bool = False
+    # 토큰 상한에 걸린 왕복이 아직 도구를 부르던 중이었다 — 답이 끝나지 않았다(이때까지 모인 표시물은 보내지 않는다).
+    token_cap_interrupted: bool = False
     # admin 태그가 필요한 도구를 부른 턴 — 관리 대화는 플레이어 메모리에 남기지 않는다.
     used_admin_tool: bool = False
     # 마지막 LLM 왕복에서 실제로 답한 모델. 보조 모델로 넘어간 턴이면 그 이름이고, 아니면 None.
@@ -322,6 +324,7 @@ class AgentLoop:
                     llm_turns, tool_call_log, self._skills_used(tool_call_log, player_tags),
                 )
                 result.hit_token_cap = True
+                result.token_cap_interrupted = bool(turn.function_calls)
                 result.text = turn.text
                 return result
 

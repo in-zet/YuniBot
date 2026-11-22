@@ -1080,7 +1080,8 @@ async def test_token_cap_counts_cached_input_at_ten_percent() -> None:
         ctx=_ctx(), skill_state=_state(registry), user_text="안녕", prompt_context_snippets=[]
     )
     assert uncached.hit_token_cap is True
-    assert cached.hit_token_cap is False
+    assert uncached.token_cap_interrupted is True  # 아직 도구를 부르던 왕복에서 걸렸다
+    assert cached.hit_token_cap is False and cached.token_cap_interrupted is False
     assert cached.text == "끝"
 
 
