@@ -11,6 +11,8 @@ import json
 import logging
 import os
 import time
+from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -39,6 +41,9 @@ _NAME_TO_PREFIX = {name: prefix for prefix, name in VERSION_NAMES.items()}
 
 
 _FIRST_DX_PREFIX = "200"
+# 현 버전으로 보려면 국제판 곡이 이만큼은 있어야 한다. 2026-10-29 otoge-db에 다음 버전(270) 곡이 국제판으로 한 곡만
+# 먼저 올라와 현 버전이 270으로 넘어가고 CiRCLE·CiRCLE PLUS 곡이 모두 구곡이 됐다. 새 버전은 첫날부터 수십 곡이 들어온다.
+_MIN_CURRENT_VERSION_SONGS = 10
 _REFRESH_INTERVAL_SECONDS = 24 * 3600
 _RETRY_INTERVAL_SECONDS = 3600
 
@@ -118,6 +123,25 @@ def _same_generation(prefix: str, current: str | None) -> bool:
     return prefix == current
 
 
+def _latest_prefix(prefixes: Iterable[str]) -> str | None:
+    """현 버전 = 국제판 곡이 `_MIN_CURRENT_VERSION_SONGS`곡 이상인 버전 중 가장 큰 것. 그보다 큰 버전의 곡은 먼저 풀린
+    곡으로 보고 경고만 남긴다. 어느 버전도 그만큼 안 되면(작은 표본) 그냥 가장 큰 버전이다."""
+    counts = Counter(prefixes)
+    if not counts:
+        return None
+    qualified = [prefix for prefix, count in counts.items() if count >= _MIN_CURRENT_VERSION_SONGS]
+    if not qualified:
+        return max(counts)
+    latest = max(qualified)
+    early = sorted(prefix for prefix in counts if prefix > latest)
+    if early:
+        logger.warning(
+            "maimai 곡 DB: 국제판 곡이 %d곡 미만인 버전 %s은 현 버전으로 보지 않는다(현 버전 %s)",
+            _MIN_CURRENT_VERSION_SONGS, ", ".join(f"{p}({counts[p]}곡)" for p in early), latest,
+        )
+    return latest
+
+
 def _load(entries: list[dict[str, Any]], *, override_prefix: str | None = None) -> _Loaded:
     """otoge-db 항목들을 곡 목록으로 바꾼다. 같은 제목이 여러 항목이면(`Link` 두 곡, 宴 한 곡의 난이도별 항목)
     츄니즘 시드처럼 처음 본 항목의 곡 정보를 쓰고 채보만 보탠다. 같은 칸이 겹치면 먼저 나온 것이 남는다."""
@@ -147,8 +171,7 @@ def _load(entries: list[dict[str, Any]], *, override_prefix: str | None = None) 
             songs[title] = song
         for key, chart in _charts_of(entry, available=in_intl).items():
             song.charts.setdefault(key, chart)
-    # 현 버전 = 국제판 수록곡 중 가장 큰 버전. 신곡은 그 버전의 곡이다.
-    latest = max((prefix_of[title] for title in available), default=None)
+    latest = _latest_prefix(prefix_of[title] for title in available)
     current = override_prefix or latest
     for title, song in songs.items():
         song.is_new = _same_generation(prefix_of[title], current)

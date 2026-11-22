@@ -144,13 +144,29 @@ def test_version_code_prefix_maps_to_version_name(db: MaimaiSongDbService) -> No
     assert _song(db, "Link").version == "maimai PLUS"
 
 
-def test_unknown_version_prefix_is_kept_as_the_code_and_still_current(tmp_path: Path) -> None:
+def _many(prefix: str, count: int) -> list[dict[str, str]]:
+    return [_entry(f"{prefix}-{i}", f"{prefix}{i:02d}", sort=str(1000 + i)) for i in range(count)]
+
+
+def test_unknown_version_prefix_is_kept_as_the_code_and_becomes_current_once_it_has_enough_songs(tmp_path: Path) -> None:
     path = tmp_path / "c.json"
-    path.write_text(json.dumps([*_sample(), _entry("Future", "27000", sort="999", **_chart("dx_lev_", "mas", "15", "15.0", "1"))]))
+    future = _entry("Future", "27000", sort="999", **_chart("dx_lev_", "mas", "15", "15.0", "1"))
+    path.write_text(json.dumps([*_sample(), *_many("265", 10), future, *_many("270", 9)]))
     db = MaimaiSongDbService(path)
     assert _song(db, "Future").version == "270"
     assert db.current_version() == "270"
     assert db.is_new_for("Future") and not db.is_new_for("Newest")
+
+
+def test_a_version_with_only_a_few_early_songs_does_not_become_current(tmp_path: Path) -> None:
+    # 2026-11-22 실제 사례: 270 곡 하나(魔法仕掛けのファンタジア)가 국제판으로 먼저 올라와 CiRCLE PLUS 곡이 구곡이 됐다.
+    path = tmp_path / "c.json"
+    early = _entry("Early", "27004", sort="999", **_chart("dx_lev_", "mas", "13", "13.0", "1"))
+    path.write_text(json.dumps([*_sample(), *_many("265", 10), early]))
+    db = MaimaiSongDbService(path)
+    assert db.current_version() == "CiRCLE PLUS"
+    assert db.is_new_for("Newest") and db.is_new_for("Last Version")
+    assert not db.is_new_for("Early")
 
 
 def test_new_song_is_the_latest_intl_version_not_japan_only_versions(db: MaimaiSongDbService) -> None:
