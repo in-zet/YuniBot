@@ -1383,3 +1383,17 @@ async def test_frames_as_of_splits_by_that_version_and_drops_later_songs(conn) -
     summary = await service.latest_sync_summary(player_id)
     assert summary is not None and result.current.computed_rating == summary.computed_rating
     assert result.metrics.computed_rating is not None and result.best
+
+
+async def test_sync_and_startup_tell_the_song_db_which_songs_were_played(conn, monkeypatch) -> None:
+    """Chunimaru 목록에 늦게 오르는 지금 버전 곡을 국제판 곡으로 보려고, 동기화와 기동 때 기록의 곡 제목을 곡 DB에 알린다."""
+    songdb = SongDbService()
+    seen: list[set[str]] = []
+    monkeypatch.setattr(songdb, "adopt_played_titles", lambda titles: seen.append(set(titles)))
+    _, player_id, ctx, service = await _setup(conn, songdb=songdb)
+
+    await service.save_sync(player_id, snapshot_from_fetch(_fixture_fetch()), ctx)
+    await service.adopt_played_titles()
+
+    played = {r.song_title for r in await service.all_pb_rows(player_id)}
+    assert seen == [played, played]

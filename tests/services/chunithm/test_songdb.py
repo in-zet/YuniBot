@@ -780,3 +780,26 @@ async def test_is_new_as_of_counts_only_that_version_and_drops_later_songs(songd
     assert songdb.is_new_as_of(luminous, "VERSE") is False
     assert songdb.is_new_as_of(x_verse, "VERSE") is None
     assert songdb.is_new_as_of("존재하지않는곡", "VERSE") is None
+
+
+async def test_played_current_version_song_missing_from_chunimaru_becomes_available(songdb: SongDbService) -> None:
+    """2026-11-21 실기: Chunimaru 목록에 아직 없는 Mate 곡(Glitch Street)이 레이팅표에는 보이는데 이름으로 못 찾았다.
+    기록에 있고 지금 버전 곡이면 국제판 곡으로 본다. 더 옛 버전 곡(삭제됐을 수도 있음)은 그대로 둔다(사용자 결정 "현 버전 곡만")."""
+    songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
+    current = songdb.current_version()
+    missing = [
+        (title, song) for title, song in songdb._songs.items()
+        if title not in songdb._available_intl and song.version and song.charts
+    ]
+    newest = next(title for title, song in missing if song.version == current)
+    older = next(title for title, song in missing if song.version != current)
+
+    songdb.adopt_played_titles([newest, older])
+
+    assert (await songdb.resolve(newest, _CTX)).title == newest
+    assert songdb.is_new_for(newest)
+    with pytest.raises(ResolutionError):
+        await songdb.resolve(older, _CTX)
+    # Chunimaru를 다시 덧씌워도 유지된다.
+    songdb._apply_chunimaru(json.loads(_CHUNIMARU_SAMPLE.read_text(encoding="utf-8")))
+    assert (await songdb.resolve(newest, _CTX)).title == newest

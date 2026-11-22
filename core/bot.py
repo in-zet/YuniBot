@@ -561,6 +561,9 @@ async def build_client(config: CoreConfig) -> tuple[YuniClient, SkillRegistry, T
     if config.fetch_chunimaru_on_startup:
         for bundle in all_games.values():
             await bundle.songdb.refresh_on_startup(http_service)
+    # Chunimaru 목록에 아직 없는 지금 버전 곡도 기록에 있으면 국제판 곡으로 본다(덧씌우기 뒤에도 유지된다).
+    for bundle in all_games.values():
+        await bundle.records.adopt_played_titles()
 
     # client → mention_entry → notify_service → _BotDiscordGateway → client로 이어지는
     # 순환을 끊으려고, notify_service의 게이트웨이는 client를 바로 쥐지 않고 아래

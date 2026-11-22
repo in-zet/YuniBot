@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -287,6 +287,9 @@ class SongDb:
         한 번도 안 됐으면 시드에는 신곡 표시가 없으므로 전부 False다."""
         song = self._songs.get(title)
         return song.is_new if song is not None else False
+
+    def adopt_played_titles(self, titles: Iterable[str]) -> None:
+        """기록(NET)에 나온 곡 제목을 알려 준다. 수록 목록이 늦게 갱신되는 게임(츄니즘 Chunimaru)만 쓴다 — 기본은 아무것도 안 한다."""
 
     def is_new_as_of(self, title: str, version: str) -> bool | None:
         """기준 버전(`version`)에서 그 곡이 신곡이면 True, 구곡이면 False, 그때 없던 곡(뒤 버전이거나 수록 버전을

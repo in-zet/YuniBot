@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -164,6 +165,7 @@ class SongDbService(SongDb):
         )
         self._linked_verse = _load_linked_verse(linked_verse_path)
         self._by_id = {song.id: song for song in self._songs.values()}
+        self._played_titles: set[str] = set()  # 기록에 나온 곡(`adopt_played_titles`)
 
     def by_id(self, song_id: int) -> SongRecord | None:
         """즐겨찾기 곡 목록처럼 CHUNITHM-NET의 실제 musicId만 들고 있을 때 곡으로
@@ -178,6 +180,27 @@ class SongDbService(SongDb):
             if song.is_new and song.version and title in self._available_intl
         )
         return counts.most_common(1)[0][0] if counts else None
+
+    def adopt_played_titles(self, titles: Iterable[str]) -> None:
+        """기록에 있고 수록 버전이 지금 버전인 곡은 Chunimaru 국제판 목록에 아직 없어도 국제판 곡으로 본다
+        (2026-11-21 사용자 결정 "현 버전 곡만"). Chunimaru 목록은 늦게 갱신돼 Glitch Street 같은 Mate 곡이 레이팅표에는
+        보이는데 이름으로는 못 찾았다. 더 옛 버전 곡은 국제판에서 삭제됐을 수도 있어 넣지 않는다. 덧씌우기 뒤에도 다시 적용한다."""
+        self._played_titles.update(titles)
+        self._apply_played()
+
+    def _apply_played(self) -> None:
+        current = self.current_version()
+        if current is None:
+            return
+        for title in self._played_titles:
+            song = self._songs.get(title)
+            if song is None or title in self._available_intl or song.version != current:
+                continue
+            self._available_intl.add(title)
+            song.is_new = True
+            for code, chart in song.charts.items():
+                if not chart.is_available:
+                    song.charts[code] = replace(chart, is_available=True)
 
     def linked_verse_gates(self) -> list[str]:
         """Linked VERSE 게이트 이름을 해금 순서대로."""
@@ -318,6 +341,7 @@ class SongDbService(SongDb):
             for title, song in self._songs.items():
                 if title not in new_is_new and song.version:
                     song.is_new = song.version == current
+        self._apply_played()
 
     async def refresh_on_startup(self, http: _HttpGetJson) -> None:
         await self.refresh_from_chunimaru(http)

@@ -378,6 +378,7 @@ class RecordsService:
         sync_id = str(uuid.uuid4())
         synced_at = datetime.now(UTC)
         merged = _merge_plays(snapshot, self._profile.chart_codes)
+        self._songdb.adopt_played_titles(key[0] for key in merged)
         # NET이 베스트/신곡 목록을 주면 그걸 믿고, 안 주면 전체 기록으로 프레임을 직접 짠다.
         best_plays, new_plays = (
             (snapshot.best, snapshot.new)
@@ -807,6 +808,13 @@ class RecordsService:
             (player_id, self._game),
         )
         return [self._current(_pb_row_from(row)) for row in await cursor.fetchall()]
+
+    async def adopt_played_titles(self) -> None:
+        """기동 때: 기록에 있는 곡 제목을 곡 DB에 알려 준다(`SongDb.adopt_played_titles`). 동기화 때는 save_sync가 알린다."""
+        cursor = await self._conn.execute(
+            "SELECT DISTINCT song_title FROM records_pb WHERE game = ?", (self._game,)
+        )
+        self._songdb.adopt_played_titles(row["song_title"] for row in await cursor.fetchall())
 
     async def current_frames(self, player_id: str) -> tuple[list[PbRow], list[PbRow]]:
         """지금 시점 (베스트30, 신곡20). 제목 순이 아니라 프레임 순(레이팅 내림차순)이다 —
