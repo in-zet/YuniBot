@@ -245,6 +245,7 @@ skills/chunithm-border/
 | 도구 | 인자 | 결과 |
 | --- | --- | --- |
 | `table_query` | `table`, `rows`, `exclude_rows`, `where`(조건 목록: 칸·비교·값), `sort`(칸), `descending`, `limit`, `group_by`, `columns`(보일 칸), `distinct_by`(겹치는 행 줄이기) | 새 표(출력 대상이 된다). 요약은 버리고 `steps`에 조건을 덧붙인다 |
+| `table_concat` | `first`, `second`(표), `first_title`, `second_title`(묶음 이름) | 두 표의 행을 이어 한 표로(각 표가 묶음 하나). 칸·게임·사람이 같은 표끼리만. 다르게 거른 표 둘을 한 번에 보이려고 2026-11-22에 더했다("구곡 상위 30 + 신곡 상위 20" — 마지막 표만 보이는 문제) |
 | `table_peek` | `table`, `rows`, `where`, `sort`, `descending`, `limit`(상한 있음) | 고른 행의 원래 값을 모델의 `data`로 준다. 새 표를 만들지 않고 아무것도 출력하지 않는다 |
 
 - `limit`은 **묶음마다** 앞에서 N개를 남긴다("상수마다 점수 높은 3개"). 묶지 않은 표에서는 전체에서 N개다.

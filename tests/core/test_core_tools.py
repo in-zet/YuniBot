@@ -10,7 +10,7 @@ from services.common.memory import MemoryService
 
 def test_core_tool_specs_contains_all_core_tools() -> None:
     names = {spec.name for spec in CORE_TOOL_SPECS}
-    assert names == {"open_skill", "remember", "list_capabilities", "table_query", "table_peek"}
+    assert names == {"open_skill", "remember", "list_capabilities", "table_query", "table_concat", "table_peek"}
 
 
 def test_list_capabilities_importable_without_core_capabilities_module() -> None:

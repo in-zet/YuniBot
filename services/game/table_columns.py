@@ -40,6 +40,11 @@ CONST = "상수"
 NOTE_COUNT = "노트 수"
 VERSION = "버전"
 ARTIST = "작곡가"
+# 레이팅 프레임 구분: "구곡"(베스트·구곡 칸 대상) 또는 "신곡". 곡 DB의 지금 신곡 판정이다 — 모델이 지금 버전 이름을 몰라도
+# `table_query`로 "구곡 중 상수 상위 30"을 거를 수 있게 둔다(2026-11-22).
+FRAME = "구분"
+FRAME_OLD = "구곡"
+FRAME_NEW = "신곡"
 SCORE = "점수"
 RANK = "랭크"
 LAMP = "램프"
@@ -115,6 +120,7 @@ def _columns_of(game: str) -> dict[str, Column]:
         NOTE_COUNT: Column(name=NOTE_COUNT, label=NOTE_COUNT, value_type="number"),
         VERSION: Column(name=VERSION, label=VERSION, order=profile.version_order),
         ARTIST: Column(name=ARTIST, label=ARTIST),
+        FRAME: Column(name=FRAME, label=FRAME),
         SCORE: Column(name=SCORE, label=SCORE, value_type="ScoreRef"),
         RANK: Column(name=RANK, label=RANK, value_type="RankRef"),
         LAMP: Column(name=LAMP, label=LAMP, value_type="LampRef"),
@@ -296,8 +302,13 @@ def chart_cells(song: SongRecord, chart: ChartRecord, names: Sequence[str]) -> d
         NOTE_COUNT: note_count_cell(chart.note_count),
         VERSION: text_cell(song.version),
         ARTIST: text_cell(song.artist),
+        FRAME: frame_cell(song),
     }
     return {name: available[name] for name in names if name in available}
+
+
+def frame_cell(song: SongRecord) -> Cell:
+    return text_cell(FRAME_NEW if song.is_new else FRAME_OLD)
 
 
 def song_cells(song: SongRecord, names: Sequence[str]) -> dict[str, Cell]:
@@ -308,6 +319,7 @@ def song_cells(song: SongRecord, names: Sequence[str]) -> dict[str, Cell]:
         DIFFICULTY: EMPTY_CELL,
         VERSION: text_cell(song.version),
         ARTIST: text_cell(song.artist),
+        FRAME: frame_cell(song),
     }
     return {name: available[name] for name in names if name in available}
 

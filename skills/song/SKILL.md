@@ -59,6 +59,11 @@ emits: [chunithm.song.viewed, maimai.song.viewed]
   가장 넓은 조건으로 한 번 찾고 `table_query`의 `where`로 거른다. 버전 범위("버스부터 엑스버스엑스까지")는
   `버전 >= VERSE`와 `버전 <= X-VERSE-X` 두 조건이다(버전 칸은 출시순을 안다). 이 도구에 인자가 없다고 못 한다고 하기 전에
   `table_query`로 되는지 먼저 본다.
+- **구곡·신곡**: 검색 표에는 숨은 `구분` 칸("구곡"/"신곡", 코드가 지금 신곡 판정으로 채움)이 있다. "구곡 중 상수 높은 순 30개"는
+  `find_songs(min_const=0)`(조건이 없으면 전체) → `table_query(where=[구분 == 구곡], limit=30)`이다(표는 이미 상수 큰 순).
+  지금 버전 이름(Mate 등)으로 거르지 않는다 — 신곡 범위는 게임마다 규칙이 달라 `구분` 칸만 믿는다.
+  "구곡 30개, 신곡 20개"처럼 둘을 같이 말하면 같은 검색 표에 `table_query`를 두 번(구곡 limit 30, 신곡 limit 20) 걸고
+  `table_concat`(묶음 이름 "구곡"·"신곡")으로 한 표로 합친다. 따로 두면 마지막 표만 보인다. 표를 훑어(`table_peek`) 직접 고르지 않는다.
 - 난이도를 둘 말했으면("마스터나 울티마") `find_songs`의 `difficulty`와 `other_difficulty`에 하나씩 준다. 난이도가 셋
   이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 `min_difficulty`/`max_difficulty`를 한 번에 준다(익스퍼트·마스터·울티마면
   `min_difficulty=EXPERT` 하나). 난이도를 따로따로 찾아 표를 둘로 나누지 않는다 — 마지막 표만 그려져 한쪽이 빠진다.

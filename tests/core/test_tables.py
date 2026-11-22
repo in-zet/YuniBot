@@ -23,6 +23,7 @@ from core.tables import (
     WorkTable,
     canonical_order_value,
     cell,
+    concat_tables,
     describe_table,
     expand_rows,
     extend_table,
@@ -1157,3 +1158,29 @@ def test_group_step_with_integer_step_names_the_whole_range() -> None:
 def test_group_step_rejects_bad_use(kwargs: dict[str, Any], message: str) -> None:
     with pytest.raises(TableError, match=message):
         select_rows(_rating_table(), **kwargs)
+
+
+def test_concat_puts_each_table_in_its_own_group() -> None:
+    """2026-11-22: "구곡 상위 30 + 신곡 상위 20"처럼 다르게 거른 표 둘을 한 표로 보인다."""
+    table = _table()
+    top = select_rows(table, limit=1, group_by="")
+    rest = select_rows(table, rows=[3])
+
+    merged = concat_tables(top, rest, ["앞", "뒤"])
+
+    assert merged.id == "" and merged.subject == "p1" and merged.row_formats == table.row_formats
+    assert [(g.title, [r.cell("song").raw for r in g.rows]) for g in merged.groups] == [("앞", ["A"]), ("뒤", ["C"])]
+    assert merged.steps[0].startswith("앞: ") and merged.steps[1].startswith("뒤: ")
+
+
+def test_concat_refuses_tables_with_different_columns_or_owners() -> None:
+    table = _table()
+    other = TableBuilder(subject="p1", unit="채보")
+    other.column("song", "곡", bare=True)
+    other.row(RowRef("chunithm.chart", "x"), {"song": cell("X")})
+    with pytest.raises(TableError, match="칸이 다른"):
+        concat_tables(table, other.build(), ["a", "b"])
+    with pytest.raises(TableError, match="다른 사람"):
+        concat_tables(table, dataclasses.replace(table, subject="p2"), ["a", "b"])
+    with pytest.raises(TableError, match="묶음 이름"):
+        concat_tables(table, table, ["a", " "])

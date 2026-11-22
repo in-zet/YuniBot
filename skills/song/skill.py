@@ -113,12 +113,12 @@ async def chart(ctx: ToolContext, chart: ChartRef, game: GameRef | None = None) 
 
 
 def _search_columns(game: str) -> tuple[str, ...]:
-    return (*tc.identity_columns(game), tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION)
+    return (*tc.identity_columns(game), tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION, tc.FRAME)
 
 
 # 검색 결과 표의 기본 칸은 곡·난이도·상수다. 나머지는 표에 있어도 글자 출력과 그림에서 숨기고, 물었을 때만
 # `table_query`의 `columns`로 보인다(2026-10-22 결정).
-_SEARCH_HIDDEN = (tc.LEVEL, tc.NOTE_COUNT, tc.VERSION, tc.ARTIST)
+_SEARCH_HIDDEN = (tc.LEVEL, tc.NOTE_COUNT, tc.VERSION, tc.ARTIST, tc.FRAME)
 
 
 def _none_found(**data: Any) -> ToolResult:

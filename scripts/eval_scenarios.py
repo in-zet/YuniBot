@@ -57,6 +57,17 @@ SCENARIOS: tuple[Scenario, ...] = (
         shown_from=("song_find_songs",),
     ),
     Scenario(name="검색/버전", question="LUMINOUS PLUS 버전 곡 다 보여 줘", shown_from=_SEARCH),
+    # 구곡·신곡 상위 — 숨은 `구분` 칸으로 거르고 table_concat으로 합친다(2026-11-22, 버전 이름으로 거르다 상한에 걸렸다).
+    Scenario(
+        name="검색/구곡·신곡 상수 상위",
+        question="모든 구곡 중 상수 높은 순 30개, 모든 신곡 중 상수 높은 순 20개 뽑아줘",
+        shown_from=("table_concat",), must_call=("song_find_songs", "table_concat"),
+    ),
+    Scenario(
+        name="기록/구곡·신곡 상수 상위 AJC 가정",
+        question="모든 구곡 중 상수 높은 순 30개랑 모든 신곡 중 상수 높은 순 20개가 전부 AJC라고 가정한 레이팅표 그려줘",
+        shown_from=("report_what_if",), must_call=("table_concat", "report_what_if", "image_table_image"),
+    ),
     # 후보곡·분석 — 호출을 본다. 상수 범위 밖의 조건은 find_songs 표로 받는다.
     Scenario(name="후보곡/상수 범위", question="15.0~15.5에서 레이팅 올릴 후보곡 뽑아줘", must_call_any=("report_candidates",)),
     Scenario(

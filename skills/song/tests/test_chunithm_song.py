@@ -7,7 +7,7 @@ from types import ModuleType
 from typing import Any
 
 from core.events import EventBus, Section
-from core.tables import WorkTable
+from core.tables import WorkTable, render_text
 from core.tool_types import Display, ToolContext
 from services.chunithm.songdb import VERSION_ORDER, SongDbService
 from services.game import table_columns as tc
@@ -131,7 +131,7 @@ async def test_find_songs_by_const_returns_sorted_results() -> None:
     table = result.table
     assert table is not None and result.display is None
     assert [c.name for c in table.columns] == [
-        tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION,
+        tc.SONG, tc.DIFFICULTY, tc.LEVEL, tc.CONST, tc.NOTE_COUNT, tc.VERSION, tc.FRAME,
     ]
     assert table.unit == "채보"
     assert table.steps[0] == "12.0~13.0 상수 MAS"
@@ -160,6 +160,25 @@ async def test_find_songs_by_const_without_max_and_new_only_filters() -> None:
         assert set(_titles(new_only.table)) <= set(_titles(open_ended.table))
     else:
         assert new_only.data["count"] == 0
+
+
+async def test_find_songs_table_has_a_hidden_old_new_column() -> None:
+    """2026-11-22: "구곡 중 상수 상위 30"을 `table_query(where 구분 == 구곡)`로 거르게, 코드가 판정한 구곡·신곡 칸을 숨겨 둔다."""
+    skill = _load_skill()
+    songdb = SongDbService()
+    new_title = next(title for title in songdb._available_intl if songdb._songs[title].charts)  # pyright: ignore[reportPrivateUsage]
+    songdb._songs[new_title].is_new = True  # pyright: ignore[reportPrivateUsage]
+
+    result = await skill.find_songs(_ctx_with_songdb(songdb), min_const=0)
+
+    table = result.table
+    assert table is not None
+    frame = table.column_by_label(tc.FRAME)
+    assert frame is not None and frame.hidden_in_text
+    values = {str(row.cell(tc.SONG).raw): row.cell(tc.FRAME).raw for row in table.rows}
+    assert values[new_title] == tc.FRAME_NEW
+    assert set(values.values()) == {tc.FRAME_OLD, tc.FRAME_NEW}
+    assert tc.FRAME not in render_text(table).content
 
 
 async def test_find_songs_by_version_without_difficulty_returns_all_available_charts() -> None:

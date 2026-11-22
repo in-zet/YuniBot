@@ -559,6 +559,25 @@ def select_rows(table: WorkTable, *, columns: Sequence[str] | None = None, **opt
     return derived if columns is None else _show_columns(derived, columns)
 
 
+def concat_tables(first: WorkTable, second: WorkTable, titles: Sequence[str]) -> WorkTable:
+    """`table_concat`의 엔진. 두 표의 행을 이어 한 표로 만든다. 각 표는 묶음 하나가 되고 표지 이름은 `titles`다
+    (서로 다르게 거른 표 둘을 한 번에 보이려고 — "구곡 상위 30 + 신곡 상위 20", 2026-11-22). 칸 정의·서식은 첫 표를
+    따르므로 두 표의 칸이 같아야 하고, 같은 게임·같은 사람의 표여야 한다. 원래 표의 묶음은 푼다."""
+    if len(titles) != 2 or not all(title.strip() for title in titles):
+        raise TableError("묶음 이름을 두 표에 하나씩 줘야 한다")
+    if {column.name for column in first.columns} != {column.name for column in second.columns}:
+        raise TableError("칸이 다른 표는 합칠 수 없다 — 같은 도구에서 나온 표끼리 합친다")
+    if first.game != second.game or first.subject != second.subject:
+        raise TableError("다른 게임이나 다른 사람의 표는 합칠 수 없다")
+    groups = [Group(title.strip(), table.rows) for title, table in zip(titles, (first, second), strict=True)]
+    merged = derive_table(first, groups)
+    steps = tuple(
+        f"{title.strip()}: {' · '.join(table.steps)}" if table.steps else title.strip()
+        for title, table in zip(titles, (first, second), strict=True)
+    )
+    return replace(merged, steps=steps)
+
+
 def _show_columns(table: WorkTable, labels: Sequence[str]) -> WorkTable:
     """`labels`의 칸만 글자 출력에 보이게 한 새 표. 나머지 칸은 지우지 않고 숨기기만 하므로(`hidden_in_text`)
     거르기·정렬·다음 도구에 넘기는 일은 그대로 된다."""

@@ -12,6 +12,7 @@ from core.tables import (
     WhereClause,
     WorkTable,
     canonical_order_value,
+    concat_tables,
     peek_rows,
     select_rows,
 )
@@ -174,6 +175,20 @@ async def table_query(
 
 
 @tool()
+async def table_concat(
+    ctx: ToolContext, first: TableRef, second: TableRef, first_title: str, second_title: str
+) -> ToolResult:
+    """두 표의 행을 이어 한 표로 만든다(각 표가 묶음 하나, 묶음 이름은 first_title·second_title). 결과 표가 사용자에게 보인다.
+    서로 다르게 거른 표 둘을 한 번에 보일 때 쓴다("구곡 중 상수 상위 30, 신곡 중 상위 20" → 같은 검색 표에 `table_query`를
+    두 번 건 표 둘을 합친다). 같은 도구에서 나온, 칸이 같은 표끼리만 합친다. 셋 이상이면 합친 표에 다시 합친다."""
+    assert isinstance(first, WorkTable) and isinstance(second, WorkTable)
+    try:
+        return ToolResult(table=concat_tables(first, second, (first_title, second_title)))
+    except TableError as exc:
+        return ToolResult(error=str(exc))
+
+
+@tool()
 async def table_peek(
     ctx: ToolContext,
     table: TableRef,
@@ -200,6 +215,7 @@ CORE_TOOL_SPECS = [
     remember.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
     list_capabilities.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
     table_query.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
+    table_concat.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
     table_peek.__yuni_tool__,  # pyright: ignore[reportFunctionMemberAccess]
 ]
 
