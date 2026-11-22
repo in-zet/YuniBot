@@ -160,6 +160,11 @@ SCENARIOS: tuple[Scenario, ...] = (
         shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
         must_args=(("report_what_if", "table", "t"),),
     ),
+    # "그려줘"만 있고 "그림·레이팅표"가 없으면 그림 스킬이 안 펼쳐져 "그림 기능은 지금 쓸 수 없어"라고 답했다(2026-11-22).
+    Scenario(
+        name="그림/그려줘만", question="메기도 마스 1009000 가정해서 그려줘",
+        shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
+    ),
     # 마이마이 — 평가 플레이어는 지어낸 maimai 기록도 받는다(AP·AP+가 섞여 AP 보너스 계산도 거친다).
     Scenario(
         name="마이/베스트 그림", question="마이마이 내 베스트 그림으로 뽑아 줘",
