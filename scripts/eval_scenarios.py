@@ -37,7 +37,7 @@ def _tutorial_context(history: str) -> str:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return f"{module._guidance(main_game='츄니즘', logged_in=True)}\n{history}"  # pyright: ignore[reportPrivateUsage]
+    return f"{module._guidance()}\n{history}"  # pyright: ignore[reportPrivateUsage]
 
 
 _CONST_TABLE = ("report_const_table",)
@@ -133,8 +133,21 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="튜토리얼/애매한 답에도 안내",
         question="다",
-        context=_tutorial_context("[지금까지의 대화] 유니: 주 게임이 뭐야? / 나: 츄니즘 / 유니: 자주 쓸 기능이 뭐야? 레이팅표 그림, 곡 상수 찾기, 동기화 중 하나부터 알려 줄게~"),
+        context=_tutorial_context(
+            "[지금까지의 대화] 유니: 주 게임이 뭐야? / 나: 츄니즘 / (로그인·동기화·레이팅표를 마쳤다) / "
+            "유니: 자주 쓸 기능이 뭐야? 레이팅표 그림, 곡 상수 찾기, 동기화 중 하나부터 알려 줄게~"
+        ),
         must_not_call=("end_conversation",),
+    ),
+    Scenario(
+        name="튜토리얼/동기화 뒤 레이팅표",
+        question="응 그려줘",
+        context=_tutorial_context(
+            "[지금까지의 대화] 유니: 주 게임이 뭐야? / 나: 츄니즘 / 유니: 로그인은 /로그인으로 해 줘 / 나: 했어 / "
+            "유니: 기록 가져올까? / 나: 응 / (동기화가 끝났다, tutorial_status: 로그인·동기화 모두 true) / "
+            "유니: 동기화 끝났어! 이제 레이팅표 그려 볼까?"
+        ),
+        must_call_any=("image_table_image", "report_best"),
     ),
     Scenario(
         name="튜토리얼/구체적 질문", question="동기화는 어떻게 해?", must_not_call=("tutorial_tutorial_start",),

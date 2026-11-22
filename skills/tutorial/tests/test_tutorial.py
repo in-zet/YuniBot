@@ -73,7 +73,7 @@ async def _ctx(db: aiosqlite.Connection, notify: _FakeNotify, *, tags: frozenset
     return ToolContext(player_id=player.id, tags=tags, services=services, db=db)
 
 
-async def test_start_opens_a_dm_thread_with_the_state_in_the_guidance(db: aiosqlite.Connection) -> None:
+async def test_start_opens_a_dm_thread_with_the_guided_steps(db: aiosqlite.Connection) -> None:
     skill, notify = _load_skill(), _FakeNotify()
     ctx = await _ctx(db, notify)
 
@@ -82,25 +82,32 @@ async def test_start_opens_a_dm_thread_with_the_state_in_the_guidance(db: aiosql
     assert result.error is None
     opened = notify.opened[0]
     assert opened["skill_name"] == "tutorial" and opened["opening"] == "인사"
-    assert "주 게임: 아직 안 정함" in opened["guidance"] and "SEGA 로그인: 아직 안 함" in opened["guidance"]
-    for command in ("/로그인", "/동기화", "/설정"):
-        assert command in opened["guidance"]
     guidance = opened["guidance"]
-    assert "remember" in guidance and "end_conversation" in guidance
-    # 2026-11-22 실기: "다"라는 애매한 답에 안내를 건너뛰고 바로 닫았다 — 안내가 필수이고 같은 턴에 닫지 않는다.
-    assert "④ 기본 명령 안내 — 반드시 한다" in guidance and "④와 같은 턴에 대화를 끝내지 않는다" in guidance
-    assert guidance.index("④ 기본 명령 안내") < guidance.index("⑥ 플레이어가") < guidance.index("end_conversation")
+    for command in ("/로그인", "/동기화", "/설정"):
+        assert command in guidance
+    assert "remember" in guidance and "end_conversation" in guidance and "tutorial_status" in guidance
+    # 로그인 → 동기화 → 레이팅표 최초 작성 → 기능 묻기 → 안내 → 마무리 순서(2026-11-22 사용자 요청).
+    order = ["② 로그인", "③ 동기화", "④ 레이팅표 최초 작성", "⑤ 어떤 기능을", "⑥ 기본 명령 안내", "⑧ 플레이어가", "end_conversation"]
+    positions = [guidance.index(step) for step in order]
+    assert positions == sorted(positions)
+    # 2026-11-22 실기: 애매한 답("다")에 안내를 건너뛰고 바로 닫았다 — 안내는 필수이고 같은 턴에 닫지 않는다.
+    assert "⑥ 기본 명령 안내 — 반드시 한다" in guidance and "⑥과 같은 턴에 대화를 끝내지 않는다" in guidance
 
 
-async def test_guidance_knows_main_game_and_login(db: aiosqlite.Connection) -> None:
+async def test_status_reads_the_current_main_game_login_and_sync_tags(db: aiosqlite.Connection) -> None:
     skill, notify = _load_skill(), _FakeNotify()
-    ctx = await _ctx(db, notify, tags=frozenset({"sega-linked"}))
-    await ctx.players.set_main_game(ctx.player_id, "마이마이")
+    ctx = await _ctx(db, notify)
+    assert (await skill.tutorial_status(ctx)).data == {
+        "main_game": None, "logged_in": False, "synced": {"chunithm": False, "maimai": False},
+    }
 
-    _ = await skill.tutorial_start(ctx)
+    await ctx.players.set_main_game(ctx.player_id, "maimai")
+    await ctx.players.set_status_tag(ctx.player_id, "sega-linked", source="test")
+    await ctx.players.set_status_tag(ctx.player_id, "maimai-synced", source="test")
 
-    guidance = notify.opened[0]["guidance"]
-    assert "주 게임: 마이마이" in guidance and "SEGA 로그인: 이미 함" in guidance
+    assert (await skill.tutorial_status(ctx)).data == {
+        "main_game": "maimai", "logged_in": True, "synced": {"chunithm": False, "maimai": True},
+    }
 
 
 async def test_start_refuses_a_second_open_thread_and_reports_dm_failures(db: aiosqlite.Connection) -> None:
