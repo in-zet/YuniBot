@@ -85,7 +85,11 @@ async def test_start_opens_a_dm_thread_with_the_state_in_the_guidance(db: aiosql
     assert "주 게임: 아직 안 정함" in opened["guidance"] and "SEGA 로그인: 아직 안 함" in opened["guidance"]
     for command in ("/로그인", "/동기화", "/설정"):
         assert command in opened["guidance"]
-    assert "remember" in opened["guidance"] and "end_conversation" in opened["guidance"]
+    guidance = opened["guidance"]
+    assert "remember" in guidance and "end_conversation" in guidance
+    # 2026-11-22 실기: "다"라는 애매한 답에 안내를 건너뛰고 바로 닫았다 — 안내가 필수이고 같은 턴에 닫지 않는다.
+    assert "④ 기본 명령 안내 — 반드시 한다" in guidance and "④와 같은 턴에 대화를 끝내지 않는다" in guidance
+    assert guidance.index("④ 기본 명령 안내") < guidance.index("⑥ 플레이어가") < guidance.index("end_conversation")
 
 
 async def test_guidance_knows_main_game_and_login(db: aiosqlite.Connection) -> None:

@@ -22,6 +22,22 @@ class Scenario:
     must_call: tuple[str, ...] = ()
     must_not_call: tuple[str, ...] = ()
     must_args: tuple[tuple[str, str, str], ...] = ()
+    # 대화 스레드 안의 지침처럼 프롬프트 맥락에 더 넣을 글(튜토리얼 DM 대화 시험용).
+    context: str = ""
+
+
+
+def _tutorial_context(history: str) -> str:
+    """튜토리얼 DM 대화의 실제 지침(skills/tutorial/skill.py)에 지금까지의 대화를 붙인다."""
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent.parent / "skills" / "tutorial" / "skill.py"
+    spec = importlib.util.spec_from_file_location("_eval_tutorial_skill", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return f"{module._guidance(main_game='츄니즘', logged_in=True)}\n{history}"  # pyright: ignore[reportPrivateUsage]
 
 
 _CONST_TABLE = ("report_const_table",)
@@ -113,6 +129,12 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="튜토리얼/DM으로 해 달라", question="처음 써 보는데 DM으로 튜토리얼 진행해 줘",
         must_call=("tutorial_tutorial_start",),
+    ),
+    Scenario(
+        name="튜토리얼/애매한 답에도 안내",
+        question="다",
+        context=_tutorial_context("[지금까지의 대화] 유니: 주 게임이 뭐야? / 나: 츄니즘 / 유니: 자주 쓸 기능이 뭐야? 레이팅표 그림, 곡 상수 찾기, 동기화 중 하나부터 알려 줄게~"),
+        must_not_call=("end_conversation",),
     ),
     Scenario(
         name="튜토리얼/구체적 질문", question="동기화는 어떻게 해?", must_not_call=("tutorial_tutorial_start",),

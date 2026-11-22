@@ -251,7 +251,7 @@ async def seed_maimai_fixture(*, executor: ToolExecutor, player_id: str, tags: f
 
 async def _run_turn(
     *, config: CoreConfig, llm: LlmAdapter, prompt: PromptAssembler, executor: ToolExecutor, client: YuniClient,
-    registry: SkillRegistry, player_id: str, tags: frozenset[str], question: str,
+    registry: SkillRegistry, player_id: str, tags: frozenset[str], question: str, context: str = "",
 ) -> tuple[AgentTurnResult, TurnTrace, float]:
     loop = _TracingAgentLoop(
         llm=llm, executor=executor, prompt=prompt, model=config.agent_model, thinking_level=config.thinking_level,
@@ -265,7 +265,7 @@ async def _run_turn(
     )
     state = SkillLoadState(mode=config.skill_loading_mode, known_skills={s.manifest.name for s in registry.enabled_skills()})
     started = time.monotonic()
-    result = await loop.run(ctx=ctx, skill_state=state, user_text=question, prompt_context_snippets=[])
+    result = await loop.run(ctx=ctx, skill_state=state, user_text=question, prompt_context_snippets=[context] if context else [])
     elapsed = time.monotonic() - started
     trace = loop.trace
     trace.shown_table_ids = list(result.drawn_table_ids) or ([result.last_table_id] if result.last_table_id else [])
@@ -333,6 +333,7 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
                 result, trace, elapsed = await _run_turn(
                     config=config, llm=llm, prompt=prompt, executor=executor, client=client, registry=registry,
                     player_id=player.id, tags=tags, question=question,
+                    context=getattr(case, "context", ""),
                 )
                 report = reports[suite]
                 report.total += 1
