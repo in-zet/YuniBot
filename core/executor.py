@@ -139,6 +139,19 @@ class ToolExecutor:
         """core/slash.py의 모달 콜백이 일반 _dispatch와 같은 "스킬 꺼짐" 검사를 하기 위해 쓴다."""
         return self._settings
 
+    def _with_game(self, ctx: ToolContext, game: str) -> ToolContext:
+        ctx = ctx.with_game_services(self._game_services)
+        # 게임별 서비스 묶음을 모르는 설치(게임이 하나뿐인 시험 등)는 게임 이름만 정한다.
+        return ctx.for_game(game) if game in self._game_services else replace(ctx, game=game)
+
+    async def context_for_game(self, ctx: ToolContext, requested: str | None) -> ToolContext:
+        """실행기를 거치지 않는 경로(입력 창을 여는 슬래시 명령)의 게임 고르기: 요청한 게임 → 주 게임 → 기본 게임.
+        게임별 서비스 묶음도 붙여 `ctx.for_game`으로 다른 게임으로 바꿀 수 있게 한다. 모르는 게임이면 UserFacingError."""
+        if self._game_chooser is None:
+            return ctx
+        preferred = await self._preferred_game(ctx.player_id) if self._preferred_game is not None else None
+        return self._with_game(ctx, self._game_chooser(requested, preferred))
+
     async def invoke(
         self,
         spec: ToolSpec | SlashOnlySpec,
@@ -208,9 +221,7 @@ class ToolExecutor:
                 # 게임을 말하지 않았는데 주 게임이 이 스킬이 다루지 않는 게임이면, 스킬이 다루는 게임으로 간다.
                 fallback_note = f"{game}는 이 기능이 아직 없어서 {games[0]} 기준으로 처리했다"
                 game = games[0]
-            ctx = ctx.with_game_services(self._game_services)
-            # 게임별 서비스 묶음을 모르는 설치(게임이 하나뿐인 시험 등)는 게임 이름만 정한다.
-            ctx = ctx.for_game(game) if game in self._game_services else replace(ctx, game=game)
+            ctx = self._with_game(ctx, game)
 
         resolved: dict[str, Any] = {}
         stale_input = False

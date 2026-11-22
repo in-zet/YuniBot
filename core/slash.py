@@ -19,7 +19,7 @@ from core.permissions import TagRequirement, check_tags
 from core.registry_snapshot import RegistrySnapshot
 from core.schema import ArgSpec, build_arg_schema
 from core.slash_rules import callback_arg_name_problems, slash_path_problems
-from core.tool_types import ToolContext, ToolResult, table_display
+from core.tool_types import ToolContext, ToolResult, UserFacingError, table_display
 from services.common.players import PlayersService
 
 if TYPE_CHECKING:
@@ -371,7 +371,9 @@ def _build_modal_command(
     도구 실행기(invoke)도 거치지 않는다: 모달 함수는 ToolResult가 아니라 Modal을 돌려주기 때문이다.
     대신 같은 태그 조건(도구와 스킬 각각 AND)을 같은 check_tags로 검사한다."""
 
-    async def callback(interaction: discord.Interaction) -> None:
+    takes_game = any(arg.name == "game" for arg in build_arg_schema(entry.spec.fn).args)
+
+    async def run(interaction: discord.Interaction, requested_game: str | None) -> None:
         if (
             executor.settings is not None
             and interaction.guild_id is not None
@@ -400,13 +402,27 @@ def _build_modal_command(
             await interaction.response.send_message("모르는 명령이야", ephemeral=True)
             return
 
+        if takes_game:
+            # 입력 창 함수가 `game`을 받으면 요청한 게임 → 주 게임 → 기본 게임으로 맥락을 정해 준다(실행기와 같은 규칙).
+            try:
+                ctx = await executor.context_for_game(ctx, requested_game)
+            except UserFacingError as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
         modal = await entry.spec.fn(ctx)
         await interaction.response.send_modal(modal)
+
+    async def callback(interaction: discord.Interaction) -> None:
+        await run(interaction, None)
+
+    @app_commands.describe(game="게임(예: 츄니즘, 마이마이). 비우면 주 게임")
+    async def callback_with_game(interaction: discord.Interaction, game: str | None = None) -> None:
+        await run(interaction, game)
 
     return app_commands.Command(
         name=entry.path[-1],
         description=(entry.spec.fn.__doc__ or "").strip().splitlines()[0][:100],
-        callback=callback,
+        callback=callback_with_game if takes_game else callback,
     )
 
 

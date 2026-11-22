@@ -25,7 +25,7 @@ from core.slash import (
     slash_path_problems,
 )
 from core.tables import RowRef, TableBuilder, TableStore, cell
-from core.tool_types import Display, ToolContext, ToolResult
+from core.tool_types import Display, GameRef, ToolContext, ToolResult
 from services.common.players import PlayersService
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -776,6 +776,47 @@ async def test_modal_command_checks_the_tool_tags_and_hides_the_modal_on_denial(
         [call] = interaction.calls
         assert "modal" not in call
         assert call["content"] == "모르는 명령이야"
+    finally:
+        await conn.close()
+
+
+async def test_modal_command_with_a_game_argument_picks_the_requested_then_main_game() -> None:
+    """2026-11-22: `/로그인 game:`처럼 입력 창 함수가 `game`을 받으면 실행기와 같은 규칙(요청 → 주 게임 → 기본)으로 맥락을 정한다."""
+    seen: list[str] = []
+
+    @slash_only("게임모달")
+    async def game_modal(ctx: ToolContext, game: GameRef | None = None) -> discord.ui.Modal:
+        """게임을 받는 입력창."""
+        seen.append(ctx.game)
+        return _FakeModal()
+
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(_PLAYERS_MIGRATION)
+    await conn.commit()
+    players = PlayersService(conn)
+
+    async def main_game(player_id: str) -> str | None:
+        return "maimai"
+
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=players, tag_definitions={}, services={"players": players},
+        game_chooser=lambda requested, preferred: requested or preferred or "chunithm", preferred_game=main_game,
+    )
+    plan = build_slash_plan(
+        [(_FakeSkill("x"), game_modal.__yuni_slash_only__)]  # pyright: ignore[reportFunctionMemberAccess, reportArgumentType]
+    )
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(
+        discord.Client(intents=discord.Intents.none())
+    )
+    attach_to_tree(tree, plan, executor=executor, db=_NO_DB, registry_snapshot=_NO_SNAPSHOT)
+
+    try:
+        command = tree.get_command("게임모달")
+        assert isinstance(command, discord.app_commands.Command)
+        assert [p.name for p in command.parameters] == ["game"]
+        await command.callback(_fake(1))  # pyright: ignore[reportCallIssue]
+        await command.callback(_fake(1), game="chunithm")  # pyright: ignore[reportCallIssue]
+        assert seen == ["maimai", "chunithm"]
     finally:
         await conn.close()
 

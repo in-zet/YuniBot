@@ -56,6 +56,16 @@ class _Site:
         url = request.url
         self.requests.append(f"{url.host}{url.path}{('?' + url.query.decode()) if url.query else ''}")
         cookies = request.headers.get("cookie", "")
+        if url.host == GATEWAY_HOST and request.method == "POST":
+            # ID/비밀번호 로그인: 맞으면 clal을 주고 사이트로 돌려보낸다.
+            if request.content.decode() != "retention=1&sid=me&password=pw":
+                return httpx.Response(200, text="login form")
+            return httpx.Response(
+                302, headers={
+                    "location": f"https://maimaidx-eng.com{_MOBILE}/",
+                    "set-cookie": f"clal=good; Domain={GATEWAY_HOST}; Path=/common_auth",
+                },
+            )
         if url.host == GATEWAY_HOST:
             if "clal=good" not in cookies:
                 return httpx.Response(200, text="login form")
@@ -98,6 +108,33 @@ async def test_adapter_logs_in_with_clal_when_the_session_is_missing_and_reads_p
     assert profile.rating == 8564 and len(targets.new) == 4 and len(targets.old) == 3
     assert len(recent) == 6 and len(master) == 7
     assert sum("common_auth/login" in request for request in site.requests) == 1  # 로그인은 한 번만
+
+
+async def test_adapter_logs_in_with_credentials_and_hands_out_the_new_clal() -> None:
+    site = _Site()
+    adapter = MaimaiNetAdapter(
+        None, username="me", password="pw", transport=httpx.MockTransport(site.handle),
+        limiter=aiolimiter.AsyncLimiter(1000, 1),
+    )
+    try:
+        profile, _targets = await adapter.get_rating_targets()
+        clal = adapter.session_clal()
+    finally:
+        await adapter.aclose()
+
+    assert profile.rating == 8564 and clal == "good"
+
+
+async def test_adapter_with_wrong_credentials_is_an_authentication_error() -> None:
+    adapter = MaimaiNetAdapter(
+        None, username="me", password="wrong", transport=httpx.MockTransport(_Site().handle),
+        limiter=aiolimiter.AsyncLimiter(1000, 1),
+    )
+    try:
+        with pytest.raises(AuthenticationError):
+            await adapter.get_rating_targets()
+    finally:
+        await adapter.aclose()
 
 
 async def test_adapter_asks_each_difficulty_page_with_its_diff_value() -> None:
@@ -196,10 +233,14 @@ async def conn() -> AsyncIterator[aiosqlite.Connection]:
 
 
 class _FakeAdapter:
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(self, *, error: Exception | None = None, clal: str | None = None) -> None:
         self.error = error
         self.closed = False
         self.listed: list[str] = []
+        self.clal = clal
+
+    def session_clal(self) -> str | None:
+        return self.clal
 
     async def get_rating_targets(self) -> tuple[MaimaiProfile, RatingTargets]:
         if self.error is not None:
@@ -294,3 +335,40 @@ async def test_maintenance_keeps_the_login(conn) -> None:
         await service.fetch_snapshot(player.id)
 
     assert await players.tags_for(player.id) == {"sega-linked"}
+
+
+async def test_login_with_credentials_stores_the_session_clal_and_links(conn) -> None:
+    """2026-11-22: CHUNITHM-NET 점검 중에도 maimai DX NET으로 로그인해 게임 공통 clal을 저장한다."""
+    secrets = SecretsService(Fernet.generate_key())
+    players = PlayersService(conn)
+    player = await players.create_player()
+    adapter = _FakeAdapter(clal="s" * 64)
+    seen: list[tuple[str, str]] = []
+    service = MaimaiNetService(
+        conn=conn, secrets=secrets, players=players,
+        credential_adapter_factory=lambda u, p: (seen.append((u, p)), cast(MaimaiNetAdapterLike, adapter))[1],
+    )
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+
+    profile = await service.login_with_credentials(player.id, "sid", "pw", ctx)
+
+    assert seen == [("sid", "pw")] and adapter.closed
+    status = await service.status(player.id)
+    assert status.linked and status.nickname == profile.username
+    row = await (await conn.execute("SELECT encrypted_cookie FROM sega_cookies WHERE player_id = ?", (player.id,))).fetchone()
+    assert row is not None and secrets.decrypt(row[0]) == "s" * 64
+
+
+async def test_login_with_credentials_saves_nothing_on_maintenance(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players = PlayersService(conn)
+    player = await players.create_player()
+    service = MaimaiNetService(
+        conn=conn, secrets=secrets, players=players,
+        credential_adapter_factory=lambda u, p: cast(MaimaiNetAdapterLike, _FakeAdapter(error=MaintenanceError())),
+    )
+
+    with pytest.raises(MaintenanceError):
+        await service.login_with_credentials(player.id, "sid", "pw", ToolContext(player_id=player.id, tags=frozenset(), services={}))
+
+    assert not (await service.status(player.id)).linked

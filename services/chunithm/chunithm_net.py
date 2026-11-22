@@ -7,8 +7,6 @@ import inspect
 import io
 import logging
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 import aiosqlite
@@ -28,7 +26,7 @@ from services.chunithm.arcade_settings import (
 from services.chunithm.sync_snapshot import SyncFetch, snapshot_from_fetch
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
-from services.common.sega_cookies import SegaCookieStore
+from services.common.sega_cookies import LoginStatus, SegaCookieStore
 
 if TYPE_CHECKING:
     from chuni_penguin.types import PersonalBest, Profile, RecentScore
@@ -199,13 +197,6 @@ def _extract_clal(lwp_cookie_jar: str) -> str | None:
     return None
 
 
-@dataclass(slots=True, kw_only=True)
-class LoginStatus:
-    linked: bool
-    nickname: str | None = None
-    last_checked_at: str | None = None
-
-
 class ChunithmNetService:
     """플레이어별로 CHUNITHM-NET 어댑터를 열어 준다. 복호화는 이 서비스 안에서만
     하고, 평문 쿠키는 어댑터를 만드는 그 함수 스코프를 벗어나지 않는다."""
@@ -261,37 +252,12 @@ class ChunithmNetService:
         return profile
 
     async def _store_clal(self, player_id: str, clal: str, nickname: str) -> None:
-        """login()과 login_with_credentials()가 공유하는 저장 로직 — 암호화해 넣고
-        sega-linked 태그를 붙인다."""
-        encrypted = self._secrets.encrypt(clal)
-        now = datetime.now(UTC).isoformat()
-        await self._conn.execute(
-            "INSERT INTO sega_cookies (player_id, encrypted_cookie, linked_at, last_checked_at, nickname) "
-            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (player_id) DO UPDATE SET "
-            "encrypted_cookie = excluded.encrypted_cookie, linked_at = excluded.linked_at, "
-            "last_checked_at = excluded.last_checked_at, nickname = excluded.nickname",
-            (player_id, encrypted, now, now, nickname),
-        )
-        await self._conn.commit()
-        await self._players.set_status_tag(player_id, "sega-linked", source="chunithm_net:login")
+        """login()과 login_with_credentials()가 공유한다. 저장은 게임 공통 쿠키 저장소가 한다."""
+        await self._cookies.store(player_id, clal, nickname)
 
     async def status(self, player_id: str) -> LoginStatus:
-        """상태 조회는 DB만 읽는 가벼운 호출이어야 한다 — 네트워크를 타지 않는다.
-        닉네임은 login()이 저장해 둔 값을 그대로 돌려준다."""
-        row = await (
-            await self._conn.execute(
-                "SELECT last_checked_at, nickname FROM sega_cookies WHERE player_id = ?",
-                (player_id,),
-            )
-        ).fetchone()
-        if row is None:
-            return LoginStatus(linked=False)
-        tags = await self._players.tags_for(player_id)
-        if "sega-linked" not in tags:
-            return LoginStatus(linked=False)
-        return LoginStatus(
-            linked=True, nickname=row["nickname"], last_checked_at=row["last_checked_at"]
-        )
+        """상태 조회는 DB만 읽는다(네트워크 없음). 게임 공통 쿠키 저장소가 답한다."""
+        return await self._cookies.status(player_id)
 
     async def logout(self, player_id: str, ctx: ToolContext) -> None:
         try:

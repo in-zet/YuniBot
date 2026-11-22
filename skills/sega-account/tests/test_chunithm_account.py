@@ -372,3 +372,69 @@ def test_login_modal_explains_how_credentials_are_handled() -> None:
     assert "암호화" in texts[0]
     assert "저장하지 않아" in texts[0]
     assert "로그아웃하면" in texts[0]
+
+
+def _two_game_ctx(chunithm_net: _FakeChunithmNet, maimai_net: _FakeChunithmNet, *, game: str = "chunithm") -> ToolContext:
+    """게임마다 `chunithm_net` 자리에 그 게임의 NET 서비스가 낀 맥락(실행기·슬래시가 만드는 모양)."""
+    by_game: dict[str, dict[str, object]] = {"chunithm": {"chunithm_net": chunithm_net}, "maimai": {"chunithm_net": maimai_net}}
+    return ToolContext(
+        player_id="p1", tags=frozenset(), services=dict(by_game[game]), game=game, game_services=by_game
+    )
+
+
+async def test_login_falls_back_to_the_other_game_net_when_the_first_is_in_maintenance() -> None:
+    """2026-11-22 실기: CHUNITHM-NET 점검(503) 중에 maimai는 정상인데 로그인이 막혔다. 다른 게임 NET으로 로그인한다."""
+    from chuni_penguin.adapters.errors import MaintenanceError
+
+    skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=False, login_error=MaintenanceError())
+    maimai_net = _FakeChunithmNet(linked=False, login_username="마이유니")
+    interaction = _FakeInteraction()
+
+    await skill._attempt_login(_two_game_ctx(chunithm_net, maimai_net), "id", "pw", interaction)
+
+    assert chunithm_net.login_calls and maimai_net.login_calls
+    message = interaction.followup.sent[0][0]
+    assert "로그인 완료" in message and "마이유니" in message and "CHUNITHM-NET" in message
+
+
+async def test_login_tries_the_requested_or_main_game_first() -> None:
+    skill = _load_skill()
+    chunithm_net = _FakeChunithmNet(linked=False)
+    maimai_net = _FakeChunithmNet(linked=False, login_username="마이유니")
+    interaction = _FakeInteraction()
+
+    await skill._attempt_login(_two_game_ctx(chunithm_net, maimai_net, game="maimai"), "id", "pw", interaction)
+
+    assert maimai_net.login_calls and not chunithm_net.login_calls
+    assert "점검" not in interaction.followup.sent[0][0]
+
+
+async def test_login_says_maintenance_when_every_net_is_down() -> None:
+    from chuni_penguin.adapters.errors import MaintenanceError
+
+    skill = _load_skill()
+    interaction = _FakeInteraction()
+    ctx = _two_game_ctx(
+        _FakeChunithmNet(linked=False, login_error=MaintenanceError()),
+        _FakeChunithmNet(linked=False, login_error=MaintenanceError()),
+    )
+
+    await skill._attempt_login(ctx, "id", "pw", interaction)
+
+    message = interaction.followup.sent[0][0]
+    assert "점검" in message and "ID와 비밀번호" not in message
+
+
+async def test_wrong_password_does_not_try_the_other_net() -> None:
+    from chuni_penguin.adapters.errors import AuthenticationError, NoCardsRegistered
+
+    skill = _load_skill()
+    for error, expected in ((AuthenticationError("x"), "ID와 비밀번호"), (NoCardsRegistered("x"), "Aime")):
+        maimai_net = _FakeChunithmNet(linked=False)
+        interaction = _FakeInteraction()
+        await skill._attempt_login(
+            _two_game_ctx(_FakeChunithmNet(linked=False, login_error=error), maimai_net), "id", "pw", interaction
+        )
+        assert not maimai_net.login_calls
+        assert expected in interaction.followup.sent[0][0]

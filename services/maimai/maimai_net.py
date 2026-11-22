@@ -1,14 +1,15 @@
 # services/maimai/maimai_net.py
 """maimai DX NET(국제판) 어댑터와 동기화용 서비스.
 
-로그인은 CHUNITHM과 같은 SEGA 공통 인증(`clal`)을 쓴다 — 쿠키는 `sega_cookies` 하나에 있고, 여기서는 읽기만
-한다(로그인·로그아웃은 `sega-account`가 CHUNITHM 서비스로 한다). 복호화는 `SegaCookieStore`를 통해 이 서비스 안에서만
+로그인은 CHUNITHM과 같은 SEGA 공통 인증(`clal`)을 쓴다 — 쿠키는 `sega_cookies` 하나에 있다. 로그인은 보통
+CHUNITHM 서비스로 하지만, 요청·선호 게임이 maimai이거나 CHUNITHM-NET이 점검이면 여기서도 한다(2026-11-22). 복호화는 `SegaCookieStore`를 통해 이 서비스 안에서만
 하고, 평문 `clal`은 어댑터를 만드는 스코프를 벗어나지 않는다."""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 import aiolimiter
@@ -18,7 +19,7 @@ from chuni_penguin.adapters.errors import AuthenticationError
 
 from core.tool_types import ToolContext, UserFacingError
 from services.common.aime_auth import GATEWAY_HOST, AimeAuth, AimeSite
-from services.common.sega_cookies import SegaCookieStore
+from services.common.sega_cookies import LoginStatus, SegaCookieStore
 from services.maimai import parser
 from services.maimai.parser import MaimaiProfile, PlayEntry, RatingTargets, ScoreEntry
 from services.maimai.sync_snapshot import snapshot_from_pages
@@ -85,11 +86,14 @@ class MaimaiNetAdapter:
 
     def __init__(
         self,
-        clal: str,
+        clal: str | None,
         *,
+        username: str | None = None,
+        password: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         limiter: aiolimiter.AsyncLimiter | None = None,
     ) -> None:
+        """`clal`이 없으면 username/password로 로그인한다(`/로그인`). 둘은 이 연결의 인증 객체에만 있다."""
         limiter = limiter if limiter is not None else aiolimiter.AsyncLimiter(1, 1)
 
         async def throttle(request: httpx.Request) -> None:
@@ -106,8 +110,18 @@ class MaimaiNetAdapter:
                 "accept-language": "en-US,en;q=0.5",
             },
         )
-        self._client.cookies.set("clal", clal, domain=_CLAL_DOMAIN, path=_CLAL_PATH)
-        self._client.auth = AimeAuth(self._client, SITE, needs_login=_session_lost)
+        if clal is not None:
+            self._client.cookies.set("clal", clal, domain=_CLAL_DOMAIN, path=_CLAL_PATH)
+        self._client.auth = AimeAuth(
+            self._client, SITE, needs_login=_session_lost, username=username, password=password
+        )
+
+    def session_clal(self) -> str | None:
+        """로그인 뒤 이 연결이 가진 `clal`. 저장할 때만 꺼낸다."""
+        for cookie in self._client.cookies.jar:
+            if cookie.name == "clal" and cookie.domain.lstrip(".") == _CLAL_DOMAIN:
+                return cookie.value
+        return None
 
     async def _get(self, path: str) -> bytes:
         response = await self._client.get(path)
@@ -133,6 +147,7 @@ class MaimaiNetAdapter:
 
 
 class MaimaiNetAdapterLike(Protocol):
+    def session_clal(self) -> str | None: ...
     async def get_rating_targets(self) -> tuple[MaimaiProfile, RatingTargets]: ...
     async def get_recent(self) -> list[PlayEntry]: ...
     async def get_music_list(self, difficulty: str) -> list[ScoreEntry]: ...
@@ -140,6 +155,18 @@ class MaimaiNetAdapterLike(Protocol):
 
 
 AdapterFactory = Callable[[str], MaimaiNetAdapterLike]
+CredentialAdapterFactory = Callable[[str, str], MaimaiNetAdapterLike]
+
+
+def _credential_adapter(username: str, password: str) -> MaimaiNetAdapterLike:
+    return MaimaiNetAdapter(None, username=username, password=password)
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class LoginProfile:
+    """로그인 결과. CHUNITHM 서비스의 프로필처럼 `username`(닉네임)을 준다."""
+
+    username: str
 
 
 class MaimaiNetService:
@@ -153,9 +180,30 @@ class MaimaiNetService:
         secrets: SecretsService,
         players: PlayersService,
         adapter_factory: AdapterFactory | None = None,
+        credential_adapter_factory: CredentialAdapterFactory | None = None,
     ) -> None:
         self._cookies = SegaCookieStore(conn=conn, secrets=secrets, players=players)
         self._adapter_factory: AdapterFactory = adapter_factory or MaimaiNetAdapter
+        self._credential_adapter_factory: CredentialAdapterFactory = credential_adapter_factory or _credential_adapter
+
+    async def status(self, player_id: str) -> LoginStatus:
+        return await self._cookies.status(player_id)
+
+    async def login_with_credentials(
+        self, player_id: str, username: str, password: str, ctx: ToolContext
+    ) -> LoginProfile:
+        """SEGA ID/비밀번호로 maimai DX NET에 한 번 로그인해 `clal`을 저장한다(게임 공통 쿠키). ID/비밀번호는 저장하지
+        않는다. 프로필을 읽어야 성공으로 본다 — 점검(MaintenanceError)·인증 실패는 그대로 던진다."""
+        adapter = self._credential_adapter_factory(username, password)
+        try:
+            profile, _targets = await adapter.get_rating_targets()
+            clal = adapter.session_clal()
+        finally:
+            await adapter.aclose()
+        if clal is None:
+            raise ConnectionError("로그인에 성공했지만 clal을 찾지 못했다")
+        await self._cookies.store(player_id, clal, profile.name)
+        return LoginProfile(username=profile.name)
 
     async def fetch_snapshot(self, player_id: str, *, ctx: ToolContext | None = None) -> SyncSnapshot:
         """프로필, 레이팅 대상곡, 최근 플레이, 난이도별 전체 기록을 한 번에 가져온다. 인증 실패일 때만 만료로 보고

@@ -5,34 +5,69 @@ import logging
 from typing import Any
 
 import discord
+import httpx
+from chuni_penguin.adapters.errors import (
+    AuthenticationError,
+    HTTPError,
+    NoCardsRegistered,
+)
 
 from core.decorators import on, slash_only, tool
-from core.tool_types import Display, ToolContext, ToolResult
+from core.tool_types import Display, GameRef, ToolContext, ToolResult, UserFacingError
+from services.game.registry import profile_for
 
 logger = logging.getLogger(__name__)
 
 _notified_expiries: set[str] = set()
 
 
+_BAD_CREDENTIALS = (
+    "로그인에 실패했어. ID와 비밀번호가 맞는지 확인해 줘. "
+    "(OTP(2단계 인증)를 쓰는 계정은 아직 이 방법으로 로그인할 수 없어.)"
+)
+_NO_CARDS = "이 SEGA 계정에 등록된 Aime 카드(액세스 코드)가 없어. https://my-aime.net 에서 먼저 등록해 줘."
+_UNKNOWN_FAILURE = "로그인에 실패했어. 잠시 뒤에 다시 해 줘."
+
+
+def _login_order(ctx: ToolContext) -> list[str]:
+    """먼저 요청한 게임(없으면 주 게임)의 NET으로, 그 NET이 점검이거나 닿지 않으면 다른 게임의 NET으로 로그인한다
+    (2026-11-22 사용자 결정 — CHUNITHM-NET 점검 중에 maimai는 정상인데 로그인이 막혔다). `clal`은 게임 공통이다."""
+    return [ctx.game, *(game for game in ctx.game_services if game != ctx.game)]
+
+
 async def _attempt_login(ctx: ToolContext, username: str, password: str, interaction: discord.Interaction) -> None:
-    """실제 login_with_credentials() 호출과 성공/실패 안내를 한 곳에 모은다. 처음
-    로그인하는 경로와 "덮어쓰기" 확인 버튼 경로가 이 함수를 같이 쓴다 — try/except를
-    두 번 베끼지 않는다."""
-    try:
-        profile = await ctx.chunithm_net.login_with_credentials(ctx.player_id, username, password, ctx)
-    except Exception as error:  # noqa: BLE001 - 어떤 예외든 같은 안내만 준다. 원인 예외를 그대로
-        # 보여주면 비밀번호나 응답 본문의 일부가 메시지에 섞여 나갈 수 있다(CLAUDE.md 비밀 값 규칙).
-        # 로그에도 예외 클래스 이름만 남긴다 — 비밀번호 오류와 어댑터·네트워크 결함을 운영에서 가르려면 필요하다.
-        logger.warning("sega login failed for player %s: %s", ctx.player_id, type(error).__name__)
+    """실제 로그인 호출과 성공/실패 안내를 한 곳에 모은다. 처음 로그인하는 경로와 "덮어쓰기" 확인 버튼 경로가 같이 쓴다.
+    예외 메시지는 사용자에게 보이지 않는다 — 비밀번호나 응답 본문의 일부가 섞여 나갈 수 있다(CLAUDE.md 비밀 값 규칙).
+    로그에도 예외 클래스 이름만 남긴다."""
+    unavailable: list[str] = []
+    for game in _login_order(ctx):
+        net_name = profile_for(game).net_name
+        try:
+            profile = await ctx.for_game(game).chunithm_net.login_with_credentials(ctx.player_id, username, password, ctx)
+        except NoCardsRegistered:
+            await interaction.followup.send(_NO_CARDS, ephemeral=True)
+            return
+        except AuthenticationError:
+            logger.warning("sega login failed for player %s on %s: AuthenticationError", ctx.player_id, game)
+            await interaction.followup.send(_BAD_CREDENTIALS, ephemeral=True)
+            return
+        except (HTTPError, httpx.TransportError, UserFacingError) as error:
+            # 점검(503)·서버 오류·접속 장애·NET 오류 페이지 — 그 NET만의 문제라 다른 게임 NET으로 다시 해 본다.
+            logger.warning("sega login: %s unavailable for player %s: %s", game, ctx.player_id, type(error).__name__)
+            unavailable.append(net_name)
+            continue
+        except Exception as error:  # noqa: BLE001 - 어떤 예외든 같은 안내만 준다(위 docstring)
+            logger.warning("sega login failed for player %s on %s: %s", ctx.player_id, game, type(error).__name__)
+            await interaction.followup.send(_UNKNOWN_FAILURE, ephemeral=True)
+            return
+        _notified_expiries.discard(ctx.player_id)  # 다시 로그인했으니 다음 만료는 또 안내해야 한다.
+        note = f" {'·'.join(unavailable)}이 점검 중이거나 닿지 않아 {net_name}으로 로그인했어." if unavailable else ""
         await interaction.followup.send(
-            "로그인에 실패했어. ID와 비밀번호가 맞는지 확인해 줘. "
-            "(OTP(2단계 인증)를 쓰는 계정은 아직 이 방법으로 로그인할 수 없어.)",
-            ephemeral=True,
+            f"로그인 완료! ({profile.username}){note} `/동기화`로 기록을 가져와 줘.", ephemeral=True
         )
         return
-    _notified_expiries.discard(ctx.player_id)  # 다시 로그인했으니 다음 만료는 또 안내해야 한다.
     await interaction.followup.send(
-        f"로그인 완료! ({profile.username}) `/동기화`로 기록을 가져와 줘.", ephemeral=True
+        f"지금 {'·'.join(unavailable)}이 모두 점검 중이거나 닿지 않아 로그인하지 못했어. 잠시 뒤에 다시 해 줘.", ephemeral=True
     )
 
 
@@ -67,13 +102,13 @@ _LOGIN_NOTICE = (
 )
 
 
-class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
+class _LoginModal(discord.ui.Modal, title="SEGA 로그인"):
     def __init__(self, *, ctx: ToolContext) -> None:
         super().__init__()
         self._ctx = ctx
         # 입력칸은 Label로 감싸야 안내 글(TextDisplay)과 같은 창에 둘 수 있다.
         self.username_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
-            placeholder="CHUNITHM-NET에 로그인하는 SEGA ID", required=True, max_length=64
+            placeholder="CHUNITHM-NET·maimai DX NET에 로그인하는 SEGA ID", required=True, max_length=64
         )
         self.password_input: discord.ui.TextInput[discord.ui.Modal] = discord.ui.TextInput(
             placeholder="OTP(2단계 인증)를 쓰는 계정은 아직 안 돼", required=True, max_length=128
@@ -105,9 +140,10 @@ class _LoginModal(discord.ui.Modal, title="CHUNITHM-NET 로그인"):
 
 
 @slash_only("로그인")
-async def start_login(ctx: ToolContext) -> discord.ui.Modal:
+async def start_login(ctx: ToolContext, game: GameRef | None = None) -> discord.ui.Modal:
     """SEGA ID/비밀번호를 입력하는 창을 연다. 입력값은 채널에 남지 않고, 로그인에
-    성공하면 거기서 나온 clal 쿠키만 저장한다 — ID/비밀번호는 저장하지 않는다."""
+    성공하면 거기서 나온 clal 쿠키만 저장한다 — ID/비밀번호는 저장하지 않는다.
+    game(비우면 주 게임)의 NET으로 먼저 로그인하고, 그 NET이 점검이면 다른 게임 NET으로 한다(쿠키는 게임 공통)."""
     return _LoginModal(ctx=ctx)
 
 

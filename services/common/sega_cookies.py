@@ -1,8 +1,11 @@
 # services/common/sega_cookies.py
-"""저장된 `clal`(SEGA 공통 인증 쿠키) 읽기와 로그인 만료 처리. 게임마다 있는 NET 서비스가 함께 쓴다.
+"""`clal`(SEGA 공통 인증 쿠키) 저장·읽기와 로그인 만료 처리. 게임마다 있는 NET 서비스가 함께 쓴다.
 `clal`은 게임 공통이라 `sega_cookies` 테이블 하나에 있고, 복호화는 NET 서비스 안에서만 한다(CLAUDE.md)."""
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import aiosqlite
 
@@ -11,11 +14,43 @@ from services.common.players import PlayersService
 from services.common.secrets import SecretsService
 
 
+@dataclass(slots=True, kw_only=True)
+class LoginStatus:
+    linked: bool
+    nickname: str | None = None
+    last_checked_at: str | None = None
+
+
 class SegaCookieStore:
     def __init__(self, *, conn: aiosqlite.Connection, secrets: SecretsService, players: PlayersService) -> None:
         self._conn = conn
         self._secrets = secrets
         self._players = players
+
+    async def store(self, player_id: str, clal: str, nickname: str) -> None:
+        """로그인으로 받은 `clal`을 암호화해 넣고 sega-linked 태그를 붙인다. 어느 게임 NET으로 로그인했든 같은 자리다."""
+        encrypted = self._secrets.encrypt(clal)
+        now = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            "INSERT INTO sega_cookies (player_id, encrypted_cookie, linked_at, last_checked_at, nickname) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (player_id) DO UPDATE SET "
+            "encrypted_cookie = excluded.encrypted_cookie, linked_at = excluded.linked_at, "
+            "last_checked_at = excluded.last_checked_at, nickname = excluded.nickname",
+            (player_id, encrypted, now, now, nickname),
+        )
+        await self._conn.commit()
+        await self._players.set_status_tag(player_id, "sega-linked", source="sega_cookies:login")
+
+    async def status(self, player_id: str) -> LoginStatus:
+        """로그인 여부와 저장해 둔 닉네임(DB만 읽는다). 쿠키가 있어도 sega-linked가 떼였으면(만료) 안 된 것이다."""
+        row = await (
+            await self._conn.execute(
+                "SELECT last_checked_at, nickname FROM sega_cookies WHERE player_id = ?", (player_id,)
+            )
+        ).fetchone()
+        if row is None or "sega-linked" not in await self._players.tags_for(player_id):
+            return LoginStatus(linked=False)
+        return LoginStatus(linked=True, nickname=row["nickname"], last_checked_at=row["last_checked_at"])
 
     async def clal(self, player_id: str) -> str | None:
         """복호화한 `clal`. 평문은 부른 쪽 스코프에만 잠깐 있어야 한다 — 로그나 LLM 입력에 넣지 않는다."""
