@@ -47,3 +47,9 @@ def test_starts_with_ends_with_and_equals() -> None:
     assert not text_ends_with(title, "フランドール")
     assert text_equals(title, "超最終鬼畜妹フランドールＳ")
     assert not text_equals(title, "最終鬼畜妹フランドール・S")
+
+
+def test_hiragana_and_katakana_are_the_same_text() -> None:
+    assert match_key("ふらんどーる") == match_key("フランドール")
+    assert text_contains("最終鬼畜妹フランドール・Ｓ", "ふらんどーる")
+    assert text_equals("きらきらぼし", "キラキラボシ")

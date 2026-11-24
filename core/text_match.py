@@ -1,13 +1,15 @@
 # core/text_match.py
 """글자 칸 비교(2026-10-31 결정). 곡명처럼 같은 이름이 전각·반각, 대소문자, 공백, 가운뎃점(`・`)만 달리 적힌 것을
-같은 글로 본다("フランドール・Ｓ"와 "フランドールS"). `table_query`의 글자 칸 비교와 곡 검색의 제목 조건이 같은 함수를 쓴다."""
+같은 글로 본다("フランドール・Ｓ"와 "フランドールS"). 히라가나와 가타카나도 같은 글로 본다("ふらんどーる"와 "フランドール"). `table_query`의 글자 칸 비교와 곡 검색의 제목 조건이 같은 함수를 쓴다."""
 from __future__ import annotations
 
 import unicodedata
 
+_HIRAGANA_TO_KATAKANA = {code: code + 0x60 for code in range(0x3041, 0x3097)}
+
 
 def _folded(text: str) -> str:
-    return unicodedata.normalize("NFKC", text).casefold()
+    return unicodedata.normalize("NFKC", text).casefold().translate(_HIRAGANA_TO_KATAKANA)
 
 
 def match_key(text: str) -> str:

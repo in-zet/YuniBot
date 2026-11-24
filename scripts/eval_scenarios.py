@@ -99,6 +99,15 @@ SCENARIOS: tuple[Scenario, ...] = (
         name="분석/레벨 조건", question="레벨 14 마스터 랭크 분포 보여줘",
         must_call=("song_find_songs", "report_analyze"),
     ),
+    # 한글로만 들은 곡 이름 — 못 찾으면 되묻기 전에 원제 글자(한자·가타카나·영문)로 찾아 본다.
+    Scenario(
+        name="곡 찾기/한글 이름을 한자로", question="봉염의135초 츄니즘 최고기록 알려줘",
+        must_call=("song_find_songs",),
+    ),
+    Scenario(
+        name="곡 찾기/한글 이름을 영문으로", question="글로리우스 크라운 츄니즘 마스터 상수 알려줘",
+        must_call_any=("song_find_songs", "song_chart"),
+    ),
     # "신곡"은 뜻이 둘이다 — 업데이트 일정의 신곡과 지금 버전의 신곡.
     Scenario(
         name="신곡/업데이트 일정", question="다음 업데이트 신곡 뭐 나와?",

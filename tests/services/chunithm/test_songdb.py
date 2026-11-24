@@ -50,6 +50,12 @@ async def test_resolve_unknown_raises_not_found(songdb: SongDbService) -> None:
         await songdb.resolve("이세상에없는곡이름절대", _CTX)
 
 
+async def test_resolve_not_found_tells_to_search_with_original_title_pieces(songdb: SongDbService) -> None:
+    with pytest.raises(ResolutionError, match="find_songs") as caught:
+        await songdb.resolve("이세상에없는곡이름절대", _CTX)
+    assert not caught.value.candidates
+
+
 async def test_resolve_ambiguous_raises_with_candidates(songdb: SongDbService) -> None:
     # 로컬 시드에 같은 부분 문자열을 공유하는 곡이 다수 있을 만한 흔한 단어로 검증한다.
     # ("Grab your sword"는 songdb_sample.json에도 있어 여러 경로에서 재사용 가능)

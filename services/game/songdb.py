@@ -41,6 +41,14 @@ def _const_descending(hit: ConstRangeHit) -> tuple[bool, float, str]:
     return (hit.chart.const is None, -(hit.chart.const or 0.0), hit.song.title)
 
 
+# 한글로 들은 곡 이름은 곡 DB 제목(원제)과 글자가 하나도 안 겹쳐 후보가 안 나온다. 되묻기 전에 원제 글자로 먼저 찾게 한다.
+_NOT_FOUND_HINT = (
+    "찾지 못함 — 곡 이름이 곡 DB에 없는 게 아니라, 한글 이름이라 DB 제목(원제)과 글자가 달라서일 가능성이 크다. "
+    "지금 바로 open_skill('song')으로 song 스킬을 펼치고 song_find_songs의 title로, 한국 한자음을 한자로 바꾼 조각·가타카나로 바꾼 조각·"
+    "영문 단어를 한 응답에서 동시에 여러 번 찾는다. 이걸 하기 전에는 사용자에게 원제를 알려 달라고 묻지 않는다"
+)
+
+
 def alias_key(text: str) -> str:
     """별칭 비교용 글. 대소문자와 띄어쓰기를 무시한다("킬링 리듬"과 "킬링리듬"은 같은 별칭 — 2026-11-08 사용자 결정)."""
     return "".join(text.split()).lower()
@@ -171,7 +179,7 @@ class SongDb:
         similar = similar_names(text, (song.title for song in available_songs), limit=_MAX_CANDIDATES, cutoff=0.6)
         if similar:
             raise ResolutionError(candidates=similar)
-        raise ResolutionError(message="찾지 못함")
+        raise ResolutionError(message=_NOT_FOUND_HINT)
 
     async def add_alias(self, *, alias: str, song_title: str, added_by: str) -> None:
         assert self._conn is not None
