@@ -7,10 +7,12 @@ CHUNITHM 서비스로 하지만, 요청·선호 게임이 maimai이거나 CHUNIT
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
+from urllib.parse import quote
 
 import aiolimiter
 import httpx
@@ -64,6 +66,8 @@ SESSION_LOST_CODES = frozenset({100001, 200002, 200004})
 # 난이도별 기록 목록의 `diff` 값. 宴은 10이다.
 _LIST_DIFF = {"BAS": 0, "ADV": 1, "EXP": 2, "MAS": 3, "REM": 4, "UTA": 10}
 LIST_DIFFICULTIES: tuple[str, ...] = tuple(_LIST_DIFF)
+# 플레이 횟수(곡마다 상세 하나)를 받을 때의 초당 요청 수(2026-11-27 사용자 결정).
+PLAY_COUNT_RATE = 10
 
 _NET_ERROR_MESSAGES: dict[int, str] = {}  # 알게 되는 대로 더한다. 모르는 코드는 번호와 함께 일반 문장으로 안내한다.
 
@@ -178,6 +182,14 @@ class MaimaiNetAdapter:
     async def post_favorites(self, payload: Mapping[str, str | list[str]]) -> None:
         await self._post(f"{_FAVORITE_PATH}/set", payload)
 
+    async def get_music_index(self) -> dict[tuple[str, str], str]:
+        """(제목, 채보 종류) → 곡 상세로 가는 값. 전체 장르 MAS 목록이라 안 친 곡도 들어 있다(宴은 없다)."""
+        return parser.parse_music_index(await self._get(f"{_MOBILE}/record/musicGenre/search/?genre=99&diff=3"))
+
+    async def get_play_counts(self, idx: str) -> dict[tuple[str, str], int]:
+        """곡 상세의 (채보 종류, 난이도) → 플레이 횟수."""
+        return parser.parse_play_counts(await self._get(f"{_MOBILE}/record/musicDetail/?idx={quote(idx, safe='')}"))
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -191,6 +203,8 @@ class MaimaiNetAdapterLike(Protocol):
     async def post_user_option(self, payload: Mapping[str, str]) -> None: ...
     async def get_favorite_page(self) -> bytes: ...
     async def post_favorites(self, payload: Mapping[str, str | list[str]]) -> None: ...
+    async def get_music_index(self) -> dict[tuple[str, str], str]: ...
+    async def get_play_counts(self, idx: str) -> dict[tuple[str, str], int]: ...
     async def aclose(self) -> None: ...
 
 
@@ -200,6 +214,11 @@ CredentialAdapterFactory = Callable[[str, str], MaimaiNetAdapterLike]
 
 def _credential_adapter(username: str, password: str) -> MaimaiNetAdapterLike:
     return MaimaiNetAdapter(None, username=username, password=password)
+
+
+def _play_count_adapter(clal: str) -> MaimaiNetAdapterLike:
+    """플레이 횟수 전용 연결: 곡마다 상세를 하나씩 받으므로 초당 10번까지(2026-11-27 사용자 결정, 다른 요청은 초당 1번)."""
+    return MaimaiNetAdapter(clal, limiter=aiolimiter.AsyncLimiter(PLAY_COUNT_RATE, 1))
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -221,9 +240,11 @@ class MaimaiNetService:
         players: PlayersService,
         adapter_factory: AdapterFactory | None = None,
         credential_adapter_factory: CredentialAdapterFactory | None = None,
+        play_count_adapter_factory: AdapterFactory | None = None,
     ) -> None:
         self._cookies = SegaCookieStore(conn=conn, secrets=secrets, players=players)
         self._adapter_factory: AdapterFactory = adapter_factory or MaimaiNetAdapter
+        self._play_count_adapter_factory: AdapterFactory = play_count_adapter_factory or _play_count_adapter
         self._credential_adapter_factory: CredentialAdapterFactory = credential_adapter_factory or _credential_adapter
 
     async def status(self, player_id: str) -> LoginStatus:
@@ -246,7 +267,12 @@ class MaimaiNetService:
         return LoginProfile(username=profile.name)
 
     async def _with_adapter[T](
-        self, player_id: str, ctx: ToolContext | None, work: Callable[[MaimaiNetAdapterLike], Awaitable[T]]
+        self,
+        player_id: str,
+        ctx: ToolContext | None,
+        work: Callable[[MaimaiNetAdapterLike], Awaitable[T]],
+        *,
+        factory: AdapterFactory | None = None,
     ) -> T:
         """저장한 `clal`로 연결 하나를 열어 `work`를 한다. 인증 실패일 때만 만료로 보고 sega-linked를 떼고
         sega.login.expired를 낸 뒤 그대로 예외를 다시 던진다. 점검·네트워크·파서 오류는 로그인과 무관하므로 태그를
@@ -255,7 +281,7 @@ class MaimaiNetService:
         if clal is None:
             raise ConnectionError("로그인되어 있지 않다")
 
-        adapter = self._adapter_factory(clal)
+        adapter = (factory or self._adapter_factory)(clal)
         del clal
         try:
             return await work(adapter)
@@ -324,3 +350,33 @@ class MaimaiNetService:
                 )
 
         await self._with_adapter(player_id, ctx, work)
+
+    async def play_counts(
+        self, player_id: str, charts: Sequence[tuple[str, str]], *, ctx: ToolContext | None = None
+    ) -> dict[tuple[str, str], dict[str, int]]:
+        """(제목, 채보 종류)마다 난이도 → 플레이 횟수(안 친 난이도는 없다 = 0회). 곡 목록에서 곡 상세로 가는 값을 찾고
+        곡 상세를 동시에 받는다(초당 10번). 목록에 없는 곡(宴 등)이나 상세를 못 읽은 곡은 결과에 없다(모름).
+        인증 실패는 만료로 처리하고 다시 던진다."""
+        wanted = list(dict.fromkeys(charts))
+
+        async def work(adapter: MaimaiNetAdapterLike) -> dict[tuple[str, str], dict[str, int]]:
+            # 목록을 먼저 하나 받아 세션을 만든 뒤 상세를 동시에 받는다(풀린 세션에 동시에 다시 로그인하지 않게).
+            index = await adapter.get_music_index()
+
+            async def one(key: tuple[str, str]) -> tuple[tuple[str, str], dict[str, int]] | None:
+                idx = index.get(key)
+                if idx is None:
+                    return None
+                try:
+                    counts = await adapter.get_play_counts(idx)
+                except AuthenticationError:
+                    raise
+                except Exception:
+                    logger.warning("maimai 곡 상세를 못 읽었다: %s", key, exc_info=True)
+                    return None
+                return key, {difficulty: n for (kind, difficulty), n in counts.items() if kind == key[1]}
+
+            results = await asyncio.gather(*(one(key) for key in wanted))
+            return dict(found for found in results if found is not None)
+
+        return await self._with_adapter(player_id, ctx, work, factory=self._play_count_adapter_factory)

@@ -259,6 +259,7 @@ class _FakeAdapter:
         self.favorite_html = (_DIR / "favorite_update.html").read_text(encoding="utf-8")
         self.applies_posts = applies_posts
         self.posts: list[tuple[str, Mapping[str, str | list[str]]]] = []
+        self.detail_requests: list[str] = []
 
     async def get_user_option(self) -> bytes:
         if self.error is not None:
@@ -274,6 +275,19 @@ class _FakeAdapter:
         if self.error is not None:
             raise self.error
         return self.favorite_html.encode()
+
+    async def get_music_index(self) -> dict[tuple[str, str], str]:
+        if self.error is not None:
+            raise self.error
+        return parser.parse_music_index((_DIR / "music_index.html").read_text(encoding="utf-8"))
+
+    async def get_play_counts(self, idx: str) -> dict[tuple[str, str], int]:
+        self.detail_requests.append(idx)
+        if idx == "IDX0002":
+            raise RuntimeError("상세를 못 읽음")
+        # 표본 상세는 STD MAS 1회 하나뿐이다. 종류 거르기를 보려고 DX 기록도 하나 섞는다.
+        counts = parser.parse_play_counts((_DIR / "music_detail.html").read_text(encoding="utf-8"))
+        return {**counts, ("DX", "EXP"): 7}
 
     async def post_favorites(self, payload: Mapping[str, str | list[str]]) -> None:
         self.posts.append(("favorite", payload))
@@ -514,4 +528,38 @@ async def test_settings_auth_failure_expires_the_login(conn) -> None:
     with pytest.raises(AuthenticationError):
         await _service_with(conn, secrets, players, _FakeAdapter(error=AuthenticationError())).get_favorite_music(player.id)
 
+    assert "sega-linked" not in await players.tags_for(player.id)
+
+
+# ---------------------------------------------------------------- 플레이 횟수 (2026-11-27 사용자 요청)
+
+
+async def test_play_counts_find_each_song_in_the_index_and_read_its_detail(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+    adapter = _FakeAdapter()
+    service = MaimaiNetService(
+        conn=conn, secrets=secrets, players=players,
+        play_count_adapter_factory=lambda clal: cast(MaimaiNetAdapterLike, adapter),
+    )
+
+    counts = await service.play_counts(
+        player.id, [("ゴーストルール", "STD"), ("ゴーストルール", "DX"), ("Overdose", "DX"), ("없는 곡", "DX")]
+    )
+
+    # 상세는 그 채보 종류 것만 남긴다. 상세를 못 읽은 곡(Overdose)과 목록에 없는 곡은 결과에 없다(모름).
+    assert counts == {("ゴーストルール", "STD"): {"MAS": 1}, ("ゴーストルール", "DX"): {"EXP": 7}}
+    assert sorted(adapter.detail_requests) == ["IDX0002", "IDX0004", "IDX0005"] and adapter.closed
+
+
+async def test_play_counts_auth_failure_expires_the_login(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+    service = MaimaiNetService(
+        conn=conn, secrets=secrets, players=players,
+        play_count_adapter_factory=lambda clal: cast(MaimaiNetAdapterLike, _FakeAdapter(error=AuthenticationError())),
+    )
+
+    with pytest.raises(AuthenticationError):
+        await service.play_counts(player.id, [("ゴーストルール", "STD")])
     assert "sega-linked" not in await players.tags_for(player.id)

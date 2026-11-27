@@ -158,3 +158,16 @@ def test_recent_play_lamps_are_read_from_the_two_result_icons() -> None:
 def test_error_code_is_read_from_the_error_page_only() -> None:
     assert parser.error_code(_html("error_session.html")) == 100001
     assert parser.error_code(_html("recent.html")) is None
+
+
+def test_parse_music_index_maps_title_and_chart_type_to_the_detail_value() -> None:
+    index = parser.parse_music_index((_DIR / "music_index.html").read_text(encoding="utf-8"))
+
+    assert index[("ゴーストルール", "DX")] == "IDX0004" and index[("ゴーストルール", "STD")] == "IDX0005"
+    assert len(index) == 5
+
+
+def test_parse_play_counts_reads_each_played_chart() -> None:
+    counts = parser.parse_play_counts((_DIR / "music_detail.html").read_text(encoding="utf-8"))
+
+    assert counts == {("STD", "MAS"): 1}  # 안 친 난이도는 칸이 없다

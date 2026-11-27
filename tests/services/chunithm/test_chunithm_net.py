@@ -154,6 +154,18 @@ class _FakeAdapter:
     async def get_personal_bests(self, *, difficulty: Difficulty) -> list[PersonalBest]:
         return self._personal_bests.get(difficulty.short(), [])
 
+    async def get_personal_bests_on_song(self, song_id: int) -> list[PersonalBest]:
+        """곡 상세: 플레이 횟수 시험용. id 13은 못 읽는 곡이다."""
+        if self.fails:
+            raise self.error
+        if song_id == 13:
+            raise RuntimeError("상세를 못 읽음")
+        return [
+            PersonalBest(song=Song(id=song_id, title=f"곡{song_id}"), chart=Chart(difficulty=Difficulty(code)),
+                         score=900_000, clear_lamp=ClearLamp.clear, combo_lamp=ComboLamp.none, play_count=count)
+            for code, count in (("MAS", song_id), ("EXP", 2))
+        ]
+
     async def get_detailed_recent_score(self, score: RecentScore) -> RecentScore:
         # 실제 어댑터는 상세 페이지를 다시 읽어 judgements를 채운다 — 가짜에서는
         # 상세 조회가 다녀갔다는 것만 알 수 있으면 충분하다.
@@ -906,3 +918,27 @@ async def test_error_translating_adapter_names_unknown_codes_and_passes_other_er
 
     assert other.marker == "그대로"  # pyright: ignore[reportAttributeAccessIssue]
     assert other.sync_value() == 7  # pyright: ignore[reportAttributeAccessIssue]
+
+
+async def test_play_counts_reads_each_song_detail_and_skips_unreadable_ones(conn, secrets) -> None:
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    counts = await service.play_counts(player.id, [5, 13, 9, 5])
+
+    assert counts == {5: {"MAS": 5, "EXP": 2}, 9: {"MAS": 9, "EXP": 2}}
+
+
+async def test_play_counts_auth_failure_expires_login(conn, secrets) -> None:
+    players, player, bus, received = await _linked_player_with_expiry_bus(conn, secrets)
+    service = _make_service(conn, secrets, adapter=_FakeAdapter(fails=True), players=players)
+    ctx_with_bus = ToolContext(player_id=player.id, tags=frozenset(), services={}, event_bus=bus)
+
+    with pytest.raises(AuthenticationError):
+        await service.play_counts(player.id, [5, 9], ctx=ctx_with_bus)
+    await bus.drain()
+
+    assert received == [(player.id, {"player_id": player.id})]

@@ -18,6 +18,7 @@ from core.resolvers import ResolutionError
 from core.tables import (
     EMPTY_CELL,
     Cell,
+    Column,
     Row,
     RowRef,
     TableBuilder,
@@ -498,6 +499,91 @@ def _judgement_cells(score: RecentScore) -> dict[str, Cell]:
         return {}
     values = (j.justice_critical, j.justice, j.attack, j.miss)
     return {name: cell(value) for name, value in zip(_JUDGEMENT_COLUMNS, values, strict=True)}
+
+
+# ---------------------------------------------------------------- 플레이 횟수 (2026-11-27 사용자 요청)
+
+_PLAY_COUNT = "플레이 횟수"
+# 한 번에 받는 곡 수 상한. 곡마다 NET 곡 상세를 하나씩 받는다(초당 10번, 2026-11-27 사용자 결정).
+_PLAY_COUNT_SONG_LIMIT = 50
+_PlayCountKey = int | tuple[str, str]
+
+
+def _play_count_key(ctx: ToolContext, song: Any, chart_type: str) -> _PlayCountKey:
+    """NET 서비스가 곡을 가리키는 값: CHUNITHM은 musicId, maimai는 (제목, 채보 종류)(곡 상세가 종류마다 따로다)."""
+    return (song.title, chart_type) if ctx.game == "maimai" else song.id
+
+
+async def _fetch_play_counts(
+    ctx: ToolContext, keys: list[_PlayCountKey]
+) -> dict[_PlayCountKey, dict[str, int]] | ToolResult:
+    net_name = profile_for(ctx.game).net_name
+    try:
+        return await ctx.chunithm_net.play_counts(ctx.player_id, keys, ctx=ctx)
+    except MaintenanceError:
+        return ToolResult(error=f"{net_name}이 점검 중이야. 점검이 끝나면 다시 해 줘.")
+    except (AuthenticationError, ConnectionError):
+        return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
+
+
+@tool(tags=["sega-linked"], cost="network")
+async def play_count(ctx: ToolContext, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
+    """채보 하나를 지금까지 몇 번 쳤는지 NET 곡 상세에서 바로 읽는다("크로노 마스 몇 번 쳤어?"). 본인 기록만이다.
+    여러 채보면 그 채보 표를 add_play_counts에 준다."""
+    assert isinstance(chart, ResolvedChart)
+    key = _play_count_key(ctx, chart.song, chart.chart.chart_type)
+    found = await _fetch_play_counts(ctx, [key])
+    if isinstance(found, ToolResult):
+        return found
+    label = f"{chart.song.title} {f'{chart.chart.chart_type} ' if chart.chart.chart_type else ''}{chart.chart.difficulty}"
+    if key not in found:
+        return ToolResult(error=f"{label}의 플레이 횟수를 {profile_for(ctx.game).net_name}에서 못 읽었어.")
+    count = found[key].get(chart.chart.difficulty, 0)
+    return ToolResult(
+        data={"song": chart.song.title, "chart_type": chart.chart.chart_type, "difficulty": chart.chart.difficulty,
+              "play_count": count},
+        display=Display(content=f"{label}  {count}회"),
+        display_mode="optional",
+    )
+
+
+@tool(tags=["sega-linked"], cost="network")
+async def add_play_counts(
+    ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])]
+) -> ToolResult:
+    """채보 표에 "플레이 횟수" 칸을 더한 새 표를 돌려준다(본인 기록, NET 곡 상세에서 바로 읽는다). 곡마다 요청이
+    나가서 곡 50개까지만 받는다 — 넘으면 표를 먼저 거른다. 안 친 채보는 0회, 못 읽은 곡은 값이 없다."""
+    assert isinstance(table, WorkTable)
+    keys: dict[int, _PlayCountKey] = {}  # 행 위치 → 서비스 키
+    for position, row in enumerate(table.rows):
+        title, chart_type, _difficulty = tc.row_chart_key(row)
+        song = ctx.songdb.song_by_title(title)
+        if song is not None:
+            keys[position] = _play_count_key(ctx, song, chart_type)
+    wanted = list(dict.fromkeys(keys.values()))
+    if len(wanted) > _PLAY_COUNT_SONG_LIMIT:
+        return ToolResult(
+            error=f"플레이 횟수는 한 번에 곡 {_PLAY_COUNT_SONG_LIMIT}개까지만 받을 수 있어(지금 {len(wanted)}개). 표를 먼저 걸러 줘."
+        )
+    found = await _fetch_play_counts(ctx, wanted) if wanted else {}
+    if isinstance(found, ToolResult):
+        return found
+    positions = {id(row): position for position, row in enumerate(table.rows)}
+
+    def cells_for(row: Row) -> dict[str, Cell]:
+        key = keys.get(positions[id(row)])
+        counts = found.get(key) if key is not None else None
+        if counts is None:
+            return {_PLAY_COUNT: cell(None, "모름")}
+        n = counts.get(tc.row_chart_key(row)[2], 0)
+        return {_PLAY_COUNT: cell(n, f"{n}회")}
+
+    extended = extend_table(
+        table, [Column(name=_PLAY_COUNT, label=_PLAY_COUNT, value_type="number")], cells_for,
+        steps=[f"{profile_for(ctx.game).net_name} 플레이 횟수"],
+    )
+    unknown = sum(1 for row in extended.rows if row.cell(_PLAY_COUNT).raw is None)
+    return ToolResult(data={"count": extended.row_count, "songs": len(wanted), "unknown": unknown}, table=extended)
 
 
 @tool(cost="network", games=["chunithm"])

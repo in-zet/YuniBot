@@ -1,6 +1,7 @@
 # services/chunithm/chunithm_net.py
 from __future__ import annotations
 
+import asyncio
 import functools
 import http.cookiejar
 import inspect
@@ -9,6 +10,7 @@ import logging
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Protocol
 
+import aiolimiter
 import aiosqlite
 from chuni_penguin.adapters.chunithm_net.errors import ChuniNetError
 from chuni_penguin.adapters.chunithm_net.utils import is_valid_clal
@@ -17,7 +19,11 @@ from chuni_penguin.types import Difficulty
 
 from core.tool_types import ToolContext, UserFacingError
 from services.chunithm.arcade_settings import SETTINGS_FIELDS
-from services.chunithm.sync_snapshot import SyncFetch, snapshot_from_fetch
+from services.chunithm.sync_snapshot import (
+    SyncFetch,
+    difficulty_code,
+    snapshot_from_fetch,
+)
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
 from services.common.sega_cookies import LoginStatus, SegaCookieStore
@@ -40,6 +46,8 @@ logger = logging.getLogger(__name__)
 
 # CHUNITHM-NET 즐겨찾기 상한("Favorite Music n /50", 2026-11-27 실측).
 FAVORITE_LIMIT = 50
+# 플레이 횟수(곡마다 상세 하나)를 받을 때의 초당 요청 수(2026-11-27 사용자 결정).
+PLAY_COUNT_RATE = 10
 
 # fetch_for_sync가 전체 PB를 모을 때 도는 순서. CHUNITHM-NET이 쓰는 코드 그대로다
 # (Difficulty(code)가 "BAS"/"ADV"/"EXP"/"MAS"/"ULT"/"WE"를 그대로 알아듣는다).
@@ -95,6 +103,7 @@ class ChunithmNetAdapterLike(Protocol):
     async def get_new20(self) -> list[PersonalBest]: ...
     async def get_recent_scores(self) -> list[RecentScore]: ...
     async def get_personal_bests(self, *, difficulty: Difficulty) -> list[PersonalBest]: ...
+    async def get_personal_bests_on_song(self, song_id: int) -> list[PersonalBest]: ...
     async def get_detailed_recent_score(self, score: RecentScore) -> RecentScore: ...
     async def get_favorite_music(self) -> list[int]: ...
     async def set_favorite_music(self, ids: Sequence[int]) -> None: ...
@@ -430,6 +439,41 @@ class ChunithmNetService:
             raise
         finally:
             await adapter.aclose()
+
+    async def play_counts(
+        self, player_id: str, song_ids: Sequence[int], *, ctx: ToolContext | None = None
+    ) -> dict[int, dict[str, int]]:
+        """곡(musicId)마다 난이도 코드 → 플레이 횟수. 곡 상세 페이지를 곡마다 하나씩, 초당 10번까지 동시에 받는다
+        (2026-11-27 사용자 결정). 안 친 난이도는 없다(0회), 상세를 못 읽은 곡은 결과에 없다(모름). 첫 곡은 따로 받아
+        세션·토큰을 만든 뒤 나머지를 보낸다. 인증 실패는 만료로 처리하고 다시 던진다."""
+        wanted = list(dict.fromkeys(song_ids))
+        cookie = await self._decrypted_cookie(player_id)
+        if cookie is None:
+            raise ConnectionError("로그인되어 있지 않다")
+
+        adapter = self._adapter_factory(cookie)
+        limiter = aiolimiter.AsyncLimiter(PLAY_COUNT_RATE, 1)
+
+        async def one(song_id: int) -> tuple[int, dict[str, int]] | None:
+            await limiter.acquire()
+            try:
+                bests = await adapter.get_personal_bests_on_song(song_id)
+            except AuthenticationError:
+                raise
+            except Exception:
+                logger.warning("CHUNITHM-NET 곡 상세를 못 읽었다: %s", song_id, exc_info=True)
+                return None
+            return song_id, {difficulty_code(pb.chart.difficulty): pb.play_count or 0 for pb in bests}
+
+        try:
+            results = [await one(wanted[0])] if wanted else []
+            results += await asyncio.gather(*(one(song_id) for song_id in wanted[1:]))
+        except AuthenticationError:
+            await self._expire_login(player_id, ctx)
+            raise
+        finally:
+            await adapter.aclose()
+        return dict(found for found in results if found is not None)
 
     async def enrich_recent_with_detail(
         self, player_id: str, scores: list[RecentScore], *, limit: int, ctx: ToolContext | None = None

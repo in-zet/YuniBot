@@ -270,6 +270,15 @@ SCENARIOS: tuple[Scenario, ...] = (
         name="곡 찾기/최고 난이도만 거르기", question="14.5에서 15.0 상수표에서 곡마다 최고 난이도만 남겨줘",
         must_call=("song_highest_charts",),
     ),
+    # 플레이 횟수 — NET 곡 상세를 바로 읽는다(2026-11-27 사용자 요청).
+    Scenario(
+        name="기록/플레이 횟수 하나", question="Climax 마스 몇 번 쳤어?",
+        must_call=("report_play_count",), must_not_call=("song_find_songs",),
+    ),
+    Scenario(
+        name="기록/플레이 횟수 표", question="내 베스트 곡들 각각 몇 번씩 쳤는지 보여줘",
+        must_call=("report_best", "report_add_play_counts"),
+    ),
     Scenario(
         name="업데이트/마이 신곡", question="마이마이 이번에 들어온 신곡 보여줘",
         must_call=("updates_new_songs",), must_args=(("updates_new_songs", "game", "마이|maimai"),),

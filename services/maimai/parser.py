@@ -294,3 +294,37 @@ def parse_recent(html: str | bytes) -> list[PlayEntry]:
         )
     return plays
 
+
+
+def parse_music_index(html: str | bytes) -> dict[tuple[str, str], str]:
+    """전체 장르 곡 목록(`record/musicGenre/search/?genre=99&diff=3`, 안 친 곡도 나온다)의 (제목, 채보 종류) → 곡 상세로
+    가는 값(`idx`, 불투명). 같은 (제목, 종류)가 둘이면 앞의 것이다(실측 1,484개 중 `Link` 하나뿐). 채보 종류 그림은
+    점수 칸(`…_score_back`) 바깥, 같은 묶음 안에 있다."""
+    index: dict[tuple[str, str], str] = {}
+    for wrapper in _doc(html).css("div.w_450.m_15.p_r.f_0"):
+        idx = wrapper.css_first('input[name="idx"]')
+        title = _text(wrapper.css_first("div.music_name_block"))
+        kind = wrapper.css_first("img.music_kind_icon")
+        if idx is None or not title or kind is None:
+            continue
+        index.setdefault((title, _chart_type(kind)), idx.attributes.get("value") or "")
+    if not index:
+        raise MaimaiParseError("곡 목록에서 곡을 하나도 찾지 못했다")
+    return index
+
+
+_PLAY_COUNT = re.compile(r"PLAY COUNT[：:]\s*([\d,]+)")
+
+
+def parse_play_counts(html: str | bytes) -> dict[tuple[str, str], int]:
+    """곡 상세(`record/musicDetail/?idx=…`)의 (채보 종류, 난이도) → 플레이 횟수. 친 채보만 점수 칸이 있고, 안 친 난이도는
+    결과에 없다(0회)."""
+    counts: dict[tuple[str, str], int] = {}
+    for node in _score_back_entries(_doc(html)):
+        if not node.attributes.get("id"):
+            continue  # 위쪽 난이도 목록 줄이 아니라 기록 칸만(기록 칸에는 id="master" 같은 id가 있다)
+        found = _PLAY_COUNT.search(node.text(separator=" "))
+        if found is None:
+            continue
+        counts[(_chart_type(node.css_first("img.music_kind_icon")), _difficulty_of(node))] = int(found.group(1).replace(",", ""))
+    return counts

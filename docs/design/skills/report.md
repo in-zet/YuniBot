@@ -97,6 +97,8 @@ listens: [chunithm.sync.completed]
 | `profile` | 프로필 | `player: PlayerRef`(기본 나) | optional |
 | `best` | 베스트 30, 신곡 20 (표 반환). `version`을 주면 이전 버전 기준 레이팅표 | `player: PlayerRef`, `kind`(best/new/둘 다), `version`(곡 DB 버전 이름, 선택) | 표 |
 | `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만. 표 반환) | `player: PlayerRef`, `count` | 표 |
+| `play_count` | 채보 하나의 플레이 횟수(NET 곡 상세를 바로 읽음, 본인만, 태그 `sega-linked`) | `chart: ChartRef`, `game` | optional |
+| `add_play_counts` | 채보 표에 "플레이 횟수" 칸(곡 50개까지, 본인만) | `table: TableRef`(곡·난이도) | 표 |
 | `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | optional |
 | `analyze` | 상수대별 평균, 랭크 분포 (표 반환). 표를 주면 그 표의 채보만으로 통계 | `player: PlayerRef`, 상수 범위(선택), `table: TableRef \| None`(선택, 곡·난이도 필요) | 표 |
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count`, `table: TableRef`(선택, `find_songs`가 거른 표 — 그 채보 안에서만 고른다) | 표 |
@@ -211,3 +213,8 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 - 레이팅 대상 채보가 AP·AP+면 곡 레이팅 +1(일본판 CiRCLE부터, RemyWiki "Achieving an ALL PERFECT(+) gives 1 bonus rating"·Gamerch "ALL PERFECT以上 … 1ポイント加算"). FC·FC+·싱크는 보너스 없음. 세가 공식 페이지 본문은 확인하지 못했다.
 - 게임 프로필의 `lamp_rating_bonus`와 `GameProfile.song_rating(점수, 상수, 콤보 램프)`로 넣었다. 기록의 곡 레이팅(저장·읽을 때 다시 계산·프레임 짜기)은 모두 이것을 쓰고, `chart_rating`은 점수만 보는 계산(후보곡 기준 점수·`rating-calc`·목표)에 남는다.
 - 실제 기록에도 그대로 적용된다. 2026-11-21 운영 DB에는 maimai AP 기록이 없어 바뀐 숫자는 없었다. 같은 점수에서 램프만 AP가 되면 다음 동기화의 저장값 갱신이 곡 레이팅을 올린다(갱신 목록에는 램프 변화로만 나온다).
+
+## 플레이 횟수 (2026-11-27 사용자 요청)
+
+- 동기화로 받는 목록에는 플레이 횟수가 없고 곡 상세에만 있다. CHUNITHM은 `sendMusicDetail`(가져온 코드의 `get_personal_bests_on_song`, musicId로), maimai는 `record/musicDetail/?idx=`(전체 장르 MAS 목록 `musicGenre/search/?genre=99&diff=3`에서 (제목, 채보 종류) → idx를 먼저 찾는다, 宴은 없음). 표본 `docs/reference/maimai-net/music_index.html`·`music_detail.html`.
+- 곡마다 상세 하나라 사용자 결정으로 곡 50개까지, 초당 10번(이 요청만, 다른 NET 요청은 그대로)으로 동시에 받는다. 첫 요청을 따로 보내 세션을 만든 뒤 나머지를 보낸다. 안 친 채보는 0회, 상세를 못 읽은 곡은 "모름". 저장하지 않는다(매번 NET에서 읽는다). 남의 쿠키로 접속하지 않도록 본인 것만.

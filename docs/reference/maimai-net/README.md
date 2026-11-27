@@ -12,6 +12,8 @@
 | `music_empty.html` | 같은 경로 `diff=0` | 친 곡이 없는 난이도 |
 | `user_option.html` | `home/userOption/updateUserOption/` | 인게임 설정 폼(2026-11-27). `<select>` 39개 + 요청 토큰, 저장은 `…/update/`에 POST. 맨 위 `optionKind`(BASIC·ADVANCED·EXPERT·Details)는 "Details일 때만 세부 설정이 켜진다" |
 | `favorite_update.html` | `home/userOption/favorite/updateMusic` | 즐겨찾기 바꾸기(2026-11-27). 수록곡 전부가 장르별 체크 칸(`music[]`, 값은 불투명), 지금 즐겨찾기는 `checked`. 장르마다 3곡 + 체크된 곡만 남겼다. 저장은 `…/set`에 `idx=99`·`music[]`·`token` POST |
+| `music_index.html` | `record/musicGenre/search/?genre=99&diff=3` | 전체 장르 MAS 목록(안 친 곡 포함, 1,484개 중 5개만 — 처음 3개 + DX·STD가 다 있는 곡 하나). 채보 종류 그림은 점수 칸 바깥 묶음 안에 있다(2026-11-27) |
+| `music_detail.html` | `record/musicDetail/?idx=…` | 곡 상세(2026-11-27). 친 난이도마다 `id`가 붙은 점수 칸에 "Last played date"·"PLAY COUNT"가 있다. 안 친 난이도는 칸이 없다 |
 | `error_session.html` | `error/` | 로그인이 풀렸을 때 가는 오류 페이지(`ERROR CODE：100001`) |
 
 ## 실측으로 안 것
