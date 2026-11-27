@@ -1,6 +1,6 @@
 ---
 name: arcade
-description: 오락실별로 츄니즘 게임 설정(스피드, 필드 월, 판정 타이밍 A·B, 가이드음)을 저장하고 꺼내 보여 준다.
+description: 오락실별로 게임 설정(츄니즘 스피드·필드 월, maimai 노트·터치 속도, 판정 타이밍 A·B, 가이드음 등)을 저장하고 꺼내 보여 준다.
 summary: 오락실마다 게임 설정(스피드, 판정 타이밍 등)을 저장해 두고 꺼내 보여 줄게.
 examples:
   - 겜플 세팅 알려 줘
@@ -8,15 +8,15 @@ examples:
   - 오늘 광주 게임플라자에서 했어
 triggers: [오락실, 겜플, 게임플라자, 방문, 세팅]
 category: 오락실
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
 services: [chunithm_net, arcades, records, db]
-listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.viewed]
+listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.viewed, maimai.sync.completed, maimai.sync.reported, maimai.session.viewed]
 ---
 
 # 유니 스킬: arcade
 
-오락실 목록·별칭·방문 기록은 `arcades` 공통 서비스가 갖고 있다. 이 스킬은 오락실마다의 츄니즘 게임 설정만 다룬다.
+오락실 목록·별칭·방문 기록은 `arcades` 공통 서비스가 갖고 있다. 이 스킬은 오락실마다의 게임 설정만 다룬다. 설정은 게임마다 따로 저장한다 — maimai 이야기면 `game`에 마이마이를 넣는다.
 
 - 오락실 선택은 버튼이 아니라 말로 받는다(동기화 리포트는 텍스트만 실어 보낸다). `/동기화`에 오락실을 같이 말하거나, 나중에 `/오락실 방문`으로 알려준다.
 - 설정을 물으면 지금 계정 설정(가장 최근에 읽은 값)과 다른 항목부터 말한다. 다른 항목이 없으면 "그대로 쓰면 된다"고 말한다. 마지막 플레이 날짜를 함께 말한다.

@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
@@ -26,7 +27,9 @@ _CORE_ARCADES_SQL = "".join(
     Path(f"migrations/core/{name}.sql").read_text()
     for name in ("005_arcades", "011_songdb_aliases", "017_arcade_aliases_guild_scope", "020_aliases_global", "025_songdb_aliases_game")
 )
-_ARCADE_SQL = (Path(__file__).parent.parent / "migrations" / "001_init.sql").read_text()
+_ARCADE_SQL = "".join(
+    (Path(__file__).parent.parent / "migrations" / name).read_text() for name in ("001_init.sql", "002_settings_by_game.sql")
+)
 
 
 def _load_skill() -> ModuleType:
@@ -493,3 +496,65 @@ async def test_register_arcade_reports_an_alias_owned_by_another_arcade(skill: M
     result = await skill.register_arcade(ctx, name="부산 오락실", alias="겜플")
 
     assert result.error is not None and "이미" in result.error
+
+
+# ---------------------------------------------------------------- 게임별 설정 (2026-11-27, plan 6-8b)
+
+
+def _maimai_settings(**overrides: str) -> GameSettings:
+    named = {
+        "speed": "5.75", "touch_speed": "5.50", "slide_timing": "0.0",
+        "play_timing_offset": "0.0", "judge_timing_offset": "0.6", "guide_sound": "OFF",
+    }
+    named.update(overrides)
+    return GameSettings(named=dict(named), raw={**named, "optionKind": "Details"})
+
+
+async def test_maimai_visit_saves_maimai_settings_apart_from_chunithm(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    player_id = await _make_player(db)
+    chuni_ctx = _ctx(player_id=player_id, db=db, chunithm_net=_FakeChunithmNet(settings=_settings(speed="9.00")))
+    arcade = await _make_arcade(chuni_ctx)
+    await skill.record_visit(chuni_ctx, arcade=arcade)
+
+    mai_net = _FakeChunithmNet(settings=_maimai_settings())
+    mai_ctx = replace(_ctx(player_id=player_id, db=db, chunithm_net=mai_net), game="maimai")
+    first = await skill.record_visit(mai_ctx, arcade=arcade)
+    mai_net.settings = _maimai_settings(touch_speed="6.00")
+    second = await skill.record_visit(mai_ctx, arcade=arcade)
+
+    assert first.data["changed"] == []  # 츄니즘 설정과 비교하지 않는다
+    assert second.data["changed"] == ["터치 속도"]
+    shown = await skill.get_settings(mai_ctx, arcade=arcade)
+    assert shown.data["settings"]["touch_speed"] == "6.00"
+    assert "노트 속도 5.75 / 터치 속도 6.00" in shown.display.content
+    chuni_shown = await skill.get_settings(chuni_ctx, arcade=arcade)
+    assert chuni_shown.data["settings"]["speed"] == "9.00"
+    table = (await skill.history(mai_ctx, arcade=arcade)).table
+    assert table is not None and [c.name for c in table.columns][1:3] == ["노트 속도", "터치 속도"]
+    assert await mai_ctx.arcades.visits_for(player_id=player_id, game="maimai")
+
+
+def test_maimai_events_reach_the_same_handlers(skill: ModuleType) -> None:
+    events = {fn.__yuni_on__.event_name for fn in vars(skill).values() if hasattr(fn, "__yuni_on__")}
+    assert {"maimai.sync.completed", "maimai.sync.reported", "maimai.session.viewed"} <= events
+
+
+async def test_migration_002_moves_existing_chunithm_rows_into_json() -> None:
+    migrations = Path(__file__).parent.parent / "migrations"
+    async with aiosqlite.connect(":memory:") as conn:
+        conn.row_factory = aiosqlite.Row
+        await conn.executescript(_CORE_PLAYERS_SQL + _CORE_ARCADES_SQL + (migrations / "001_init.sql").read_text())
+        await conn.execute(
+            "INSERT INTO arcade_settings (visit_id, player_id, arcade_id, play_date, speed, field_wall_position, "
+            "play_timing_offset, judge_timing_offset, guide_sound, raw_json, read_at) "
+            "VALUES (1, 'p1', 'a1', '2026-10-11', '8.25', '3', '0.0', '0.8', '1', '{}', 't')"
+        )
+        await conn.executescript((migrations / "002_settings_by_game.sql").read_text())
+
+        row = await (await conn.execute("SELECT * FROM arcade_settings")).fetchone()
+
+    assert row is not None and row["game"] == "chunithm" and row["play_date"] == "2026-10-11"
+    assert json.loads(row["named_json"]) == {
+        "speed": "8.25", "field_wall_position": "3", "play_timing_offset": "0.0",
+        "judge_timing_offset": "0.8", "guide_sound": "1",
+    }

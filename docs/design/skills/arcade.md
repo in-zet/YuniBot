@@ -13,7 +13,7 @@ examples:
   - 겜플 세팅 알려 줘
   - 게임플라자 설정 바뀐 거 보여 줘
 category: 오락실
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
 services: [chunithm_net, arcades, records, db]
 listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.viewed]
@@ -134,3 +134,8 @@ listens: [chunithm.sync.completed, chunithm.sync.reported, chunithm.session.view
 
 표 모양·서식은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2를 따른다. 구현에서 정한 것:
 - `history`: 가리키는 것 `arcade.settings_entry` = JSON(오락실 id, 날짜). 칸 날짜·스피드·필드 월·판정 타이밍 A·판정 타이밍 B·가이드음(칸 이름은 `FIELD_LABELS`). 표 요약에 오락실 이름. 서식 없이 기본 출력. 저장된 설정이 없으면 지금처럼 오류다.
+
+## maimai DX 대응 (2026-11-27, plan 17단계 6-8b)
+
+- 설정은 게임마다 따로 저장·비교한다. `arcade_settings`를 스킬 마이그레이션 002로 다시 만들어 츄니즘 다섯 칸 대신 `game`과 `named_json`(이름 붙인 항목, attr → 표시값)을 둔다. 기존 행은 `chunithm`으로 옮긴다(운영 DB 사본에 적용 확인, 그때 행 0개). 항목 목록은 `GameProfile.settings_fields`(maimai: 노트·터치 속도·슬라이드 타이밍·판정 A·B·가이드음, `settings`와 같다).
+- 방문 기록(`arcades` 서비스)도 `ctx.game`으로 남긴다. 도구 `get_settings`·`history`·`record_visit`에 `game: GameRef`. `maimai.sync.completed/reported`·`maimai.session.viewed`는 츄니즘 핸들러 본체를 그대로 부른다(이벤트 버스가 `chunithm_net` 자리에 maimai DX NET을 끼운다).

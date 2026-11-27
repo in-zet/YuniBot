@@ -13,13 +13,16 @@ from core.events import Section
 from core.fuzzy import normalize_name
 from core.resolvers import ResolutionError
 from core.tables import RowRef, TableBuilder, cell
-from core.tool_types import ArcadeRef, Display, ToolContext, ToolResult
-from services.chunithm.arcade_settings import SETTINGS_FIELDS
+from core.tool_types import ArcadeRef, Display, GameRef, ToolContext, ToolResult
 from services.common.arcades import Arcade
-from services.game.net_settings import GameSettings
-from services.game.net_settings import settings_line as _settings_line
+from services.game.net_settings import (
+    GameSettings,
+    SettingField,
+    changed_labels,
+    settings_line,
+)
+from services.game.registry import profile_for
 
-_GAME = "chunithm"
 _SETTINGS_ENTRY = "arcade.settings_entry"
 _H_DATE = "날짜"
 _REPORT_ORDER = 50
@@ -28,32 +31,29 @@ _NO_ARCADE_HINT = "오락실을 말 안 했네. 다음 동기화 때 같이 말�
 
 # ---------------------------------------------------------------- 공통 도우미
 
-FIELD_LABELS = {f.attr: f.label for f in SETTINGS_FIELDS}
-
-
-def settings_line(named: dict[str, str]) -> str:
-    return _settings_line(named, SETTINGS_FIELDS)
+def _fields(ctx: ToolContext) -> tuple[SettingField, ...]:
+    return profile_for(ctx.game).settings_fields
 
 
 def _named_from_row(row: aiosqlite.Row) -> dict[str, str]:
-    return {name: row[name] for name in FIELD_LABELS}
+    return json.loads(row["named_json"])
 
 
-def _diff(target: dict[str, str], other: dict[str, str]) -> list[str]:
-    return [label for name, label in FIELD_LABELS.items() if target.get(name) != other.get(name)]
+def _line(ctx: ToolContext, named: dict[str, str]) -> str:
+    return settings_line(named, _fields(ctx))
 
 
 async def _latest_settings(ctx: ToolContext, *, player_id: str, arcade_id: str | None) -> aiosqlite.Row | None:
     assert ctx.db is not None
     if arcade_id is not None:
         cursor = await ctx.db.execute(
-            "SELECT * FROM arcade_settings WHERE player_id = ? AND arcade_id = ? ORDER BY read_at DESC LIMIT 1",
-            (player_id, arcade_id),
+            "SELECT * FROM arcade_settings WHERE player_id = ? AND game = ? AND arcade_id = ? ORDER BY read_at DESC LIMIT 1",
+            (player_id, ctx.game, arcade_id),
         )
     else:
         cursor = await ctx.db.execute(
-            "SELECT * FROM arcade_settings WHERE player_id = ? ORDER BY read_at DESC LIMIT 1",
-            (player_id,),
+            "SELECT * FROM arcade_settings WHERE player_id = ? AND game = ? ORDER BY read_at DESC LIMIT 1",
+            (player_id, ctx.game),
         )
     return await cursor.fetchone()
 
@@ -62,35 +62,32 @@ async def _store_settings(
     ctx: ToolContext, *, visit_id: int, player_id: str, arcade_id: str, play_date: str, settings: GameSettings
 ) -> None:
     assert ctx.db is not None
-    named = settings.named
     now = datetime.now(UTC).isoformat()
     await ctx.db.execute(
-        "INSERT INTO arcade_settings (visit_id, player_id, arcade_id, play_date, speed, field_wall_position, "
-        "play_timing_offset, judge_timing_offset, guide_sound, raw_json, read_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO arcade_settings (visit_id, player_id, arcade_id, game, play_date, named_json, raw_json, read_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
-            visit_id, player_id, arcade_id, play_date, named["speed"], named["field_wall_position"],
-            named["play_timing_offset"], named["judge_timing_offset"], named["guide_sound"],
-            json.dumps(settings.raw), now,
+            visit_id, player_id, arcade_id, ctx.game, play_date,
+            json.dumps(settings.named, ensure_ascii=False), json.dumps(settings.raw, ensure_ascii=False), now,
         ),
     )
     await ctx.db.commit()
 
 
 async def _last_visit_date(ctx: ToolContext, *, player_id: str, arcade_id: str) -> str | None:
-    visits = await ctx.arcades.visits_for(player_id=player_id, game=_GAME)
+    visits = await ctx.arcades.visits_for(player_id=player_id, game=ctx.game)
     dates = [v.visited_at for v in visits if v.arcade_id == arcade_id]
     return max(dates) if dates else None
 
 
 async def _apply_visit(ctx: ToolContext, arcade: Arcade, *, play_date: str | None) -> dict[str, Any]:
-    """방문을 남기고, 그 날짜가 가장 최근 세션일 때만 CHUNITHM-NET의 지금 설정을 읽어
+    """방문을 남기고, 그 날짜가 가장 최근 세션일 때만 그 게임 NET의 지금 설정을 읽어
     저장한다. `record_visit` 도구와 `on_sync_reported`가 같이 쓰는 공유 로직이다."""
     latest = await ctx.records.latest_session(ctx.player_id)
     is_latest = play_date is None or latest is None or play_date == latest.play_date
     resolved_date = play_date or (latest.play_date if latest is not None else datetime.now(UTC).date().isoformat())
 
-    visit_id = await ctx.arcades.record_visit(arcade.id, player_id=ctx.player_id, game=_GAME)
+    visit_id = await ctx.arcades.record_visit(arcade.id, player_id=ctx.player_id, game=ctx.game)
 
     if not is_latest:
         return {"play_date": resolved_date, "settings_saved": False, "reason": "historical", "changed": []}
@@ -101,7 +98,7 @@ async def _apply_visit(ctx: ToolContext, arcade: Arcade, *, play_date: str | Non
         return {"play_date": resolved_date, "settings_saved": False, "reason": "network_error", "changed": []}
 
     previous = await _latest_settings(ctx, player_id=ctx.player_id, arcade_id=arcade.id)
-    changed = _diff(_named_from_row(previous), settings.named) if previous is not None else []
+    changed = changed_labels(_named_from_row(previous), settings.named, _fields(ctx)) if previous is not None else []
     await _store_settings(
         ctx, visit_id=visit_id, player_id=ctx.player_id, arcade_id=arcade.id,
         play_date=resolved_date, settings=settings,
@@ -113,8 +110,8 @@ async def _apply_visit(ctx: ToolContext, arcade: Arcade, *, play_date: str | Non
 
 
 @tool()
-async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
-    """그 오락실에서 마지막으로 저장한 설정과, 지금 계정 설정(가장 최근에 읽은 값)의 차이를 보여준다."""
+async def get_settings(ctx: ToolContext, arcade: ArcadeRef, game: GameRef | None = None) -> ToolResult:
+    """그 오락실에서 마지막으로 저장한 그 게임의 설정과, 지금 계정 설정(가장 최근에 읽은 값)의 차이를 보여준다."""
     assert isinstance(arcade, Arcade)
     for_arcade = await _latest_settings(ctx, player_id=ctx.player_id, arcade_id=arcade.id)
     if for_arcade is None:
@@ -129,9 +126,9 @@ async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
 
     target = _named_from_row(for_arcade)
     current = await _latest_settings(ctx, player_id=ctx.player_id, arcade_id=None)
-    changed = _diff(target, _named_from_row(current)) if current is not None else []
+    changed = changed_labels(target, _named_from_row(current), _fields(ctx)) if current is not None else []
 
-    lines = [f"{arcade.name}  마지막 방문 {for_arcade['play_date']}", settings_line(target)]
+    lines = [f"{arcade.name}  마지막 방문 {for_arcade['play_date']}", _line(ctx, target)]
     lines.append("지금 계정과 다른 항목: " + ", ".join(changed) if changed else "지금 계정 그대로 쓰면 돼.")
     return ToolResult(
         data={
@@ -144,13 +141,13 @@ async def get_settings(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
 
 
 @tool()
-async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
-    """그 오락실에서 저장된 설정 변화를 날짜순 표로 보여준다."""
+async def history(ctx: ToolContext, arcade: ArcadeRef, game: GameRef | None = None) -> ToolResult:
+    """그 오락실에서 저장된 그 게임의 설정 변화를 날짜순 표로 보여준다."""
     assert isinstance(arcade, Arcade)
     assert ctx.db is not None
     cursor = await ctx.db.execute(
-        "SELECT * FROM arcade_settings WHERE player_id = ? AND arcade_id = ? ORDER BY play_date",
-        (ctx.player_id, arcade.id),
+        "SELECT * FROM arcade_settings WHERE player_id = ? AND game = ? AND arcade_id = ? ORDER BY play_date",
+        (ctx.player_id, ctx.game, arcade.id),
     )
     rows = await cursor.fetchall()
     if not rows:
@@ -159,8 +156,9 @@ async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
     entries = [{"play_date": row["play_date"], **_named_from_row(row)} for row in rows]
     builder = TableBuilder(subject=ctx.player_id, unit="기록")
     builder.column(_H_DATE)
-    for label in FIELD_LABELS.values():
-        builder.column(label)
+    fields = _fields(ctx)
+    for field in fields:
+        builder.column(field.label)
     builder.step("오락실 설정 기록 (날짜순)")
     builder.summary({"오락실": arcade.name})
     for entry in entries:
@@ -168,16 +166,18 @@ async def history(ctx: ToolContext, arcade: ArcadeRef) -> ToolResult:
             RowRef(_SETTINGS_ENTRY, json.dumps([arcade.id, entry["play_date"]], ensure_ascii=False)),
             {
                 _H_DATE: cell(entry["play_date"]),
-                **{label: cell(entry[name]) for name, label in FIELD_LABELS.items()},
+                **{field.label: cell(entry.get(field.attr)) for field in fields},
             },
         )
     return ToolResult(data={"arcade": arcade.name, "entries": entries}, table=builder.build())
 
 
 @tool(tags=["sega-linked"], cost="network", mutates=True)
-async def record_visit(ctx: ToolContext, arcade: ArcadeRef, date: str | None = None) -> ToolResult:
+async def record_visit(
+    ctx: ToolContext, arcade: ArcadeRef, date: str | None = None, game: GameRef | None = None
+) -> ToolResult:
     """오락실 방문을 남긴다("오늘 겜플에서 했어"처럼 어디서 쳤는지 말했을 때). 이름이 등록돼 있지 않으면 비슷한 이름을 짐작해 맞는지 사용자에게 먼저 묻고, 확인받으면 register_arcade로 등록한 뒤 다시 부른다. date(ISO 날짜)를 안 주면 가장 최근 세션으로 본다 — 그때만
-    CHUNITHM-NET의 지금 설정을 같이 읽어 저장한다. 지난 날짜는 그날 설정을 알 수 없어
+    그 게임 NET(CHUNITHM-NET·maimai DX NET)의 지금 설정을 같이 읽어 저장한다. 지난 날짜는 그날 설정을 알 수 없어
     방문만 남는다."""
     assert isinstance(arcade, Arcade)
     outcome = await _apply_visit(ctx, arcade, play_date=date)
@@ -191,7 +191,7 @@ async def record_visit(ctx: ToolContext, arcade: ArcadeRef, date: str | None = N
     elif outcome["reason"] == "historical":
         lines.append("지난 날짜라 그때 설정은 저장 안 했어.")
     else:
-        lines.append("설정은 CHUNITHM-NET에서 못 읽었어.")
+        lines.append(f"설정은 {profile_for(ctx.game).net_name}에서 못 읽었어.")
 
     return ToolResult(
         data={"arcade": arcade.name, **outcome},
@@ -251,6 +251,24 @@ async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
 # ---------------------------------------------------------------- 이벤트 핸들러
 
 
+@on("maimai.sync.completed")
+async def on_maimai_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
+    """`on_sync_completed`의 maimai 판."""
+    return await on_sync_completed(ctx, payload)
+
+
+@on("maimai.sync.reported")
+async def on_maimai_sync_reported(ctx: ToolContext, payload: dict[str, Any]) -> None:
+    """`on_sync_reported`의 maimai 판. 이벤트 버스가 핸들러의 `chunithm_net` 자리에 maimai DX NET을 끼워 준다."""
+    await on_sync_reported(ctx, payload)
+
+
+@on("maimai.session.viewed")
+async def on_maimai_session_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
+    """`on_session_viewed`의 maimai 판."""
+    return await on_session_viewed(ctx, payload)
+
+
 @on("chunithm.sync.completed")
 async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
     """오락실을 안 말했을 때만 안내 문구를 한 줄 더한다(버튼 없음 — 동기화 리포트는
@@ -297,8 +315,8 @@ async def on_session_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
             return None
 
     cursor = await ctx.db.execute(
-        "SELECT * FROM arcade_settings WHERE player_id = ? AND play_date = ? ORDER BY read_at DESC LIMIT 1",
-        (player_id, payload["play_date"]),
+        "SELECT * FROM arcade_settings WHERE player_id = ? AND game = ? AND play_date = ? ORDER BY read_at DESC LIMIT 1",
+        (player_id, ctx.game, payload["play_date"]),
     )
     row = await cursor.fetchone()
     lines: list[str] = []
@@ -312,7 +330,7 @@ async def on_session_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
             lines.append(f"오락실  {found.name}")
             data["arcade"] = found.name
     if row is not None:
-        lines.append(f"설정  {settings_line(_named_from_row(row))}")
+        lines.append(f"설정  {_line(ctx, _named_from_row(row))}")
         data.update(_named_from_row(row))
     if not lines:
         return None

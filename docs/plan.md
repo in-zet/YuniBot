@@ -132,7 +132,7 @@
     - [X] 6-10 호칭을 주 게임 NET 이름으로 — 구현 완료(2026-11-27, 사용자 결정). 코어 마이그레이션 030(`records_profile.username`, 동기화 때 게임별 이름 저장), `main_game_nickname_source`(주 게임 → 없으면 CHUNITHM, 그 게임 미동기화면 로그인 때 이름), `/계정 상태`도 게임별 이름. 실기 미확인: 재배포 뒤 주 게임 동기화 한 번 하면 유니가 그 이름+상으로 부르는지, 주 게임을 바꾸면 호칭이 따라 바뀌는지
     - [ ] 6-8 `arcade`·`settings`·`updates`의 maimai 대응 — 2026-11-27 실측(maimai DX NET 설정·즐겨찾기 페이지, 공식 사이트·곡 목록 JSON, 일본판 RSS) 뒤 사용자 결정으로 세 덩어리. 표본 `docs/reference/maimai-net/`
       - [X] 6-8a `settings` — 구현 완료(2026-11-27). 설정 틀 공통화(`services/game/net_settings.py`, `GameProfile.settings_fields`), maimai 6항목(노트·터치 속도·슬라이드 타이밍·판정 A·B·가이드음)과 제목 기반 즐겨찾기(30곡). 상세 `settings.md` "maimai DX 대응". 실측 완료(2026-11-27, 바꿨다 되돌리기: maimai 가이드음·즐겨찾기 추가, 두 게임 즐겨찾기 비우기). 사용자 요청으로 즐겨찾기 일괄 삭제 `remove_favorites(table)`·전체 삭제 `clear_favorites` 추가. 실기 미확인: "마이마이 노트 속도 바꿔줘"·maimai 즐겨찾기 추가·"즐겨찾기 다 지워"의 확인 버튼
-      - [ ] 6-8b `arcade` — 미착수. 오락실 방문 때 maimai 설정 저장(`arcade_settings`가 츄니즘 칸으로 고정이라 마이그레이션 필요)
+      - [X] 6-8b `arcade` — 구현 완료(2026-11-27). 스킬 마이그레이션 002(`arcade_settings`를 `game`+`named_json`으로, 운영 DB 사본 적용 확인), 게임별 저장·비교·이벤트. 상세 `arcade.md` "maimai DX 대응". 실기 미확인: "마이마이 동기화, 겜플에서 쳤어" 뒤 maimai 설정이 저장되는지, "겜플 마이마이 세팅 알려 줘"
       - [ ] 6-8c `updates` — 미착수. 국제판은 공식 곡 목록 JSON 비교 + 공식 사이트 출시 목록으로 버전업 감지(글 공지 없음), 일본판은 RSS
     - [X] 6-9 `sega-account`를 두 게임 공통으로(`games: [chunithm, maimai]`) — 구현 완료(2026-11-27, A안). `status`가 로그인·공개 설정은 한 번, 마지막 동기화는 게임마다 보인다. 이름은 하나("로그인 때 읽은 이름"). 실기 미확인: 주 게임이 maimai인 사람의 "나 로그인 돼 있어?"·공개 설정·로그아웃에 대체 안내가 안 붙는지
 

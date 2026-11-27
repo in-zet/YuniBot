@@ -262,6 +262,10 @@ SCENARIOS: tuple[Scenario, ...] = (
         must_call=("settings_change_settings",), must_args=(("settings_change_settings", "speed", "9.00"),),
     ),
     Scenario(
+        name="오락실/마이 세팅", question="겜플 마이마이 세팅 알려 줘",
+        must_call=("arcade_get_settings",), must_args=(("arcade_get_settings", "game", "마이|maimai"),),
+    ),
+    Scenario(
         name="설정/즐겨찾기 전체 삭제", question="즐겨찾기 전부 지워줘",
         must_call=("settings_clear_favorites",), must_not_call=("settings_remove_favorite",),
     ),
