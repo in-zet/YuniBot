@@ -261,6 +261,15 @@ SCENARIOS: tuple[Scenario, ...] = (
         name="설정/츄니 스피드", question="스피드 9.00으로 바꿔줘",
         must_call=("settings_change_settings",), must_args=(("settings_change_settings", "speed", "9.00"),),
     ),
+    # 최고 난이도만 — 곡마다 상수가 가장 높은 채보 하나(2026-11-27 사용자 요청).
+    Scenario(
+        name="곡 찾기/최고 난이도만 펼치기", question="sasakure.UK 곡들 최고 난이도로만 보여줘",
+        must_call=("song_charts_of",), must_args=(("song_charts_of", "highest", "True"),),
+    ),
+    Scenario(
+        name="곡 찾기/최고 난이도만 거르기", question="14.5에서 15.0 상수표에서 곡마다 최고 난이도만 남겨줘",
+        must_call=("song_highest_charts",),
+    ),
     Scenario(
         name="업데이트/마이 신곡", question="마이마이 이번에 들어온 신곡 보여줘",
         must_call=("updates_new_songs",), must_args=(("updates_new_songs", "game", "마이|maimai"),),

@@ -185,3 +185,20 @@ async def test_charts_of_with_utage_difficulty_finds_the_utage_song(songdb) -> N
 
     assert _rows(result.table) == [("[宴]Party", "STD", "UTA")]
 
+
+
+async def test_highest_picks_one_top_const_chart_across_chart_types(songdb) -> None:
+    """"최고 난이도만"은 곡마다 상수가 가장 높은 채보 하나다 — STD·DX를 가리지 않는다(2026-11-27 사용자 결정)."""
+    skill = _load_skill()
+    ctx = _ctx(songdb)
+    songs = await skill.find_by_artist(ctx, artist="작곡가A")
+    assert songs.table is not None
+
+    expanded = await skill.charts_of(ctx, table=songs.table, highest=True)
+    every = await skill.charts_of(ctx, table=songs.table)  # STD MAS·DX MAS 두 행
+    assert every.table is not None
+    filtered = await skill.highest_charts(ctx, table=every.table)
+
+    # Both: STD MAS 12.6 · DX MAS 13.7 · DX REM 14.2 → DX REM. 宴 곡은 상수를 몰라 빠진다.
+    assert _rows(expanded.table) == [("Both", "DX", "REM")]
+    assert _rows(filtered.table) == [("Both", "DX", "MAS")]

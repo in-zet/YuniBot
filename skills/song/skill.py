@@ -33,7 +33,7 @@ from core.tool_types import (
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
 from services.game.registry import profile_for
-from services.game.songdb import ChartRecord, ConstRangeHit, SongRecord
+from services.game.songdb import ChartRecord, ConstRangeHit, SongRecord, chart_key
 
 
 def _charts_in_display_order(song: SongRecord, game: str) -> list[ChartRecord]:
@@ -43,6 +43,14 @@ def _charts_in_display_order(song: SongRecord, game: str) -> list[ChartRecord]:
         (chart for chart in song.charts.values() if chart.is_available),
         key=lambda c: (profile.chart_types.index(c.chart_type), profile.chart_codes.index(c.difficulty)),
     )
+
+
+def _top_const_chart(song: SongRecord, game: str) -> ChartRecord | None:
+    """곡에서 상수가 가장 높은 채보 하나("최고 난이도만", 2026-11-27 사용자 결정). 상수를 모르는 채보(WORLD'S END·宴
+    등)는 비교하지 않고, 상수가 같으면 높은 난이도를 고른다. 상수를 아는 채보가 없으면 None."""
+    codes = profile_for(game).chart_codes
+    known = [c for c in _charts_in_display_order(song, game) if c.const is not None]
+    return max(known, key=lambda c: (c.const or 0.0, codes.index(c.difficulty)), default=None)
 
 
 def _chart_label(chart: ChartRecord) -> str:
@@ -307,30 +315,39 @@ async def charts_of(
     ctx: ToolContext,
     table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG])],
     difficulty: DifficultyRef | None = None,
+    highest: bool = False,
 ) -> ToolResult:
     """곡 표의 곡 단위 행(난이도 없음)을 그 곡의 채보 행으로 바꾼 새 표를 돌려준다. 난이도를 안 주면 MAS다
     (모든 난이도로 펼치지 않는다). 그 난이도가 없는 곡은 빠진다. 이미 채보인 행은 그대로 둔다.
+    highest=True면 difficulty 대신 곡마다 상수가 가장 높은 채보 하나로 펼친다("최고 난이도로", "제일 어려운 채보로").
     점수·보더·채보 링크처럼 난이도가 필요한 도구에 곡 표를 넘기기 전에 쓴다."""
     assert isinstance(table, WorkTable)
     code = tc.difficulty_code(difficulty) or _DEFAULT_EXPAND
+    label = "곡마다 상수가 가장 높은 채보" if highest else code
     columns = _expand_columns(ctx.game)
     missing = 0
     expanded = 0
+
+    def charts_for(song: SongRecord) -> list[ChartRecord]:
+        if highest:
+            top = _top_const_chart(song, ctx.game)
+            return [] if top is None else [top]
+        # 채보 종류가 둘이면(maimai STD/DX) 그 난이도의 채보가 둘 다 행이 된다.
+        return [c for c in _charts_in_display_order(song, ctx.game) if c.difficulty == code]
 
     def expand(row: Row) -> Sequence[Row] | None:
         nonlocal missing, expanded
         if row.cell(tc.DIFFICULTY).filled:
             return None
         song = ctx.songdb.song_by_title(str(row.cell(tc.SONG).raw))
-        # 채보 종류가 둘이면(maimai STD/DX) 그 난이도의 채보가 둘 다 행이 된다.
-        found = [] if song is None else [c for c in _charts_in_display_order(song, ctx.game) if c.difficulty == code]
+        found = [] if song is None else charts_for(song)
         if song is None or not found:
             missing += 1
             return []
         expanded += 1
         return [
             Row(
-                tc.chart_ref(song.title, code, chart_record.chart_type),
+                tc.chart_ref(song.title, chart_record.difficulty, chart_record.chart_type),
                 MappingProxyType({**row.cells, **tc.chart_cells(song, chart_record, columns)}),
             )
             for chart_record in found
@@ -339,13 +356,42 @@ async def charts_of(
     result = expand_rows(
         table, expand, tc.common_columns(*columns, hidden_in_text=_SEARCH_HIDDEN, game=ctx.game)
     )
-    steps = [f"{code}로 펼침"] if expanded else ["펼칠 곡 단위 행 없음"]
+    steps = [f"{label}로 펼침"] if expanded else ["펼칠 곡 단위 행 없음"]
     if missing:
-        steps.append(f"{code} 없는 곡 {missing}개 뺌")
+        steps.append(f"{'상수를 아는 채보' if highest else code} 없는 곡 {missing}개 뺌")
     result = replace(result, steps=(*result.steps, *steps), unit="채보" if expanded else result.unit)
     if result.row_count == 0:
-        return ToolResult(error=f"{code} 채보가 있는 곡이 없어(곡 {missing}개 뺌)")
-    return ToolResult(data={"count": result.row_count, "difficulty": code, "expanded": expanded}, table=result)
+        return ToolResult(error=f"{'상수를 아는' if highest else code} 채보가 있는 곡이 없어(곡 {missing}개 뺌)")
+    data: dict[str, Any] = {"count": result.row_count, "difficulty": None if highest else code, "expanded": expanded}
+    return ToolResult(data=data, table=result)
+
+
+@tool()
+async def highest_charts(
+    ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])]
+) -> ToolResult:
+    """채보 표에서 곡마다 상수가 가장 높은 채보 행 하나만 남긴 새 표를 돌려준다("최고 난이도만", "곡마다 제일 어려운
+    것만"). 상수는 표의 칸이 아니라 곡 DB에서 읽으므로 상수 칸이 없는 표(베스트·폴더 등)에도 쓴다. 상수를 모르는 채보는
+    상수를 아는 채보가 같은 곡에 있으면 빠진다. 행 순서는 그대로다. 곡 단위 행만 있는 표는 charts_of(highest=True)를 쓴다."""
+    assert isinstance(table, WorkTable)
+    codes = profile_for(ctx.game).chart_codes
+    # 곡 → ((상수, 난이도 순서), 행 위치). 상수를 모르면 -1로 둬 아는 채보에 진다. 완전히 같으면 앞 행을 남긴다.
+    best: dict[str, tuple[tuple[float, int], int]] = {}
+    for position, row in enumerate(table.rows):
+        title, chart_type, difficulty = tc.row_chart_key(row)
+        song = ctx.songdb.song_by_title(title)
+        chart = None if song is None else song.charts.get(chart_key(chart_type, difficulty))
+        const = chart.const if chart is not None and chart.const is not None else -1.0
+        score = (const, codes.index(difficulty) if difficulty in codes else -1)
+        if title not in best or score > best[title][0]:
+            best[title] = (score, position)
+    keep = {position for _, position in best.values()}
+    dropped = table.row_count - len(keep)
+    rows_by_identity = {id(row): position for position, row in enumerate(table.rows)}
+
+    result = expand_rows(table, lambda row: None if rows_by_identity[id(row)] in keep else [])
+    result = replace(result, steps=(*result.steps, f"곡마다 상수가 가장 높은 채보만 ({dropped}개 뺌)"))
+    return ToolResult(data={"count": result.row_count, "dropped": dropped}, table=result)
 
 
 # 곡 단위 행에 남기는 칸. 나머지(난이도·레벨·상수·노트 수·점수·링크 등)는 채보마다 달라서 곡 단위에서는 비운다.

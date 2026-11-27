@@ -89,7 +89,8 @@ emits: [chunithm.song.viewed]
 | `find_linked_verse` | Linked VERSE 해금곡 채보를 게이트별 묶음 표로(게이트·난이도로 좁힘) | `gate: str \| None`, `difficulty: DifficultyRef \| None` | required | never |
 | `find_by_artist` | 작곡가로 수록곡 목록 | `artist`, `difficulty: DifficultyRef \| None`(선택) | 없음 | required | never |
 | `find_songs` | 상수·레벨·버전·난이도·노트 수 범위·신곡 여부·곡명 글자로 채보 목록(조건 하나여도 이것) | 전부 선택적: `min_const`, `max_const`, `level`, `version`, `difficulty: DifficultyRef \| None`, `other_difficulty: DifficultyRef \| None`, `min_difficulty: DifficultyRef \| None`, `max_difficulty: DifficultyRef \| None`, `min_note_count`, `max_note_count`, `new_only`, `title`, `exclude_title` | 없음 | required | never |
-| `charts_of` | 표의 곡 단위 행을 채보 행으로 펼친 새 표 | `table: TableRef`(곡 칸 필요), `difficulty: DifficultyRef \| None`(선택, 없으면 MAS) | 없음 | 표 | never |
+| `charts_of` | 표의 곡 단위 행을 채보 행으로 펼친 새 표 | `table: TableRef`(곡 칸 필요), `difficulty: DifficultyRef \| None`(선택, 없으면 MAS), `highest: bool`(곡마다 상수가 가장 높은 채보 하나) | 없음 | 표 | never |
+| `highest_charts` | 채보 표에서 곡마다 상수가 가장 높은 채보 행 하나만 남긴 새 표(순서 유지) | `table: TableRef`(곡·난이도 칸 필요) | 없음 | 표 | never |
 | `songs_of` | 표의 채보 행을 곡 단위 행으로 합친 새 표(`charts_of`의 반대) | `table: TableRef`(곡 칸 필요) | 없음 | 표 | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | optional | never |
 | `add_links` | 채보 표에 "채보 링크" 칸 더하기 | `table: TableRef`(곡·난이도 필요) | 없음 | 표 | never |
@@ -223,3 +224,8 @@ emits: [chunithm.song.viewed]
 - `find_by_version`에만 있던 "없는 버전 이름이면 이름 목록" 오류는 `find_songs`로 옮겼다(결과가 없을 때만 본다).
 - 곡 DB 서비스의 `find_by_const`·`find_by_version`은 그대로다(`goals`·`updates`·`records`가 쓴다).
 - `find_by_artist`는 남겼다. 저장된 작곡가 별칭을 풀고 못 찾으면 비슷한 이름을 주며, 난이도를 안 주면 곡 단위 표를 낸다 — `find_songs`에 넣으면 같은 도구가 곡 표와 채보 표를 오가게 된다. `find_linked_verse`도 버전이 아니라 해금 시스템이라 남겼다.
+
+## 최고 난이도만 (2026-11-27 사용자 요청)
+
+- 기준은 사용자 결정으로 "곡마다 상수가 가장 높은 채보 하나"다(난이도 이름이 아니라). 상수를 모르는 채보(WORLD'S END·宴 등)는 비교하지 않고, 상수가 같으면 높은 난이도를 고른다. maimai는 STD·DX를 가리지 않고 곡 하나에 하나다.
+- 곡 단위 표는 `charts_of(highest=True)`로 펼치고, 이미 채보인 표는 `highest_charts`로 거른다. 상수는 곡 DB에서 읽어 상수 칸이 없는 표(베스트·폴더)에도 쓴다. `table_query(sort=상수, distinct_by=곡)`로도 비슷하게 되지만 순서가 바뀌고 상수 칸이 있어야 해서 따로 둔다.

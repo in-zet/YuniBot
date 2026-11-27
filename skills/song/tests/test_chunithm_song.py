@@ -705,3 +705,53 @@ async def test_find_by_artist_uses_a_saved_artist_alias_and_suggests_similar_nam
 
     assert aliased.data["count"] > 0
     assert typo.data["count"] == 0 and artist in typo.data["similar_artists"]
+
+
+# ---------------------------------------------------------------- 최고 난이도만 (2026-11-27 사용자 요청: 상수가 가장 높은 채보)
+
+
+def _top_const_code(songdb: SongDbService, title: str) -> str:
+    song = songdb.song_by_title(title)
+    assert song is not None
+    known = [(c.const, c.difficulty) for c in song.charts.values() if c.is_available and c.const is not None]
+    order = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
+    return max(known, key=lambda pair: (pair[0], order.index(pair[1])))[1]
+
+
+async def test_charts_of_highest_expands_each_song_to_its_top_const_chart() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    with_ult = _titles_with(songdb, "ULT", want=True, count=1)
+    without_ult = _titles_with(songdb, "ULT", want=False, count=1)
+
+    result = await skill.charts_of(_ctx_with_songdb(songdb), table=_song_table([*with_ult, *without_ult]), highest=True)
+
+    assert result.error is None and result.table is not None
+    codes = [str(row.cell(tc.DIFFICULTY).text) for row in result.table.rows]
+    assert codes == [_top_const_code(songdb, with_ult[0]), _top_const_code(songdb, without_ult[0])]
+    assert codes[1] == "MAS"
+    assert result.table.steps[-1] == "곡마다 상수가 가장 높은 채보로 펼침"
+    assert result.data["difficulty"] is None
+
+
+async def test_highest_charts_keeps_one_top_const_row_per_song_in_place() -> None:
+    from core.tables import TableBuilder
+
+    skill = _load_skill()
+    songdb = SongDbService()
+    [ult_song] = _titles_with(songdb, "ULT", want=True, count=1)
+    [plain] = _titles_with(songdb, "ULT", want=False, count=1)
+    builder = TableBuilder(unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY)
+    builder.step("테스트 채보 표")
+    for title, code in ((plain, "EXP"), (ult_song, "MAS"), (plain, "MAS"), (ult_song, "ULT")):
+        builder.row(tc.chart_ref(title, code), {tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell(code)})
+
+    result = await skill.highest_charts(_ctx_with_songdb(songdb), table=builder.build())
+
+    assert result.error is None and result.table is not None
+    kept = [(str(r.cell(tc.SONG).raw), str(r.cell(tc.DIFFICULTY).text)) for r in result.table.rows]
+    # 곡마다 그 곡의 최고 상수 채보 행 하나만, 원래 순서대로(이 곡들은 MAS·ULT 행이 표에 다 있다).
+    rows = [(plain, "EXP"), (ult_song, "MAS"), (plain, "MAS"), (ult_song, "ULT")]
+    assert kept == [pair for pair in rows if pair[1] == _top_const_code(songdb, pair[0])]
+    assert len(kept) == 2 and result.data == {"count": 2, "dropped": 2}
