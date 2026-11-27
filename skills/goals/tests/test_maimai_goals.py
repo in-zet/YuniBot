@@ -38,7 +38,7 @@ _CORE_SQL = "".join(
     (_CORE / name).read_text()
     for name in (
         "001_players.sql", "002_player_tags.sql", "003_settings.sql", "006_schedules.sql", "008_records.sql",
-        "013_records_overpower.sql", "014_records_sync_log_snapshot_averages.sql", "018_records_profile.sql",
+        "013_records_overpower.sql", "014_records_sync_log_snapshot_averages.sql", "018_records_profile.sql", "030_records_profile_username.sql",
         "019_records_session_state.sql", "024_records_chart_type.sql",
     )
 )
