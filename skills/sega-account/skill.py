@@ -149,22 +149,29 @@ async def start_login(ctx: ToolContext, game: GameRef | None = None) -> discord.
 
 @tool()
 async def status(ctx: ToolContext) -> ToolResult:
-    """로그인 여부, CHUNITHM-NET 닉네임, 마지막 동기화 시각, 기록 공개 설정을 보여준다."""
+    """로그인 여부, 로그인 때 읽은 이름, 게임별 마지막 동기화 시각, 기록 공개 설정을 보여준다(로그인은 두 게임 공통)."""
     login_status = await ctx.chunithm_net.status(ctx.player_id)
     player = await ctx.players.get_player(ctx.player_id)
     assert player is not None
-    last_synced_at = await ctx.records.last_sync_at(ctx.player_id)
+    # 게임별 서비스 묶음이 없으면(시험 등) 지금 게임 하나만 본다.
+    games = list(ctx.game_services) or [ctx.game]
+    last_synced: dict[str, str | None] = {}
+    for game in games:
+        last_synced[game] = await ctx.for_game(game).records.last_sync_at(ctx.player_id)
 
     data = {
         "linked": login_status.linked,
         "nickname": login_status.nickname,
-        "last_synced_at": last_synced_at,
+        "last_synced_at": last_synced,
         "records_public": player.records_public,
     }
     lines = [
         f"로그인: {'되어있음' if login_status.linked else '안 되어있음'}",
-        f"닉네임: {login_status.nickname or '없음'}",
-        f"마지막 동기화: {last_synced_at or '아직 동기화한 적 없음'}",
+        f"로그인 때 읽은 이름: {login_status.nickname or '없음'}",
+        *(
+            f"{profile_for(game).label} 마지막 동기화: {synced_at or '아직 동기화한 적 없음'}"
+            for game, synced_at in last_synced.items()
+        ),
         f"기록 공개: {'공개' if player.records_public else '비공개'}",
     ]
     return ToolResult(

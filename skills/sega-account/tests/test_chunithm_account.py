@@ -135,7 +135,7 @@ async def test_status_reports_linked_and_last_sync() -> None:
     assert result.error is None
     assert result.data["linked"] is True
     assert result.data["nickname"] == "유니상"
-    assert result.data["last_synced_at"] == "2026-10-11T03:00:00+00:00"
+    assert result.data["last_synced_at"] == {"chunithm": "2026-10-11T03:00:00+00:00"}
     assert result.data["records_public"] is False
 
 
@@ -147,7 +147,7 @@ async def test_status_reports_never_synced() -> None:
 
     result = await skill.status(_ctx(chunithm_net=chunithm_net, players=players, records=records))
 
-    assert result.data["last_synced_at"] is None
+    assert result.data["last_synced_at"] == {"chunithm": None}
     assert result.display is not None and "아직" in (result.display.content or "")
 
 
@@ -438,3 +438,28 @@ async def test_wrong_password_does_not_try_the_other_net() -> None:
         )
         assert not maimai_net.login_calls
         assert expected in interaction.followup.sent[0][0]
+
+
+async def test_status_lists_last_sync_per_game() -> None:
+    """로그인은 두 게임 공통이라 한 번만, 마지막 동기화는 게임마다 한 줄씩 보인다(2026-11-27, plan 6-9)."""
+    skill = _load_skill()
+    net = _FakeChunithmNet(linked=True, nickname="유니상")
+    by_game: dict[str, dict[str, object]] = {
+        "chunithm": {"chunithm_net": net, "records": _FakeRecords("2026-11-20T03:00:00+00:00")},
+        "maimai": {"chunithm_net": net, "records": _FakeRecords(None)},
+    }
+    ctx = ToolContext(
+        player_id="p1",
+        tags=frozenset(),
+        services={**by_game["maimai"], "players": _FakePlayers(records_public=True)},
+        game="maimai",
+        game_services=by_game,
+    )
+
+    result = await skill.status(ctx)
+
+    assert result.data["last_synced_at"] == {"chunithm": "2026-11-20T03:00:00+00:00", "maimai": None}
+    content = result.display.content if result.display is not None else ""
+    assert "CHUNITHM 마지막 동기화: 2026-11-20T03:00:00+00:00" in (content or "")
+    assert "maimai DX 마지막 동기화: 아직 동기화한 적 없음" in (content or "")
+    assert (content or "").count("로그인:") == 1
