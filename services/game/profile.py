@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
+from services.game.net_settings import SettingField
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class GameProfile:
@@ -44,6 +46,8 @@ class GameProfile:
     candidate_target_label: str = "SSS"
     # 기록을 가져오는 사이트 이름. 오류 문구에 쓴다.
     net_name: str = "CHUNITHM-NET"
+    # NET 인게임 설정 페이지에서 이름 붙여 다루는 항목(`arcade`·`settings`). 없으면 그 게임은 설정을 다루지 않는다.
+    settings_fields: tuple[SettingField, ...] = ()
     # 풀콤보·올 저스티스(maimai는 올 퍼펙트)에 해당하는 콤보 램프 이름과 사용자에게 보일 이름. 램프 우열표의 키다.
     full_combo_lamp: str = "FULL COMBO"
     all_justice_lamp: str = "ALL JUSTICE"

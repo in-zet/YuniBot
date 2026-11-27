@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<body oncontextmenu="return false;">
+	<!-- Google Tag Manager (noscript) -->
+	<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5PWDSV"
+	height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+	<!-- End Google Tag Manager (noscript) -->
+	<div class="wrapper t_c">
+					<div class="spmenu_toggle"></div>
+			<nav class="spmenu_navigation" style="display:none">
+				<img src="https://maimaidx-eng.com/maimai-mobile/img/menu_title.png" class="w_320 m_t_20"/>
+				<div class="container p_10 f_0">
+					<div class="p_5">
+						<div class="d_ib col2"><a href="https://maimaidx-eng.com/maimai-mobile/home/"><img src="https://maimaidx-eng.com/maimai-mobile/img/menu_home.png" class="w_112"/></a></div>
+						<div class="d_ib col2"><a href="https://maimaidx-eng.com/maimai-mobile/playerData/"><img src="https://maimaidx-eng.com/maimai-mobile/img/menu_playerdata.png" class="w_112"/></a></div>
+					</div>
+					<div class="p_5">
+						<div class="d_ib col2"><a href="https://maimaidx-eng.com/maimai-mobile/friend/"><img src="https://maimaidx-eng.com/maimai-mobile/img/menu_friendcircle.png" class="w_112"/></a></div>
+						<div class="d_ib col2"><a href="https://maimaidx-eng.com/maimai-mobile/shop/"><img src="https://maimaidx-eng.com/maimai-mobile/img/menu_shop.png" class="w_112"/></a></div>
+					</div>
+					<div class="p_5">
+						<div class="d_ib col2"><a href="https://maimaidx-eng.com/maimai-mobile/record/"><img src="https://maimaidx-eng.com/maimai-mobile/img/menu_record.png" class="w_112"/></a></div>
+						<div class="d_ib col2"><a href="https://maimaidx-eng.com/maimai-mobile/map/"><img src="https://maimaidx-eng.com/maimai-mobile/img/menu_map.png?ver=1.65" class="w_112"/></a></div>
+					</div>
+					<div class="p_5 p_b_10">
+						<div class="d_ib col2"><a href="https://maimaidx-eng.com/maimai-mobile/collection/"><img src="https://maimaidx-eng.com/maimai-mobile/img/menu_collection.png" class="w_112"/></a></div>
+						<div class="d_ib col2"><a href="https://maimaidx-eng.com/maimai-mobile/ranking/"><img src="https://maimaidx-eng.com/maimai-mobile/img/menu_ranking.png" class="w_112"/></a></div>
+					</div>
+				</div>
+			</nav>
+				<a href="https://maimaidx-eng.com/maimai-mobile/home/"><img src="https://maimaidx-eng.com/maimai-mobile/img/logo.png" class="logo p_5"/></a>
+					<a href="https://maimaidx-eng.com/maimai-mobile/home/userOption/" class="setting"><img src="https://maimaidx-eng.com/maimai-mobile/img/btn_setting.png" /></a>
+			</div>
+	<div class="wrapper main_wrapper t_c o_v">
+		<img src="https://maimaidx-eng.com/maimai-mobile/img/title_setting.png" class="title m_10 m_t_15"/>
+<form action="https://maimaidx-eng.com/maimai-mobile/home/userOption/favorite/updateMusic/set" method="post" accept-charset="utf-8">
+	<div class="town_block m_l_10 m_r_10 p_10 p_b_0 f_0 t_c p_s" id="nav">
+		<div class="m_t_10 m_b_10"><img src="https://maimaidx-eng.com/maimai-mobile/img/title_option_favmusic.png"/></div>
+		<div class="p_5 f_14">FAVORITE SONGS&nbsp;<span name="favoriteCount" class="f_16 f_b">2</span>/30</div>
+		<div class="m_t_10">
+			<select name="idx" class="w_430">
+				<option value="99">All genre</option>
+																			<option value="1">POPS＆ANIME</option>
+																										<option value="2">niconico＆VOCALOID™</option>
+																										<option value="3">東方Project</option>
+																										<option value="4">GAME＆VARIETY</option>
+																										<option value="5">maimai</option>
+																										<option value="6">オンゲキ＆CHUNITHM</option>
+																											</select>
+		</div>
+		<table class="collapse f_0">
+			<tr>
+				<td class="col4"><button type="submit"><img src="https://maimaidx-eng.com/maimai-mobile/img/btn_decision.png" class="h_50 m_t_10"/></button></td>
+				<td class="col4"><button type="button" onclick="favoriteAllOffClick()"><img src="https://maimaidx-eng.com/maimai-mobile/img/btn_allreset.png" class="h_50 m_t_10"/></button></td>
+				<td class="col4"></td>
+				<td class="col4"><button type="button" onclick="location.href='https://maimaidx-eng.com/maimai-mobile/home/userOption/favorite/musicList';"><img src="https://maimaidx-eng.com/maimai-mobile/img/btn_back_02.png" class="h_50 m_t_10"/></button></td>
+			</tr>
+		</table>
+	</div>
+	<div id="list">
+																	<div class="screw_block m_10 f_15 favorite_p_s" name=genre1>POPS＆ANIME</div>
+					<p class="scroll_point" id="scroll_point_1"></p>
+					<div class="m_t_10" name=genre1>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0001"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">愛♡スクリ～ム！</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0002"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">Overdose</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0003"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">アイドル</div>
+								</div>
+							</label>
+</div>
+																					<div class="screw_block m_10 f_15 favorite_p_s" name=genre2>niconico＆VOCALOID™</div>
+					<p class="scroll_point" id="scroll_point_2"></p>
+					<div class="m_t_10" name=genre2>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0106"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">お返事まだカナ？おじさん構文！</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0107"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">雑魚</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0108"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">テレパシ</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0114" checked class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">テトリス</div>
+								</div>
+							</label>
+</div>
+																					<div class="screw_block m_10 f_15 favorite_p_s" name=genre3>東方Project</div>
+					<p class="scroll_point" id="scroll_point_3"></p>
+					<div class="m_t_10" name=genre3>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0448"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">超ナイト・オブ・ナイツ</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0449"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">Help me, ERINNNNNN!!</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0450"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">超最終鬼畜妹フランドール・S</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0452" checked class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">運命線上のアリア</div>
+								</div>
+							</label>
+</div>
+																					<div class="screw_block m_10 f_15 favorite_p_s" name=genre4>GAME＆VARIETY</div>
+					<p class="scroll_point" id="scroll_point_4"></p>
+					<div class="m_t_10" name=genre4>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0596"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">AiAe</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0597"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">浮世絵横丁</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0598"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">RE Aoharu</div>
+								</div>
+							</label>
+</div>
+																					<div class="screw_block m_10 f_15 favorite_p_s" name=genre5>maimai</div>
+					<p class="scroll_point" id="scroll_point_5"></p>
+					<div class="m_t_10" name=genre5>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0858"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">CiRCLE CAMPAiGN</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0859"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">忙シー日</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC0860"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">地獄</div>
+								</div>
+							</label>
+</div>
+																					<div class="screw_block m_10 f_15 favorite_p_s" name=genre6>オンゲキ＆CHUNITHM</div>
+					<p class="scroll_point" id="scroll_point_6"></p>
+					<div class="m_t_10" name=genre6>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC1241"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">私たちは、花になる</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC1242"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">キミは“見ていたね”？</div>
+								</div>
+							</label>
+<label class="favorite_checkbox_frame m_10">
+								<div class="favorite_checkbox">
+									<input type="checkbox" id="favorite" name="music[]" value="MUSIC1243"  class="f_l favotite_checkbox"/>
+									<div class="favorite_music_name break">TECHNOPOLIS 2085</div>
+								</div>
+							</label>
+</div>
+																							<input type="hidden" name="token" value="TOKEN" />
+		<div class="btn_back mb_10 mt_20" onClick="location.href='https://maimaidx-eng.com/maimai-mobile/home/userOption/favorite/musicList';"></div>
+	</div>
+</form>
+<img src="https://maimaidx-eng.com/maimai-mobile/img/line_02.png" class="w_450 m_t_10" />
+<div class="t_c">
+	<button type="button" onclick="location.href='https://maimaidx-eng.com/maimai-mobile/home/userOption/favorite/musicList';" class="f_0"><img src="https://maimaidx-eng.com/maimai-mobile/img/btn_back.png" class="w_80 m_t_10"/></button>
+</div>
+	</div>
+	<img id="page-top" src="https://maimaidx-eng.com/maimai-mobile/img/btn_page_top.png" class="pointer">
+	<img id="page-bottom" src="https://maimaidx-eng.com/maimai-mobile/img/btn_page_bottom.png" class="pointer">
+</body>
+</html>

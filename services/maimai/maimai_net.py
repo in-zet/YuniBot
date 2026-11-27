@@ -8,7 +8,7 @@ CHUNITHM 서비스로 하지만, 요청·선호 게임이 maimai이거나 CHUNIT
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -16,13 +16,27 @@ import aiolimiter
 import httpx
 from chuni_penguin.adapters._hooks import raise_on_server_errors
 from chuni_penguin.adapters.errors import AuthenticationError
+from selectolax.lexbor import LexborHTMLParser
 
 from core.tool_types import ToolContext, UserFacingError
 from services.common.aime_auth import GATEWAY_HOST, AimeAuth, AimeSite
 from services.common.sega_cookies import LoginStatus, SegaCookieStore
+from services.game.net_settings import (
+    ChangeNotAppliedError,
+    GameSettings,
+    build_update_payload,
+    parse_settings,
+    raise_if_not_applied,
+)
 from services.maimai import parser
 from services.maimai.parser import MaimaiProfile, PlayEntry, RatingTargets, ScoreEntry
 from services.maimai.sync_snapshot import snapshot_from_pages
+from services.maimai.user_option import (
+    SETTINGS_FIELDS,
+    favorite_payload,
+    form_token,
+    parse_favorite_page,
+)
 
 if TYPE_CHECKING:
     import aiosqlite
@@ -33,9 +47,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 _BASE_URL = "https://maimaidx-eng.com"
 _MOBILE = "/maimai-mobile"
 _ERROR_PATH = f"{_MOBILE}/error/"
+_OPTION_PATH = f"{_MOBILE}/home/userOption/updateUserOption/"
+_FAVORITE_PATH = f"{_MOBILE}/home/userOption/favorite/updateMusic"
 SITE = AimeSite(
     site_id="maimaidxex", redirect_url=f"{_BASE_URL}{_MOBILE}/", back_url="https://maimai.sega.com/"
 )
@@ -142,6 +159,25 @@ class MaimaiNetAdapter:
         path = f"{_MOBILE}/record/musicSort/search/?search=V&sort=1&playCheck=on&diff={_LIST_DIFF[difficulty]}"
         return parser.parse_music_list(await self._get(path))
 
+    async def _post(self, path: str, data: Mapping[str, str | list[str]]) -> None:
+        response = await self._client.post(path, data=data)
+        if _session_lost(response):
+            raise AuthenticationError("로그인했는데도 세션이 풀려 있다")
+
+    async def get_user_option(self) -> bytes:
+        """인게임 설정 페이지(폼 하나에 `<select>` 40개 남짓과 요청 토큰)."""
+        return await self._get(_OPTION_PATH)
+
+    async def post_user_option(self, payload: Mapping[str, str]) -> None:
+        await self._post(f"{_OPTION_PATH}update/", payload)
+
+    async def get_favorite_page(self) -> bytes:
+        """즐겨찾기 바꾸기 페이지(수록곡 전부의 체크 칸, 지금 즐겨찾기는 체크돼 있다)."""
+        return await self._get(_FAVORITE_PATH)
+
+    async def post_favorites(self, payload: Mapping[str, str | list[str]]) -> None:
+        await self._post(f"{_FAVORITE_PATH}/set", payload)
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -151,6 +187,10 @@ class MaimaiNetAdapterLike(Protocol):
     async def get_rating_targets(self) -> tuple[MaimaiProfile, RatingTargets]: ...
     async def get_recent(self) -> list[PlayEntry]: ...
     async def get_music_list(self, difficulty: str) -> list[ScoreEntry]: ...
+    async def get_user_option(self) -> bytes: ...
+    async def post_user_option(self, payload: Mapping[str, str]) -> None: ...
+    async def get_favorite_page(self) -> bytes: ...
+    async def post_favorites(self, payload: Mapping[str, str | list[str]]) -> None: ...
     async def aclose(self) -> None: ...
 
 
@@ -205,10 +245,12 @@ class MaimaiNetService:
         await self._cookies.store(player_id, clal, profile.name)
         return LoginProfile(username=profile.name)
 
-    async def fetch_snapshot(self, player_id: str, *, ctx: ToolContext | None = None) -> SyncSnapshot:
-        """프로필, 레이팅 대상곡, 최근 플레이, 난이도별 전체 기록을 한 번에 가져온다. 인증 실패일 때만 만료로 보고
-        sega-linked를 떼고 sega.login.expired를 낸 뒤 그대로 예외를 다시 던진다. 점검·네트워크·파서 오류는
-        로그인과 무관하므로 태그를 건드리지 않는다."""
+    async def _with_adapter[T](
+        self, player_id: str, ctx: ToolContext | None, work: Callable[[MaimaiNetAdapterLike], Awaitable[T]]
+    ) -> T:
+        """저장한 `clal`로 연결 하나를 열어 `work`를 한다. 인증 실패일 때만 만료로 보고 sega-linked를 떼고
+        sega.login.expired를 낸 뒤 그대로 예외를 다시 던진다. 점검·네트워크·파서 오류는 로그인과 무관하므로 태그를
+        건드리지 않는다."""
         clal = await self._cookies.clal(player_id)
         if clal is None:
             raise ConnectionError("로그인되어 있지 않다")
@@ -216,13 +258,69 @@ class MaimaiNetService:
         adapter = self._adapter_factory(clal)
         del clal
         try:
-            profile, targets = await adapter.get_rating_targets()
-            recent = await adapter.get_recent()
-            lists = {code: await adapter.get_music_list(code) for code in LIST_DIFFICULTIES}
+            return await work(adapter)
         except AuthenticationError:
             await self._cookies.expire(player_id, ctx)
             raise
         finally:
             await adapter.aclose()
-        return snapshot_from_pages(profile, targets, recent, lists)
 
+    async def fetch_snapshot(self, player_id: str, *, ctx: ToolContext | None = None) -> SyncSnapshot:
+        """프로필, 레이팅 대상곡, 최근 플레이, 난이도별 전체 기록을 한 번에 가져온다."""
+
+        async def work(adapter: MaimaiNetAdapterLike) -> SyncSnapshot:
+            profile, targets = await adapter.get_rating_targets()
+            recent = await adapter.get_recent()
+            lists = {code: await adapter.get_music_list(code) for code in LIST_DIFFICULTIES}
+            return snapshot_from_pages(profile, targets, recent, lists)
+
+        return await self._with_adapter(player_id, ctx, work)
+
+    async def get_arcade_settings(self, player_id: str, *, ctx: ToolContext | None = None) -> GameSettings:
+        """지금 계정의 인게임 설정(`arcade`·`settings`)."""
+
+        async def work(adapter: MaimaiNetAdapterLike) -> GameSettings:
+            return parse_settings(LexborHTMLParser(await adapter.get_user_option()), SETTINGS_FIELDS)
+
+        return await self._with_adapter(player_id, ctx, work)
+
+    async def update_arcade_settings(
+        self, player_id: str, *, changes: dict[str, str], ctx: ToolContext | None = None
+    ) -> GameSettings:
+        """`changes`(attr → 표시 텍스트)만 바꾸고 나머지는 지금 값 그대로 다시 제출한다. 다시 읽어 실제로 반영된 값을
+        돌려주고, 요청과 다르면 `ChangeNotAppliedError`다. 선택지에 없는 값은 `build_update_payload`의 ValueError."""
+
+        async def work(adapter: MaimaiNetAdapterLike) -> GameSettings:
+            html = await adapter.get_user_option()
+            payload = build_update_payload(LexborHTMLParser(html), SETTINGS_FIELDS, changes)
+            payload["token"] = form_token(html)
+            await adapter.post_user_option(payload)
+            settings = parse_settings(LexborHTMLParser(await adapter.get_user_option()), SETTINGS_FIELDS)
+            raise_if_not_applied(changes, settings, SETTINGS_FIELDS, "maimai DX NET")
+            return settings
+
+        return await self._with_adapter(player_id, ctx, work)
+
+    async def get_favorite_music(self, player_id: str, *, ctx: ToolContext | None = None) -> list[str]:
+        """지금 즐겨찾기 곡 제목(곡 단위, DX/STD 구분 없음). 사이트의 곡 값은 불투명해서 제목으로 다룬다."""
+
+        async def work(adapter: MaimaiNetAdapterLike) -> list[str]:
+            return [entry.title for entry in parse_favorite_page(await adapter.get_favorite_page()) if entry.checked]
+
+        return await self._with_adapter(player_id, ctx, work)
+
+    async def set_favorite_music(
+        self, player_id: str, titles: Sequence[str], *, ctx: ToolContext | None = None
+    ) -> None:
+        """즐겨찾기를 `titles`(추가·삭제를 반영한 전체 목록)로 통째로 바꾼다. 다시 읽어 다르면 `ChangeNotAppliedError`."""
+
+        async def work(adapter: MaimaiNetAdapterLike) -> None:
+            html = await adapter.get_favorite_page()
+            await adapter.post_favorites(favorite_payload(parse_favorite_page(html), titles, form_token(html)))
+            after = [entry.title for entry in parse_favorite_page(await adapter.get_favorite_page()) if entry.checked]
+            if set(after) != set(titles):
+                raise ChangeNotAppliedError(
+                    f"maimai DX NET에 반영되지 않았어 — 보낸 곡 {len(set(titles))}개, 지금 즐겨찾기 {len(set(after))}개"
+                )
+
+        await self._with_adapter(player_id, ctx, work)

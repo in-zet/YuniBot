@@ -251,6 +251,16 @@ SCENARIOS: tuple[Scenario, ...] = (
         name="마이/이전 버전 레이팅표", question="마이마이 프리즘 때 기준으로 레이팅표 보여줘",
         shown_from=("report_best",), must_args=(("report_best", "version", "PRiSM"),),
     ),
+    # 설정 — maimai는 같은 도구에 게임 인자와 maimai 전용 항목(2026-11-27, plan 6-8).
+    Scenario(
+        name="설정/마이 터치 속도", question="마이마이 터치 속도 6.00으로 바꿔줘",
+        must_call=("settings_change_settings",),
+        must_args=(("settings_change_settings", "touch_speed", "6.00"), ("settings_change_settings", "game", "마이|maimai")),
+    ),
+    Scenario(
+        name="설정/츄니 스피드", question="스피드 9.00으로 바꿔줘",
+        must_call=("settings_change_settings",), must_args=(("settings_change_settings", "speed", "9.00"),),
+    ),
     Scenario(
         name="기록/폴더 분석", question="연습 폴더 랭크 분포 보여줘",
         shown_from=("report_analyze",), must_call=("folders_show_folder",),

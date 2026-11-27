@@ -5,12 +5,14 @@ from pathlib import Path
 
 from chuni_penguin.types.lamp import ChainLamp, ClearLamp, ComboLamp
 
+from services.chunithm.arcade_settings import SETTINGS_FIELDS
 from services.game.profile import GameProfile
 from services.game.records_calc import chart_rating
 
 CHUNITHM = GameProfile(
     game="chunithm",
     label="CHUNITHM",
+    settings_fields=SETTINGS_FIELDS,
     aliases=("츄니즘", "츄니", "chuni"),
     chart_codes=("BAS", "ADV", "EXP", "MAS", "ULT", "WE"),
     # WORLD'S END는 쉬움·어려움 축에 없어 범위에 넣지 않는다.

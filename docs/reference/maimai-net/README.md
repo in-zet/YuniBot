@@ -10,6 +10,8 @@
 | `music_remaster.html` | 같은 경로 `diff=4` | Re:MASTER 1곡 |
 | `music_utage.html` | `search=V&sort=1&diff=10`(`playCheck` 없음) | 宴 3곡, 친 적 없는 곡이라 점수 칸이 없다. 난이도 칸 클래스 `music__score_back`(이름이 비어 있음) |
 | `music_empty.html` | 같은 경로 `diff=0` | 친 곡이 없는 난이도 |
+| `user_option.html` | `home/userOption/updateUserOption/` | 인게임 설정 폼(2026-11-27). `<select>` 39개 + 요청 토큰, 저장은 `…/update/`에 POST. 맨 위 `optionKind`(BASIC·ADVANCED·EXPERT·Details)는 "Details일 때만 세부 설정이 켜진다" |
+| `favorite_update.html` | `home/userOption/favorite/updateMusic` | 즐겨찾기 바꾸기(2026-11-27). 수록곡 전부가 장르별 체크 칸(`music[]`, 값은 불투명), 지금 즐겨찾기는 `checked`. 장르마다 3곡 + 체크된 곡만 남겼다. 저장은 `…/set`에 `idx=99`·`music[]`·`token` POST |
 | `error_session.html` | `error/` | 로그인이 풀렸을 때 가는 오류 페이지(`ERROR CODE：100001`) |
 
 ## 실측으로 안 것
@@ -22,3 +24,5 @@
 - 목록 항목의 오른쪽 그림 3개는 HTML 순서로 싱크·콤보·랭크다. 램프가 없으면 `music_icon_back.png`가 자리를 채운다.
 - 채보 종류는 `music_dx.png`/`music_standard.png` 그림으로 갈린다. 宴은 모두 `music_standard.png`다.
 - 최근 플레이는 최대 50개이고 시각은 JST다.
+- 즐겨찾기는 30곡까지, 곡 단위(DX/STD 구분 없음)다. 실측 1389곡 중 같은 제목은 `Link` 둘뿐이었다(2026-11-27). 곡 상세(`record/musicDetail/`)에는 즐겨찾기 버튼이 없다.
+- 공지는 NET에 없다. 공식 사이트(`maimai.sega.com`)에도 글 공지는 없고 매장 홍보 그림과 버전 출시 날짜 목록뿐이다.

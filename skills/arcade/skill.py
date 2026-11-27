@@ -14,13 +14,10 @@ from core.fuzzy import normalize_name
 from core.resolvers import ResolutionError
 from core.tables import RowRef, TableBuilder, cell
 from core.tool_types import ArcadeRef, Display, ToolContext, ToolResult
-from services.chunithm.arcade_settings import (
-    FIELD_LABELS,
-    ArcadeSettings,
-    named_from_settings,
-    settings_line,
-)
+from services.chunithm.arcade_settings import SETTINGS_FIELDS
 from services.common.arcades import Arcade
+from services.game.net_settings import GameSettings
+from services.game.net_settings import settings_line as _settings_line
 
 _GAME = "chunithm"
 _SETTINGS_ENTRY = "arcade.settings_entry"
@@ -30,6 +27,12 @@ _NO_ARCADE_HINT = "오락실을 말 안 했네. 다음 동기화 때 같이 말�
 
 
 # ---------------------------------------------------------------- 공통 도우미
+
+FIELD_LABELS = {f.attr: f.label for f in SETTINGS_FIELDS}
+
+
+def settings_line(named: dict[str, str]) -> str:
+    return _settings_line(named, SETTINGS_FIELDS)
 
 
 def _named_from_row(row: aiosqlite.Row) -> dict[str, str]:
@@ -56,10 +59,10 @@ async def _latest_settings(ctx: ToolContext, *, player_id: str, arcade_id: str |
 
 
 async def _store_settings(
-    ctx: ToolContext, *, visit_id: int, player_id: str, arcade_id: str, play_date: str, settings: ArcadeSettings
+    ctx: ToolContext, *, visit_id: int, player_id: str, arcade_id: str, play_date: str, settings: GameSettings
 ) -> None:
     assert ctx.db is not None
-    named = named_from_settings(settings)
+    named = settings.named
     now = datetime.now(UTC).isoformat()
     await ctx.db.execute(
         "INSERT INTO arcade_settings (visit_id, player_id, arcade_id, play_date, speed, field_wall_position, "
@@ -98,7 +101,7 @@ async def _apply_visit(ctx: ToolContext, arcade: Arcade, *, play_date: str | Non
         return {"play_date": resolved_date, "settings_saved": False, "reason": "network_error", "changed": []}
 
     previous = await _latest_settings(ctx, player_id=ctx.player_id, arcade_id=arcade.id)
-    changed = _diff(_named_from_row(previous), named_from_settings(settings)) if previous is not None else []
+    changed = _diff(_named_from_row(previous), settings.named) if previous is not None else []
     await _store_settings(
         ctx, visit_id=visit_id, player_id=ctx.player_id, arcade_id=arcade.id,
         play_date=resolved_date, settings=settings,

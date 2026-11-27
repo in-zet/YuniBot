@@ -6,6 +6,7 @@ from pathlib import Path
 
 from services.game.profile import GameProfile
 from services.maimai.rating import chart_rating
+from services.maimai.user_option import SETTINGS_FIELDS
 
 # otoge-db 버전 코드의 앞 세 자리 → 버전 이름(출시 순서). 5로 끝나는 코드는 PLUS다(예: 26500 = CiRCLE PLUS).
 # 뒤 두 자리는 그 버전 안의 업데이트 차수다. 2026-10-23 music-ex-intl.json의 버전 27가지 전부와 대조했다.
@@ -41,6 +42,7 @@ MAIMAI = GameProfile(
     new_label="신곡 15",
     candidate_target_label="SSS+",
     net_name="maimai DX NET",
+    settings_fields=SETTINGS_FIELDS,
     full_combo_lamp="FC",
     all_justice_lamp="AP",
     all_justice_label="올 퍼펙트",

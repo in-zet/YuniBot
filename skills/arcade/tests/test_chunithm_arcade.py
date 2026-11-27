@@ -15,9 +15,9 @@ import pytest
 from core.events import EventBus
 from core.tables import render_text
 from core.tool_types import ToolContext
-from services.chunithm.arcade_settings import ArcadeSettings
 from services.common.arcades import ArcadesService
 from services.common.players import PlayersService
+from services.game.net_settings import GameSettings
 from services.game.records import SessionInfo
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -65,11 +65,11 @@ class _FakeRecords:
 
 @dataclass(slots=True, kw_only=True)
 class _FakeChunithmNet:
-    settings: ArcadeSettings | None = None
+    settings: GameSettings | None = None
     error: Exception | None = None
     calls: int = 0
 
-    async def get_arcade_settings(self, player_id: str, *, ctx: ToolContext | None = None) -> ArcadeSettings:
+    async def get_arcade_settings(self, player_id: str, *, ctx: ToolContext | None = None) -> GameSettings:
         self.calls += 1
         if self.error is not None:
             raise self.error
@@ -77,13 +77,13 @@ class _FakeChunithmNet:
         return self.settings
 
 
-def _settings(**overrides: str) -> ArcadeSettings:
+def _settings(**overrides: str) -> GameSettings:
     named = {
         "speed": "1.00", "field_wall_position": "0", "play_timing_offset": "0.0",
         "judge_timing_offset": "0.0", "guide_sound": "5",
     }
     named.update(overrides)
-    return ArcadeSettings(raw={**named, "extraField": "x"}, **named)
+    return GameSettings(named=dict(named), raw={**named, "extraField": "x"})
 
 
 def _ctx(

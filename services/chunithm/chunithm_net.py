@@ -16,17 +16,18 @@ from chuni_penguin.adapters.errors import AuthenticationError
 from chuni_penguin.types import Difficulty
 
 from core.tool_types import ToolContext, UserFacingError
-from services.chunithm.arcade_settings import (
-    FIELD_LABELS,
-    ArcadeSettings,
-    build_update_payload,
-    named_from_settings,
-    parse_arcade_settings,
-)
+from services.chunithm.arcade_settings import SETTINGS_FIELDS
 from services.chunithm.sync_snapshot import SyncFetch, snapshot_from_fetch
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
 from services.common.sega_cookies import LoginStatus, SegaCookieStore
+from services.game.net_settings import (
+    ChangeNotAppliedError,
+    GameSettings,
+    build_update_payload,
+    parse_settings,
+    raise_if_not_applied,
+)
 
 if TYPE_CHECKING:
     from chuni_penguin.types import PersonalBest, Profile, RecentScore
@@ -39,10 +40,6 @@ logger = logging.getLogger(__name__)
 # fetch_for_sync가 전체 PB를 모을 때 도는 순서. CHUNITHM-NET이 쓰는 코드 그대로다
 # (Difficulty(code)가 "BAS"/"ADV"/"EXP"/"MAS"/"ULT"/"WE"를 그대로 알아듣는다).
 _PERSONAL_BEST_DIFFICULTY_CODES: tuple[str, ...] = ("BAS", "ADV", "EXP", "MAS", "ULT", "WE")
-
-
-class ChangeNotAppliedError(Exception):
-    """CHUNITHM-NET에 바꾸라고 보냈는데 다시 읽어 보니 반영되지 않았다. 메시지는 사용자에게 그대로 보여 줄 수 있다."""
 
 
 class ChunithmNetBlockedError(UserFacingError):
@@ -341,8 +338,8 @@ class ChunithmNetService:
 
     async def get_arcade_settings(
         self, player_id: str, *, ctx: ToolContext | None = None
-    ) -> ArcadeSettings:
-        """지금 계정의 게임 설정 페이지를 읽는다(`arcade` 전용). 인증 실패는
+    ) -> GameSettings:
+        """지금 계정의 게임 설정 페이지를 읽는다(`arcade`·`settings`). 인증 실패는
         다른 메서드와 똑같이 만료로 처리하고 예외를 다시 던진다."""
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
@@ -351,7 +348,7 @@ class ChunithmNetService:
         adapter = self._adapter_factory(cookie)
         try:
             soup = await adapter._request_as_soup("GET", "/mobile/home/userOption/updateUserOption")
-            return parse_arcade_settings(soup)
+            return parse_settings(soup, SETTINGS_FIELDS)
         except AuthenticationError:
             await self._expire_login(player_id, ctx)
             raise
@@ -360,7 +357,7 @@ class ChunithmNetService:
 
     async def update_arcade_settings(
         self, player_id: str, *, changes: dict[str, str], ctx: ToolContext | None = None
-    ) -> ArcadeSettings:
+    ) -> GameSettings:
         """게임 설정 중 `changes`에 담긴 항목만 바꾸고 나머지는 지금 값 그대로 다시
         제출한다(`settings` 전용). POST 응답을 믿지 않고 다시 읽어 실제로
         반영된 값을 돌려주며, 요청한 값과 다르면 `ChangeNotAppliedError`다. `changes`의 표시 텍스트가 선택지에 없으면
@@ -372,20 +369,14 @@ class ChunithmNetService:
         adapter = self._adapter_factory(cookie)
         try:
             soup = await adapter._request_as_soup("GET", "/mobile/home/userOption/updateUserOption")
-            payload = build_update_payload(soup, changes)
+            payload = build_update_payload(soup, SETTINGS_FIELDS, changes)
             payload["token"] = adapter._token or ""
             await adapter._request_as_soup(
                 "POST", "/mobile/home/userOption/updateUserOption/update/", data=payload,
             )
             soup = await adapter._request_as_soup("GET", "/mobile/home/userOption/updateUserOption")
-            settings = parse_arcade_settings(soup)
-            not_applied = [
-                f"{FIELD_LABELS[attr]}: 요청 {requested}, 지금 {named_from_settings(settings)[attr]}"
-                for attr, requested in changes.items()
-                if named_from_settings(settings)[attr] != requested
-            ]
-            if not_applied:
-                raise ChangeNotAppliedError("CHUNITHM-NET에 반영되지 않았어 — " + "; ".join(not_applied))
+            settings = parse_settings(soup, SETTINGS_FIELDS)
+            raise_if_not_applied(changes, settings, SETTINGS_FIELDS, "CHUNITHM-NET")
             return settings
         except AuthenticationError:
             await self._expire_login(player_id, ctx)

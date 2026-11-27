@@ -1,7 +1,8 @@
 # tests/services/maimai/test_maimai_net.py
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import re
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -19,6 +20,7 @@ from core.tool_types import ToolContext
 from services.common.aime_auth import GATEWAY_HOST
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
+from services.game.net_settings import ChangeNotAppliedError
 from services.maimai import parser
 from services.maimai.maimai_net import (
     LIST_DIFFICULTIES,
@@ -232,12 +234,56 @@ async def conn() -> AsyncIterator[aiosqlite.Connection]:
         await connection.close()
 
 
+def _select_values(html: str, payload: Mapping[str, str]) -> str:
+    """POST를 받은 사이트처럼 각 `<select>`에서 보낸 value의 option만 selected로 둔다."""
+
+    def one(match: re.Match[str]) -> str:
+        name, body = match.group(1), match.group(2)
+        if name not in payload:
+            return match.group(0)
+        body = re.sub(r"\s+selected(=\"selected\")?", "", body)
+        body = body.replace(f'value="{payload[name]}"', f'value="{payload[name]}" selected', 1)
+        return match.group(0).replace(match.group(2), body)
+
+    return re.sub(r'<select[^>]*name="([^"]+)"[^>]*>(.*?)</select>', one, html, flags=re.DOTALL)
+
+
 class _FakeAdapter:
-    def __init__(self, *, error: Exception | None = None, clal: str | None = None) -> None:
+    def __init__(self, *, error: Exception | None = None, clal: str | None = None, applies_posts: bool = True) -> None:
         self.error = error
         self.closed = False
         self.listed: list[str] = []
         self.clal = clal
+        # 설정·즐겨찾기 페이지는 실측 표본에서 시작하고, POST를 받으면(applies_posts) 사이트처럼 선택을 바꾼다.
+        self.option_html = (_DIR / "user_option.html").read_text(encoding="utf-8")
+        self.favorite_html = (_DIR / "favorite_update.html").read_text(encoding="utf-8")
+        self.applies_posts = applies_posts
+        self.posts: list[tuple[str, Mapping[str, str | list[str]]]] = []
+
+    async def get_user_option(self) -> bytes:
+        if self.error is not None:
+            raise self.error
+        return self.option_html.encode()
+
+    async def post_user_option(self, payload: Mapping[str, str]) -> None:
+        self.posts.append(("option", payload))
+        if self.applies_posts:
+            self.option_html = _select_values(self.option_html, payload)
+
+    async def get_favorite_page(self) -> bytes:
+        if self.error is not None:
+            raise self.error
+        return self.favorite_html.encode()
+
+    async def post_favorites(self, payload: Mapping[str, str | list[str]]) -> None:
+        self.posts.append(("favorite", payload))
+        if self.applies_posts:
+            chosen = set(payload["music[]"])
+            self.favorite_html = re.sub(
+                r'(<input type="checkbox" id="favorite" name="music\[\]" value="([^"]+)") ?(checked)? ?',
+                lambda m: f"{m.group(1)} {'checked ' if m.group(2) in chosen else ''}",
+                self.favorite_html,
+            )
 
     def session_clal(self) -> str | None:
         return self.clal
@@ -372,3 +418,100 @@ async def test_login_with_credentials_saves_nothing_on_maintenance(conn) -> None
         await service.login_with_credentials(player.id, "sid", "pw", ToolContext(player_id=player.id, tags=frozenset(), services={}))
 
     assert not (await service.status(player.id)).linked
+
+
+# ---------------------------------------------------------------- 인게임 설정·즐겨찾기 (2026-11-27, plan 6-8)
+
+
+def _service_with(conn: aiosqlite.Connection, secrets: SecretsService, players: PlayersService, adapter: _FakeAdapter):
+    return MaimaiNetService(
+        conn=conn, secrets=secrets, players=players, adapter_factory=lambda clal: cast(MaimaiNetAdapterLike, adapter)
+    )
+
+
+async def test_get_arcade_settings_reads_the_named_fields(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+    adapter = _FakeAdapter()
+
+    settings = await _service_with(conn, secrets, players, adapter).get_arcade_settings(player.id)
+
+    assert settings.named == {
+        "speed": "5.75", "touch_speed": "5.50", "slide_timing": "0.0",
+        "play_timing_offset": "0.0", "judge_timing_offset": "0.6", "guide_sound": "OFF",
+    }
+    assert len(settings.raw) == 39 and settings.raw["optionKind"] == "Details"  # 나머지 설정도 통째로
+    assert adapter.closed
+
+
+async def test_update_arcade_settings_posts_every_select_with_the_token_and_rereads(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+    adapter = _FakeAdapter()
+
+    settings = await _service_with(conn, secrets, players, adapter).update_arcade_settings(
+        player.id, changes={"speed": "6.00", "judge_timing_offset": "0.5"}
+    )
+
+    assert settings.named["speed"] == "6.00" and settings.named["judge_timing_offset"] == "0.5"
+    assert settings.named["touch_speed"] == "5.50"  # 말하지 않은 항목은 그대로
+    [(kind, payload)] = adapter.posts
+    assert kind == "option" and payload["token"] == "TOKEN"
+    assert payload["optionKind"] == "3" and payload["touchSpeed"] == "18"  # 폼 전체를 지금 값으로 되돌려 보낸다
+    assert len(payload) == 40
+
+
+async def test_update_arcade_settings_raises_when_the_site_ignored_it(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+
+    with pytest.raises(ChangeNotAppliedError, match="maimai DX NET에 반영되지 않았어 — 노트 속도"):
+        await _service_with(conn, secrets, players, _FakeAdapter(applies_posts=False)).update_arcade_settings(
+            player.id, changes={"speed": "6.00"}
+        )
+
+
+async def test_update_arcade_settings_unknown_value_is_refused_without_posting(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+    adapter = _FakeAdapter()
+
+    with pytest.raises(ValueError, match="가이드음에 '11'라는 값은 없어"):
+        await _service_with(conn, secrets, players, adapter).update_arcade_settings(player.id, changes={"guide_sound": "11"})
+    assert adapter.posts == []
+
+
+async def test_favorites_are_read_and_written_by_title(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+    adapter = _FakeAdapter()
+    service = _service_with(conn, secrets, players, adapter)
+
+    assert await service.get_favorite_music(player.id) == ["テトリス", "運命線上のアリア"]
+
+    await service.set_favorite_music(player.id, ["テトリス", "AiAe"])
+
+    [(kind, payload)] = adapter.posts
+    assert kind == "favorite" and payload["idx"] == "99" and payload["token"] == "TOKEN"
+    assert len(payload["music[]"]) == 2
+    assert await service.get_favorite_music(player.id) == ["テトリス", "AiAe"]
+
+
+async def test_set_favorites_raises_when_the_site_ignored_it(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+
+    with pytest.raises(ChangeNotAppliedError, match="maimai DX NET에 반영되지 않았어"):
+        await _service_with(conn, secrets, players, _FakeAdapter(applies_posts=False)).set_favorite_music(
+            player.id, ["テトリス"]
+        )
+
+
+async def test_settings_auth_failure_expires_the_login(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+
+    with pytest.raises(AuthenticationError):
+        await _service_with(conn, secrets, players, _FakeAdapter(error=AuthenticationError())).get_favorite_music(player.id)
+
+    assert "sega-linked" not in await players.tags_for(player.id)

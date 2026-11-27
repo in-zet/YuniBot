@@ -27,7 +27,7 @@ from selectolax.lexbor import LexborHTMLParser
 
 from core.events import EventBus
 from core.tool_types import ToolContext
-from services.chunithm.arcade_settings import parse_arcade_settings
+from services.chunithm.arcade_settings import SETTINGS_FIELDS
 from services.chunithm.chunithm_net import (
     ChangeNotAppliedError,
     ChunithmNetBlockedError,
@@ -41,6 +41,7 @@ from services.chunithm.chunithm_net import (
 )
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
+from services.game.net_settings import parse_settings
 
 _PLAYERS_MIGRATION = (
     Path("migrations/core/001_players.sql").read_text()
@@ -580,7 +581,7 @@ async def test_get_arcade_settings_returns_parsed_settings(conn, secrets) -> Non
 
     result = await service.get_arcade_settings(player.id)
 
-    assert result == parse_arcade_settings(LexborHTMLParser(_ARCADE_SETTINGS_HTML))
+    assert result == parse_settings(LexborHTMLParser(_ARCADE_SETTINGS_HTML), SETTINGS_FIELDS)
 
 
 async def test_get_arcade_settings_without_login_raises_connection_error(conn, secrets) -> None:
@@ -602,9 +603,9 @@ async def test_update_arcade_settings_posts_full_payload_with_only_requested_cha
 
     result = await service.update_arcade_settings(player.id, changes={"speed": "9.00"})
 
-    assert result.speed == "9.00"
-    original = parse_arcade_settings(LexborHTMLParser(_ARCADE_SETTINGS_HTML))
-    assert result.guide_sound == original.guide_sound  # 말하지 않은 항목은 그대로
+    assert result.named["speed"] == "9.00"
+    original = parse_settings(LexborHTMLParser(_ARCADE_SETTINGS_HTML), SETTINGS_FIELDS)
+    assert result.named["guide_sound"] == original.named["guide_sound"]  # 말하지 않은 항목은 그대로
     methods = [r[0] for r in adapter.requests]
     assert methods == ["GET", "POST", "GET"]
     _, post_url, post_kwargs = adapter.requests[1]

@@ -12,9 +12,8 @@ from chuni_penguin.adapters.errors import AuthenticationError, MaintenanceError
 from core.events import EventBus
 from core.tables import TableBuilder, WorkTable, render_text
 from core.tool_types import ToolContext
-from services.chunithm.arcade_settings import ArcadeSettings
-from services.chunithm.chunithm_net import ChangeNotAppliedError
 from services.game import table_columns as tc
+from services.game.net_settings import ChangeNotAppliedError, GameSettings
 from services.game.songdb import SongRecord
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -33,23 +32,23 @@ def skill() -> ModuleType:
     return _load_skill()
 
 
-def _settings(**overrides: str) -> ArcadeSettings:
+def _settings(**overrides: str) -> GameSettings:
     named = {
         "speed": "1.00", "field_wall_position": "0", "play_timing_offset": "0.0",
         "judge_timing_offset": "0.0", "guide_sound": "5",
     }
     named.update(overrides)
-    return ArcadeSettings(raw={**named, "extraField": "x"}, **named)
+    return GameSettings(named=dict(named), raw={**named, "extraField": "x"})
 
 
 @dataclass(slots=True, kw_only=True)
 class _FakeChunithmNet:
-    settings: ArcadeSettings | None = None
+    settings: GameSettings | None = None
     favorites: list[int] = field(default_factory=list)
     error: Exception | None = None
     update_error: Exception | None = None
 
-    async def get_arcade_settings(self, player_id: str, *, ctx: ToolContext | None = None) -> ArcadeSettings:
+    async def get_arcade_settings(self, player_id: str, *, ctx: ToolContext | None = None) -> GameSettings:
         if self.error is not None:
             raise self.error
         assert self.settings is not None
@@ -57,19 +56,14 @@ class _FakeChunithmNet:
 
     async def update_arcade_settings(
         self, player_id: str, *, changes: dict[str, str], ctx: ToolContext | None = None
-    ) -> ArcadeSettings:
+    ) -> GameSettings:
         if self.update_error is not None:
             raise self.update_error
         if self.error is not None:
             raise self.error
         assert self.settings is not None
-        named = {
-            "speed": self.settings.speed, "field_wall_position": self.settings.field_wall_position,
-            "play_timing_offset": self.settings.play_timing_offset,
-            "judge_timing_offset": self.settings.judge_timing_offset, "guide_sound": self.settings.guide_sound,
-        }
-        named.update(changes)
-        self.settings = ArcadeSettings(raw={**named, "extraField": "x"}, **named)
+        named = {**self.settings.named, **changes}
+        self.settings = GameSettings(named=dict(named), raw={**named, "extraField": "x"})
         return self.settings
 
     async def get_favorite_music(self, player_id: str, *, ctx: ToolContext | None = None) -> list[int]:

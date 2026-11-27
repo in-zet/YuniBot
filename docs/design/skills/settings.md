@@ -15,7 +15,7 @@ examples:
   - 즐겨찾기에 크로노마기아 추가해줘
   - 즐겨찾기 목록 보여줘
 category: 오락실
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
 services: [chunithm_net, songdb]
 tags: [sega-linked]
@@ -101,3 +101,10 @@ tags: [sega-linked]
 - **원인(즐겨찾기)**: `set_favorite_music`이 새 어댑터로 바로 POST했다. 요청 토큰은 `_t` 쿠키라 로그인 뒤에야 생기는데, 사이트가 토큰 없는 요청을 오류 페이지로 돌리면 chuni-penguin의 `ChunithmNetAuth`가 재로그인한 뒤 **같은 body(옛 토큰)를 그대로 다시 보낸다** — 사이트는 302만 돌려주고 안 바꾼다. 로그에도 매 호출이 `POST → GET updateMusic 302 → /mobile/error/ → 재로그인 → POST`로 나타난다. 게임 설정은 먼저 설정 페이지를 GET한 뒤 토큰을 읽어서 이 문제가 없다(다만 아래 검증이 없어 성공 여부를 몰랐다).
 - **수정**: ① 서비스 `set_favorite_music`이 쓰기 전에 한 번 읽어 세션·토큰을 만든다. ② 쓴 뒤 다시 읽어 보낸 목록과 다르면 `ChangeNotAppliedError`. ③ `update_arcade_settings`도 다시 읽은 값이 요청과 다르면 같은 오류. 스킬 네 도구가 이 오류를 에러 결과로 돌려주므로 반영이 안 됐는데 "바꿨어"라고 말하지 않는다.
 - 확인 버튼(디스코드)은 이 문제와 무관하다(2026-10-20 결정 그대로 확인 없이 즉시 반영). 사이트 쪽 확인 단계가 따로 있는지는 저장본 HTML에 스크립트가 없어 알 수 없다 — 위 검증이 실제 반영 여부를 알려 준다.
+
+## maimai DX 대응 (2026-11-27, plan 17단계 6-8)
+
+- **틀 공통화**: 설정 페이지 읽기·쓰기를 `services/game/net_settings.py`(`SettingField`·`GameSettings`·`parse_settings`·`build_update_payload`·`raise_if_not_applied`)로 옮기고, 게임마다 이름 붙여 다루는 항목만 `GameProfile.settings_fields`에 둔다(CHUNITHM `services/chunithm/arcade_settings.py`, maimai `services/maimai/user_option.py`).
+- **maimai 항목(사용자 결정)**: 노트 속도(TAP SPEED, `speed`)·터치 속도(`touch_speed`)·슬라이드 타이밍(`slide_timing`)·판정 타이밍 A·B·가이드음. 나머지 30여 항목은 보이지도 바꾸지도 않는다. 도구 인자는 두 게임 공통 하나로 두고, 그 게임에 없는 항목을 말하면 "○○ 설정에는 △△ 항목이 없어"로 거절한다.
+- **maimai 즐겨찾기**: 사이트의 곡 값이 불투명해서 제목으로 다룬다(`get_favorite_music`이 제목 목록). 30곡 상한, 곡 단위. 이미 즐겨찾기인 곡은 체크된 칸을 그대로 보내고, 새로 더하는 곡의 제목이 둘이면(`Link`) 거절한다. 저장은 `updateMusic/set`에 전체 목록 POST, 다시 읽어 다르면 `ChangeNotAppliedError`.
+- 도구에 `game: GameRef` 인자(`add_favorites`는 표의 게임). 오류 문구의 사이트 이름은 `GameProfile.net_name`.
