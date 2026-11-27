@@ -194,6 +194,7 @@ class PlayerProfile:
     character_image_url: str | None
     character_frame_url: str | None
     updated_at: str
+    username: str | None = None  # 그 게임 NET의 플레이어 이름
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)
@@ -443,15 +444,16 @@ class RecordsService:
             # 플레이어당 최신 한 줄만 둔다(이력 없음).
             await self._conn.execute(
                 "INSERT INTO records_profile (player_id, game, level, reincarnation_stars, "
-                "character_image_url, character_frame_url, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "character_image_url, character_frame_url, updated_at, username) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(player_id, game) DO UPDATE SET level = excluded.level, "
                 "reincarnation_stars = excluded.reincarnation_stars, "
                 "character_image_url = excluded.character_image_url, "
-                "character_frame_url = excluded.character_frame_url, updated_at = excluded.updated_at",
+                "character_frame_url = excluded.character_frame_url, updated_at = excluded.updated_at, "
+                "username = excluded.username",
                 (
                     player_id, self._game, snapshot.profile.level, snapshot.profile.reincarnation_stars,
                     snapshot.profile.character_image_url, snapshot.profile.character_frame_url,
-                    synced_at.isoformat(),
+                    synced_at.isoformat(), snapshot.profile.username or None,
                 ),
             )
             await self._conn.commit()
@@ -957,9 +959,9 @@ class RecordsService:
         return _frame_floor(new, self._profile.new_frame_size)
 
     async def player_profile(self, player_id: str) -> PlayerProfile | None:
-        """마지막 동기화 때 저장한 레벨·환생 별·캐릭터 그림 주소. 동기화한 적 없으면 None."""
+        """마지막 동기화 때 저장한 레벨·환생 별·캐릭터 그림 주소·NET 이름. 동기화한 적 없으면 None."""
         cursor = await self._conn.execute(
-            "SELECT level, reincarnation_stars, character_image_url, character_frame_url, updated_at "
+            "SELECT level, reincarnation_stars, character_image_url, character_frame_url, updated_at, username "
             "FROM records_profile WHERE player_id = ? AND game = ?",
             (player_id, self._game),
         )
@@ -972,6 +974,7 @@ class RecordsService:
             character_image_url=row["character_image_url"],
             character_frame_url=row["character_frame_url"],
             updated_at=row["updated_at"],
+            username=row["username"],
         )
 
     async def last_sync_at(self, player_id: str) -> str | None:

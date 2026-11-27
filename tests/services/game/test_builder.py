@@ -11,7 +11,11 @@ from core.tool_types import RankRef, ToolContext
 from services.chunithm.chunithm_net import ChunithmNetService
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
-from services.game.builder import build_all_game_services, register_resolvers
+from services.game.builder import (
+    build_all_game_services,
+    main_game_nickname_source,
+    register_resolvers,
+)
 from services.game.registry import GAME_PROFILES
 from services.maimai.maimai_net import MaimaiNetService
 from services.maimai.songdb import MaimaiSongDbService
@@ -20,7 +24,7 @@ _MIGRATIONS = "".join(
     Path(f"migrations/core/{name}").read_text()
     for name in (
         "001_players.sql", "002_player_tags.sql", "008_records.sql", "013_records_overpower.sql",
-        "014_records_sync_log_snapshot_averages.sql", "018_records_profile.sql", "019_records_session_state.sql",
+        "014_records_sync_log_snapshot_averages.sql", "018_records_profile.sql", "030_records_profile_username.sql", "019_records_session_state.sql",
         "024_records_chart_type.sql", "009_terms_server.sql", "021_terms_aliases.sql",
         "028_terms_aliases_game.sql",
     )
@@ -59,17 +63,53 @@ async def test_each_game_gets_its_own_net_service_in_the_chunithm_net_slot(conn,
     assert isinstance(games["maimai"].skill_services()["chunithm_net"], MaimaiNetService)
 
 
-async def test_nickname_source_exists_only_for_a_game_whose_net_knows_nicknames(conn, tmp_path: Path) -> None:
-    keyed = await build_all_game_services(
-        conn=conn, players=PlayersService(conn), secrets=SecretsService(Fernet.generate_key()), data_dir=tmp_path
+async def _save_profile_name(conn: aiosqlite.Connection, player_id: str, game: str, name: str) -> None:
+    await conn.execute(
+        "INSERT INTO records_profile (player_id, game, updated_at, username) VALUES (?, ?, '2026-11-27T00:00:00+00:00', ?)",
+        (player_id, game, name),
     )
-    keyless = await build_all_game_services(
-        conn=conn, players=PlayersService(conn), secrets=None, data_dir=tmp_path
-    )
+    await conn.commit()
 
-    assert keyed["chunithm"].nickname_source() is not None
-    assert keyed["maimai"].nickname_source() is None
-    assert keyless["chunithm"].nickname_source() is None
+
+async def test_nickname_source_reads_the_main_game_name(conn, tmp_path: Path) -> None:
+    """유니는 주 게임 NET의 이름으로 부른다(2026-11-27 사용자 결정). 주 게임이 없으면 기본 게임(CHUNITHM)."""
+    players = PlayersService(conn)
+    player = await players.create_player()
+    games = await build_all_game_services(conn=conn, players=players, secrets=None, data_dir=tmp_path)
+    await _save_profile_name(conn, player.id, "chunithm", "츄니이름")
+    await _save_profile_name(conn, player.id, "maimai", "마이이름")
+    main: dict[str, str | None] = {player.id: None}
+
+    async def main_game(player_id: str) -> str | None:
+        return main[player_id]
+
+    source = main_game_nickname_source(games, main_game)
+
+    assert await source(player.id) == "츄니이름"
+    main[player.id] = "maimai"
+    assert await source(player.id) == "마이이름"
+
+
+async def test_nickname_source_falls_back_to_the_login_name_before_the_main_game_is_synced(conn, tmp_path: Path) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players = PlayersService(conn)
+    player = await players.create_player()
+    games = await build_all_game_services(conn=conn, players=players, secrets=secrets, data_dir=tmp_path)
+    await _save_profile_name(conn, player.id, "chunithm", "츄니이름")
+
+    async def main_game(player_id: str) -> str | None:
+        return "maimai"
+
+    async def login_status(player_id: str):
+        from services.common.sega_cookies import LoginStatus
+
+        return LoginStatus(linked=True, nickname="로그인이름")
+
+    for bundle in games.values():
+        assert bundle.net is not None
+        bundle.net.status = login_status  # type: ignore[method-assign]
+
+    assert await main_game_nickname_source(games, main_game)(player.id) == "로그인이름"
 
 
 async def test_without_a_secrets_key_no_game_has_a_net_service(conn, tmp_path: Path) -> None:

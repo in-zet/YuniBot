@@ -55,7 +55,7 @@ listens: [sega.login.expired]
 
 | 함수 | 하는 일 | 인자 | 슬래시 | 태그 | display | confirm |
 | --- | --- | --- | --- | --- | --- | --- |
-| `status` | 로그인 여부, 로그인 때 읽은 이름, 게임별 마지막 동기화 시각, 공개 설정 | 없음 | 없음 | 없음 | optional | never |
+| `status` | 로그인 여부(로그인 때 읽은 이름), 게임별 NET 이름·마지막 동기화 시각, 공개 설정 | 없음 | 없음 | 없음 | optional | never |
 | `set_privacy` | 기록 공개 설정을 켜거나 끈다 | `public: bool` | 없음 | `sega-linked` | optional | never |
 | `logout` | 쿠키 삭제 | 없음 | 없음 | `sega-linked` | required | always |
 
@@ -84,7 +84,7 @@ listens: [sega.login.expired]
 - 만료 이벤트가 같은 만료에 대해 DM을 한 번만 보내는지 확인한다.
 - 태그가 로그인 성공 때 붙고 로그아웃과 만료 때 떨어지는지 확인한다.
 
-- **두 게임 공통(2026-11-27, plan 17단계 6-9)**: `games: [chunithm, maimai]`. 츄니즘 전용일 때는 주 게임이 maimai인 플레이어의 `status`·`set_privacy`·`logout`이 츄니즘으로 넘어가 "이 기능이 아직 없어서" 안내가 붙었다. `status`는 로그인·공개 설정을 한 번, 마지막 동기화를 게임마다 한 줄씩 보인다. 이름은 `sega_cookies.nickname` 하나뿐이라(로그인한 NET의 이름) 게임별로 나누지 않고 "로그인 때 읽은 이름"으로 보인다.
+- **두 게임 공통(2026-11-27, plan 17단계 6-9)**: `games: [chunithm, maimai]`. 츄니즘 전용일 때는 주 게임이 maimai인 플레이어의 `status`·`set_privacy`·`logout`이 츄니즘으로 넘어가 "이 기능이 아직 없어서" 안내가 붙었다. `status`는 로그인·공개 설정을 한 번, 게임마다 "NET 이름, 마지막 동기화"를 한 줄씩 보인다. 게임별 이름은 동기화 때 `records_profile.username`(코어 마이그레이션 030)에 저장한 것이고, 그 게임을 동기화한 적 없으면 "아직 동기화한 적 없음"이다. 로그인 때 읽은 이름(`sega_cookies.nickname`)은 로그인 줄에 괄호로 붙인다.
 
 ## 미확인 사항
 

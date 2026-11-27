@@ -149,31 +149,38 @@ async def start_login(ctx: ToolContext, game: GameRef | None = None) -> discord.
 
 @tool()
 async def status(ctx: ToolContext) -> ToolResult:
-    """로그인 여부, 로그인 때 읽은 이름, 게임별 마지막 동기화 시각, 기록 공개 설정을 보여준다(로그인은 두 게임 공통)."""
+    """로그인 여부, 게임별 NET 이름·마지막 동기화 시각, 기록 공개 설정을 보여준다(로그인은 두 게임 공통)."""
     login_status = await ctx.chunithm_net.status(ctx.player_id)
     player = await ctx.players.get_player(ctx.player_id)
     assert player is not None
     # 게임별 서비스 묶음이 없으면(시험 등) 지금 게임 하나만 본다.
     games = list(ctx.game_services) or [ctx.game]
-    last_synced: dict[str, str | None] = {}
+    per_game: dict[str, dict[str, str | None]] = {}
     for game in games:
-        last_synced[game] = await ctx.for_game(game).records.last_sync_at(ctx.player_id)
+        records = ctx.for_game(game).records
+        profile = await records.player_profile(ctx.player_id)
+        per_game[game] = {
+            "username": profile.username if profile is not None else None,
+            "last_synced_at": await records.last_sync_at(ctx.player_id),
+        }
 
     data = {
         "linked": login_status.linked,
-        "nickname": login_status.nickname,
-        "last_synced_at": last_synced,
+        "login_nickname": login_status.nickname,
+        "games": per_game,
         "records_public": player.records_public,
     }
-    lines = [
-        f"로그인: {'되어있음' if login_status.linked else '안 되어있음'}",
-        f"로그인 때 읽은 이름: {login_status.nickname or '없음'}",
-        *(
-            f"{profile_for(game).label} 마지막 동기화: {synced_at or '아직 동기화한 적 없음'}"
-            for game, synced_at in last_synced.items()
-        ),
-        f"기록 공개: {'공개' if player.records_public else '비공개'}",
-    ]
+    if login_status.linked:
+        lines = [f"로그인: 되어있음 ({login_status.nickname})" if login_status.nickname else "로그인: 되어있음"]
+    else:
+        lines = ["로그인: 안 되어있음"]
+    for game, info in per_game.items():
+        if info["last_synced_at"] is None:
+            lines.append(f"{profile_for(game).label}: 아직 동기화한 적 없음")
+        else:
+            name = info["username"] or login_status.nickname or "이름 모름"
+            lines.append(f"{profile_for(game).label}: {name}, 마지막 동기화 {info['last_synced_at']}")
+    lines.append(f"기록 공개: {'공개' if player.records_public else '비공개'}")
     return ToolResult(
         data=data, display=Display(content="\n".join(lines), ephemeral=True), display_mode="optional"
     )

@@ -255,7 +255,7 @@ async def test_028_terms_aliases_get_a_game_column_keeping_rows(tmp_path: Path) 
         await conn.commit()
 
         applied = await run_migrations(conn, roots=[("core", real_core)])
-        assert applied == ["core/028_terms_aliases_game.sql", "core/029_change_log.sql"]
+        assert applied == [f"core/{sql.name}" for sql in sorted(real_core.glob("*.sql")) if sql.name >= "028"]
 
         cursor = await conn.execute("SELECT game, kind, alias, canonical FROM terms_aliases")
         assert [tuple(r) for r in await cursor.fetchall()] == [("chunithm", "rank", "트플", "SSS")]
@@ -264,3 +264,25 @@ async def test_028_terms_aliases_get_a_game_column_keeping_rows(tmp_path: Path) 
             "INSERT INTO terms_aliases (game, kind, alias, canonical, added_by, created_at) "
             "VALUES ('maimai', 'rank', '트플', 'SSS+', 'p1', 't')"
         )
+
+
+async def test_030_records_profile_gets_a_username_column_keeping_rows(tmp_path: Path) -> None:
+    """게임별 NET 이름 칸(유니가 주 게임 이름으로 부른다, 2026-11-27). 이미 있던 프로필 줄은 이름 없이 남는다."""
+    real_core = Path("migrations/core")
+    before = tmp_path / "before"
+    before.mkdir()
+    for sql in sorted(real_core.glob("*.sql")):
+        if sql.name < "030":
+            (before / sql.name).write_text(sql.read_text())
+
+    async with aiosqlite.connect(":memory:") as conn:
+        await run_migrations(conn, roots=[("core", before)])
+        await conn.execute(
+            "INSERT INTO records_profile (player_id, game, level, updated_at) VALUES ('p1', 'chunithm', 42, 't')"
+        )
+        await conn.commit()
+
+        await run_migrations(conn, roots=[("core", real_core)])
+
+        cursor = await conn.execute("SELECT player_id, game, level, username FROM records_profile")
+        assert [tuple(r) for r in await cursor.fetchall()] == [("p1", "chunithm", 42, None)]

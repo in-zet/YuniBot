@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,7 +29,7 @@ from services.common.secrets import SecretsService
 from services.game.chart_ref import ChartRefResolver
 from services.game.profile import GameProfile
 from services.game.records import RecordsService
-from services.game.registry import GAME_PROFILES, GameResolver, profile_for
+from services.game.registry import GAME_PROFILES, GameResolver, choose_game, profile_for
 from services.game.songdb import SongDb
 from services.game.terms import TermsService
 from services.maimai.maimai_net import MaimaiNetService
@@ -100,17 +100,6 @@ class GameServices:
             services["chunithm_net"] = self.net  # 스킬에는 게임과 상관없이 이 이름이다. 게임별 서비스가 이 자리에 낀다.
         return services
 
-    def nickname_source(self) -> NicknameSource | None:
-        """이 게임의 NET에 저장된 플레이어 닉네임을 읽는 소스. NET이 없거나 닉네임을 모르는 게임이면 None."""
-        net = self.net
-        if not isinstance(net, ChunithmNetService):
-            return None
-
-        async def _nickname(player_id: str) -> str | None:
-            return (await net.status(player_id)).nickname
-
-        return _nickname
-
     def resolvers(self) -> dict[type, Any]:
         return {
             SongQuery: self.songdb,
@@ -120,6 +109,27 @@ class GameServices:
             LampRef: _LampRefAdapter(terms=self.terms),
             ScoreRef: _ScoreRefAdapter(terms=self.terms),
         }
+
+
+def main_game_nickname_source(
+    games: Mapping[str, GameServices], main_game: Callable[[str], Awaitable[str | None]]
+) -> NicknameSource:
+    """유니가 부를 게임 쪽 이름(2026-11-27 사용자 결정): 주 게임(정하지 않았으면 기본 게임)을 동기화할 때 저장한
+    NET 이름 → 없으면 로그인 때 읽은 이름(게임 공통 쿠키 저장소에 하나). 코어는 이 이름이 어느 게임 것인지 모른다."""
+
+    async def _nickname(player_id: str) -> str | None:
+        game = choose_game(requested=None, preferred=await main_game(player_id))
+        bundle = games.get(game)
+        if bundle is not None:
+            profile = await bundle.records.player_profile(player_id)
+            if profile is not None and profile.username:
+                return profile.username
+        for any_bundle in games.values():
+            if any_bundle.net is not None:
+                return (await any_bundle.net.status(player_id)).nickname
+        return None
+
+    return _nickname
 
 
 def register_resolvers(resolvers: ResolverRegistry, games: Mapping[str, GameServices]) -> None:

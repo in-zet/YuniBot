@@ -51,6 +51,7 @@ _RECORDS_MIGRATION = (
     + Path("migrations/core/013_records_overpower.sql").read_text()
     + Path("migrations/core/014_records_sync_log_snapshot_averages.sql").read_text()
     + Path("migrations/core/018_records_profile.sql").read_text()
+    + Path("migrations/core/030_records_profile_username.sql").read_text()
     + Path("migrations/core/019_records_session_state.sql").read_text()
     + Path("migrations/core/024_records_chart_type.sql").read_text()
 )
@@ -329,6 +330,7 @@ async def test_player_profile_saved_by_sync_and_overwritten_by_next(conn) -> Non
     assert saved.reincarnation_stars == 3
     assert saved.character_image_url == "https://example.invalid/chara1.png"
     assert saved.character_frame_url == "https://example.invalid/frame1.png"
+    assert saved.username == first.profile.username  # 유니가 주 게임 이름으로 부를 때 쓴다(2026-11-27)
 
     second = _fixture_fetch()
     second.profile.level = 43
