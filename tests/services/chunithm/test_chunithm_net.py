@@ -672,6 +672,21 @@ async def test_set_favorite_music_replaces_list(conn, secrets) -> None:
     assert await service.get_favorite_music(player.id) == [3, 7]
 
 
+async def test_set_favorite_music_refuses_more_than_50_without_sending(conn, secrets) -> None:
+    """CHUNITHM-NET 즐겨찾기는 50곡까지다(2026-11-27 실측). 넘기면 사이트가 조용히 거절하므로 보내기 전에 막는다."""
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    adapter = _FakeAdapter(favorite_music=[3])
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    with pytest.raises(ValueError, match="즐겨찾기는 50곡까지야\\(바꾸면 51곡\\)"):
+        await service.set_favorite_music(player.id, list(range(51)))
+
+    assert await service.get_favorite_music(player.id) == [3]
+
+
 async def test_set_favorite_music_without_login_raises_connection_error(conn, secrets) -> None:
     players = PlayersService(conn)
     player = await players.create_player()

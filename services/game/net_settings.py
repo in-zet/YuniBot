@@ -111,3 +111,10 @@ def raise_if_not_applied(
     ]
     if missed:
         raise ChangeNotAppliedError(f"{net_name}에 반영되지 않았어 — " + "; ".join(missed))
+
+
+def check_favorite_limit(count: int, limit: int) -> None:
+    """즐겨찾기 곡 수 상한(CHUNITHM 50, maimai 30 — 2026-11-27 실측). 넘으면 보내기 전에 ValueError(사용자에게 그대로
+    보여 줄 한글 메시지). 넘겨 보내면 사이트가 조용히 거절해 "반영되지 않았어"만 남는다."""
+    if count > limit:
+        raise ValueError(f"즐겨찾기는 {limit}곡까지야(바꾸면 {count}곡).")

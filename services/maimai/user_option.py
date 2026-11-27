@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from selectolax.lexbor import LexborHTMLParser
 
-from services.game.net_settings import SettingField
+from services.game.net_settings import SettingField, check_favorite_limit
 
 # 츄니즘 설정과 같은 자리(속도·판정 타이밍 A·B·가이드음)는 같은 attr를 쓴다 — 도구 인자가 두 게임 공통이다.
 # 나머지 30여 항목(노트 디자인·효과음 등)은 이름 붙이지 않는다(2026-11-27 사용자 결정).
@@ -66,8 +66,7 @@ def favorite_payload(entries: Sequence[FavoriteEntry], titles: Sequence[str], to
     for entry in entries:
         by_title.setdefault(entry.title, []).append(entry)
     wanted = list(dict.fromkeys(titles))
-    if len(wanted) > FAVORITE_LIMIT:
-        raise ValueError(f"즐겨찾기는 {FAVORITE_LIMIT}곡까지야(바꾸면 {len(wanted)}곡).")
+    check_favorite_limit(len(wanted), FAVORITE_LIMIT)
     values: list[str] = []
     for title in wanted:
         kept = [entry for entry in by_title.get(title, []) if entry.checked]

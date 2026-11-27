@@ -25,6 +25,7 @@ from services.game.net_settings import (
     ChangeNotAppliedError,
     GameSettings,
     build_update_payload,
+    check_favorite_limit,
     parse_settings,
     raise_if_not_applied,
 )
@@ -36,6 +37,9 @@ if TYPE_CHECKING:
     from services.game.sync_types import SyncSnapshot
 
 logger = logging.getLogger(__name__)
+
+# CHUNITHM-NET 즐겨찾기 상한("Favorite Music n /50", 2026-11-27 실측).
+FAVORITE_LIMIT = 50
 
 # fetch_for_sync가 전체 PB를 모을 때 도는 순서. CHUNITHM-NET이 쓰는 코드 그대로다
 # (Difficulty(code)가 "BAS"/"ADV"/"EXP"/"MAS"/"ULT"/"WE"를 그대로 알아듣는다).
@@ -403,7 +407,8 @@ class ChunithmNetService:
         self, player_id: str, ids: Sequence[int], *, ctx: ToolContext | None = None
     ) -> None:
         """즐겨찾기 곡 id 목록을 통째로 교체한다(`settings` 전용) — 호출하는
-        쪽이 추가·삭제를 반영한 전체 목록을 만들어 넘긴다."""
+        쪽이 추가·삭제를 반영한 전체 목록을 만들어 넘긴다. 50곡을 넘으면 보내지 않고 ValueError."""
+        check_favorite_limit(len(set(ids)), FAVORITE_LIMIT)
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
             raise ConnectionError("로그인되어 있지 않다")

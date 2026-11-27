@@ -113,3 +113,4 @@ tags: [sega-linked]
 
 - `remove_favorites(table)`: 표의 곡을 한 번에 뺀다(없는 곡은 건너뛰고 수만 알림). `clear_favorites()`: 전부 비운다. 둘 다 `confirm="bulk"`(2곡 이상이면 확인), 쓰기는 전체 목록 한 번. 일괄 추가는 원래 있던 `add_favorites(table)`.
 - 실측(2026-11-27, 사용자 계정): 두 게임 모두 빈 목록 저장이 반영되고 원래 목록으로 되돌아왔다. maimai 설정 변경(가이드음)·즐겨찾기 추가도 바꿨다 되돌려 확인했다.
+- 즐겨찾기 상한(2026-11-27 실측): CHUNITHM 50곡, maimai 30곡. 넘기면 사이트가 조용히 거절하므로 서비스가 보내기 전에 `check_favorite_limit`(`services/game/net_settings.py`)로 막고 "즐겨찾기는 N곡까지야(바꾸면 M곡)"를 돌려준다.
