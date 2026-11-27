@@ -927,9 +927,15 @@ async def test_play_counts_reads_each_song_detail_and_skips_unreadable_ones(conn
     service = _make_service(conn, secrets, adapter=_FakeAdapter(), players=players)
     await service.login(player.id, "a" * 64, ctx)
 
+    adapter = _FakeAdapter()
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
     counts = await service.play_counts(player.id, [5, 13, 9, 5])
 
     assert counts == {5: {"MAS": 5, "EXP": 2}, 9: {"MAS": 9, "EXP": 2}}
+    # 곡 상세 POST 전에 GET 한 번으로 세션·토큰을 만든다(첫 곡만 빈 결과가 나던 실측).
+    assert adapter.requests[0][:2] == ("GET", "/mobile/record/musicGenre/")
 
 
 async def test_play_counts_auth_failure_expires_login(conn, secrets) -> None:

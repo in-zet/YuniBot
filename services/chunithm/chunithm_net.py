@@ -1,7 +1,6 @@
 # services/chunithm/chunithm_net.py
 from __future__ import annotations
 
-import asyncio
 import functools
 import http.cookiejar
 import inspect
@@ -443,9 +442,9 @@ class ChunithmNetService:
     async def play_counts(
         self, player_id: str, song_ids: Sequence[int], *, ctx: ToolContext | None = None
     ) -> dict[int, dict[str, int]]:
-        """곡(musicId)마다 난이도 코드 → 플레이 횟수. 곡 상세 페이지를 곡마다 하나씩, 초당 10번까지 동시에 받는다
-        (2026-11-27 사용자 결정). 안 친 난이도는 없다(0회), 상세를 못 읽은 곡은 결과에 없다(모름). 첫 곡은 따로 받아
-        세션·토큰을 만든 뒤 나머지를 보낸다. 인증 실패는 만료로 처리하고 다시 던진다."""
+        """곡(musicId)마다 난이도 코드 → 플레이 횟수. 곡 상세 페이지를 곡마다 하나씩 차례로, 초당 10번까지 받는다
+        (2026-11-27 사용자 결정). 안 친 난이도는 없다(0회), 상세를 못 읽은 곡은 결과에 없다(모름). 인증 실패는 만료로
+        처리하고 다시 던진다."""
         wanted = list(dict.fromkeys(song_ids))
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
@@ -466,8 +465,12 @@ class ChunithmNetService:
             return song_id, {difficulty_code(pb.chart.difficulty): pb.play_count or 0 for pb in bests}
 
         try:
-            results = [await one(wanted[0])] if wanted else []
-            results += await asyncio.gather(*(one(song_id) for song_id in wanted[1:]))
+            # 요청 토큰(`_t`)은 로그인 뒤에야 생긴다. 새 연결로 바로 POST하면 거절 → 재로그인 뒤 옛 토큰의 같은 body가 다시
+            # 나가 빈 페이지가 온다(즐겨찾기와 같은 함정, 2026-11-27 실측: 첫 곡만 늘 빈 결과). 먼저 GET 한 번으로 세션을 만든다.
+            await adapter._request_as_soup("GET", "/mobile/record/musicGenre/")
+            # 한 곡씩 차례로 보낸다. 곡 상세는 요청 토큰(`_t`)을 실어 POST하는데 응답마다 토큰이 바뀌어, 같은 토큰으로 동시에
+            # 보내면 오류 코드 100001로 막힌다(2026-11-27 실측: 동시 10곡 중 7곡). 상한은 그대로 초당 10번이다.
+            results = [await one(song_id) for song_id in wanted]
         except AuthenticationError:
             await self._expire_login(player_id, ctx)
             raise

@@ -17,3 +17,6 @@
 - **국제판 공지 `news--date`는 월/일을 0으로 안 채운다**("2026.9.30", "2026.10.15") — 요일 span도 공백 없이 바로 붙는다("2026.9.30Wed"). 글자 수로 자르면 한 자리 월에서 깨진다. → 날짜 패턴을 정규식으로 뽑는다(`updates_calc._INTL_POSTED_DATE_RE`).
 - **일본판 공지 제목의 『』는 버전명 전용이 아니다**: 콜라보 이벤트 이름에도 쓴다(저장본의 "『いよわ』リバイバルイベント開催"). 국제판만 믿을 수 있다(`docs/design/skills/updates.md` "구현 결정").
 - **스킬 `skill.py`에서 `@dataclass`를 쓰면 로드가 실패할 수 있다**: `from __future__ import annotations`와 함께 쓰면 `dataclasses`가 `sys.modules`에서 모듈을 찾는데, 레지스트리가 불러온 모듈은 등록돼 있지 않아 `NoneType has no attribute __dict__`로 "스킬 로드 실패"가 난다(`yuni-lore`, 2026-10-20). 단위 시험은 `sys.modules`에 직접 넣어 통과해도 `tests/core/test_contract.py`가 잡는다. → 단순한 값 묶음은 `NamedTuple`로 쓴다.
+
+## CHUNITHM-NET 곡 상세 POST는 동시에도, 새 연결로 바로도 보내지 않는다 (2026-11-27)
+- 곡 상세(`sendMusicDetail`)는 요청 토큰(`_t`)을 실은 POST다. 동시에 여러 개 보내면 오류 코드 100001로 막혔고(10곡 중 7곡), 새 연결로 바로 보내면 토큰이 없어 재로그인 뒤 옛 토큰의 같은 body가 다시 나가 빈 페이지가 왔다(첫 곡만 늘 빈 결과). GET 한 번으로 세션을 만들고 한 곡씩 보낸다. 즐겨찾기 쓰기(2026-10-21)와 같은 함정이다.
