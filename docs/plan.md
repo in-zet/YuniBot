@@ -16,13 +16,13 @@
 | updates                                                          | 9    | 구현   |
 | web-qa                                                           | 10   | 구현   |
 | memory                                                           | 12   | 구현   |
-| yuni-bond                                                        | 12   | 미착수 |
+| yuni-bond                                                        | 12   | 구현   |
 | settings                                                         | 13   | 구현   |
 | folders                                                          | 14   | 구현   |
 | yuni-lore                                                        | 15   | 구현   |
 | rating-calc                                                      | 17   | 구현   |
 | tutorial                                                         | 18   | 구현   |
-| (maimai DX — 기존 스킬에 게임 매개변수)                          | 17   | 미착수 |
+| (maimai DX — 기존 스킬에 게임 매개변수)                          | 17   | 진행 중 |
 
 **제외** (검토하고 버린 안 — 재논의 전까지 다시 제안하지 않는다)
 
@@ -86,7 +86,7 @@
 - [X] 13. `settings`(인게임 설정 조회·변경, 즐겨찾기) — `2026-10-20_수정.md` §13
 - [X] 14. `folders`(채보 폴더) — `2026-10-20_수정.md` §14
 - [X] 15. `yuni-lore`(설정집 읽기) — `2026-10-20_수정.md` §15
-- [ ] 16. 작업 표(설계 `00-core.md` "작업 표" 초안, 결정 대기 모두 정리·구현 전) — `2026-10-20_수정.md` §16
+- [X] 16. 작업 표(설계 `00-core.md` "작업 표", Part 0~6 구현 완료) — `2026-10-20_수정.md` §16
   - [X] Part 0: 동기화 때 플레이어 레벨·캐릭터 그림 주소 저장 — 구현 완료(2026-10-20, `records_profile`·`RecordsService.player_profile`). 실기 미확인: 실제 동기화 뒤 `records_profile`에 레벨·그림 주소가 들어가는지
   - [X] Part 1: 코어(표 구조·보관소·`TableRef`·`table_query`/`table_peek`·글자 출력·`Display.files`) — 구현 완료(2026-10-20). 세부 파트로 나눠 하다가 사용자가 "쭉 해라"고 해 1-5부터 한 번에 이었다. 실기 미확인: 표를 낸 도구가 아직 없어(Part 2부터) 실제 대화 확인은 Part 2 뒤에 한다. 시험은 세부 파트마다 그 파트 몫을 함께 쓴다(수정 문서 1-10을 나눠 담는다)
     - [X] 1-1 표 구조(`core/tables.py`: `WorkTable`·`Column`·`Cell`·`Row`·`Group`·`TableBuilder`·`row_at`) — 구현 완료(2026-10-20)
@@ -121,7 +121,7 @@
   - [X] Part 3: aime 인증 공통화와 maimai DX NET 어댑터 — 구현 완료(2026-10-30, SEGA 사이트 복구 뒤 실측). `services/common/aime_auth.py`(`site_id`·돌아올 주소를 받는 로그인 흐름)·`sega_cookies.py`(clal 읽기·만료 처리를 두 NET 서비스가 공유), `services/maimai/parser.py`·`maimai_net.py`(어댑터 + `MaimaiNetService.fetch_snapshot`)·`sync_snapshot.py`. 같은 `clal`로 로그인되고, 베스트 목록은 `home/ratingTargetMusic/`가 주며, 그 목록과 곡 DB 상수로 계산한 레이팅이 NET 표시 레이팅과 정확히 같았다(§17.9 2번 확정). 표본은 `docs/reference/maimai-net/`. 스킬에서 부르는 일(`sync` 등)은 6-5b. 실기 미확인은 §17.10
   - [X] Part 4: maimai 곡 DB(otoge-db) — 구현 완료(2026-10-23). `services/game/songdb.py`(곡·채보 자료형·찾기 공통 틀, `chart_type` 조건)에서 츄니즘 `SongDbService`와 `services/maimai/songdb.py`의 `MaimaiSongDbService`가 갈라진다. 봇 부팅·등록부 연결은 아직 없다(Part 6) — §17.6
   - [X] Part 5: 기록·레이팅·동기화 — 구현 완료(2026-10-24, NET 없이 가능한 범위). `RecordsService`가 게임 중립 `SyncSnapshot`(`services/game/sync_types.py`)을 받고, 채보 키는 `(제목, 채보 종류, 난이도)`, `records_pb`에 `chart_type`·`dx_score`를 읽고 쓴다. 레이팅 규칙·램프 순서·첫 동기화 태그는 `GameProfile`에서 받고(maimai 레이팅: `services/maimai/rating.py`), 베스트/신곡 목록이 없으면 전체 기록으로 프레임을 짠다. 남은 것: maimai 파서·어댑터가 `SyncSnapshot`을 채우는 일(Part 3), 계산 레이팅과 NET 표시 레이팅 대조(실기), 스킬 쪽 `chart_type` 전달(Part 6) — §17.7
-  - [ ] Part 6: 스킬 확장과 프롬프트 — §17.8. 결정은 2026-10-24에 끝냈다(§17.8 "정리한 범위와 순서", §17.9 1번 = A안)
+  - [ ] Part 6: 스킬 확장과 프롬프트 — §17.8. 결정은 2026-10-24에 끝냈다(§17.8 "정리한 범위와 순서", §17.9 1번 = A안). 6-1~6-7 완료, 남은 것은 6-8·6-9(2026-11-27 코드 확인)
     - [X] 6-1 서비스 배선 — 구현 완료(2026-10-24). 용어 사전을 게임별로(`TermsService`가 `services/game/terms.py`로, 마이그레이션 028, `services/maimai/data/terms.yaml`), 게임별 서비스 한 벌(`build_all_game_services`)과 해석기 분배(`_ByGame`), 실행기가 고른 게임에 맞춰 서비스를 바꿔 끼움·스킬이 안 다루는 게임이면 스킬의 게임으로, maimai 곡 DB 부팅·주기 갱신, `admin`의 `set_song_version`, 등록부에 maimai 등록
     - [X] 6-2 `GameRef`(표준 인자 타입, `resolve_game_name`이 등록 이름·표시 이름·별칭을 받는다)와 도구별 `games` 제한(`@tool(games=[...])`) — 구현 완료(2026-10-24). 슬래시 옵션은 `GameRef` 인자를 가진 도구에 자동으로 생긴다(옵션 이름은 인자 이름 `game`, 다른 옵션처럼 영문). `game` 인자를 실제 도구에 붙이는 일은 스킬별 작업(6-4·6-5)에서
     - [X] 6-3 주 게임을 `/설정 바꾸기 skill:player setting:주 게임 value:마이마이`로(스킬 설정이 아니라 `players.main_game`에 저장, `/설정 보기`에도 나옴), 실행기가 게임 고르기 ②번으로 읽음 — 구현 완료(2026-10-24)
@@ -129,6 +129,8 @@
     - [X] 6-5 기록 의존 스킬 — **`terms`·`notes`·`folders` 구현(2026-10-24), `sync`·`report`·`session`·`goals` 구현(2026-10-30, 6-5b)**. 6-5b: `sync`가 `game`을 받아 `<game>.sync.completed/reported`를 내고, 이벤트 버스가 낸 쪽의 게임에 맞춰 핸들러의 `records`·`songdb`를 바꿔 준다(`ToolContext.for_game`). `report`는 `recent`만 츄니즘 전용, `goals`는 오버파워만 츄니즘 전용. 실기 확인은 §17.10. **남은 것**: `arcade`·`settings`·`updates`(maimai 사이트 실측이 먼저)는 아직 츄니즘 전용. 아래는 2026-10-24 시점 메모(그때는 기록이 없어 미룸): `terms`(용어 설명이 게임별 점수 모양)·`notes`(게임별·채보 종류별 메모, 같은 난이도에 종류가 둘이면 `chart_type`을 받고 하나뿐이면 정해 줌, `maimai.song.viewed` 수신)·`folders`(게임별·종류별 폴더)는 maimai 대응 완료. **미룸**: `report`·`goals`·`session`·`sync`(그리고 `arcade`·`settings`·`updates`)는 maimai 기록이 생기는 Part 3 뒤 — 기록이 없는 동안은 유니가 처리할 데이터가 없고 실기 검증이 불가능해서. 이 스킬을 maimai로 부르면 "이 기능은 maimai에서는 아직 지원하지 않아"이고, 게임을 말하지 않았는데 주 게임이 maimai면 츄니즘으로 처리하며 `game_note`로 알린다
     - [X] 6-6 플레이어 메모리의 게임별 구획 — 구현 완료(2026-10-24). 줄 앞 `[chunithm]`·`[maimai]` 표시, 요약 프롬프트·`remember(game=)`·프롬프트 주입 문구
     - [X] 6-7 프롬프트 — 구현 완료(2026-10-24). `persona.md`(A안: 소개 문장에 maimai DX 추가, maimai 설정은 지어내지 않음), `rules.md`(게임 인자·`game_note`·어택/보더는 CHUNITHM 한정·계정 문구), 카드 예시에 마이마이. 실기 미확인: 라우팅이 흔들리지 않는지, 멘션이 "마이마이 …"에서 `game`을 넣는지
+    - [ ] 6-8 `arcade`·`settings`·`updates`의 maimai 대응 — 미착수. 세 스킬 모두 `games: [chunithm]`이고 maimai 코드가 없다. maimai DX NET의 설정·공지 페이지 표본이 `docs/reference/maimai-net/`에 없어 실측부터 한다(§17.8b "안 한 것")
+    - [ ] 6-9 `sega-account`의 `games: [chunithm]` 정리 — 미착수. `/로그인`은 실행기를 안 거쳐 maimai도 되지만(2026-11-22), `status`·`set_privacy`·`logout`은 주 게임이 maimai면 츄니즘으로 넘어가 "이 기능이 아직 없어서" 안내가 붙고, `status`는 CHUNITHM 닉네임·츄니즘 마지막 동기화만 보인다. 고칠 방향은 정하지 않았다
 
 고정 원칙: 5단계까지는 LLM 없이 슬래시로 동작한다. `yuni` 서비스는 11단계 전까지 정해진 문구를 돌려주고, 7~10단계 스킬은 이 인터페이스만 쓴다.
 
