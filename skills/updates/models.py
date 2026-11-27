@@ -15,6 +15,7 @@ _SNAPSHOT_COLUMNS = "id, game, region, checked_at, song_ids_json, added_json, re
 @dataclass(slots=True, kw_only=True, frozen=True)
 class NoticeRow:
     id: int
+    game: str
     region: str
     url: str
     title: str
@@ -37,7 +38,7 @@ class SnapshotRow:
 
 def _notice_from_row(row: aiosqlite.Row) -> NoticeRow:
     return NoticeRow(
-        id=row["id"], region=row["region"], url=row["url"], title=row["title"],
+        id=row["id"], game=row["game"], region=row["region"], url=row["url"], title=row["title"],
         posted_at=row["posted_at"], update_date=row["update_date"], version_name=row["version_name"],
         schedule_id=row["schedule_id"], notified=bool(row["notified"]),
     )
@@ -76,14 +77,16 @@ async def insert_notice(
     return row_id
 
 
-async def has_notices(conn: aiosqlite.Connection, *, region: str) -> bool:
-    cursor = await conn.execute("SELECT 1 FROM updates_notices WHERE region = ? LIMIT 1", (region,))
+async def has_notices(conn: aiosqlite.Connection, *, region: str, game: str = "chunithm") -> bool:
+    cursor = await conn.execute(
+        "SELECT 1 FROM updates_notices WHERE game = ? AND region = ? LIMIT 1", (game, region)
+    )
     return await cursor.fetchone() is not None
 
 
-async def notice_exists(conn: aiosqlite.Connection, *, region: str, url: str) -> bool:
+async def notice_exists(conn: aiosqlite.Connection, *, region: str, url: str, game: str = "chunithm") -> bool:
     cursor = await conn.execute(
-        "SELECT 1 FROM updates_notices WHERE region = ? AND url = ?", (region, url)
+        "SELECT 1 FROM updates_notices WHERE game = ? AND region = ? AND url = ?", (game, region, url)
     )
     return await cursor.fetchone() is not None
 
@@ -104,23 +107,25 @@ async def get_notice(conn: aiosqlite.Connection, notice_id: int) -> NoticeRow | 
     return _notice_from_row(row) if row is not None else None
 
 
-async def latest_version_name(conn: aiosqlite.Connection, *, region: str) -> str | None:
-    """그 지역에서 지금까지 알아낸 가장 최근 버전명(없으면 None — 처음 켤 때는 기준이 없다)."""
+async def latest_version_name(conn: aiosqlite.Connection, *, region: str, game: str = "chunithm") -> str | None:
+    """그 게임·지역에서 지금까지 알아낸 가장 최근 버전명(없으면 None — 처음 켤 때는 기준이 없다)."""
     cursor = await conn.execute(
-        "SELECT version_name FROM updates_notices WHERE region = ? AND version_name IS NOT NULL "
+        "SELECT version_name FROM updates_notices WHERE game = ? AND region = ? AND version_name IS NOT NULL "
         "ORDER BY id DESC LIMIT 1",
-        (region,),
+        (game, region),
     )
     row = await cursor.fetchone()
     return row[0] if row is not None else None
 
 
-async def next_update_notice(conn: aiosqlite.Connection, *, region: str, today: str) -> NoticeRow | None:
+async def next_update_notice(
+    conn: aiosqlite.Connection, *, region: str, today: str, game: str = "chunithm"
+) -> NoticeRow | None:
     """오늘(today, ISO 날짜) 이후로 예정된 가장 가까운 업데이트. 없으면 None."""
     cursor = await conn.execute(
-        f"SELECT {_NOTICE_COLUMNS} FROM updates_notices WHERE region = ? AND update_date >= ? "
+        f"SELECT {_NOTICE_COLUMNS} FROM updates_notices WHERE game = ? AND region = ? AND update_date >= ? "
         "ORDER BY update_date ASC LIMIT 1",
-        (region, today),
+        (game, region, today),
     )
     row = await cursor.fetchone()
     return _notice_from_row(row) if row is not None else None
@@ -144,33 +149,37 @@ async def insert_song_snapshot(
     await conn.commit()
 
 
-async def latest_song_snapshot(conn: aiosqlite.Connection, *, region: str) -> SnapshotRow | None:
+async def latest_song_snapshot(conn: aiosqlite.Connection, *, region: str, game: str = "chunithm") -> SnapshotRow | None:
     cursor = await conn.execute(
-        f"SELECT {_SNAPSHOT_COLUMNS} FROM updates_song_snapshots WHERE region = ? "
+        f"SELECT {_SNAPSHOT_COLUMNS} FROM updates_song_snapshots WHERE game = ? AND region = ? "
         "ORDER BY checked_at DESC LIMIT 1",
-        (region,),
+        (game, region),
     )
     row = await cursor.fetchone()
     return _snapshot_from_row(row) if row is not None else None
 
 
-async def song_snapshot_at_or_before(conn: aiosqlite.Connection, *, region: str, on_date: str) -> SnapshotRow | None:
+async def song_snapshot_at_or_before(
+    conn: aiosqlite.Connection, *, region: str, on_date: str, game: str = "chunithm"
+) -> SnapshotRow | None:
     """그 날짜(on_date, ISO 날짜) 당일이나 그 전의 가장 최근 저장본. `new_songs`에 날짜를 줬을 때 쓴다."""
     cursor = await conn.execute(
-        f"SELECT {_SNAPSHOT_COLUMNS} FROM updates_song_snapshots WHERE region = ? AND date(checked_at) <= date(?) "
-        "ORDER BY checked_at DESC LIMIT 1",
-        (region, on_date),
+        f"SELECT {_SNAPSHOT_COLUMNS} FROM updates_song_snapshots "
+        "WHERE game = ? AND region = ? AND date(checked_at) <= date(?) ORDER BY checked_at DESC LIMIT 1",
+        (game, region, on_date),
     )
     row = await cursor.fetchone()
     return _snapshot_from_row(row) if row is not None else None
 
 
-async def song_snapshots_since(conn: aiosqlite.Connection, *, region: str, since: str) -> list[SnapshotRow]:
+async def song_snapshots_since(
+    conn: aiosqlite.Connection, *, region: str, since: str, game: str = "chunithm"
+) -> list[SnapshotRow]:
     """since(ISO 시각) 뒤에 생긴 저장본 전부, 오래된 순. 동기화 리포트 조각이 "지난 동기화 뒤"
     추가된 곡을 모으는 데 쓴다."""
     cursor = await conn.execute(
-        f"SELECT {_SNAPSHOT_COLUMNS} FROM updates_song_snapshots WHERE region = ? AND checked_at > ? "
+        f"SELECT {_SNAPSHOT_COLUMNS} FROM updates_song_snapshots WHERE game = ? AND region = ? AND checked_at > ? "
         "ORDER BY checked_at ASC",
-        (region, since),
+        (game, region, since),
     )
     return [_snapshot_from_row(row) for row in await cursor.fetchall()]

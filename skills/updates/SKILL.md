@@ -1,17 +1,17 @@
 ---
 name: updates
-description: 츄니즘 국제판·일본판 업데이트 일정과 신곡을 알려 주고, 업데이트 알림을 켜고 끈다.
+description: 츄니즘·maimai DX의 국제판·일본판 업데이트 일정과 신곡을 알려 주고, 업데이트 알림을 켜고 끈다.
 summary: 국제판·일본판 업데이트 일정과 신곡을 알려 주고, 알림도 켜고 끌 수 있어.
 examples:
   - 다음 업데이트 언제야?
   - 이번에 들어온 신곡 보여 줘
 triggers: [업데이트, 알림, 일정, 신곡]
 category: 알림
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
-services: [songdb, records, notify, http, players, settings, scheduler, yuni, db]
-emits: [chunithm.update.detected, updates.notice_due]
-listens: [chunithm.sync.completed, updates.notice_due]
+services: [songdb, songdbs, records, notify, http, players, settings, scheduler, yuni, db]
+emits: [chunithm.update.detected, maimai.update.detected, updates.notice_due]
+listens: [chunithm.sync.completed, maimai.sync.completed, updates.notice_due]
 settings:
   - name: 알림 채널
     kind: str
@@ -23,6 +23,11 @@ settings:
     default: true
     description: 일본판 업데이트도 이 서버에 알릴지. 국제판 알림은 늘 켜져 있다.
     scope: guild
+  - name: maimai 알림
+    kind: bool
+    default: true
+    description: maimai DX 업데이트도 이 서버에 알릴지. 츄니즘 알림은 늘 켜져 있다.
+    scope: guild
   - name: 역할 멘션
     kind: str
     default: ""
@@ -33,6 +38,7 @@ settings:
 # 유니 스킬: updates
 
 - 업데이트 날짜와 신곡은 도구 결과로만 말한다. 모르는 날짜는 "아직 공지가 없다"고 말한다.
-- 일본판 소식인지 국제판 소식인지 항상 밝힌다.
+- 어느 게임(CHUNITHM·maimai DX)의 일본판·국제판 소식인지 항상 밝힌다. maimai 이야기면 `game`에 마이마이를 넣는다.
+- maimai 국제판은 글 공지가 없어 버전 출시 날짜만 안다. 그 밖의 일정은 "아직 공지가 없다"고 말한다.
 - 알림 요약은 두세 문장으로 한다.
 - 업데이트 알림 설정(`configure`)은 admin만 쓸 수 있다. 채널·역할은 각각 #채널 멘션/@역할 멘션으로 받고, id를 그대로 말해 주지 않는다.

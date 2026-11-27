@@ -16,6 +16,9 @@ _VERSION_NAME_RE = re.compile(r"『([^』]+)』")
 _JP_UPDATE_DATE_RE = re.compile(r"^(\d{1,2})/(\d{1,2})\(")
 _INTL_UPDATE_DATE_RE = re.compile(r"Details of (\d{1,2})/(\d{1,2}) Update", re.IGNORECASE)
 _INTL_POSTED_DATE_RE = re.compile(r"^\d{4}\.\d{1,2}\.\d{1,2}")
+# maimai 국제판 공식 사이트의 출시 목록: "maimai DX CiRCLE PLUS International Version is launched!"
+_MAIMAI_LAUNCH_RE = re.compile(r"maimai DX (.+?) International Version is launched", re.IGNORECASE)
+MAIMAI_INTL_TOP = "https://maimai.sega.com/"
 # 년도 표기가 없는 "M/D"가 게시일보다 6일 이상 전으로 풀리면 실제로는 다음 해다(연말연초 경계).
 _YEAR_WRAP_TOLERANCE_DAYS = 5
 
@@ -126,6 +129,40 @@ def parse_intl_news(html_text: str) -> list[NoticeItem]:
                 posted_at=posted_at,
                 update_date=extract_intl_update_date(title, posted_at),
                 version_name=extract_version_name(title),
+            )
+        )
+    return items
+
+
+def parse_maimai_intl_launches(html_text: str) -> list[NoticeItem]:
+    """maimai 국제판 공식 사이트 첫 화면의 "Latest Updates" 출시 목록(`docs/reference/maimai-updates/intl_top_sample.html`).
+    maimai 국제판에는 글로 된 공지가 없어(2026-11-27 실측) 이 목록이 공지 자리를 대신한다 — 항목 하나가 버전 출시
+    하나이고, 날짜가 곧 업데이트 날짜다. 주소는 페이지 하나뿐이라 날짜를 조각으로 붙여 공지마다 다르게 만든다."""
+    soup = LexborHTMLParser(html_text)
+    entries = soup.css("li.top--update__item")
+    if not entries:
+        raise ValueError("maimai 국제판 사이트 구조가 바뀌었다 — top--update__item을 못 찾았다")
+
+    items: list[NoticeItem] = []
+    for entry in entries:
+        date_node = entry.css_first("p.top--update__time")
+        text_node = entry.css_first("p.top--update__text")
+        if date_node is None or text_node is None:
+            continue
+        date_match = _INTL_POSTED_DATE_RE.match(date_node.text(strip=True))
+        if date_match is None:
+            continue
+        launched = datetime.strptime(date_match.group(), "%Y.%m.%d").date()  # noqa: DTZ007 - 날짜만 쓰고 버린다
+        # 괄호 안 안내문("The launching date may be different…")은 뺀다.
+        title = text_node.text(separator=" ", strip=True).split("(")[0].strip()
+        version = _MAIMAI_LAUNCH_RE.search(title)
+        items.append(
+            NoticeItem(
+                url=f"{MAIMAI_INTL_TOP}#{launched.isoformat()}",
+                title=title,
+                posted_at=launched,
+                update_date=launched,
+                version_name=version.group(1).strip() if version else None,
             )
         )
     return items

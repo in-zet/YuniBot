@@ -116,3 +116,27 @@ def test_impossible_month_day_gives_none_instead_of_stopping_the_whole_feed() ->
     posted = date(2026, 10, 1)
     assert calc.extract_jp_update_date("2/30(金)新曲追加", posted) is None
     assert calc.extract_intl_update_date("Details of 2/29 Update", date(2027, 2, 1)) is None
+
+
+def test_parse_maimai_intl_launches_reads_the_launch_list() -> None:
+    """maimai 국제판은 글 공지가 없어 공식 사이트 첫 화면의 출시 목록을 공지로 쓴다(2026-11-27 실측)."""
+    html = Path("docs/reference/maimai-updates/intl_top_sample.html").read_text(encoding="utf-8")
+
+    items = calc.parse_maimai_intl_launches(html)
+
+    assert [(i.update_date, i.version_name) for i in items] == [
+        (date(2026, 7, 23), "CiRCLE PLUS"), (date(2026, 1, 22), "CiRCLE"),
+        (date(2025, 7, 24), "PRiSM PLUS"), (date(2025, 1, 16), "PRiSM"),
+    ]
+    assert items[0].url == "https://maimai.sega.com/#2026-07-23"
+    assert items[0].title == "maimai DX CiRCLE PLUS International Version is launched!"
+
+
+def test_parse_jp_rss_reads_the_maimai_feed() -> None:
+    xml = Path("docs/reference/maimai-updates/jp_rss_sample.xml").read_text(encoding="utf-8")
+
+    items = calc.parse_jp_rss(xml)
+
+    assert [(i.update_date, i.version_name) for i in items][:3] == [
+        (date(2026, 11, 27), None), (date(2026, 11, 27), None), (None, None),
+    ]

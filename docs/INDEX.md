@@ -13,7 +13,7 @@
 | `docs/plan/` | 날짜별 계획 수정(`YYYY-MM-DD_수정.md`) — 계획 밖에서 더한 단계의 상세. `plan.md` §4가 단계마다 가리킨다 | **관리대상** |
 | `docs/conventions.md` · `docs/pitfalls.md` | 개발 규칙 · 겪은 함정 | **관리대상** |
 | `docs/design/` | 기준 설계서: `00-core.md`(코어) + `skills/<스킬>.md` 21개 | **관리대상** |
-| `docs/reference/` | CHUNITHM-NET·maimai DX NET(`maimai-net/`, 개인 정보를 지움) 페이지·Chunimaru 응답 저장본 — 파서 시험이 읽는다 | **읽기전용** |
+| `docs/reference/` | CHUNITHM-NET·maimai DX NET(`maimai-net/`, 개인 정보를 지움) 페이지·Chunimaru 응답·업데이트 공지(`chunithm-updates/`·`maimai-updates/`) 저장본 — 파서 시험이 읽는다 | **읽기전용** |
 | `docs/persona/yuni-lines/` | 유니 일본어 대사 원문: `uni/`(유니)·`navi/`(나비)·`setting/`(설정 안내문). 말투 튜닝 자료, 봇은 읽지 않는다 | **관리대상** |
 | `skills/yuni-lore/lore.md` | 유니 설정집(우리말, 구간·스포일러 구분). `yuni-lore` 스킬의 `read_lore`가 읽는다 | **관리대상** |
 | `progress/` | 날짜별 작업 일지(`YYYY-MM-DD.md`) — 실제 작업의 유일한 확정 기록 | **관리대상** |

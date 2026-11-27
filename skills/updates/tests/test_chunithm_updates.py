@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import importlib.util
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import time
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import aiosqlite
 import pytest
@@ -139,9 +139,11 @@ def _ctx(
     player_id: str = "system",
     guild_id: str | None = None,
 ) -> ToolContext:
+    songdb_obj = songdb or _FakeSongDb()
     services: dict[str, object] = {
         "http": http or _FakeHttp(),
-        "songdb": songdb or _FakeSongDb(),
+        "songdb": songdb_obj,
+        "songdbs": {"chunithm": songdb_obj},
         "records": records or _FakeRecords(),
         "notify": notify or _FakeNotify(),
         "settings": SettingsService(db),
@@ -161,6 +163,10 @@ async def _enable_channel(ctx: ToolContext, *, guild_id: str, channel_id: str = 
         scope="guild", scope_id=guild_id, skill="updates", name="알림 채널",
         value=channel_id, updated_by="tester",
     )
+
+
+def _feed(skill: ModuleType, game: str, region: Any) -> Any:
+    return next(f for f in skill._FEEDS if f.game == game and f.region == region)
 
 
 # ---------------------------------------------------------------- _check_notices
@@ -183,7 +189,7 @@ async def test_check_notices_schedules_dated_updates_and_broadcasts_dateless_one
     await _enable_channel(ctx, guild_id="g1")
     await _seed_known_notice(skill, db)
 
-    found = await skill._check_notices(ctx, skill.Region.INTL)
+    found = await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL))
     assert found is True
 
     cursor = await db.execute("SELECT url, update_date, notified, schedule_id FROM updates_notices ORDER BY id")
@@ -216,7 +222,7 @@ async def test_check_notices_flags_version_change_only_for_the_chronologically_l
     await _enable_channel(ctx, guild_id="g1")
     await _seed_known_notice(skill, db)
 
-    await skill._check_notices(ctx, skill.Region.INTL)
+    await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL))
 
     assert len(notify.dms) == 1
     assert "CHUNITHM Mate" in notify.dms[0][1]
@@ -229,8 +235,8 @@ async def test_check_notices_skips_urls_already_known(skill: ModuleType, db: aio
     await _enable_channel(ctx, guild_id="g1")
     await _seed_known_notice(skill, db)
 
-    assert await skill._check_notices(ctx, skill.Region.INTL) is True
-    assert await skill._check_notices(ctx, skill.Region.INTL) is False
+    assert await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL)) is True
+    assert await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL)) is False
 
     cursor = await db.execute("SELECT COUNT(*) FROM updates_notices")
     row = await cursor.fetchone()
@@ -244,7 +250,7 @@ async def test_check_notices_first_run_only_sets_baseline(skill: ModuleType, db:
     ctx = _ctx(db=db, http=http, notify=notify)
     await _enable_channel(ctx, guild_id="g1")
 
-    assert await skill._check_notices(ctx, skill.Region.INTL) is False
+    assert await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL)) is False
 
     cursor = await db.execute("SELECT notified, schedule_id FROM updates_notices")
     rows = list(await cursor.fetchall())
@@ -281,7 +287,7 @@ async def test_check_song_list_first_check_only_sets_baseline(skill: ModuleType,
     ctx = _ctx(db=db, http=http, songdb=songdb, notify=notify)
     await _enable_channel(ctx, guild_id="g1")
 
-    await skill._check_song_list(ctx, skill.Region.INTL, notice_found_this_tick=False)
+    await skill._check_song_list(ctx, _feed(skill, "chunithm", skill.Region.INTL), notice_found_this_tick=False)
 
     assert notify.posts == []
     assert songdb.refresh_calls == 0
@@ -299,10 +305,10 @@ async def test_check_song_list_broadcasts_added_songs_when_no_notice_found(
     notify = _FakeNotify()
     ctx = _ctx(db=db, http=http, songdb=songdb, notify=notify)
     await _enable_channel(ctx, guild_id="g1")
-    await skill._check_song_list(ctx, skill.Region.INTL, notice_found_this_tick=False)  # 기준점
+    await skill._check_song_list(ctx, _feed(skill, "chunithm", skill.Region.INTL), notice_found_this_tick=False)  # 기준점
 
     http.json_data[_INTL_MUSIC_URL] = [{"id": "1", "title": "곡A"}, {"id": "2", "title": "새곡"}]
-    await skill._check_song_list(ctx, skill.Region.INTL, notice_found_this_tick=False)
+    await skill._check_song_list(ctx, _feed(skill, "chunithm", skill.Region.INTL), notice_found_this_tick=False)
 
     assert songdb.refresh_calls == 1
     assert len(notify.posts) == 1
@@ -316,10 +322,10 @@ async def test_check_song_list_suppresses_broadcast_when_a_notice_was_found_this
     notify = _FakeNotify()
     ctx = _ctx(db=db, http=http, notify=notify)
     await _enable_channel(ctx, guild_id="g1")
-    await skill._check_song_list(ctx, skill.Region.INTL, notice_found_this_tick=False)  # 기준점
+    await skill._check_song_list(ctx, _feed(skill, "chunithm", skill.Region.INTL), notice_found_this_tick=False)  # 기준점
 
     http.json_data[_INTL_MUSIC_URL] = [{"id": "1", "title": "곡A"}, {"id": "2", "title": "새곡"}]
-    await skill._check_song_list(ctx, skill.Region.INTL, notice_found_this_tick=True)
+    await skill._check_song_list(ctx, _feed(skill, "chunithm", skill.Region.INTL), notice_found_this_tick=True)
 
     assert notify.posts == []
     snapshot = await skill.models.latest_song_snapshot(db, region="intl")
@@ -336,10 +342,10 @@ async def test_check_song_list_jp_respects_jp_updates_toggle(skill: ModuleType, 
     await settings.set_value(
         scope="guild", scope_id="g1", skill="updates", name="일본판 알림", value=False, updated_by="tester",
     )
-    await skill._check_song_list(ctx, skill.Region.JP, notice_found_this_tick=False)  # 기준점
+    await skill._check_song_list(ctx, _feed(skill, "chunithm", skill.Region.JP), notice_found_this_tick=False)  # 기준점
 
     http.json_data[_JP_MUSIC_URL] = [{"id": "1", "title": "곡A"}, {"id": "2", "title": "새곡"}]
-    await skill._check_song_list(ctx, skill.Region.JP, notice_found_this_tick=False)
+    await skill._check_song_list(ctx, _feed(skill, "chunithm", skill.Region.JP), notice_found_this_tick=False)
 
     assert notify.posts == []
 
@@ -411,9 +417,9 @@ async def test_new_songs_tool_reports_added_and_removed(skill: ModuleType, db: a
     table = result.table
     assert table is not None and table.unit == "곡"
     assert [g.title for g in table.groups] == ["추가", "삭제"]
-    assert dict(table.summary) == {"지역": "일본판", "확인": "2026-10-10"}
+    assert dict(table.summary) == {"지역": "CHUNITHM 일본판", "확인": "2026-10-10"}
     added, removed = table.rows
-    assert added.ref == RowRef("updates.listed_song", '["jp", "곡A"]')
+    assert added.ref == RowRef("updates.listed_song", '["chunithm", "jp", "곡A"]')
     assert not added.cell("곡").filled and added.cell("곡 이름(원문)").text == "곡A"  # 일본판은 곡 칸을 비운다
     assert removed.cell("구분").text == "삭제"
     text = render_text(table).content
@@ -482,3 +488,101 @@ async def test_configure_requires_at_least_one_value(skill: ModuleType, db: aios
     ctx = _ctx(db=db, guild_id="g1")
     result = await skill.configure(ctx)
     assert result.error is not None
+
+
+# ---------------------------------------------------------------- maimai DX (2026-11-27, plan 6-8c)
+
+_MAIMAI_REFERENCE_DIR = Path("docs/reference/maimai-updates")
+_MAIMAI_INTL_TOP = "https://maimai.sega.com/"
+_MAIMAI_INTL_MUSIC = "https://maimai.sega.com/assets/data/maimai_songs.json"
+
+
+@dataclass(slots=True, kw_only=True)
+class _FakeMaimaiSongDb:
+    refresh_calls: int = 0
+
+    async def refresh_from_otoge(self, http: Any) -> bool:
+        self.refresh_calls += 1
+        return True
+
+
+def _maimai_ctx(skill: ModuleType, db: aiosqlite.Connection, http: _FakeHttp, notify: _FakeNotify) -> tuple[ToolContext, Any]:
+    ctx = _ctx(db=db, http=http, notify=notify)
+    maimai_songdb = _FakeMaimaiSongDb()
+    songdbs = {**cast(dict[str, Any], ctx.services["songdbs"]), "maimai": maimai_songdb}
+    return replace(ctx, services={**ctx.services, "songdbs": songdbs}), maimai_songdb
+
+
+async def test_maimai_intl_launch_list_stands_in_for_notices(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    """maimai 국제판은 글 공지가 없어 공식 사이트의 출시 목록을 공지로 쓴다. 새 버전이 오르면 그날 10시 예약과 admin DM."""
+    page = (_MAIMAI_REFERENCE_DIR / "intl_top_sample.html").read_text(encoding="utf-8")
+    newest = page.index('<li class="top--update__item">')
+    older = page[: newest] + page[page.index("</li>", newest) + len("</li>"):]
+    http = _FakeHttp(pages={_MAIMAI_INTL_TOP: older})
+    notify = _FakeNotify()
+    ctx, _ = _maimai_ctx(skill, db, http, notify)
+    players: PlayersService = ctx.players  # type: ignore[assignment]
+    admin = await players.create_player()
+    await players.grant_tag(admin.id, "admin", source="test")
+    feed = _feed(skill, "maimai", skill.Region.INTL)
+
+    assert await skill._check_notices(ctx, feed) is False  # 첫 실행은 기준점만
+    http.pages[_MAIMAI_INTL_TOP] = page
+    assert await skill._check_notices(ctx, feed) is True
+
+    row = await (await db.execute(
+        "SELECT game, update_date, version_name, schedule_id FROM updates_notices ORDER BY id DESC LIMIT 1"
+    )).fetchone()
+    assert row is not None and row["schedule_id"] is not None
+    assert (row["game"], row["update_date"], row["version_name"]) == ("maimai", "2026-07-23", "CiRCLE PLUS")
+    assert notify.dms and "maimai DX NET 파서 점검" in notify.dms[0][1] and "[maimai DX 국제판]" in notify.dms[0][1]
+    # 츄니즘 공지 기록과 섞이지 않는다.
+    assert await skill.models.has_notices(db, game="chunithm", region="intl") is False
+
+
+async def test_maimai_song_list_uses_sort_refreshes_otoge_and_respects_the_toggle(
+    skill: ModuleType, db: aiosqlite.Connection
+) -> None:
+    http = _FakeHttp(json_data={_MAIMAI_INTL_MUSIC: [{"sort": "1", "title": "곡A"}]})
+    notify = _FakeNotify()
+    ctx, maimai_songdb = _maimai_ctx(skill, db, http, notify)
+    await _enable_channel(ctx, guild_id="g1")
+    feed = _feed(skill, "maimai", skill.Region.INTL)
+    await skill._check_song_list(ctx, feed, notice_found_this_tick=False)  # 기준점
+
+    http.json_data[_MAIMAI_INTL_MUSIC] = [{"sort": "1", "title": "곡A"}, {"sort": "2", "title": "새곡"}]
+    await skill._check_song_list(ctx, feed, notice_found_this_tick=False)
+
+    assert maimai_songdb.refresh_calls == 1
+    assert len(notify.posts) == 1 and notify.posts[0][1].startswith("[maimai DX 국제판] 공지 없이 곡 목록이 바뀌었어.")
+    snapshot = await skill.models.latest_song_snapshot(db, game="maimai", region="intl")
+    assert snapshot is not None and snapshot.added == [("2", "새곡")]
+    assert await skill.models.latest_song_snapshot(db, game="chunithm", region="intl") is None
+
+    settings: SettingsService = ctx.settings  # type: ignore[assignment]
+    await settings.set_value(scope="guild", scope_id="g1", skill="updates", name="maimai 알림", value=False, updated_by="t")
+    http.json_data[_MAIMAI_INTL_MUSIC] = [{"sort": "1", "title": "곡A"}]
+    await skill._check_song_list(ctx, feed, notice_found_this_tick=False)
+    assert len(notify.posts) == 1  # maimai 알림을 끈 서버엔 안 올린다
+
+
+async def test_maimai_sync_section_uses_the_maimai_rating_and_frame(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    await skill.models.insert_song_snapshot(
+        db, game="maimai", region="intl", checked_at="2026-10-10T12:00:00",
+        song_ids={"1": "낮은곡", "2": "높은곡"}, added=[("1", "낮은곡"), ("2", "높은곡")], removed=[],
+    )
+    songdb = _FakeSongDb(
+        hits=[
+            SimpleNamespace(song=SimpleNamespace(title="낮은곡"), chart=SimpleNamespace(const=10.0)),
+            SimpleNamespace(song=SimpleNamespace(title="높은곡"), chart=SimpleNamespace(const=14.0)),
+        ]
+    )
+    # maimai SSS+(100.5%) 곡 레이팅: 상수 10.0 → 225, 14.0 → 315. 신곡 15 최저점 250이면 높은곡만 든다.
+    ctx = replace(_ctx(db=db, songdb=songdb, records=_FakeRecords(floor=Decimal(250))), game="maimai")
+
+    section = await skill.on_maimai_sync_completed(
+        ctx, {"has_new_plays": True, "previous_synced_at": "2026-10-01T00:00:00", "player_id": "p1"},
+    )
+
+    assert section is not None and section.data == {"new_songs_fit": ["높은곡"]}
+    assert "신곡 15 프레임" in section.display.content

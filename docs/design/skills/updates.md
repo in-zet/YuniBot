@@ -13,7 +13,7 @@ examples:
   - 다음 업데이트 언제야?
   - 이번에 들어온 신곡 보여 줘
 category: 알림
-games: [chunithm]
+games: [chunithm, maimai]
 version: 1
 services: [songdb, records, notify, http, players, yuni]
 emits: [chunithm.update.detected]
@@ -120,4 +120,13 @@ listens: [chunithm.sync.completed]
 ## 표로 바꾼 읽기 도구 (16단계 Part 4-4, 2026-10-20)
 
 표 모양·서식은 `docs/plan/2026-10-20_수정.md` §16 Part 4의 4-1·4-2를 따른다. 구현에서 정한 것:
-- `new_songs`: 가리키는 것 `updates.listed_song` = JSON(지역, 제목). 묶음 추가·삭제(빈 묶음은 뺀다), 표 요약 지역·확인 날짜. 칸 구분(글자 출력에서 숨김 — 묶음 표지가 보여 준다)·곡·곡 이름(원문). 국제판 추가곡이 `songdb`에 있으면(`SongDbService.song_by_title`) 곡 칸을 채우고 원문 칸은 비운다(곡 단위 행, 같은 제목이 두 번 찍히지 않게). 그 밖에는 곡 칸을 비우고 원문만 적는다. 추가·삭제가 모두 없으면 표 없이 지금 문장("추가: 없음 / 삭제: 없음")을 낸다.
+- `new_songs`: 가리키는 것 `updates.listed_song` = JSON(게임, 지역, 제목)(게임은 2026-11-27부터). 묶음 추가·삭제(빈 묶음은 뺀다), 표 요약 지역·확인 날짜. 칸 구분(글자 출력에서 숨김 — 묶음 표지가 보여 준다)·곡·곡 이름(원문). 국제판 추가곡이 `songdb`에 있으면(`SongDbService.song_by_title`) 곡 칸을 채우고 원문 칸은 비운다(곡 단위 행, 같은 제목이 두 번 찍히지 않게). 그 밖에는 곡 칸을 비우고 원문만 적는다. 추가·삭제가 모두 없으면 표 없이 지금 문장("추가: 없음 / 삭제: 없음")을 낸다.
+
+## maimai DX 대응 (2026-11-27, plan 17단계 6-8c)
+
+- 확인할 곳을 게임 × 지역 네 갈래(`_FEEDS`)로 둔다. 공지·곡 목록·곡 DB 새로 받기가 갈래마다 다르고, 나머지 흐름(기준점, 10시 예약, 공지를 놓친 경우, 버전 변경 DM)은 같다. 저장 테이블은 원래 있던 `game` 칸으로 가른다.
+- **maimai 국제판에는 글 공지가 없다**(2026-11-27 실측, `docs/reference/maimai-updates/README.md`). 공식 사이트 첫 화면의 버전 출시 목록을 공지로 읽는다 — 항목 하나가 버전 출시, 날짜가 곧 업데이트 날짜라 그날 10시 알림과 버전 변경 감지만 된다. 그 밖의 업데이트는 곡 목록 비교("공지 없이 곡 목록이 바뀌었어")로만 알린다.
+- maimai 일본판은 츄니즘 일본판과 같은 RSS 파서. 곡 목록은 공식 `maimai_songs.json`(`sort`로 비교), 국제판에 곡이 더해지면 otoge-db 곡 DB를 바로 새로 받는다(`ctx.songdbs`).
+- 서버 설정 "maimai 알림"(기본 켜짐)으로 maimai 알림만 끌 수 있다(`configure(maimai_updates_enabled=)`). 알림 머리말은 `[CHUNITHM 국제판]`·`[maimai DX 일본판]`처럼 게임을 붙인다.
+- 이벤트는 `<게임>.update.detected`. 동기화 리포트 조각은 게임 프로필로 판정한다: 기준 점수(CHUNITHM SSS, maimai SSS+)를 낸 곡 레이팅이 신곡 프레임 최저점보다 큰 추가곡(츄니즘은 전과 같은 결과).
+- 도구 `next`·`new_songs`에 `game: GameRef`.

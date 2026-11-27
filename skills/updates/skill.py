@@ -4,18 +4,19 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, time
 from enum import StrEnum
-from typing import Any
+from typing import Any, NamedTuple
 
 from core.decorators import on, schedule, tool
 from core.events import Section
 from core.sibling import load_sibling
 from core.tables import EMPTY_CELL, RowRef, TableBuilder, cell
-from core.tool_types import Display, ToolContext, ToolResult
+from core.tool_types import Display, GameRef, ToolContext, ToolResult
 from services.common.notify import parse_channel_ref
 from services.game import table_columns as tc
-from services.game.records_calc import candidate_upside
+from services.game.registry import profile_for
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +29,13 @@ _SKILL_NAME = "updates"
 _SETTING_CHANNEL = "알림 채널"
 _SETTING_JP_ENABLED = "일본판 알림"
 _SETTING_ROLE = "역할 멘션"
+_SETTING_MAIMAI_ENABLED = "maimai 알림"
 _DEFAULT_JP_ENABLED = True
+_DEFAULT_MAIMAI_ENABLED = True
 _NOTICE_DUE_EVENT = "updates.notice_due"
 _NOTICE_FIRE_HOUR = 10
 _REPORT_ORDER = 40
 _ROLE_MENTION_RE = re.compile(r"^<@&\d{15,25}>$")
-
-_MUSIC_JSON_URLS: dict[str, str] = {
-    "intl": "https://chunithm.sega.com/assets/data/music.json",
-    "jp": "https://chunithm.sega.jp/storage/json/music.json",
-}
-
 
 class Region(StrEnum):
     INTL = "intl"
@@ -50,10 +47,48 @@ _LISTED_SONG = "updates.listed_song"
 _U_KIND = "구분"
 _U_ADDED = "추가"
 _U_REMOVED = "삭제"
-_NOTICE_SOURCES: dict[Region, tuple[str, Any]] = {
-    Region.INTL: ("https://info-chunithm.sega.com/", calc.parse_intl_news),
-    Region.JP: ("https://info-chunithm.sega.jp/feed/", calc.parse_jp_rss),
-}
+
+
+class _Feed(NamedTuple):
+    """확인할 곳 하나(게임 × 지역). 곡 목록 JSON에서 곡을 가리키는 칸은 츄니즘 `id`, maimai `sort`다(둘 다 목록 안에서
+    겹치지 않는다, 2026-11-27 확인). 국제판에 곡이 더해지면 그 게임 곡 DB를 바로 새로 받는다(`refresh`).
+    스킬 파일은 파일 경로로 불러와 `sys.modules`에 없으므로 dataclass 대신 NamedTuple이다."""
+
+    game: str
+    region: Region
+    notice_url: str
+    parse_notices: Callable[[str], list[Any]]
+    music_url: str
+    music_key: str
+    refresh: Callable[[Any, Any], Awaitable[Any]] | None = None
+
+
+_FEEDS: tuple[_Feed, ...] = (
+    _Feed(
+        game="chunithm", region=Region.INTL, notice_url="https://info-chunithm.sega.com/",
+        parse_notices=calc.parse_intl_news, music_url="https://chunithm.sega.com/assets/data/music.json",
+        music_key="id", refresh=lambda songdb, http: songdb.refresh_from_chunimaru(http),
+    ),
+    _Feed(
+        game="chunithm", region=Region.JP, notice_url="https://info-chunithm.sega.jp/feed/",
+        parse_notices=calc.parse_jp_rss, music_url="https://chunithm.sega.jp/storage/json/music.json", music_key="id",
+    ),
+    # maimai 국제판은 글 공지가 없어 공식 사이트의 버전 출시 목록이 공지 자리를 대신한다(2026-11-27 실측).
+    _Feed(
+        game="maimai", region=Region.INTL, notice_url=calc.MAIMAI_INTL_TOP,
+        parse_notices=calc.parse_maimai_intl_launches,
+        music_url="https://maimai.sega.com/assets/data/maimai_songs.json", music_key="sort",
+        refresh=lambda songdb, http: songdb.refresh_from_otoge(http),
+    ),
+    _Feed(
+        game="maimai", region=Region.JP, notice_url="https://info-maimai.sega.jp/feed/",
+        parse_notices=calc.parse_jp_rss, music_url="https://maimai.sega.jp/data/maimai_songs.json", music_key="sort",
+    ),
+)
+
+
+def _feed_label(game: str, region: Region) -> str:
+    return f"{profile_for(game).label} {_REGION_LABELS[region]}"
 
 
 def _now() -> datetime:
@@ -79,8 +114,8 @@ def _parse_role_ref(raw: str) -> str | None:
 # ---------------------------------------------------------------- 공통 도우미
 
 
-async def _broadcast_to_guilds(ctx: ToolContext, *, region: Region, content: str) -> None:
-    """알림 채널을 정해 둔 서버마다, 그 서버의 스킬 켜짐·일본판 알림 설정을 보고 올린다.
+async def _broadcast_to_guilds(ctx: ToolContext, *, game: str, region: Region, content: str) -> None:
+    """알림 채널을 정해 둔 서버마다, 그 서버의 스킬 켜짐·일본판 알림·maimai 알림 설정을 보고 올린다.
     이 핸들러 자체가 길드를 훑는다 — system 플레이어가 낸 이벤트라 특정 길드로 안 좁혀진다."""
     channels = await ctx.settings.scope_ids_with_value(scope="guild", skill=_SKILL_NAME, name=_SETTING_CHANNEL)
     for guild_id, channel_id in channels:
@@ -95,6 +130,13 @@ async def _broadcast_to_guilds(ctx: ToolContext, *, region: Region, content: str
             )
             if not jp_enabled:
                 continue
+        if game == "maimai":
+            maimai_enabled = await ctx.settings.get_value(
+                scope="guild", scope_id=guild_id, skill=_SKILL_NAME, name=_SETTING_MAIMAI_ENABLED,
+                default=_DEFAULT_MAIMAI_ENABLED,
+            )
+            if not maimai_enabled:
+                continue
         role_mention = await ctx.settings.get_value(
             scope="guild", scope_id=guild_id, skill=_SKILL_NAME, name=_SETTING_ROLE, default="",
         )
@@ -103,7 +145,7 @@ async def _broadcast_to_guilds(ctx: ToolContext, *, region: Region, content: str
 
 
 async def _compose_notice_message(ctx: ToolContext, notice: Any, *, is_version_change: bool) -> str:
-    region_label = _REGION_LABELS[Region(notice.region)]
+    region_label = _feed_label(notice.game, Region(notice.region))
     section = Section(
         order=0, data={"title": notice.title, "url": notice.url}, stage="great" if is_version_change else "good",
     )
@@ -113,49 +155,50 @@ async def _compose_notice_message(ctx: ToolContext, notice: Any, *, is_version_c
 
 
 async def _dm_admins_version_change(ctx: ToolContext, notice: Any) -> None:
-    region_label = _REGION_LABELS[Region(notice.region)]
+    region_label = _feed_label(notice.game, Region(notice.region))
     content = (
         f"[{region_label}] 버전이 '{notice.version_name}'(으)로 바뀐 것 같아. "
-        f"CHUNITHM-NET 파서 점검이 필요할 수 있어.\n{notice.url}"
+        f"{profile_for(notice.game).net_name} 파서 점검이 필요할 수 있어.\n{notice.url}"
     )
     for player_id in await ctx.players.players_with_tag("admin"):
         await ctx.notify.dm(player_id, content)
 
 
-async def _broadcast_song_diff(ctx: ToolContext, region: Region, diff: Any) -> None:
+async def _broadcast_song_diff(ctx: ToolContext, feed: _Feed, diff: Any) -> None:
     """공지를 못 찾았는데 곡 목록만 바뀌었을 때 쓰는 대체 알림(설계서 "공지를 놓친 경우")."""
     added = ", ".join(title for _, title in diff.added) or "없음"
     removed = ", ".join(title for _, title in diff.removed) or "없음"
     section = Section(order=0, data={"added": added, "removed": removed}, stage="good")
     yuni_line = await ctx.yuni.line([section])
-    region_label = _REGION_LABELS[region]
-    content = f"[{region_label}] 공지 없이 곡 목록이 바뀌었어.\n추가: {added}\n삭제: {removed}\n{yuni_line}"
-    await _broadcast_to_guilds(ctx, region=region, content=content)
+    content = (
+        f"[{_feed_label(feed.game, feed.region)}] 공지 없이 곡 목록이 바뀌었어.\n추가: {added}\n삭제: {removed}\n{yuni_line}"
+    )
+    await _broadcast_to_guilds(ctx, game=feed.game, region=feed.region, content=content)
 
 
 # ---------------------------------------------------------------- 예약 작업
 
 
-async def _check_notices(ctx: ToolContext, region: Region) -> bool:
+async def _check_notices(ctx: ToolContext, feed: _Feed) -> bool:
     """새 공지를 저장하고(있으면) 당일 10시 알림을 건다. 이번에 하나라도 새로 찾았으면 True
     — 곡 목록 쪽이 같은 틱에서 "공지를 놓친 경우" 알림을 또 보내지 않게 하는 신호다."""
     assert ctx.db is not None
-    url, parser = _NOTICE_SOURCES[region]
-    response = await ctx.http.get(url)
+    game, region = feed.game, feed.region
+    response = await ctx.http.get(feed.notice_url)
     response.raise_for_status()
-    items = parser(response.text)
+    items = feed.parse_notices(response.text)
     # 페이지·피드는 최신 글이 먼저 온다. 버전명 비교는 "바로 전에 안 글"과 맞대는 방식이라
     # 오래된 순으로 처리해야 한다 — 최신 순으로 그대로 돌면, 한 번에 여러 공지가 처음
     # 들어올 때(켜진 직후 등) 옛 버전이 "방금 들어온 새 버전"보다 나중에 읽혀 거꾸로
     # "버전이 바뀌었다"고 잘못 보게 된다.
     items = sorted(items, key=lambda item: item.posted_at)
 
-    if not await models.has_notices(ctx.db, region=region.value):
+    if not await models.has_notices(ctx.db, game=game, region=region.value):
         # 처음 켰을 때(또는 DB를 비웠을 때)는 곡 목록처럼 기준점만 잡는다 — 페이지에 남은 옛 공지
         # 수십 건을 새 공지로 알리고 과거 시각 예약을 한꺼번에 쏘지 않는다.
         for item in items:
             await models.insert_notice(
-                ctx.db, region=region.value, url=item.url, title=item.title,
+                ctx.db, game=game, region=region.value, url=item.url, title=item.title,
                 posted_at=item.posted_at.isoformat(),
                 update_date=item.update_date.isoformat() if item.update_date else None,
                 version_name=item.version_name, created_at=_now().isoformat(), notified=True,
@@ -164,15 +207,15 @@ async def _check_notices(ctx: ToolContext, region: Region) -> bool:
 
     found_new = False
     for item in items:
-        if await models.notice_exists(ctx.db, region=region.value, url=item.url):
+        if await models.notice_exists(ctx.db, game=game, region=region.value, url=item.url):
             continue
         found_new = True
-        last_version = await models.latest_version_name(ctx.db, region=region.value)
+        last_version = await models.latest_version_name(ctx.db, game=game, region=region.value)
         is_version_change = (
             last_version is not None and item.version_name is not None and last_version != item.version_name
         )
         notice_id = await models.insert_notice(
-            ctx.db, region=region.value, url=item.url, title=item.title,
+            ctx.db, game=game, region=region.value, url=item.url, title=item.title,
             posted_at=item.posted_at.isoformat(),
             update_date=item.update_date.isoformat() if item.update_date else None,
             version_name=item.version_name, created_at=_now().isoformat(),
@@ -196,16 +239,17 @@ async def _check_notices(ctx: ToolContext, region: Region) -> bool:
             # 업데이트 날짜를 못 뽑은 공지(예: 버전 자체를 알리는 글)는 기다릴 미래 시각이
             # 없으니 바로 알린다.
             content = await _compose_notice_message(ctx, notice, is_version_change=is_version_change)
-            await _broadcast_to_guilds(ctx, region=region, content=content)
+            await _broadcast_to_guilds(ctx, game=game, region=region, content=content)
             await models.mark_notified(ctx.db, notice_id)
     return found_new
 
 
-async def _check_song_list(ctx: ToolContext, region: Region, *, notice_found_this_tick: bool) -> None:
+async def _check_song_list(ctx: ToolContext, feed: _Feed, *, notice_found_this_tick: bool) -> None:
     assert ctx.db is not None
-    data = await ctx.http.get_json(_MUSIC_JSON_URLS[region])
-    current = {str(entry["id"]): entry["title"] for entry in data}
-    previous_snapshot = await models.latest_song_snapshot(ctx.db, region=region.value)
+    game, region = feed.game, feed.region
+    data = await ctx.http.get_json(feed.music_url)
+    current = {str(entry[feed.music_key]): entry["title"] for entry in data}
+    previous_snapshot = await models.latest_song_snapshot(ctx.db, game=game, region=region.value)
     previous = previous_snapshot.song_ids if previous_snapshot is not None else None
     diff = calc.diff_song_ids(previous, current)
 
@@ -213,19 +257,19 @@ async def _check_song_list(ctx: ToolContext, region: Region, *, notice_found_thi
         return
     now = _now_utc()
     await models.insert_song_snapshot(
-        ctx.db, region=region.value, checked_at=now.isoformat(), song_ids=current,
+        ctx.db, game=game, region=region.value, checked_at=now.isoformat(), song_ids=current,
         added=diff.added, removed=diff.removed,
     )
     if previous is None:
         return  # 처음 켰을 때는 기준점만 잡는다 — 수록곡 전부를 "신곡"으로 알리지 않는다.
 
-    if region is Region.INTL and diff.added:
-        await ctx.songdb.refresh_from_chunimaru(ctx.http)
+    if feed.refresh is not None and diff.added:
+        await feed.refresh(ctx.songdbs[game], ctx.http)
     if (diff.added or diff.removed) and not notice_found_this_tick:
-        await _broadcast_song_diff(ctx, region, diff)
+        await _broadcast_song_diff(ctx, feed, diff)
     if diff.added or diff.removed:
         await ctx.emit(
-            "chunithm.update.detected",
+            f"{game}.update.detected",
             {
                 "region": region.value, "update_date": None,
                 "added": [list(pair) for pair in diff.added], "removed": [list(pair) for pair in diff.removed],
@@ -236,17 +280,17 @@ async def _check_song_list(ctx: ToolContext, region: Region, *, notice_found_thi
 
 @schedule("0 */3 * * *", catch_up=True)
 async def check_updates(ctx: ToolContext) -> None:
-    """두세 시간마다 일본판·국제판 공지와 곡 목록을 확인한다(서버별이 아니라 전역에서 한 번)."""
-    for region in (Region.INTL, Region.JP):
+    """두세 시간마다 게임·지역마다 공지와 곡 목록을 확인한다(서버별이 아니라 전역에서 한 번). 한 곳이 실패해도 나머지는 돈다."""
+    for feed in _FEEDS:
         notice_found = False
         try:
-            notice_found = await _check_notices(ctx, region)
+            notice_found = await _check_notices(ctx, feed)
         except Exception:
-            logger.warning("'%s' 공지 확인 실패, 다음 주기에 다시 시도한다", region.value, exc_info=True)
+            logger.warning("'%s/%s' 공지 확인 실패, 다음 주기에 다시 시도한다", feed.game, feed.region.value, exc_info=True)
         try:
-            await _check_song_list(ctx, region, notice_found_this_tick=notice_found)
+            await _check_song_list(ctx, feed, notice_found_this_tick=notice_found)
         except Exception:
-            logger.warning("'%s' 곡 목록 확인 실패, 다음 주기에 다시 시도한다", region.value, exc_info=True)
+            logger.warning("'%s/%s' 곡 목록 확인 실패, 다음 주기에 다시 시도한다", feed.game, feed.region.value, exc_info=True)
 
 
 @on(_NOTICE_DUE_EVENT)
@@ -262,7 +306,7 @@ async def on_notice_due(ctx: ToolContext, payload: dict[str, Any]) -> None:
     content = await _compose_notice_message(
         ctx, notice, is_version_change=bool(payload.get("version_changed", False))
     )
-    await _broadcast_to_guilds(ctx, region=Region(notice.region), content=content)
+    await _broadcast_to_guilds(ctx, game=notice.game, region=Region(notice.region), content=content)
     await models.mark_notified(ctx.db, notice.id)
 
 
@@ -271,8 +315,8 @@ async def on_notice_due(ctx: ToolContext, payload: dict[str, Any]) -> None:
 
 @on("chunithm.sync.completed")
 async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
-    """지난 동기화 뒤에 생긴 국제판 추가곡 중, 내 신곡20 프레임에 들어올 상수대인 것만
-    보여준다. 상수를 아직 모르는 신곡(Chunimaru 반영 전)은 조용히 뺀다."""
+    """지난 동기화 뒤에 생긴 국제판 추가곡 중, 기준 점수(CHUNITHM SSS, maimai SSS+)를 내면 내 신곡 프레임에 들어올
+    상수대인 것만 보여준다. 상수를 아직 모르는 신곡(곡 DB 반영 전)은 조용히 뺀다."""
     if not payload.get("has_new_plays"):
         return None
     previous_synced_at = payload.get("previous_synced_at")
@@ -280,60 +324,72 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
         return None
     assert ctx.db is not None
 
-    snapshots = await models.song_snapshots_since(ctx.db, region=Region.INTL.value, since=previous_synced_at)
+    snapshots = await models.song_snapshots_since(
+        ctx.db, game=ctx.game, region=Region.INTL.value, since=previous_synced_at
+    )
     added_titles = {title for snapshot in snapshots for _, title in snapshot.added}
     if not added_titles:
         return None
 
+    profile = profile_for(ctx.game)
     floor = await ctx.records.new_frame_floor(payload["player_id"])
     fits = sorted(
         {
             hit.song.title
             for hit in ctx.songdb.find_by_const(min_const=0.0, max_const=99.0)
             if hit.song.title in added_titles
-            and hit.chart.const is not None
-            and candidate_upside(hit.chart.const, floor) > 0
+            and (rating := profile.chart_rating(profile.candidate_target_score, hit.chart.const)) is not None
+            and rating > floor
         }
     )
     if not fits:
         return None
     return Section(
         order=_REPORT_ORDER,
-        display=Display(content="새로 들어온 곡 중 네 신곡20 프레임에 들어올 만한 것: " + ", ".join(fits)),
+        display=Display(content=f"새로 들어온 곡 중 네 {profile.new_label} 프레임에 들어올 만한 것: " + ", ".join(fits)),
         data={"new_songs_fit": fits},
         stage="good",
     )
+
+
+@on("maimai.sync.completed")
+async def on_maimai_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
+    """`on_sync_completed`의 maimai 판. 이벤트 버스가 핸들러의 `records`·`songdb`를 maimai 것으로 바꿔 준다."""
+    return await on_sync_completed(ctx, payload)
 
 
 # ---------------------------------------------------------------- 도구
 
 
 @tool()
-async def next(ctx: ToolContext, region: Region) -> ToolResult:
-    """알려진 다음 업데이트 날짜와 공지 링크. region은 intl(국제판)·jp(일본판)."""
+async def next(ctx: ToolContext, region: Region, game: GameRef | None = None) -> ToolResult:
+    """알려진 다음 업데이트 날짜와 공지 링크. region은 intl(국제판)·jp(일본판). maimai 국제판은 글 공지가 없어 버전 출시
+    날짜만 안다."""
     try:
         region = Region(region)
     except ValueError:
         return ToolResult(error="region은 intl, jp 중 하나여야 해.")
     assert ctx.db is not None
     today = _now().date().isoformat()
-    notice = await models.next_update_notice(ctx.db, region=region.value, today=today)
+    notice = await models.next_update_notice(ctx.db, game=ctx.game, region=region.value, today=today)
     if notice is None:
         return ToolResult(
-            data={"region": region.value, "update_date": None},
-            display=Display(content="아직 공지가 없어."),
+            data={"game": ctx.game, "region": region.value, "update_date": None},
+            display=Display(content=f"[{_feed_label(ctx.game, region)}] 아직 공지가 없어."),
         )
-    lines = [f"[{_REGION_LABELS[region]}] {notice.update_date} 업데이트", notice.title, notice.url]
+    lines = [f"[{_feed_label(ctx.game, region)}] {notice.update_date} 업데이트", notice.title, notice.url]
     return ToolResult(
         data={
-            "region": region.value, "update_date": notice.update_date, "title": notice.title, "url": notice.url,
+            "game": ctx.game, "region": region.value, "update_date": notice.update_date, "title": notice.title, "url": notice.url,
         },
         display=Display(content="\n".join(lines)),
     )
 
 
 @tool()
-async def new_songs(ctx: ToolContext, region: Region, date: str | None = None) -> ToolResult:
+async def new_songs(
+    ctx: ToolContext, region: Region, date: str | None = None, game: GameRef | None = None
+) -> ToolResult:
     """최근 업데이트의 추가·삭제 곡. region은 intl(국제판)·jp(일본판). date(ISO, YYYY-MM-DD)를
     주면 그 날짜 당일이나 그 전의 가장 최근 저장본을 본다."""
     try:
@@ -342,9 +398,9 @@ async def new_songs(ctx: ToolContext, region: Region, date: str | None = None) -
         return ToolResult(error="region은 intl, jp 중 하나여야 해.")
     assert ctx.db is not None
     snapshot = (
-        await models.song_snapshot_at_or_before(ctx.db, region=region.value, on_date=date)
+        await models.song_snapshot_at_or_before(ctx.db, game=ctx.game, region=region.value, on_date=date)
         if date is not None
-        else await models.latest_song_snapshot(ctx.db, region=region.value)
+        else await models.latest_song_snapshot(ctx.db, game=ctx.game, region=region.value)
     )
     if snapshot is None:
         return ToolResult(
@@ -356,14 +412,14 @@ async def new_songs(ctx: ToolContext, region: Region, date: str | None = None) -
     data = {"region": region.value, "checked_at": snapshot.checked_at, "added": added, "removed": removed}
     checked = snapshot.checked_at[:10]
     if not added and not removed:
-        lines = [f"[{_REGION_LABELS[region]}] {checked} 확인", "추가: 없음", "삭제: 없음"]
+        lines = [f"[{_feed_label(ctx.game, region)}] {checked} 확인", "추가: 없음", "삭제: 없음"]
         return ToolResult(data=data, display=Display(content="\n".join(lines)))
 
     builder = TableBuilder(unit="곡")
     builder.column(_U_KIND, hidden_in_text=True)  # 묶음 표지(추가/삭제)가 이미 보여 준다
     tc.add_columns(builder, tc.SONG, tc.SONG_RAW_NAME)
     builder.step("업데이트 곡 변동")
-    builder.summary({"지역": _REGION_LABELS[region], "확인": checked})
+    builder.summary({"지역": _feed_label(ctx.game, region), "확인": checked})
     for kind, titles in ((_U_ADDED, added), (_U_REMOVED, removed)):
         if not titles:
             continue
@@ -373,7 +429,7 @@ async def new_songs(ctx: ToolContext, region: Region, date: str | None = None) -
             # 원문만 적는다(곡 DB에 없거나 이미 빠진 곡, 일본판 곡).
             known = region is Region.INTL and kind == _U_ADDED and ctx.songdb.song_by_title(title) is not None
             builder.row(
-                RowRef(_LISTED_SONG, json.dumps([region.value, title], ensure_ascii=False)),
+                RowRef(_LISTED_SONG, json.dumps([ctx.game, region.value, title], ensure_ascii=False)),
                 {
                     _U_KIND: cell(kind),
                     tc.SONG: tc.song_cell(title) if known else EMPTY_CELL,
@@ -389,8 +445,9 @@ async def configure(
     channel: str | None = None,
     jp_updates_enabled: bool | None = None,
     role_mention: str | None = None,
+    maimai_updates_enabled: bool | None = None,
 ) -> ToolResult:
-    """업데이트 알림 채널·일본판 알림 여부·같이 멘션할 역할을 바꾼다. 안 준 값은 그대로
+    """업데이트 알림 채널·일본판 알림 여부·같이 멘션할 역할·maimai 알림 여부를 바꾼다. 안 준 값은 그대로
     둔다. channel/role_mention을 빈 문자열로 주면 끈다(채널은 #채널 멘션이나 채널 id,
     역할은 @역할 멘션으로 준다)."""
     if ctx.guild_id is None:
@@ -413,6 +470,13 @@ async def configure(
             value=jp_updates_enabled, updated_by=ctx.player_id,
         )
         result["jp_updates_enabled"] = jp_updates_enabled
+
+    if maimai_updates_enabled is not None:
+        await ctx.settings.set_value(
+            scope="guild", scope_id=ctx.guild_id, skill=_SKILL_NAME, name=_SETTING_MAIMAI_ENABLED,
+            value=maimai_updates_enabled, updated_by=ctx.player_id,
+        )
+        result["maimai_updates_enabled"] = maimai_updates_enabled
 
     if role_mention is not None:
         role_ref = _parse_role_ref(role_mention) if role_mention else ""

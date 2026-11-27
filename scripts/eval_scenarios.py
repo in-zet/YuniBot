@@ -262,6 +262,10 @@ SCENARIOS: tuple[Scenario, ...] = (
         must_call=("settings_change_settings",), must_args=(("settings_change_settings", "speed", "9.00"),),
     ),
     Scenario(
+        name="업데이트/마이 신곡", question="마이마이 이번에 들어온 신곡 보여줘",
+        must_call=("updates_new_songs",), must_args=(("updates_new_songs", "game", "마이|maimai"),),
+    ),
+    Scenario(
         name="오락실/마이 세팅", question="겜플 마이마이 세팅 알려 줘",
         must_call=("arcade_get_settings",), must_args=(("arcade_get_settings", "game", "마이|maimai"),),
     ),
