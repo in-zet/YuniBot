@@ -116,3 +116,22 @@ async def test_list_favorites_shows_a_title_missing_from_the_song_db(skill: Modu
 
     assert result.data["titles"] == ["모르는 곡"]
     assert result.table is not None and result.table.rows[0].cell("곡 이름(원문)").text == "모르는 곡"
+
+
+async def test_remove_and_clear_favorites_go_by_title(skill: ModuleType) -> None:
+    from core.tables import TableBuilder
+    from services.game import table_columns as tc
+
+    songs = {title: SongRecord(title=title, aliases=(), artist="", id=i) for i, title in enumerate(["A", "B", "C"])}
+    net = _FakeMaimaiNet(favorites=["A", "B", "C"])
+    builder = TableBuilder(unit="곡")
+    tc.add_columns(builder, tc.SONG)
+    builder.step("즐겨찾기")
+    for title in ("A", "C"):
+        builder.row(tc.song_ref(title), {tc.SONG: tc.song_cell(title)})
+
+    removed = await skill.remove_favorites(_ctx(net, _FakeSongdb(songs=songs)), builder.build())
+    cleared = await skill.clear_favorites(_ctx(net, _FakeSongdb(songs=songs)))
+
+    assert removed.data["titles"] == ["A", "C"] and net.writes[0] == ["B"]
+    assert cleared.data == {"count": 1} and net.writes[1] == [] and net.favorites == []

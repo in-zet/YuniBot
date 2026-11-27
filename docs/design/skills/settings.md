@@ -108,3 +108,8 @@ tags: [sega-linked]
 - **maimai 항목(사용자 결정)**: 노트 속도(TAP SPEED, `speed`)·터치 속도(`touch_speed`)·슬라이드 타이밍(`slide_timing`)·판정 타이밍 A·B·가이드음. 나머지 30여 항목은 보이지도 바꾸지도 않는다. 도구 인자는 두 게임 공통 하나로 두고, 그 게임에 없는 항목을 말하면 "○○ 설정에는 △△ 항목이 없어"로 거절한다.
 - **maimai 즐겨찾기**: 사이트의 곡 값이 불투명해서 제목으로 다룬다(`get_favorite_music`이 제목 목록). 30곡 상한, 곡 단위. 이미 즐겨찾기인 곡은 체크된 칸을 그대로 보내고, 새로 더하는 곡의 제목이 둘이면(`Link`) 거절한다. 저장은 `updateMusic/set`에 전체 목록 POST, 다시 읽어 다르면 `ChangeNotAppliedError`.
 - 도구에 `game: GameRef` 인자(`add_favorites`는 표의 게임). 오류 문구의 사이트 이름은 `GameProfile.net_name`.
+
+## 즐겨찾기 일괄 삭제·전체 삭제 (2026-11-27 사용자 요청)
+
+- `remove_favorites(table)`: 표의 곡을 한 번에 뺀다(없는 곡은 건너뛰고 수만 알림). `clear_favorites()`: 전부 비운다. 둘 다 `confirm="bulk"`(2곡 이상이면 확인), 쓰기는 전체 목록 한 번. 일괄 추가는 원래 있던 `add_favorites(table)`.
+- 실측(2026-11-27, 사용자 계정): 두 게임 모두 빈 목록 저장이 반영되고 원래 목록으로 되돌아왔다. maimai 설정 변경(가이드음)·즐겨찾기 추가도 바꿨다 되돌려 확인했다.

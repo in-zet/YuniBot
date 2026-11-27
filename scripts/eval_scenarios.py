@@ -262,6 +262,14 @@ SCENARIOS: tuple[Scenario, ...] = (
         must_call=("settings_change_settings",), must_args=(("settings_change_settings", "speed", "9.00"),),
     ),
     Scenario(
+        name="설정/즐겨찾기 전체 삭제", question="즐겨찾기 전부 지워줘",
+        must_call=("settings_clear_favorites",), must_not_call=("settings_remove_favorite",),
+    ),
+    Scenario(
+        name="설정/즐겨찾기 일괄 삭제", question="15.0 상수 곡들 즐겨찾기에서 다 빼줘",
+        must_call=("settings_remove_favorites",), must_not_call=("settings_clear_favorites", "settings_remove_favorite"),
+    ),
+    Scenario(
         name="기록/폴더 분석", question="연습 폴더 랭크 분포 보여줘",
         shown_from=("report_analyze",), must_call=("folders_show_folder",),
     ),

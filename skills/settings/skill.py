@@ -235,9 +235,7 @@ async def add_favorites(
     if unknown:
         notes.append(f"{unknown}개는 곡 데이터에 없음")
     note_text = f" ({'; '.join(notes)})" if notes else ""
-    shown = ", ".join(new_titles[:_DISPLAY_LIMIT]) + (
-        f" 외 {len(new_titles) - _DISPLAY_LIMIT}개" if len(new_titles) > _DISPLAY_LIMIT else ""
-    )
+    shown = _shown(new_titles)
     data = {"count": len(new_titles), "titles": new_titles, "already": already, "unknown": unknown}
 
     if not new_titles:
@@ -250,3 +248,69 @@ async def add_favorites(
     except _NetFailed as failed:
         return failed.result
     return ToolResult(data=data, display=Display(content=f"즐겨찾기에 {len(new_titles)}곡을 더했어: {shown}{note_text}"))
+
+
+@tool(cost="network", mutates=True, confirm="bulk")
+async def remove_favorites(
+    ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG])], *, dry_run: bool = False
+) -> ToolResult:
+    """작업 표의 곡(곡 칸이 있는 행, 채보 행이면 그 곡)을 즐겨찾기에서 일괄로 뺀다. 즐겨찾기에 없는 곡은 건너뛴다.
+    조건("15.0 곡들")이 있으면 그 조건의 곡 표를 바로 준다 — 즐겨찾기에 없는 곡은 건너뛰므로 list_favorites를 먼저
+    부르지 않는다. list_favorites 표를 거른 표도 된다. 전부 지울 때는 clear_favorites를 쓴다.
+    대상이 2개 이상이면 실행기가 먼저 개수를 보여 주고 확인을 받는다."""
+    assert isinstance(table, WorkTable)
+    try:
+        keys = await _read_favorites(ctx)
+    except _NetFailed as failed:
+        return failed.result
+
+    drop_keys: list[_FavoriteKey] = []
+    drop_titles: list[str] = []
+    absent = 0
+    for title in dict.fromkeys(str(row.cell(tc.SONG).raw) for row in table.rows):
+        song = ctx.songdb.song_by_title(title)
+        key = _favorite_key(ctx, song) if song is not None else None
+        if key is None or key not in keys:
+            absent += 1
+        elif key not in drop_keys:
+            drop_keys.append(key)
+            drop_titles.append(title)
+
+    note_text = f" ({absent}개는 즐겨찾기에 없음)" if absent else ""
+    data = {"count": len(drop_titles), "titles": drop_titles, "absent": absent}
+    if not drop_titles:
+        return ToolResult(data=data, display=Display(content=f"뺄 곡이 없어.{note_text}"))
+    shown = _shown(drop_titles)
+    if dry_run:
+        return ToolResult(data=data, display=Display(content=f"즐겨찾기에서 {len(drop_titles)}곡을 뺄게: {shown}{note_text}"))
+
+    try:
+        await _write_favorites(ctx, [key for key in keys if key not in drop_keys])
+    except _NetFailed as failed:
+        return failed.result
+    return ToolResult(data=data, display=Display(content=f"즐겨찾기에서 {len(drop_titles)}곡을 뺐어: {shown}{note_text}"))
+
+
+@tool(cost="network", mutates=True, confirm="bulk")
+async def clear_favorites(ctx: ToolContext, game: GameRef | None = None, *, dry_run: bool = False) -> ToolResult:
+    """즐겨찾기를 전부 비운다. "즐겨찾기 다 지워"·"전부 삭제"처럼 전체를 분명히 말했을 때만 부른다. 일부만이면
+    remove_favorites에 표를 준다. 2곡 이상이면 실행기가 먼저 개수를 보여 주고 확인을 받는다."""
+    try:
+        keys = await _read_favorites(ctx)
+    except _NetFailed as failed:
+        return failed.result
+
+    data = {"count": len(keys)}
+    if not keys:
+        return ToolResult(data=data, display=Display(content="즐겨찾기가 이미 비어 있어."))
+    if dry_run:
+        return ToolResult(data=data, display=Display(content=f"즐겨찾기 {len(keys)}곡을 전부 지울게."))
+    try:
+        await _write_favorites(ctx, [])
+    except _NetFailed as failed:
+        return failed.result
+    return ToolResult(data=data, display=Display(content=f"즐겨찾기 {len(keys)}곡을 전부 지웠어."))
+
+
+def _shown(titles: list[str]) -> str:
+    return ", ".join(titles[:_DISPLAY_LIMIT]) + (f" 외 {len(titles) - _DISPLAY_LIMIT}개" if len(titles) > _DISPLAY_LIMIT else "")

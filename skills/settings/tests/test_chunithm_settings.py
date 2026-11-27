@@ -353,3 +353,48 @@ async def test_favorite_writes_report_not_applied(skill: ModuleType) -> None:
     for result in (added, removed, bulk):
         assert result.error is not None and "반영되지 않았어" in result.error
         assert result.display is None
+
+
+# ---------------------------------------------------------------- 일괄 삭제·전체 삭제 (2026-11-27 사용자 요청)
+
+
+async def test_remove_favorites_drops_table_songs_in_one_write(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(favorites=[3, 42, 43])
+    ctx = _ctx(chunithm_net=net, songdb=_songdb(_song("A", 3), _song("B", 42), _song("C", 43), _song("D", 44)))
+
+    result = await skill.remove_favorites(ctx, _song_table("A", "C", "D", "A"))
+
+    assert result.error is None
+    assert result.data == {"count": 2, "titles": ["A", "C"], "absent": 1}
+    assert net.favorites == [42]
+    assert "1개는 즐겨찾기에 없음" in result.display.content
+
+
+async def test_remove_favorites_dry_run_and_nothing_to_drop_write_nothing(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(favorites=[3, 42])
+    ctx = _ctx(chunithm_net=net, songdb=_songdb(_song("A", 3), _song("B", 42), _song("D", 44)))
+
+    preview = await skill.remove_favorites(ctx, _song_table("A", "B"), dry_run=True)
+    nothing = await skill.remove_favorites(ctx, _song_table("D"))
+
+    assert preview.data["count"] == 2 and nothing.data["count"] == 0
+    assert net.favorites == [3, 42]
+
+
+async def test_clear_favorites_empties_the_list_after_a_dry_run_count(skill: ModuleType) -> None:
+    net = _FakeChunithmNet(favorites=[3, 42])
+    ctx = _ctx(chunithm_net=net)
+
+    preview = await skill.clear_favorites(ctx, dry_run=True)
+    assert preview.data == {"count": 2} and net.favorites == [3, 42]
+
+    result = await skill.clear_favorites(ctx)
+
+    assert result.error is None and net.favorites == []
+    assert (await skill.clear_favorites(ctx)).display.content == "즐겨찾기가 이미 비어 있어."
+
+
+def test_bulk_favorite_tools_confirm_before_writing(skill: ModuleType) -> None:
+    for fn in (skill.remove_favorites, skill.clear_favorites):
+        spec = fn.__yuni_tool__
+        assert spec.confirm == "bulk" and spec.mutates and spec.cost == "network"
