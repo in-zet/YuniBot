@@ -4,7 +4,7 @@ from __future__ import annotations
 import importlib.util
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, replace
-from datetime import time
+from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -169,6 +169,12 @@ def _feed(skill: ModuleType, game: str, region: Any) -> Any:
     return next(f for f in skill._FEEDS if f.game == game and f.region == region)
 
 
+def _pin_now(skill: ModuleType, day: date) -> None:
+    """오래된 공지 거르기(`_STALE_NOTICE_DAYS`)가 지금 시각을 보므로, 표본 날짜 근처로 시각을 고정한다."""
+    when = datetime.combine(day, time(9, 0))  # 스킬의 `_now`와 같은 서버 로컬 벽시계 기준
+    setattr(skill, "_now", lambda: when)  # noqa: B010
+
+
 # ---------------------------------------------------------------- _check_notices
 
 
@@ -188,6 +194,7 @@ async def test_check_notices_schedules_dated_updates_and_broadcasts_dateless_one
     ctx = _ctx(db=db, http=http, notify=notify)
     await _enable_channel(ctx, guild_id="g1")
     await _seed_known_notice(skill, db)
+    _pin_now(skill, date(2026, 8, 20))  # 표본 공지 2026-08-19 ~ 10-15가 모두 최근
 
     found = await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL))
     assert found is True
@@ -221,6 +228,7 @@ async def test_check_notices_flags_version_change_only_for_the_chronologically_l
     ctx = _ctx(db=db, http=http, notify=notify)
     await _enable_channel(ctx, guild_id="g1")
     await _seed_known_notice(skill, db)
+    _pin_now(skill, date(2026, 8, 20))  # 표본 공지 2026-08-19 ~ 10-15가 모두 최근
 
     await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL))
 
@@ -234,6 +242,7 @@ async def test_check_notices_skips_urls_already_known(skill: ModuleType, db: aio
     ctx = _ctx(db=db, http=http)
     await _enable_channel(ctx, guild_id="g1")
     await _seed_known_notice(skill, db)
+    _pin_now(skill, date(2026, 8, 20))  # 표본 공지 2026-08-19 ~ 10-15가 모두 최근
 
     assert await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL)) is True
     assert await skill._check_notices(ctx, _feed(skill, "chunithm", skill.Region.INTL)) is False
@@ -257,6 +266,59 @@ async def test_check_notices_first_run_only_sets_baseline(skill: ModuleType, db:
     assert len(rows) == 6
     assert all(r["notified"] == 1 and r["schedule_id"] is None for r in rows)
     assert notify.posts == [] and notify.dms == []
+
+
+def _notice(skill: ModuleType, url: str, posted: date, *, version: str | None = None) -> Any:
+    return skill.calc.NoticeItem(
+        url=url, title=f"공지 {url}", posted_at=posted, update_date=posted, version_name=version,
+    )
+
+
+async def test_baseline_survives_a_url_repeated_on_the_page(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    """2026-11-28 사고: 기준점 저장이 같은 주소 둘째에서 멈춰 나머지가 다음 주기에 "새 공지"로 몰아서 나갔다."""
+    items = [
+        _notice(skill, "https://example.invalid/#a", date(2019, 11, 25)),
+        _notice(skill, "https://example.invalid/#a", date(2019, 11, 25)),
+        _notice(skill, "https://example.invalid/#b", date(2026, 7, 23)),
+    ]
+    feed = _feed(skill, "chunithm", skill.Region.INTL)._replace(parse_notices=lambda _text: items)
+    notify = _FakeNotify()
+    ctx = _ctx(db=db, http=_FakeHttp(pages={feed.notice_url: ""}), notify=notify)
+
+    assert await skill._check_notices(ctx, feed) is False
+
+    cursor = await db.execute("SELECT url FROM updates_notices ORDER BY url")
+    assert [r["url"] for r in await cursor.fetchall()] == ["https://example.invalid/#a", "https://example.invalid/#b"]
+    assert notify.posts == [] and notify.dms == []
+
+
+async def test_old_notices_found_late_are_stored_without_alerting(skill: ModuleType, db: aiosqlite.Connection) -> None:
+    """게시일이 7일보다 오래된 공지는 새로 봐도 알리지 않고 저장만 한다. 늦게 저장된 옛 버전이 "최근 버전"이 되지도 않는다."""
+    await skill.models.insert_notice(
+        db, region="intl", url="https://example.invalid/#known", title="알던 공지", posted_at="2026-07-23",
+        update_date=None, version_name="CiRCLE PLUS", created_at="2026-07-23T00:00:00", notified=True,
+    )
+    items = [
+        _notice(skill, "https://example.invalid/#old", date(2025, 1, 16), version="PRiSM"),
+        _notice(skill, "https://example.invalid/#new", date(2026, 11, 27), version="CiRCLE PLUS"),
+    ]
+    feed = _feed(skill, "chunithm", skill.Region.INTL)._replace(parse_notices=lambda _text: items)
+    players = PlayersService(db)
+    admin = await players.create_player()
+    await players.grant_tag(admin.id, "admin", source="test")
+    notify = _FakeNotify()
+    ctx = _ctx(db=db, http=_FakeHttp(pages={feed.notice_url: ""}), notify=notify)
+    await _enable_channel(ctx, guild_id="g1")
+    _pin_now(skill, date(2026, 11, 28))
+
+    assert await skill._check_notices(ctx, feed) is True
+
+    cursor = await db.execute("SELECT url, notified, schedule_id FROM updates_notices ORDER BY id")
+    rows = {r["url"]: (r["notified"], r["schedule_id"]) for r in await cursor.fetchall()}
+    assert rows["https://example.invalid/#old"] == (1, None)
+    assert rows["https://example.invalid/#new"][0] == 0 and rows["https://example.invalid/#new"][1] is not None
+    assert notify.dms == []  # 옛 PRiSM을 "버전이 바뀌었다"로 보지 않는다
+    assert await skill.models.latest_version_name(db, region="intl") == "CiRCLE PLUS"
 
 
 # ---------------------------------------------------------------- on_notice_due
@@ -525,6 +587,7 @@ async def test_maimai_intl_launch_list_stands_in_for_notices(skill: ModuleType, 
     admin = await players.create_player()
     await players.grant_tag(admin.id, "admin", source="test")
     feed = _feed(skill, "maimai", skill.Region.INTL)
+    _pin_now(skill, date(2026, 7, 23))
 
     assert await skill._check_notices(ctx, feed) is False  # 첫 실행은 기준점만
     http.pages[_MAIMAI_INTL_TOP] = page

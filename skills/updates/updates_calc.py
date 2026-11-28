@@ -144,6 +144,7 @@ def parse_maimai_intl_launches(html_text: str) -> list[NoticeItem]:
         raise ValueError("maimai 국제판 사이트 구조가 바뀌었다 — top--update__item을 못 찾았다")
 
     items: list[NoticeItem] = []
+    seen_dates: dict[date, int] = {}
     for entry in entries:
         date_node = entry.css_first("p.top--update__time")
         text_node = entry.css_first("p.top--update__text")
@@ -154,11 +155,16 @@ def parse_maimai_intl_launches(html_text: str) -> list[NoticeItem]:
             continue
         launched = datetime.strptime(date_match.group(), "%Y.%m.%d").date()  # noqa: DTZ007 - 날짜만 쓰고 버린다
         # 괄호 안 안내문("The launching date may be different…")은 뺀다.
-        title = text_node.text(separator=" ", strip=True).split("(")[0].strip()
+        # 줄바꿈·들여쓰기 공백("is\n              launched!")은 공백 하나로 줄인다.
+        title = " ".join(text_node.text(separator=" ", strip=True).split("(")[0].split())
         version = _MAIMAI_LAUNCH_RE.search(title)
+        # 같은 날짜 항목이 둘 이상일 수 있다(2019-11-25: Facebook 안내 + 첫 출시, 2026-11-28 사고). 페이지 순서로
+        # 첫 항목은 날짜만, 둘째부터 "-2"·"-3"을 붙인다 — 첫 항목 주소는 이미 저장된 행과 그대로 맞는다.
+        seen_dates[launched] = seen_dates.get(launched, 0) + 1
+        suffix = "" if seen_dates[launched] == 1 else f"-{seen_dates[launched]}"
         items.append(
             NoticeItem(
-                url=f"{MAIMAI_INTL_TOP}#{launched.isoformat()}",
+                url=f"{MAIMAI_INTL_TOP}#{launched.isoformat()}{suffix}",
                 title=title,
                 posted_at=launched,
                 update_date=launched,

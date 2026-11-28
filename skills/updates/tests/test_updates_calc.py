@@ -132,6 +132,23 @@ def test_parse_maimai_intl_launches_reads_the_launch_list() -> None:
     assert items[0].title == "maimai DX CiRCLE PLUS International Version is launched!"
 
 
+def test_parse_maimai_intl_launches_keeps_same_date_items_apart_and_tidies_titles() -> None:
+    """같은 날짜 항목이 둘이면 둘째부터 주소에 "-2"를 붙인다(첫 항목은 날짜만 — 이미 저장된 행과 맞는다)."""
+    def item(day: str, text: str) -> str:
+        return (f'<li class="top--update__item"><p class="top--update__time">{day}</p>'
+                f'<p class="top--update__text">{text}</p></li>')
+    html = "<ul>" + item("2019.11.25", "The official\n    Facebook Page is now available!") + item(
+        "2019.11.25", "maimai DX International Version is\n      launched!"
+    ) + "</ul>"
+
+    items = calc.parse_maimai_intl_launches(html)
+
+    assert [i.url for i in items] == ["https://maimai.sega.com/#2019-11-25", "https://maimai.sega.com/#2019-11-25-2"]
+    assert [i.title for i in items] == [
+        "The official Facebook Page is now available!", "maimai DX International Version is launched!",
+    ]
+
+
 def test_parse_jp_rss_reads_the_maimai_feed() -> None:
     xml = Path("docs/reference/maimai-updates/jp_rss_sample.xml").read_text(encoding="utf-8")
 

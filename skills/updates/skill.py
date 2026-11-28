@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
 from typing import Any, NamedTuple
 
@@ -34,6 +34,9 @@ _DEFAULT_JP_ENABLED = True
 _DEFAULT_MAIMAI_ENABLED = True
 _NOTICE_DUE_EVENT = "updates.notice_due"
 _NOTICE_FIRE_HOUR = 10
+# 게시일이 이보다 오래된 공지는 새로 발견해도 알리지 않고 "알린 것"으로만 저장한다 — 기준점이 덜 잡혔거나
+# 사이트가 옛 글을 다시 올렸을 때 지난 공지가 몰아서 나가지 않게 한다(2026-11-28 사고: maimai 국제판 13건).
+_STALE_NOTICE_DAYS = 7
 _REPORT_ORDER = 40
 _ROLE_MENTION_RE = re.compile(r"^<@&\d{15,25}>$")
 
@@ -197,6 +200,9 @@ async def _check_notices(ctx: ToolContext, feed: _Feed) -> bool:
         # 처음 켰을 때(또는 DB를 비웠을 때)는 곡 목록처럼 기준점만 잡는다 — 페이지에 남은 옛 공지
         # 수십 건을 새 공지로 알리고 과거 시각 예약을 한꺼번에 쏘지 않는다.
         for item in items:
+            # 한 페이지에 같은 주소가 두 번 나와도 기준점 저장을 멈추지 않는다(멈추면 나머지가 다음 주기에 "새 공지"가 된다).
+            if await models.notice_exists(ctx.db, game=game, region=region.value, url=item.url):
+                continue
             await models.insert_notice(
                 ctx.db, game=game, region=region.value, url=item.url, title=item.title,
                 posted_at=item.posted_at.isoformat(),
@@ -206,8 +212,18 @@ async def _check_notices(ctx: ToolContext, feed: _Feed) -> bool:
         return False
 
     found_new = False
+    stale_before = _now().date() - timedelta(days=_STALE_NOTICE_DAYS)
     for item in items:
         if await models.notice_exists(ctx.db, game=game, region=region.value, url=item.url):
+            continue
+        if item.posted_at < stale_before:
+            logger.info("'%s/%s' 오래된 공지라 알리지 않고 저장만 한다: %s (%s)", game, region.value, item.title, item.posted_at)
+            await models.insert_notice(
+                ctx.db, game=game, region=region.value, url=item.url, title=item.title,
+                posted_at=item.posted_at.isoformat(),
+                update_date=item.update_date.isoformat() if item.update_date else None,
+                version_name=item.version_name, created_at=_now().isoformat(), notified=True,
+            )
             continue
         found_new = True
         last_version = await models.latest_version_name(ctx.db, game=game, region=region.value)

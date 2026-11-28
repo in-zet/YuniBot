@@ -108,10 +108,11 @@ async def get_notice(conn: aiosqlite.Connection, notice_id: int) -> NoticeRow | 
 
 
 async def latest_version_name(conn: aiosqlite.Connection, *, region: str, game: str = "chunithm") -> str | None:
-    """그 게임·지역에서 지금까지 알아낸 가장 최근 버전명(없으면 None — 처음 켤 때는 기준이 없다)."""
+    """그 게임·지역에서 지금까지 알아낸 가장 최근 버전명(없으면 None — 처음 켤 때는 기준이 없다). 게시일 순이다 —
+    오래된 공지가 늦게 저장될 수 있어(알리지 않고 저장만 하는 경우) 저장 순서로 보면 옛 버전이 최신이 된다."""
     cursor = await conn.execute(
         "SELECT version_name FROM updates_notices WHERE game = ? AND region = ? AND version_name IS NOT NULL "
-        "ORDER BY id DESC LIMIT 1",
+        "ORDER BY posted_at DESC, id DESC LIMIT 1",
         (game, region),
     )
     row = await cursor.fetchone()
