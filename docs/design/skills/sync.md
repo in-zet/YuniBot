@@ -110,5 +110,5 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 
 ## Arcaea 대응 (19단계 2단계, 2026-11-28)
 
-- 도구 태그를 `tags_any: [sega-linked, arcaea-linked]`로 바꿨다(Arcaea만 하는 사람도 부를 수 있게). 로그인 안내 문구는 게임 프로필의 `net_name`·`login_command`를 쓴다("Arcaea Online 로그인이 … `/아르케아 로그인`으로 연결해 줘"). Arcaea Online이 거절한 경우(구독 없음 등)는 사이트 문구를 그대로 돌려준다.
+- 도구 태그를 `tags_any: [sega-linked, arcaea-linked]`로 바꿨다(Arcaea만 하는 사람도 부를 수 있게). 로그인 안내 문구는 게임 프로필의 `net_name`·`login_command`를 쓴다("Arcaea Online 로그인이 … `/로그인 아르케아`으로 연결해 줘"). Arcaea Online이 거절한 경우(구독 없음 등)는 사이트 문구를 그대로 돌려준다.
 - Arcaea는 최근 플레이 목록이 없어서(마지막 1판뿐) 기록마다 붙은 시각을 최근 플레이로 넘긴다 — 직전 동기화 뒤에 오른 기록이 그날 세션이 된다. 점수가 안 오른 판은 세션에 안 잡힌다.
