@@ -27,3 +27,10 @@
 | [Arcaea-Infinity/ArcaeaSongDatabase](https://github.com/Arcaea-Infinity/ArcaeaSongDatabase) | 안 씀 | 2023-07(4.6.0)에서 멈춤 | |
 | 중국 Arcwiki(`wiki.arcaea.cn`, 옛 `arcwiki.mcd.blue`)의 상수 데이터 페이지 | 안 씀 | — | 봇 차단 화면이 떠 받지 못했다(우회하지 않음) |
 | [일본 위키](https://wikiwiki.jp/arcaea/) | DoriTran의 원 출처 | 곡 페이지마다 譜面定数 | 직접 수집은 갱신이 끊길 때 검토(사용자 결정) |
+
+## 더 알아낸 것 (2026-11-28 후속)
+
+- 로그인 `POST /auth/login`은 성공해도 본문이 `{success, value}` 모양이 아니다 — 본문은 보지 않고 프로필로 확인한다.
+- 그림: 공식 재킷 `https://webassets.lowiro.com/{bg}.jpg`(기록 항목의 `bg`, 받아짐), 캐릭터 `https://webassets.lowiro.com/chr/{icon}.png`(사이트 코드, 직접 받으면 403이 났다 — 실기 확인 필요).
+- 해금 정보: 프로필 `packs`(가진 팩 내부 ID, 예 `core`·`chunithm_append_3`), `singles`(따로 산 곡 ID), `world_songs`(월드 모드로 푼 곡 ID), `world_unlocks`, `is_beyond_unlocked`. 전체 곡 목록 API는 없다(`/webapi/song/showcase` 10곡, `/webapi/song/rank/free`·`paid` 15곡).
+- 제목 표기 차이: 물결표 `〜`(U+301C)와 `～`(U+FF5E)가 섞여 있다.
