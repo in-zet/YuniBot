@@ -374,6 +374,7 @@ class MentionEntry:
         )
         skill_state = SkillLoadState(
             mode=cast("Mode", self._skill_loading_mode), known_skills=self._known_skill_names, opened=carried,
+            keep=[thread.skill_name] if thread is not None else [],
         )
 
         async def reply(text: str, displays: list[Display]) -> str | None:
@@ -417,7 +418,7 @@ class MentionEntry:
         async with typing:
             try:
                 result = await self._agent.run(
-                    ctx=ctx, skill_state=skill_state, user_text=user_text,
+                    ctx=ctx, skill_state=skill_state, user_text=user_text, trigger_text=trigger.content,
                     prompt_context_snippets=prompt_context_snippets, on_retry=on_retry, on_heavy_call=on_heavy_call,
                     thread_end=thread_end,
                 )

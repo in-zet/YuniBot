@@ -1099,6 +1099,21 @@ async def test_agent_loop_pre_opens_skills_whose_triggers_match_the_message() ->
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_matches_triggers_on_this_message_not_the_whole_conversation() -> None:
+    """2026-11-28 실기: 트리거를 대화 66줄 전체에 맞춰 스킬이 9개 펼쳐졌다. 이번 메시지에만 맞춘다."""
+    registry = _registry()
+    script = [GenerationTurn(content=LlmContent(role="model", parts=[LlmPart(text="답")]), text="답")]
+    state = _state(registry, mode="full")
+    history = "p1: 보더 알려줘\n유니: 보더는…\np1: 내 즐겨찾기 보여줘"
+    await _loop(registry, script).run(
+        ctx=_ctx(frozenset({"sega-linked"})), skill_state=state, user_text=history, trigger_text="내 즐겨찾기 보여줘",
+        prompt_context_snippets=[],
+    )
+    assert state.level_for("settings") == "full"
+    assert state.level_for("chunithm-border") == "card"
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_warns_when_one_round_prompt_is_large(caplog: pytest.LogCaptureFixture) -> None:
     """왕복 한 번의 입력이 8만 토큰을 넘으면 경고한다(10만 초과 시 단가가 오르는 모델이 있다)."""
     registry = _registry()

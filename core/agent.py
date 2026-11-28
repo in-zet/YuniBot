@@ -229,8 +229,11 @@ class AgentLoop:
         on_retry: OnRetry | None = None,
         on_heavy_call: OnHeavyCall | None = None,
         thread_end: ThreadEndRequest | None = None,
+        trigger_text: str | None = None,
     ) -> AgentTurnResult:
-        """thread_end가 있으면 대화 스레드 안의 응답이다 — 모델에게 end_conversation 도구가 보이고, 부르면 thread_end가 켜진다."""
+        """thread_end가 있으면 대화 스레드 안의 응답이다 — 모델에게 end_conversation 도구가 보이고, 부르면 thread_end가 켜진다.
+        `user_text`는 최근 대화 전체이고 `trigger_text`는 이번 메시지다. 트리거 낱말은 이번 메시지에만 맞춘다(없으면 user_text) —
+        대화 전체에 맞추면 앞 대화의 말로 스킬이 줄줄이 펼쳐진다(2026-11-28 실기: 66줄 대화로 9개)."""
         date_line = today_line()
         # 날짜 줄은 모델이 본 글이라 숫자 대조에서 맞는 숫자로 친다("2026년 12월 31일까지"를 위반으로 잡지 않게).
         result = AgentTurnResult(seen_text=f"{date_line}\n{user_text}")
@@ -261,7 +264,9 @@ class AgentLoop:
 
         prompt_context_snippets = [date_line, *prompt_context_snippets, *await self._skill_prompt_snippets(ctx)]
         # 메시지에 스킬의 `triggers` 낱말이 있으면 모델이 open_skill을 부르기 전에 미리 펼친다(왕복 절약).
-        for name in self._prompt.triggered_skills(user_text, player_tags=set(ctx.tags)):
+        for name in self._prompt.triggered_skills(
+            user_text if trigger_text is None else trigger_text, player_tags=set(ctx.tags)
+        ):
             skill_state.open(name)
         contents: list[LlmContent] = [LlmContent(role="user", parts=[LlmPart(text=user_text)])]
         tool_calls_made = 0
