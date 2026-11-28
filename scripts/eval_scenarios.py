@@ -358,6 +358,17 @@ SCENARIOS: tuple[Scenario, ...] = (
         must_call=("report_const_table", "report_add_play_counts", "table_query"),
         must_args=(("table_query", "where", "플레이 횟수"),),
     ),
+    # 앞 대화의 오류를 지금 상태로 믿지 않는다(2026-11-28 실기 — 수집이 끝났는데 17:41의 "아직"을 보고 도구를 안 불렀다).
+    Scenario(
+        name="기록/플카 앞 대화 오류 뒤 다시",
+        question="츄니즘 플레이카운트가 5 이상인 모든 채보를 새 폴더에 추가",
+        context=(
+            "앞선 대화:\n플레이어: 츄니즘 플레이카운트가 5 이상인 모든 채보를 새 폴더에 추가\n"
+            "유니: 아직 플레이 횟수를 모아 두지 않았어. 동기화를 한 번 해 주면 뒤에서 모아 둘게.\n"
+            "플레이어: 츄니즘 동기화\n유니: 동기화 끝났어! 새로 친 기록은 없고 레이팅 그대로야."
+        ),
+        must_call=("report_add_play_counts",),
+    ),
     Scenario(
         name="업데이트/마이 신곡", question="마이마이 이번에 들어온 신곡 보여줘",
         must_call=("updates_new_songs",), must_args=(("updates_new_songs", "game", "마이|maimai"),),
