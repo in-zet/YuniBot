@@ -105,6 +105,8 @@ def _load(entries: list[dict[str, Any]]) -> dict[str, SongRecord]:
             charts=_charts_of(entry),
             bpm=_number(entry.get("bpm")),
             version=_major_version(_text(entry.get("version"))),
+            # 일본 위키의 재킷 그림 주소(사용자 결정 2026-11-28 — 곡 전부에 있다). 받은 그림은 ImageCache가 디스크에 둔다.
+            jacket=_text(entry.get("jacket")) or None,
         )
     return songs
 

@@ -57,6 +57,7 @@ from services.game.records import (
     RatingDeltas,
     SyncDiff,
 )
+from services.game.records_calc import average_rating
 from services.game.registry import profile_for
 from services.game.songdb import ConstRangeHit
 
@@ -218,7 +219,8 @@ def _best_columns(game: str) -> tuple[str, ...]:
 
 def _best_row_format(game: str) -> str:
     # 한 줄 서식(램프는 글자 출력에서 숨긴다 — 줄 모양은 지금 베스트 줄 그대로).
-    return f"{tc.identity_format(game)} {{상수}}  {{점수}} {{랭크}}  곡 레이팅 {{곡 레이팅}}"
+    word = profile_for(game).rating_label  # Arcaea는 "곡 포텐셜"(칸 이름은 그대로 "곡 레이팅")
+    return f"{tc.identity_format(game)} {{상수}}  {{점수}} {{랭크}}  곡 {word} {{곡 레이팅}}"
 
 
 def _pb_row_cells(row: PbRow, rank_scores: dict[str, int], game: str, *, weight: int = 1) -> dict[str, Cell]:
@@ -287,7 +289,7 @@ async def best(
         header["레벨"] = str(profile_row.level)
     if version is not None:
         header["기준 버전"] = version
-    header["레이팅"] = _overall(rating, game_profile)
+    header[game_profile.rating_label] = _overall(rating, game_profile)
     data: dict[str, Any] = {"player_id": target.id, "kind": kind.value, "computed_rating": _overall(rating, game_profile)}
     if as_of is not None:
         header["지금 레이팅"] = _overall(as_of.current.computed_rating, game_profile)
@@ -305,6 +307,29 @@ async def best(
             "excluded_records": as_of.excluded,
         }
     return ToolResult(data=data, table=table)
+
+
+_TOP_PREFIX = "상위 "
+
+
+def _split_doubled(
+    frames: list[tuple[str, list[PbRow], Decimal | None]], profile: GameProfile
+) -> list[tuple[str, list[PbRow], Decimal | None]]:
+    """두 번 세는 위쪽 곡이 있는 게임(Arcaea 상위 10곡)은 베스트 묶음을 "상위 10"·"하위 40"으로 나눈다(2026-11-28
+    사용자 요청). 묶음 평균은 그 묶음 곡 포텐셜의 평균이다."""
+    count = profile.best_double_count
+    if not count:
+        return frames
+    split: list[tuple[str, list[PbRow], Decimal | None]] = []
+    for title, rows, average in frames:
+        if title != profile.best_label:
+            split.append((title, rows, average))
+            continue
+        top, rest = rows[:count], rows[count:]
+        split.append((f"{_TOP_PREFIX}{count}", top, average_rating([r.rating for r in top]) if top else None))
+        split.append((f"하위 {profile.best_frame_size - count}", rest,
+                      average_rating([r.rating for r in rest]) if rest else None))
+    return split
 
 
 def _frame_table(
@@ -326,11 +351,11 @@ def _frame_table(
 
     rank_scores = ctx.terms.rank_scores()
     game_profile = _profile(ctx)
-    for title, rows, average in frames:
+    for title, rows, average in _split_doubled(frames, game_profile):
+        doubled = title.startswith(_TOP_PREFIX)
         builder.group(title, {"평균": _average(average)})
-        doubled = game_profile.best_double_count if title == game_profile.best_label else 0
-        for position, r in enumerate(rows):
-            cells = _pb_row_cells(r, rank_scores, ctx.game, weight=2 if position < doubled else 1)
+        for r in rows:
+            cells = _pb_row_cells(r, rank_scores, ctx.game, weight=2 if doubled else 1)
             if assumed is not None:
                 mark = assumed.get((r.song_title, r.chart_type, r.difficulty))
                 cells[tc.ASSUMED] = cell(mark) if mark else cell(None, "")
@@ -974,8 +999,8 @@ async def what_if(
     if game_profile.new_frame_size:
         frames.append((game_profile.new_label, ranked(result.new), after.new20_average))
     header: dict[str, str] = {"닉네임": summary.nickname or "(닉네임 없음)"}
-    header["레이팅"] = _overall(after.computed_rating, game_profile)
-    header["지금 레이팅"] = (
+    header[game_profile.rating_label] = _overall(after.computed_rating, game_profile)
+    header[f"지금 {game_profile.rating_label}"] = (
         f"{_overall(before.computed_rating, game_profile)} ({_change_text('computed_rating', before, after, game_profile)})"
     )
     outside = [item for item in result.charts if item.applied and item.frame is None]

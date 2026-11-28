@@ -92,3 +92,12 @@ def next_star(rungs: Sequence[Rung], current: Decimal) -> Rung | None:
     """`current` 다음에 닿을 별·단계 칸. 가장 높은 칸을 넘었으면 None."""
     upcoming = [rung for rung in rungs if rung.series == STAR and rung.threshold > current]
     return min(upcoming, key=lambda rung: rung.threshold) if upcoming else None
+
+
+def stars_for(rating: Decimal) -> int:
+    """그 레이팅의 별 개수(그림의 머리말에 붙인다). 백금부터 단계 안에서 0.25마다 하나씩 늘고 단계의 별 수를 넘지 않는다
+    (예: 백금 15.25~15.49 1성, 무지개 16.75~16.99 4성, 극무지개 17.50~ 3성). 별이 없는 단계면 0."""
+    tier = tier_for(rating)
+    if tier is None or tier.stars == 0:
+        return 0
+    return min(int((rating - tier.base) // STAR_STEP) + 1, tier.stars)

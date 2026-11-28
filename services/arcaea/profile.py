@@ -39,7 +39,8 @@ ARCAEA = GameProfile(
     terms_path=Path(__file__).parent / "data" / "terms.yaml",
     chart_rating=chart_rating,
     clear_lamp_rating_bonus={"TRACK LOST": -CLEAR_BONUS},
-    song_rating_places=4,
+    # 곡 포텐셜은 넷째 자리까지 계산하고 셋째 자리까지 보인다(2026-11-28 사용자 요청).
+    song_rating_places=3,
     rating_divisor=60,
     overall_places=3,
     displayed_places=3,

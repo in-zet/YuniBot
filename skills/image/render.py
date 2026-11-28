@@ -18,7 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, ImageChops, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from core.message_split import MAX_ATTACHMENTS
 from core.tables import (
@@ -30,8 +30,10 @@ from core.tables import (
     visible_columns,
 )
 from core.tool_types import DEFAULT_GAME
-from services.chunithm.rating_tier import tier_for
+from services.arcaea.rating_tier import tier_for as arcaea_tier_for
+from services.chunithm.rating_tier import stars_for, tier_for
 from services.game import table_columns as tc
+from services.maimai.rating_tier import stars_for as maimai_stars_for
 from services.maimai.rating_tier import tier_for as maimai_tier_for
 
 logger = logging.getLogger(__name__)
@@ -78,10 +80,17 @@ _DIFFICULTY_COLORS = {
     # maimai: Re:MASTER는 MASTER보다 옅은 보라, 宴은 WE와 같은 취급이라 같은 색.
     "REM": (190, 170, 225),
     "UTA": (210, 100, 170),
+    # Arcaea(2026-11-28 사용자 요청: 게임 화면 색) PAST 하늘·PRESENT 초록·FUTURE 보라·BEYOND 빨강·ETERNAL 연보라.
+    "PST": (70, 170, 220),
+    "PRS": (120, 180, 60),
+    "FTR": (150, 70, 170),
+    "BYD": (210, 50, 70),
+    "ETR": (160, 140, 210),
 }
 _LAMP_LABELS = {
     "AJC": "AJC", "ALL JUSTICE": "AJ", "FULL COMBO": "FC",
     "AP+": "AP+", "AP": "AP", "FC+": "FC+", "FC": "FC",  # maimai 콤보 램프(조회 키가 비면 FC만 칩이 빠진다)
+    "PURE MEMORY": "PM", "FULL RECALL": "FR",  # Arcaea
 }
 # 가정 레이팅표에서 가정으로 바뀐 채보(2026-11-21 사용자 결정: 재킷은 그대로, 청록 테두리 + 난이도 밑 "가정" 칩).
 _ASSUMED_OUTLINE = (40, 220, 210)
@@ -89,6 +98,7 @@ _ASSUMED_CHIP = (20, 160, 150)
 _LAMP_COLORS = {
     "AJC": (255, 215, 70), "AJ": (255, 140, 60), "FC": (70, 200, 110),
     "AP+": (255, 215, 70), "AP": (255, 140, 60), "FC+": (70, 200, 110),
+    "PM": (120, 220, 255), "FR": (210, 120, 255),
 }
 
 # 난이도별 카드 바탕색(2026-10-21): 섞지 않고 채도 있는 짙은 색을 그대로 쓴다. ULT는 검붉은색.
@@ -101,6 +111,11 @@ _DIFFICULTY_PANELS = {
     "WE": (104, 42, 86),
     "REM": (92, 80, 128),
     "UTA": (104, 42, 86),
+    "PST": (14, 58, 84),
+    "PRS": (36, 70, 20),
+    "FTR": (70, 28, 84),
+    "BYD": (90, 14, 26),
+    "ETR": (66, 56, 104),
 }
 _CARD_SUBTEXT = (177, 183, 196)  # 카드 위 보조 글자(상수·점수 없음)
 _CARD_DIVIDER = (255, 255, 255, 80)  # 재킷이 끝나는 곳에 긋는 얇은 선(양쪽을 글자 여백만큼 비운다)
@@ -342,13 +357,14 @@ class HeaderProfile:
 _NICKNAME_KEY = "닉네임"
 _LEVEL_KEY = "레벨"
 _RATING_KEY = "레이팅"
+_RATING_KEYS = (_RATING_KEY, "포텐셜")  # 요약에서 최종 값을 담는 칸 이름(Arcaea는 포텐셜)
 _ICON = 120
 _HEADER_PROBE_H = 600  # 머리말 높이를 재려고 그려 보는 임시 도화지
 
 
 def header_rating(table: WorkTable) -> str | None:
     """표 요약의 최종 레이팅 — 레이팅표(요약에 `레이팅`이 있는 표)에서만 머리말 오른쪽 끝에 크게 그린다."""
-    return table.summary.get(_RATING_KEY)
+    return next((value for key in _RATING_KEYS if (value := table.summary.get(key)) is not None), None)
 
 
 def _header_lines(table: WorkTable, profile: HeaderProfile | None) -> tuple[str | None, list[str], str | None]:
@@ -359,7 +375,7 @@ def _header_lines(table: WorkTable, profile: HeaderProfile | None) -> tuple[str 
     level = profile.level if profile is not None and profile.level is not None else None
     level_text = f"Lv.{level}" if level is not None else summary.get(_LEVEL_KEY)
     summary.pop(_LEVEL_KEY, None)
-    rating = summary.pop(_RATING_KEY, None)
+    rating = next((value for key in _RATING_KEYS if (value := summary.pop(key, None)) is not None), None)
     title = " ".join(part for part in (nickname, level_text) if part) or None
     details = [" · ".join(f"{key} {value}" for key, value in summary.items())] if summary else []
     if rating is not None and profile is not None and profile.version:
@@ -403,13 +419,57 @@ _MAIMAI_TIER_COLORS: dict[str, tuple[int, int, int] | None] = {
 }
 
 
+# Arcaea 포텐셜 단계의 색(2026-11-28 사용자 제공 아이콘 표를 눈으로 옮긴 것). 경계·빛·별은 `services/arcaea/rating_tier.py`.
+_ARCAEA_TIER_COLORS: dict[str, tuple[int, int, int]] = {
+    "하늘": (90, 200, 220),
+    "초록": (110, 210, 80),
+    "보라": (190, 100, 230),
+    "빛나는 보라": (200, 110, 240),
+    "빛나는 빨강": (245, 70, 100),
+    "빨강 1성": (250, 70, 120),
+    "빨강 2성": (255, 60, 140),
+    "3성": (255, 120, 190),
+}
+_STAR_GOLD = (255, 214, 90)  # 무지개 계열 단계의 별(단색이 없는 단계)
+
+
+def _decimal(rating: str) -> Decimal | None:
+    try:
+        return Decimal(rating)
+    except InvalidOperation:
+        return None
+
+
+def rating_stars(rating: str, game: str = DEFAULT_GAME) -> int:
+    """머리말 레이팅·포텐셜에 붙일 별 개수(2026-11-28 사용자 제공 표: CHUNITHM 백금부터, maimai 금부터, Arcaea 12.00부터)."""
+    value = _decimal(rating)
+    if value is None:
+        return 0
+    if game == "maimai":
+        return maimai_stars_for(value)
+    if game == "arcaea":
+        tier = arcaea_tier_for(value)
+        return tier.stars if tier is not None else 0
+    return stars_for(value) if game in ("", DEFAULT_GAME) else 0
+
+
+def rating_glows(rating: str, game: str = DEFAULT_GAME) -> bool:
+    """글자 뒤에 빛을 두르는 단계인가(Arcaea 10.00부터)."""
+    value = _decimal(rating)
+    tier = arcaea_tier_for(value) if game == "arcaea" and value is not None else None
+    return tier is not None and tier.glow
+
+
 def rating_tier(rating: str, game: str = DEFAULT_GAME) -> tuple[str, tuple[int, int, int] | None] | None:
-    """레이팅 글자("17.0024", maimai는 "8564")의 색 단계 이름과 단색(무지개 계열은 None). 숫자가 아니거나
-    단계 기준을 모르는 게임이면 None."""
+    """레이팅 글자("17.0024", maimai는 "8564", Arcaea 포텐셜 "11.366")의 색 단계 이름과 단색(무지개 계열은 None).
+    숫자가 아니거나 단계 기준을 모르는 게임이면 None."""
     try:
         value = Decimal(rating)
     except InvalidOperation:
         return None
+    if game == "arcaea":
+        arcaea_tier = arcaea_tier_for(value)
+        return None if arcaea_tier is None else (arcaea_tier.name, _ARCAEA_TIER_COLORS[arcaea_tier.name])
     if game == "maimai":
         maimai_tier = maimai_tier_for(value)
         return None if maimai_tier is None else (maimai_tier.name, _MAIMAI_TIER_COLORS[maimai_tier.name])
@@ -471,6 +531,8 @@ def _draw_rating_value(
         ImageDraw.Draw(canvas).text(xy, text, font=font, fill=_TEXT)
         return
     if tier[1] is not None:
+        if rating_glows(text, game):
+            _draw_glow(canvas, xy, text, font, tier[1])
         ImageDraw.Draw(canvas).text(xy, text, font=font, fill=tier[1], stroke_width=2, stroke_fill=_RATING_OUTLINE)
         return
     extreme = tier[0] == "극무지개"
@@ -487,6 +549,33 @@ def _draw_rating_value(
     canvas.paste(_highlight_top(fill, box) if extreme else fill, (x - pad, y - pad), mask)
 
 
+_GLOW_RADIUS = 9  # Arcaea 빛: 글자 모양을 굵게 칠해 흐린 것
+
+
+def _draw_glow(
+    canvas: Image.Image, xy: tuple[int, int], text: str, font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    color: tuple[int, int, int],
+) -> None:
+    """글자 뒤에 같은 색의 번진 빛을 깐다(Arcaea 포텐셜 10.00부터)."""
+    pad = _GLOW_RADIUS * 3
+    size = (_width(font, text) + 2 * pad, _fs(40) + 12 + 2 * pad)
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).text((pad, pad), text, font=font, fill=200, stroke_width=4, stroke_fill=200)
+    mask = mask.filter(ImageFilter.GaussianBlur(_GLOW_RADIUS))
+    canvas.paste(Image.new("RGB", size, color), (xy[0] - pad, xy[1] - pad), mask)
+
+
+def _draw_stars(draw: ImageDraw.ImageDraw, right: int, y: int, count: int, color: tuple[int, int, int]) -> int:
+    """오른쪽 끝을 `right`에 맞춰 ★을 `count`개 그리고 왼쪽 끝 x를 돌려준다."""
+    font = _font(13, True)
+    text = "★" * count
+    left = right - _width(font, text)
+    draw.text((left, y), text, font=font, fill=color, stroke_width=1, stroke_fill=_RATING_OUTLINE)
+    return left
+
+
+# 머리말의 최종 값 이름(Arcaea는 포텐셜).
+_RATING_CAPTIONS = {"arcaea": "POTENTIAL"}
 _RATING_TAIL_SCALE = 0.5  # 소수점 아래 셋째·넷째 자리의 글자 크기(둘째 자리까지의 큰 글자에 대한 비율)
 _RATING_TAIL_COLOR = (200, 205, 218)  # 같은 자리의 밝은 회색
 
@@ -494,7 +583,8 @@ _RATING_TAIL_COLOR = (200, 205, 218)  # 같은 자리의 밝은 회색
 def split_rating(rating: str) -> tuple[str, str]:
     """"17.0024" → ("17.00", "24"). 소수점 아래 셋째 자리부터가 뒷부분이고, 그런 자리가 없으면 뒷부분은 빈 글자."""
     whole, dot, fraction = rating.partition(".")
-    if not dot or len(fraction) <= 2 or not fraction.isdigit():
+    # 셋째 자리까지인 값(Arcaea 포텐셜 "11.366")은 나누지 않고 다 크게 쓴다.
+    if not dot or len(fraction) <= 3 or not fraction.isdigit():
         return rating, ""
     return f"{whole}.{fraction[:2]}", fraction[2:]
 
@@ -515,14 +605,21 @@ def _draw_final_rating(
     tail_width = _width(tail_font, tail) if tail else 0
     value_width = _width(font, main) + tail_width
     right = width - _MARGIN
-    draw.text((right - _width(label_font, "RATING"), y), "RATING", font=label_font, fill=_MUTED)
+    caption = _RATING_CAPTIONS.get(game, "RATING")
+    caption_left = right - _width(label_font, caption)
+    draw.text((caption_left, y), caption, font=label_font, fill=_MUTED)
+    stars = rating_stars(rating, game)
+    if stars:
+        tier = rating_tier(rating, game)
+        color = tier[1] if tier is not None and tier[1] is not None else _STAR_GOLD
+        caption_left = _draw_stars(draw, caption_left - 6, y, stars, color)
     value_y = y + _fs(13) + 4
     _draw_rating_value(canvas, (right - value_width, value_y), main, font, game=game)
     if tail:  # 큰 글자와 바닥선을 맞춘다
         draw.text(
             (right - tail_width, value_y + _ascent(font) - _ascent(tail_font)), tail, font=tail_font, fill=_RATING_TAIL_COLOR
         )
-    return right - max(value_width, _width(label_font, "RATING")), value_y + _fs(40) + 8
+    return min(right - value_width, caption_left), value_y + _fs(40) + 8
 
 
 def _draw_header(

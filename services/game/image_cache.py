@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
 from collections.abc import Iterable, Mapping
@@ -49,8 +50,15 @@ def jacket_url(jacket: str | None, *, now: datetime | None = None) -> str | None
 
 
 def _file_name(url: str) -> str | None:
-    name = PurePosixPath(urlparse(url).path).name
-    return name or None
+    """캐시 파일 이름. 주소에 물음표 뒤 값이 있으면(Arcaea 재킷 — 일본 위키 주소는 곡마다 폴더가 다르고 파일 이름이 겹칠
+    수 있다) 주소 전체의 해시를 붙여 겹치지 않게 한다."""
+    parsed = urlparse(url)
+    name = PurePosixPath(parsed.path).name
+    if not name:
+        return None
+    if parsed.query:
+        return f"{hashlib.sha256(url.encode()).hexdigest()[:20]}{PurePosixPath(name).suffix}"
+    return name
 
 
 def _is_image(data: bytes) -> bool:

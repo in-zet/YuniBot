@@ -657,12 +657,12 @@ def test_extreme_rainbow_top_is_lightened_but_has_no_glow() -> None:
 
     assert sum(lit.getpixel((50, 12))) > sum(base.getpixel((50, 12)))  # 윗부분은 밝아진다
     assert lit.getpixel((50, 49)) == base.getpixel((50, 49))  # 아랫부분은 그대로
-    assert not hasattr(render, "ImageFilter")  # 번짐(블러) 효과는 쓰지 않는다
+    assert not render.rating_glows("17.6000", "chunithm")  # 번짐(빛)은 Arcaea 포텐셜에만 쓴다(2026-11-28)
 
 
 @pytest.mark.parametrize(
     "rating,expected",
-    [("17.0024", ("17.00", "24")), ("16.52", ("16.52", "")), ("16.5", ("16.5", "")), ("17.001", ("17.00", "1")),
+    [("17.0024", ("17.00", "24")), ("16.52", ("16.52", "")), ("16.5", ("16.5", "")), ("17.001", ("17.001", "")),
      ("17", ("17", "")), ("-", ("-", "")), ("1.2x34", ("1.2x34", ""))],
 )
 def test_split_rating_cuts_after_two_decimals(rating: str, expected: tuple[str, str]) -> None:
@@ -959,3 +959,20 @@ def test_every_combo_lamp_text_has_a_label_and_a_color(text: str) -> None:
 
     assert label is not None
     assert label in render._LAMP_COLORS
+
+
+@pytest.mark.parametrize(
+    ("game", "rating", "stars"),
+    [("chunithm", "15.2499", 0), ("chunithm", "15.2500", 1), ("chunithm", "16.7500", 4), ("chunithm", "17.5512", 3),
+     ("maimai", "13999", 0), ("maimai", "14250", 2), ("maimai", "15750", 4), ("maimai", "16000", 1),
+     ("arcaea", "11.999", 0), ("arcaea", "12.000", 1), ("arcaea", "12.500", 2), ("arcaea", "13.020", 3)],
+)
+def test_rating_stars_follow_the_tables_the_user_gave(game: str, rating: str, stars: int) -> None:
+    """2026-11-28 사용자 제공 표: CHUNITHM 백금부터, maimai 금부터, Arcaea 12.00부터 별."""
+    assert render.rating_stars(rating, game) == stars
+
+
+def test_arcaea_potential_glows_from_ten() -> None:
+    assert not render.rating_glows("9.999", "arcaea")
+    assert render.rating_glows("10.000", "arcaea")
+    assert render.rating_tier("11.366", "arcaea") is not None
