@@ -68,7 +68,10 @@ class PlayCountNet(Protocol):
     """수집에 쓰는 NET 서비스 쪽 두 메서드. CHUNITHM은 곡을 musicId(int)로, maimai는 (제목, 종류)로 받는다."""
 
     async def play_activity(self, player_id: str, /, *, ctx: ToolContext | None = None) -> PlayActivity: ...
-    async def play_counts(self, player_id: str, keys: Sequence[Any], /, *, ctx: ToolContext | None = None) -> Mapping[Any, dict[str, int]]: ...
+    # 값이 None이면 NET이 그 곡 상세를 늘 막는 곡(읽을 수 없음)이다. 저장해 두고 "다 받음" 판정에 센다 — 안 그러면 매 동기화가 전체 수집이 된다.
+    async def play_counts(
+        self, player_id: str, keys: Sequence[Any], /, *, ctx: ToolContext | None = None
+    ) -> Mapping[Any, dict[str, int] | None]: ...
 
 
 def _now() -> str:
@@ -112,10 +115,11 @@ class PlayCountService:
         song = self._songdb.song_by_title(title)
         return (str(song.id), "") if song is not None and song.id else None
 
-    async def counts(self, player_id: str, keys: Sequence[PlayCountKey]) -> dict[PlayCountKey, dict[str, int]]:
-        """저장된 곡만 돌려준다. 곡이 있는데 난이도가 없으면 0회, 곡이 없으면 모름(결과에 없음)."""
+    async def counts(self, player_id: str, keys: Sequence[PlayCountKey]) -> dict[PlayCountKey, dict[str, int] | None]:
+        """저장된 곡만 돌려준다. 곡이 있는데 난이도가 없으면 0회, 곡이 없으면 모름(결과에 없음), 값이 None이면 NET이 막아
+        읽을 수 없는 곡(모름)."""
         wanted = list(dict.fromkeys(keys))
-        found: dict[PlayCountKey, dict[str, int]] = {}
+        found: dict[PlayCountKey, dict[str, int] | None] = {}
         for start in range(0, len(wanted), 400):  # SQLite 변수 개수 상한 안쪽으로 나눈다
             chunk = wanted[start:start + 400]
             where = " OR ".join("(song_key = ? AND chart_type = ?)" for _ in chunk)
@@ -187,7 +191,8 @@ class PlayCountService:
         stored = await self._store(player_id, fetched)
         complete = stored == len(targets)
         await self._save_state(player_id, activity.total_plays, newest_text, complete=complete)
-        logger.info("%s 플레이 횟수 수집(%s): %d곡 중 %d곡", self._game, mode, len(targets), stored)
+        blocked = sum(1 for counts in fetched.values() if counts is None)
+        logger.info("%s 플레이 횟수 수집(%s): %d곡 중 %d곡(읽을 수 없는 곡 %d)", self._game, mode, len(targets), stored, blocked)
         return CollectResult(mode=mode, asked=len(targets), fetched=stored)
 
     async def store_counts(self, player_id: str, counts: Mapping[PlayCountKey, dict[str, int]]) -> None:
@@ -200,7 +205,7 @@ class PlayCountService:
     def _net_keys(self, keys: Sequence[PlayCountKey]) -> list[Any]:
         return list(keys) if self._game == "maimai" else [int(song_key) for song_key, _ in keys]
 
-    async def _store(self, player_id: str, fetched: Mapping[Any, dict[str, int]]) -> int:
+    async def _store(self, player_id: str, fetched: Mapping[Any, dict[str, int] | None]) -> int:
         now = self._now()
         rows = [
             (player_id, self._game, *(key if isinstance(key, tuple) else (str(key), "")), json.dumps(counts), now)

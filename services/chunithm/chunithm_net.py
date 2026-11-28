@@ -465,10 +465,11 @@ class ChunithmNetService:
 
     async def play_counts(
         self, player_id: str, song_ids: Sequence[int], *, ctx: ToolContext | None = None
-    ) -> dict[int, dict[str, int]]:
+    ) -> dict[int, dict[str, int] | None]:
         """곡(musicId)마다 난이도 코드 → 플레이 횟수. 곡 상세 페이지를 곡마다 하나씩 차례로, 초당 `PLAY_COUNT_RATE`번까지
-        받는다. 안 친 난이도는 없다(0회), 상세를 못 읽은 곡은 결과에 없다(모름). 인증 실패는 만료로
-        처리하고 다시 던진다."""
+        받는다. 안 친 난이도는 없다(0회), 상세를 못 읽은 곡은 결과에 없다(모름, 다음에 다시 받는다). NET이 그 곡 상세를
+        "Invalid access"(120202)로 늘 막으면 None이다(읽을 수 없는 곡 — 국제판에서 빠진 곡으로 보인다, 2026-11-28 실측
+        LUMINOUS 3곡이 두 번 다 막힘). 인증 실패는 만료로 처리하고 다시 던진다."""
         wanted = list(dict.fromkeys(song_ids))
         cookie = await self._decrypted_cookie(player_id)
         if cookie is None:
@@ -477,12 +478,20 @@ class ChunithmNetService:
         adapter = self._adapter_factory(cookie)
         limiter = aiolimiter.AsyncLimiter(PLAY_COUNT_RATE, 1)
 
-        async def one(song_id: int) -> tuple[int, dict[str, int]] | None:
+        async def one(song_id: int) -> tuple[int, dict[str, int] | None] | None:
             await limiter.acquire()
             try:
                 bests = await adapter.get_personal_bests_on_song(song_id)
             except AuthenticationError:
                 raise
+            except (ChunithmNetBlockedError, ChuniNetError) as exc:
+                # 운영 어댑터는 `_ErrorTranslatingAdapter`가 감싸 ChuniNetError가 원인(__cause__)으로 붙어 온다.
+                cause = exc if isinstance(exc, ChuniNetError) else exc.__cause__
+                if isinstance(cause, ChuniNetError) and cause.code == ChuniNetError.INVALID_ACCESS:
+                    logger.info("CHUNITHM-NET이 곡 상세를 막았다(읽을 수 없는 곡): %s", song_id)
+                    return song_id, None
+                logger.warning("CHUNITHM-NET 곡 상세를 못 읽었다: %s", song_id, exc_info=True)
+                return None
             except Exception:
                 logger.warning("CHUNITHM-NET 곡 상세를 못 읽었다: %s", song_id, exc_info=True)
                 return None

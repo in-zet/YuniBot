@@ -60,13 +60,15 @@ class _Records:
 @dataclass(slots=True, kw_only=True)
 class _Net:
     activity: PlayActivity
-    counts: dict[Any, dict[str, int]]
+    counts: dict[Any, dict[str, int] | None]
     asked: list[list[Any]] = field(default_factory=list)
 
     async def play_activity(self, player_id: str, *, ctx: ToolContext | None = None) -> PlayActivity:
         return self.activity
 
-    async def play_counts(self, player_id: str, keys: Sequence[Any], *, ctx: ToolContext | None = None) -> Mapping[Any, dict[str, int]]:
+    async def play_counts(
+        self, player_id: str, keys: Sequence[Any], *, ctx: ToolContext | None = None
+    ) -> Mapping[Any, dict[str, int] | None]:
         self.asked.append(list(keys))
         return {key: self.counts[key] for key in keys if key in self.counts}
 
@@ -96,6 +98,17 @@ async def test_first_collection_fetches_every_played_song_and_reads_back(conn: a
     assert await service.counts(pid, [("1", ""), ("9", "")]) == {("1", ""): {"MAS": 5}}
     state = await service.state(pid)
     assert state is not None and state.complete and state.total_plays == 10
+
+
+async def test_songs_the_net_blocks_count_as_done_and_read_back_as_unknown(conn: aiosqlite.Connection) -> None:
+    net = _Net(activity=PlayActivity(total_plays=10, recent=[_play("A", 0, 1)]), counts={1: {"MAS": 5}, 2: None, 3: {}})
+    service, pid = await _service(conn, net)
+
+    await service.collect(pid)
+
+    state = await service.state(pid)
+    assert state is not None and state.complete  # 막힌 곡 때문에 다음 동기화가 다시 전체 수집이 되지 않는다
+    assert await service.counts(pid, [("2", "")]) == {("2", ""): None}
 
 
 async def test_new_credits_all_in_the_recent_list_refetch_only_those_songs(conn: aiosqlite.Connection) -> None:

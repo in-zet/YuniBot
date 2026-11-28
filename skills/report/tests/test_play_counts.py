@@ -34,7 +34,7 @@ def skill() -> ModuleType:
 class _FakePlayCounts:
     """저장본: 키는 (제목, 채보 종류) 그대로 쓴다(진짜 서비스의 musicId 변환은 서비스 시험에서 본다)."""
 
-    stored: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+    stored: dict[tuple[str, str], dict[str, int] | None] = field(default_factory=dict)
     saved: PlayCountState | None = None
     running: bool = False
     collect_error: Exception | None = None
@@ -43,7 +43,7 @@ class _FakePlayCounts:
     def key_for(self, title: str, chart_type: str, difficulty: str = "") -> tuple[str, str] | None:
         return None if title == "곡 DB에 없음" else (title, chart_type)
 
-    async def counts(self, player_id: str, keys: list[tuple[str, str]]) -> dict[tuple[str, str], dict[str, int]]:
+    async def counts(self, player_id: str, keys: list[tuple[str, str]]) -> dict[tuple[str, str], dict[str, int] | None]:
         return {key: self.stored[key] for key in keys if key in self.stored}
 
     async def state(self, player_id: str) -> PlayCountState | None:
@@ -150,6 +150,17 @@ async def test_play_count_of_a_missing_song_depends_on_whether_the_store_is_comp
 
     incomplete = await skill.play_count(_ctx(_FakePlayCounts(saved=_state(complete=False))), chart=_chart("B"))
     assert incomplete.error == "B MAS의 플레이 횟수는 아직 못 받았어. 다음 동기화 때 다시 받아 둘게."
+
+
+async def test_songs_the_net_blocks_are_unknown_not_zero(skill: ModuleType) -> None:
+    store = _FakePlayCounts(stored={("A", ""): {"MAS": 2}, ("X", ""): None}, saved=_state())
+
+    table = await skill.add_play_counts(_ctx(store), table=_chart_table([("A", "", "MAS"), ("X", "", "MAS")]))
+    one = await skill.play_count(_ctx(store), chart=_chart("X"))
+
+    assert table.table is not None
+    assert [r.cell("플레이 횟수").text for r in table.table.rows] == ["2회", "모름"]
+    assert one.error == "X MAS — CHUNITHM-NET이 곡 상세를 막아 둔 곡이라 플레이 횟수를 몰라."
 
 
 async def test_sync_saved_collects_in_the_background_and_swallows_login_errors(skill: ModuleType) -> None:

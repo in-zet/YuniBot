@@ -155,11 +155,13 @@ class _FakeAdapter:
         return self._personal_bests.get(difficulty.short(), [])
 
     async def get_personal_bests_on_song(self, song_id: int) -> list[PersonalBest]:
-        """곡 상세: 플레이 횟수 시험용. id 13은 못 읽는 곡이다."""
+        """곡 상세: 플레이 횟수 시험용. id 13은 못 읽는 곡, 14는 NET이 늘 막는 곡(Invalid access)이다."""
         if self.fails:
             raise self.error
         if song_id == 13:
             raise RuntimeError("상세를 못 읽음")
+        if song_id == 14:
+            raise ChuniNetError(ChuniNetError.INVALID_ACCESS, "Invalid access.")
         return [
             PersonalBest(song=Song(id=song_id, title=f"곡{song_id}"), chart=Chart(difficulty=Difficulty(code)),
                          score=900_000, clear_lamp=ClearLamp.clear, combo_lamp=ComboLamp.none, play_count=count)
@@ -931,9 +933,10 @@ async def test_play_counts_reads_each_song_detail_and_skips_unreadable_ones(conn
     service = _make_service(conn, secrets, adapter=adapter, players=players)
     await service.login(player.id, "a" * 64, ctx)
 
-    counts = await service.play_counts(player.id, [5, 13, 9, 5])
+    counts = await service.play_counts(player.id, [5, 13, 14, 9, 5])
 
-    assert counts == {5: {"MAS": 5, "EXP": 2}, 9: {"MAS": 9, "EXP": 2}}
+    # 13(그때 못 읽음)은 빠지고(다음에 다시), 14(NET이 막는 곡)는 None으로 온다.
+    assert counts == {5: {"MAS": 5, "EXP": 2}, 14: None, 9: {"MAS": 9, "EXP": 2}}
     # 곡 상세 POST 전에 GET 한 번으로 세션·토큰을 만든다(첫 곡만 빈 결과가 나던 실측).
     assert adapter.requests[0][:2] == ("GET", "/mobile/record/musicGenre/")
 

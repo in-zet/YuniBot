@@ -609,7 +609,10 @@ async def play_count(ctx: ToolContext, chart: ChartRef, game: GameRef | None = N
     key = ctx.play_counts.key_for(chart.song.title, chart.chart.chart_type, chart.chart.difficulty)
     found = await ctx.play_counts.counts(ctx.player_id, [key]) if key is not None else {}
     if key is not None and key in found:
-        count = found[key].get(chart.chart.difficulty, 0)
+        counts = found[key]
+        if counts is None:
+            return ToolResult(error=f"{label} — {_profile(ctx).net_name}이 곡 상세를 막아 둔 곡이라 플레이 횟수를 몰라.")
+        count = counts.get(chart.chart.difficulty, 0)
     elif state.complete:
         count = 0  # 마지막 수집이 친 곡을 모두 받았는데 없으면 안 친 곡이다
     else:
@@ -646,7 +649,7 @@ async def add_play_counts(
         key = keys.get(positions[id(row)])
         counts = found.get(key) if key is not None else None
         if counts is None:
-            if key is not None and state.complete:
+            if key is not None and key not in found and state.complete:
                 return {_PLAY_COUNT: cell(0, "0회")}
             return {_PLAY_COUNT: cell(None, "모름")}
         n = counts.get(tc.row_chart_key(row)[2], 0)

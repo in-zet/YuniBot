@@ -367,7 +367,17 @@ SCENARIOS: tuple[Scenario, ...] = (
             "유니: 아직 플레이 횟수를 모아 두지 않았어. 동기화를 한 번 해 주면 뒤에서 모아 둘게.\n"
             "플레이어: 츄니즘 동기화\n유니: 동기화 끝났어! 새로 친 기록은 없고 레이팅 그대로야."
         ),
-        must_call=("report_add_play_counts",),
+        must_call=("report_add_play_counts",), must_not_call=("sync_run",),
+    ),
+    Scenario(
+        name="기록/플카 방금 동기화 뒤 다시",
+        question="츄니즘 플레이카운트가 5 이상인 모든 채보를 새 폴더에 추가",
+        context=(
+            "앞선 대화:\n플레이어: 츄니즘 플레이카운트가 5 이상인 모든 채보를 새 폴더에 추가\n"
+            "유니: 아직 플레이 횟수를 모아 두지 않았어. 동기화하면 뒤에서 모아 둘게.\n"
+            "플레이어: 츄니즘 동기화\n유니: 동기화 끝났어! 새로 친 기록은 없고 레이팅 그대로야."
+        ),
+        must_call=("report_add_play_counts",), must_not_call=("sync_run",),
     ),
     Scenario(
         name="업데이트/마이 신곡", question="마이마이 이번에 들어온 신곡 보여줘",
