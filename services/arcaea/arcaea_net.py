@@ -124,13 +124,16 @@ class ArcaeaOnlineAdapter:
         return None
 
     async def login(self, username: str, password: str) -> None:
-        """사이트 로그인 폼과 같은 요청(`POST /auth/login`, 아이디나 이메일·비밀번호). 틀리면 AuthenticationError."""
+        """사이트 로그인 폼과 같은 요청(`POST /auth/login`, 아이디나 이메일·비밀번호). 틀리면 AuthenticationError.
+        응답 본문은 보지 않는다 — 다른 API의 `{"success", "value"}` 모양이 아니다(2026-11-28 실기: 200인데 거절로 읽어
+        실패했다). 사이트 코드도 로그인 뒤 프로필(`/webapi/user/me`)을 읽어 성공을 판단하고, 부른 쪽이 그렇게 한다."""
         await self._client.get("/auth/me")  # csrf 쿠키를 먼저 받는다(있으면 헤더로 돌려준다)
         headers = {"x-csrf-token": csrf} if (csrf := self._client.cookies.get("csrf")) else {}
         response = await self._client.post("/auth/login", json={"email": username, "password": password}, headers=headers)
         if response.status_code in (400, 401, 403):
             raise AuthenticationError("Arcaea 로그인 실패")
-        _value(response)
+        if response.status_code >= 400:
+            _api_error(response)
 
     async def get_user(self) -> dict[str, Any]:
         return _value(await self._client.get("/webapi/user/me"))

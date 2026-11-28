@@ -317,7 +317,8 @@ async def test_adapter_login_sends_the_site_form_and_reads_the_new_sid() -> None
         if request.url.path == "/auth/login":
             assert json.loads(request.content) == {"email": "me", "password": "pw"}
             assert request.headers["x-csrf-token"] == "tok"
-            return httpx.Response(200, json={"success": True, "value": {}},
+            # 실제 응답은 다른 API의 {"success", "value"} 모양이 아니다(2026-11-28 실기) — 본문은 보지 않는다.
+            return httpx.Response(200, json={"isLoggedIn": True},
                                   headers={"set-cookie": "sid=fresh; Domain=.lowiro.com; Path=/"})
         raise AssertionError(request.url)
 
@@ -351,3 +352,17 @@ async def test_synced_potential_matches_arcaea_online_on_the_real_sample(conn, t
     assert str(result.computed_rating) == "11.366" and result.displayed_rating == Decimal("11.366")
     assert not result.rating_mismatch
     assert "arcaea-synced" in await players.tags_for(player.id)
+
+
+async def test_adapter_login_with_a_wrong_password_is_an_authentication_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/auth/me":
+            return httpx.Response(401)
+        return httpx.Response(401, json={"success": False})
+
+    adapter = ArcaeaOnlineAdapter(None, transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(AuthenticationError):
+            await adapter.login("me", "wrong")
+    finally:
+        await adapter.aclose()
