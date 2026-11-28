@@ -280,6 +280,14 @@ SCENARIOS: tuple[Scenario, ...] = (
         must_call=("report_best", "report_add_play_counts"),
     ),
     Scenario(
+        name="기록/플카 하나", question="Climax 마스 플카 몇이야?",
+        must_call=("report_play_count",), must_not_call=("song_find_songs",),
+    ),
+    Scenario(
+        name="기록/플카 표", question="베스트 플카 보여줘",
+        must_call=("report_best", "report_add_play_counts"),
+    ),
+    Scenario(
         name="업데이트/마이 신곡", question="마이마이 이번에 들어온 신곡 보여줘",
         must_call=("updates_new_songs",), must_args=(("updates_new_songs", "game", "마이|maimai"),),
     ),

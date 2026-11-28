@@ -528,7 +528,7 @@ async def _fetch_play_counts(
 
 @tool(tags=["sega-linked"], cost="network")
 async def play_count(ctx: ToolContext, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
-    """채보 하나를 지금까지 몇 번 쳤는지 NET 곡 상세에서 바로 읽는다("크로노 마스 몇 번 쳤어?"). 본인 기록만이다.
+    """채보 하나를 지금까지 몇 번 쳤는지 NET 곡 상세에서 바로 읽는다("크로노 마스 몇 번 쳤어?", "크로노 마스 플카"). 본인 기록만이다.
     여러 채보면 그 채보 표를 add_play_counts에 준다."""
     assert isinstance(chart, ResolvedChart)
     key = _play_count_key(ctx, chart.song, chart.chart.chart_type)
@@ -551,7 +551,7 @@ async def play_count(ctx: ToolContext, chart: ChartRef, game: GameRef | None = N
 async def add_play_counts(
     ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])]
 ) -> ToolResult:
-    """채보 표에 "플레이 횟수" 칸을 더한 새 표를 돌려준다(본인 기록, NET 곡 상세에서 바로 읽는다). 곡마다 요청이
+    """채보 표에 "플레이 횟수"(플카) 칸을 더한 새 표를 돌려준다(본인 기록, NET 곡 상세에서 바로 읽는다). 곡마다 요청이
     나가서 곡 50개까지만 받는다 — 넘으면 표를 먼저 거른다. 안 친 채보는 0회, 못 읽은 곡은 값이 없다."""
     assert isinstance(table, WorkTable)
     keys: dict[int, _PlayCountKey] = {}  # 행 위치 → 서비스 키

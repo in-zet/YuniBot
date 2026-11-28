@@ -218,3 +218,4 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 
 - 동기화로 받는 목록에는 플레이 횟수가 없고 곡 상세에만 있다. CHUNITHM은 `sendMusicDetail`(가져온 코드의 `get_personal_bests_on_song`, musicId로), maimai는 `record/musicDetail/?idx=`(전체 장르 MAS 목록 `musicGenre/search/?genre=99&diff=3`에서 (제목, 채보 종류) → idx를 먼저 찾는다, 宴은 없음). 표본 `docs/reference/maimai-net/music_index.html`·`music_detail.html`.
 - 곡마다 상세 하나라 사용자 결정으로 곡 50개까지, 초당 10번 상한(이 요청만, 다른 NET 요청은 그대로). maimai는 곡 목록 GET으로 세션을 만든 뒤 상세를 동시에 받는다(실측 10개 1.8초). **CHUNITHM은 한 곡씩 차례로** 받는다 — 곡 상세는 요청 토큰을 실은 POST라 동시에 보내면 오류 코드 100001로 막히고(실측 10곡 중 7곡), 새 연결의 첫 POST는 토큰이 없어 빈 결과가 오므로 GET 한 번으로 세션을 먼저 만든다(실측 12곡 2.4초). 안 친 채보는 0회, 상세를 못 읽은 곡은 "모름". 저장하지 않는다(매번 NET에서 읽는다). 남의 쿠키로 접속하지 않도록 본인 것만.
+- "플카"는 플레이 카운트의 줄임말이다(사용자 확인 2026-11-27) — 트리거·지침에 같이 둔다.
