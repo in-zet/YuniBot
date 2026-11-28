@@ -253,6 +253,16 @@ SCENARIOS: tuple[Scenario, ...] = (
         must_args=(("report_best", "game", "아르케아|arcaea|Arcaea"),),
     ),
     Scenario(
+        name="아르케아/상수표 그림", question="아르케아 9점대 상수표 그려줘",
+        shown_from=("report_const_table",), must_call=("report_const_table", "image_table_image"),
+        must_not_call=("song_find_songs",),
+    ),
+    Scenario(
+        name="아르케아/상수표 범위 그림", question="아르케아 9.0~9.9 상수에서 상수표 그려줘",
+        shown_from=("report_const_table",), must_call=("report_const_table", "image_table_image"),
+        must_not_call=("song_find_songs",),
+    ),
+    Scenario(
         name="아르케아/곡 포텐셜 계산", question="아르케아에서 상수 10.5 곡을 익플 하면 곡 포텐셜 몇이야?",
         must_call=("rating-calc_song_rating",), must_args=(("rating-calc_song_rating", "game", "아르케아|arcaea|Arcaea"),),
     ),
