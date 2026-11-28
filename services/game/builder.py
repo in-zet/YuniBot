@@ -27,6 +27,7 @@ from services.chunithm.songdb import SongDbService
 from services.common.players import PlayersService
 from services.common.secrets import SecretsService
 from services.game.chart_ref import ChartRefResolver
+from services.game.play_counts import PlayCountService
 from services.game.profile import GameProfile
 from services.game.records import RecordsService
 from services.game.registry import GAME_PROFILES, GameResolver, choose_game, profile_for
@@ -92,10 +93,13 @@ class GameServices:
     records: RecordsService
     chart_ref: ChartRefResolver
     net: ChunithmNetService | MaimaiNetService | None
+    play_counts: PlayCountService
 
     def skill_services(self) -> dict[str, object]:
         """manifest `services`로 스킬에게 주는 이름 → 서비스."""
-        services: dict[str, object] = {"songdb": self.songdb, "terms": self.terms, "records": self.records}
+        services: dict[str, object] = {
+            "songdb": self.songdb, "terms": self.terms, "records": self.records, "play_counts": self.play_counts,
+        }
         if self.net is not None:
             services["chunithm_net"] = self.net  # 스킬에는 게임과 상관없이 이 이름이다. 게임별 서비스가 이 자리에 낀다.
         return services
@@ -162,13 +166,15 @@ async def build_game_services(
         net = ChunithmNetService(conn=conn, secrets=secrets, players=players) if secrets is not None else None
     terms = TermsService(profile.terms_path, conn=conn, game=game, percent_scores=profile.score_is_percent)
     await terms.load_aliases()
+    records = RecordsService(conn=conn, songdb=songdb, players=players, game=game)
     return GameServices(
         profile=profile,
         songdb=songdb,
         terms=terms,
-        records=RecordsService(conn=conn, songdb=songdb, players=players, game=game),
+        records=records,
         chart_ref=ChartRefResolver(songdb=songdb, terms=terms),
         net=net,
+        play_counts=PlayCountService(conn=conn, game=game, records=records, songdb=songdb, net=net),
     )
 
 

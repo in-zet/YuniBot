@@ -34,6 +34,7 @@ from services.game.net_settings import (
     parse_settings,
     raise_if_not_applied,
 )
+from services.game.play_counts import PlayActivity, RecentPlay
 
 if TYPE_CHECKING:
     from chuni_penguin.types import PersonalBest, Profile, RecentScore
@@ -45,8 +46,8 @@ logger = logging.getLogger(__name__)
 
 # CHUNITHM-NET 즐겨찾기 상한("Favorite Music n /50", 2026-11-27 실측).
 FAVORITE_LIMIT = 50
-# 플레이 횟수(곡마다 상세 하나)를 받을 때의 초당 요청 수(2026-11-27 사용자 결정).
-PLAY_COUNT_RATE = 10
+# 플레이 횟수(곡마다 상세 하나)를 받을 때의 초당 요청 수(2026-11-28 사용자 결정 — 동기화 뒤 배경 수집).
+PLAY_COUNT_RATE = 5
 
 # fetch_for_sync가 전체 PB를 모을 때 도는 순서. CHUNITHM-NET이 쓰는 코드 그대로다
 # (Difficulty(code)가 "BAS"/"ADV"/"EXP"/"MAS"/"ULT"/"WE"를 그대로 알아듣는다).
@@ -439,11 +440,34 @@ class ChunithmNetService:
         finally:
             await adapter.aclose()
 
+    async def play_activity(self, player_id: str, *, ctx: ToolContext | None = None) -> PlayActivity:
+        """플레이 횟수 수집의 시작점: 플레이어 정보의 총 플레이 횟수(크레딧)와 최근 플레이 목록(곡 번호·시각)."""
+        cookie = await self._decrypted_cookie(player_id)
+        if cookie is None:
+            raise ConnectionError("로그인되어 있지 않다")
+
+        adapter = self._adapter_factory(cookie)
+        try:
+            profile = await adapter.get_profile()
+            recent = await adapter.get_recent_scores()
+        except AuthenticationError:
+            await self._expire_login(player_id, ctx)
+            raise
+        finally:
+            await adapter.aclose()
+        return PlayActivity(
+            total_plays=profile.total_credits,
+            recent=[
+                RecentPlay(title=score.song.title, chart_type="", played_at=score.achieved_at, track=score.track_no)
+                for score in recent if score.achieved_at is not None
+            ],
+        )
+
     async def play_counts(
         self, player_id: str, song_ids: Sequence[int], *, ctx: ToolContext | None = None
     ) -> dict[int, dict[str, int]]:
-        """곡(musicId)마다 난이도 코드 → 플레이 횟수. 곡 상세 페이지를 곡마다 하나씩 차례로, 초당 10번까지 받는다
-        (2026-11-27 사용자 결정). 안 친 난이도는 없다(0회), 상세를 못 읽은 곡은 결과에 없다(모름). 인증 실패는 만료로
+        """곡(musicId)마다 난이도 코드 → 플레이 횟수. 곡 상세 페이지를 곡마다 하나씩 차례로, 초당 `PLAY_COUNT_RATE`번까지
+        받는다. 안 친 난이도는 없다(0회), 상세를 못 읽은 곡은 결과에 없다(모름). 인증 실패는 만료로
         처리하고 다시 던진다."""
         wanted = list(dict.fromkeys(song_ids))
         cookie = await self._decrypted_cookie(player_id)
@@ -469,7 +493,7 @@ class ChunithmNetService:
             # 나가 빈 페이지가 온다(즐겨찾기와 같은 함정, 2026-11-27 실측: 첫 곡만 늘 빈 결과). 먼저 GET 한 번으로 세션을 만든다.
             await adapter._request_as_soup("GET", "/mobile/record/musicGenre/")
             # 한 곡씩 차례로 보낸다. 곡 상세는 요청 토큰(`_t`)을 실어 POST하는데 응답마다 토큰이 바뀌어, 같은 토큰으로 동시에
-            # 보내면 오류 코드 100001로 막힌다(2026-11-27 실측: 동시 10곡 중 7곡). 상한은 그대로 초당 10번이다.
+            # 보내면 오류 코드 100001로 막힌다(2026-11-27 실측: 동시 10곡 중 7곡).
             results = [await one(song_id) for song_id in wanted]
         except AuthenticationError:
             await self._expire_login(player_id, ctx)

@@ -1,21 +1,21 @@
 # skills/report/tests/test_play_counts.py
-"""플레이 횟수 도구(2026-11-27 사용자 요청). NET 서비스는 `play_counts`만 가진 가짜다."""
+"""플레이 횟수 도구(2026-11-27 사용자 요청, 2026-11-28 저장값 방식). `play_counts` 서비스는 가짜다."""
 from __future__ import annotations
 
 import importlib.util
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 
 import pytest
-from chuni_penguin.adapters.errors import MaintenanceError
+from chuni_penguin.adapters.errors import AuthenticationError
 
 from core.events import EventBus
 from core.tables import TableBuilder, WorkTable
 from core.tool_types import ToolContext
 from services.game import table_columns as tc
 from services.game.chart_ref import ResolvedChart
+from services.game.play_counts import PlayCountState
 from services.game.songdb import ChartRecord, SongRecord
 
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
@@ -31,35 +31,39 @@ def skill() -> ModuleType:
 
 
 @dataclass(slots=True, kw_only=True)
-class _FakeNet:
-    counts: dict[Any, dict[str, int]] = field(default_factory=dict)
-    error: Exception | None = None
-    asked: list[list[Any]] = field(default_factory=list)
+class _FakePlayCounts:
+    """저장본: 키는 (제목, 채보 종류) 그대로 쓴다(진짜 서비스의 musicId 변환은 서비스 시험에서 본다)."""
 
-    async def play_counts(self, player_id: str, keys: list[Any], *, ctx: ToolContext | None = None) -> dict[Any, dict[str, int]]:
-        self.asked.append(list(keys))
-        if self.error is not None:
-            raise self.error
-        return {key: self.counts[key] for key in keys if key in self.counts}
+    stored: dict[tuple[str, str], dict[str, int]] = field(default_factory=dict)
+    saved: PlayCountState | None = None
+    running: bool = False
+    collect_error: Exception | None = None
+    collected: list[str] = field(default_factory=list)
+
+    def key_for(self, title: str, chart_type: str, difficulty: str = "") -> tuple[str, str] | None:
+        return None if title == "곡 DB에 없음" else (title, chart_type)
+
+    async def counts(self, player_id: str, keys: list[tuple[str, str]]) -> dict[tuple[str, str], dict[str, int]]:
+        return {key: self.stored[key] for key in keys if key in self.stored}
+
+    async def state(self, player_id: str) -> PlayCountState | None:
+        return self.saved
+
+    def collecting(self, player_id: str) -> bool:
+        return self.running
+
+    async def collect(self, player_id: str, *, ctx: ToolContext | None = None) -> None:
+        self.collected.append(player_id)
+        if self.collect_error is not None:
+            raise self.collect_error
 
 
-@dataclass(slots=True, kw_only=True)
-class _FakeSongdb:
-    songs: dict[str, SongRecord]
-
-    def song_by_title(self, title: str) -> SongRecord | None:
-        return self.songs.get(title)
+def _state(*, complete: bool = True) -> PlayCountState:
+    return PlayCountState(total_plays=10, newest_play_at=None, complete=complete, updated_at="2026-11-28T03:00:00+00:00")
 
 
-def _song(title: str, song_id: int) -> SongRecord:
-    return SongRecord(title=title, aliases=(), artist="", id=song_id)
-
-
-def _ctx(net: _FakeNet, songs: list[SongRecord], *, game: str = "chunithm") -> ToolContext:
-    return ToolContext(
-        player_id="p1", tags=frozenset(), game=game, event_bus=EventBus(),
-        services={"chunithm_net": net, "songdb": _FakeSongdb(songs={s.title: s for s in songs})},
-    )
+def _ctx(play_counts: _FakePlayCounts, *, game: str = "chunithm") -> ToolContext:
+    return ToolContext(player_id="p1", tags=frozenset(), game=game, event_bus=EventBus(), services={"play_counts": play_counts})
 
 
 def _chart_table(rows: list[tuple[str, str, str]]) -> WorkTable:
@@ -74,59 +78,84 @@ def _chart_table(rows: list[tuple[str, str, str]]) -> WorkTable:
     return builder.build()
 
 
-async def test_add_play_counts_asks_each_song_once_and_fills_the_column(skill: ModuleType) -> None:
-    net = _FakeNet(counts={1: {"MAS": 12, "EXP": 3}, 2: {"EXP": 1}})
-    songs = [_song("A", 1), _song("B", 2), _song("C", 3)]
+def _chart(title: str, difficulty: str = "MAS") -> ResolvedChart:
+    return ResolvedChart(song=SongRecord(title=title, aliases=(), artist="", id=1),
+                         chart=ChartRecord(difficulty=difficulty, const=14.5, note_count=1000))
 
-    result = await skill.add_play_counts(
-        _ctx(net, songs), table=_chart_table([("A", "", "MAS"), ("A", "", "EXP"), ("B", "", "MAS"), ("C", "", "MAS")])
-    )
+
+async def test_add_play_counts_fills_the_column_from_stored_counts_without_a_song_limit(skill: ModuleType) -> None:
+    store = _FakePlayCounts(stored={("A", ""): {"MAS": 12, "EXP": 3}, ("B", ""): {"EXP": 1}}, saved=_state())
+    rows = [("A", "", "MAS"), ("A", "", "EXP"), ("B", "", "MAS"), ("C", "", "MAS"), ("곡 DB에 없음", "", "MAS")]
+    rows += [(f"곡{i}", "", "MAS") for i in range(60)]  # 예전 50곡 상한은 없다
+
+    result = await skill.add_play_counts(_ctx(store), table=_chart_table(rows))
 
     assert result.error is None and result.table is not None
-    assert net.asked == [[1, 2, 3]]  # 곡마다 한 번
-    assert [r.cell("플레이 횟수").text for r in result.table.rows] == ["12회", "3회", "0회", "모름"]
-    assert result.data == {"count": 4, "songs": 3, "unknown": 1}
+    texts = [r.cell("플레이 횟수").text for r in result.table.rows]
+    # 저장본에 곡이 있는데 난이도가 없으면 0회, 마지막 수집이 다 받았는데 곡이 없으면 안 친 곡이라 0회, 곡 DB에 없으면 모름.
+    assert texts[:5] == ["12회", "3회", "0회", "0회", "모름"]
+    assert result.data == {"count": 65, "unknown": 1, "as_of": "2026-11-28T03:00:00+00:00", "collecting": False}
 
 
-async def test_add_play_counts_refuses_more_than_50_songs_without_asking(skill: ModuleType) -> None:
-    net = _FakeNet()
-    songs = [_song(f"곡{i}", i) for i in range(51)]
+async def test_add_play_counts_marks_missing_songs_unknown_while_the_store_is_incomplete(skill: ModuleType) -> None:
+    store = _FakePlayCounts(stored={("A", ""): {"MAS": 2}}, saved=_state(complete=False))
 
-    result = await skill.add_play_counts(_ctx(net, songs), table=_chart_table([(s.title, "", "MAS") for s in songs]))
+    result = await skill.add_play_counts(_ctx(store), table=_chart_table([("A", "", "MAS"), ("B", "", "MAS")]))
 
-    assert result.error == "플레이 횟수는 한 번에 곡 50개까지만 받을 수 있어(지금 51개). 표를 먼저 걸러 줘."
-    assert net.asked == []
+    assert result.table is not None
+    assert [r.cell("플레이 횟수").text for r in result.table.rows] == ["2회", "모름"]
+
+
+async def test_add_play_counts_column_is_numeric_for_filters(skill: ModuleType) -> None:
+    store = _FakePlayCounts(stored={("A", ""): {"MAS": 12}}, saved=_state())
+
+    result = await skill.add_play_counts(_ctx(store), table=_chart_table([("A", "", "MAS")]))
+
+    assert result.table is not None
+    assert result.table.column_by_label("플레이 횟수").value_type == "number"  # type: ignore[union-attr]
+    assert result.table.rows[0].cell("플레이 횟수").raw == 12
+
+
+async def test_add_play_counts_before_any_collection_says_so(skill: ModuleType) -> None:
+    result = await skill.add_play_counts(_ctx(_FakePlayCounts()), table=_chart_table([("A", "", "MAS")]))
+    assert result.error == "아직 플레이 횟수를 모아 두지 않았어. 동기화하면 뒤에서 모아 둘게."
+
+    result = await skill.add_play_counts(_ctx(_FakePlayCounts(running=True)), table=_chart_table([("A", "", "MAS")]))
+    assert result.error == "지금 플레이 횟수를 모으는 중이야. 조금 뒤에 다시 물어봐 줘."
 
 
 async def test_add_play_counts_in_maimai_goes_by_title_and_chart_type(skill: ModuleType) -> None:
-    net = _FakeNet(counts={("Both", "DX"): {"MAS": 4}, ("Both", "STD"): {"MAS": 2}})
+    store = _FakePlayCounts(stored={("Both", "DX"): {"MAS": 4}, ("Both", "STD"): {"MAS": 2}}, saved=_state())
 
     result = await skill.add_play_counts(
-        _ctx(net, [_song("Both", 9)], game="maimai"), table=_chart_table([("Both", "STD", "MAS"), ("Both", "DX", "MAS")])
+        _ctx(store, game="maimai"), table=_chart_table([("Both", "STD", "MAS"), ("Both", "DX", "MAS")])
     )
 
     assert result.table is not None
-    assert net.asked == [[("Both", "STD"), ("Both", "DX")]]
     assert [r.cell("플레이 횟수").text for r in result.table.rows] == ["2회", "4회"]
 
 
 async def test_play_count_reads_one_chart(skill: ModuleType) -> None:
-    song = _song("A", 1)
-    chart = ChartRecord(difficulty="MAS", const=14.5, note_count=1000)
-    net = _FakeNet(counts={1: {"MAS": 12}})
+    store = _FakePlayCounts(stored={("A", ""): {"MAS": 12}}, saved=_state())
 
-    result = await skill.play_count(_ctx(net, [song]), chart=ResolvedChart(song=song, chart=chart))
+    result = await skill.play_count(_ctx(store), chart=_chart("A"))
 
-    assert result.data["play_count"] == 12
+    assert result.data["play_count"] == 12 and result.data["as_of"] == "2026-11-28T03:00:00+00:00"
     assert result.display is not None and result.display.content == "A MAS  12회"
 
 
-async def test_play_count_reports_maintenance(skill: ModuleType) -> None:
-    song = _song("A", 1)
-    chart = ChartRecord(difficulty="MAS", const=14.5, note_count=1000)
+async def test_play_count_of_a_missing_song_depends_on_whether_the_store_is_complete(skill: ModuleType) -> None:
+    complete = await skill.play_count(_ctx(_FakePlayCounts(saved=_state())), chart=_chart("B"))
+    assert complete.data["play_count"] == 0
 
-    result = await skill.play_count(
-        _ctx(_FakeNet(error=MaintenanceError()), [song]), chart=ResolvedChart(song=song, chart=chart)
-    )
+    incomplete = await skill.play_count(_ctx(_FakePlayCounts(saved=_state(complete=False))), chart=_chart("B"))
+    assert incomplete.error == "B MAS의 플레이 횟수는 아직 못 받았어. 다음 동기화 때 다시 받아 둘게."
 
-    assert result.error == "CHUNITHM-NET이 점검 중이야. 점검이 끝나면 다시 해 줘."
+
+async def test_sync_saved_collects_in_the_background_and_swallows_login_errors(skill: ModuleType) -> None:
+    store = _FakePlayCounts(collect_error=AuthenticationError())
+
+    await skill.on_sync_saved(_ctx(store), {"player_id": "p1"})
+    await skill.on_maimai_sync_saved(_ctx(store, game="maimai"), {"player_id": "p1"})
+
+    assert store.collected == ["p1", "p1"]

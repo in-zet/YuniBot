@@ -286,3 +286,20 @@ async def test_030_records_profile_gets_a_username_column_keeping_rows(tmp_path:
 
         cursor = await conn.execute("SELECT player_id, game, level, username FROM records_profile")
         assert [tuple(r) for r in await cursor.fetchall()] == [("p1", "chunithm", 42, None)]
+
+
+async def test_031_play_counts_tables_go_with_the_player(tmp_path: Path) -> None:
+    """플레이 횟수 저장본(2026-11-28). 플레이어를 지우면 같이 지워진다."""
+    async with aiosqlite.connect(":memory:") as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await run_migrations(conn, roots=[("core", Path("migrations/core"))])
+        await conn.execute("INSERT INTO players (id, first_seen_at) VALUES ('p1', 't')")
+        await conn.execute(
+            "INSERT INTO play_counts (player_id, game, song_key, counts_json, fetched_at) VALUES ('p1', 'chunithm', '5', '{}', 't')"
+        )
+        await conn.execute("INSERT INTO play_count_state (player_id, game, updated_at) VALUES ('p1', 'chunithm', 't')")
+        await conn.execute("DELETE FROM players WHERE id = 'p1'")
+
+        for table in ("play_counts", "play_count_state"):
+            row = await (await conn.execute(f"SELECT COUNT(*) FROM {table}")).fetchone()
+            assert row is not None and row[0] == 0

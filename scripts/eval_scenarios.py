@@ -287,6 +287,22 @@ SCENARIOS: tuple[Scenario, ...] = (
         name="기록/플카 표", question="베스트 플카 보여줘",
         must_call=("report_best", "report_add_play_counts"),
     ),
+    # 플카로 거르기 — 저장값 표에 table_query(2026-11-28 사용자 요청).
+    Scenario(
+        name="기록/플카 거르기 베스트", question="베스트 중에 플카 5 이상인 것만 보여줘",
+        must_call=("report_best", "report_add_play_counts", "table_query"),
+        must_args=(("table_query", "where", "플레이 횟수"),),
+    ),
+    Scenario(
+        name="기록/플카 거르기 회", question="베스트에서 5회 이상 친 곡만 보여줘",
+        must_call=("report_best", "report_add_play_counts", "table_query"),
+        must_args=(("table_query", "where", "플레이 횟수"),),
+    ),
+    Scenario(
+        name="기록/플카 거르기 전체", question="플카 5 이상인 곡 다 보여줘",
+        must_call=("report_const_table", "report_add_play_counts", "table_query"),
+        must_args=(("table_query", "where", "플레이 횟수"),),
+    ),
     Scenario(
         name="업데이트/마이 신곡", question="마이마이 이번에 들어온 신곡 보여줘",
         must_call=("updates_new_songs",), must_args=(("updates_new_songs", "game", "마이|maimai"),),

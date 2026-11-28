@@ -12,7 +12,7 @@ version: 1
 weight: heavy
 services: [chunithm_net, records, settings, yuni, notify, players, tables]
 tags: [sega-linked]
-emits: [chunithm.sync.completed, chunithm.sync.reported, maimai.sync.completed, maimai.sync.reported]
+emits: [chunithm.sync.completed, chunithm.sync.reported, chunithm.sync.saved, maimai.sync.completed, maimai.sync.reported, maimai.sync.saved]
 settings:
   - name: 동기화 쿨다운
     kind: int

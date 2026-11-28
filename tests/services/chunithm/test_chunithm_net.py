@@ -948,3 +948,22 @@ async def test_play_counts_auth_failure_expires_login(conn, secrets) -> None:
     await bus.drain()
 
     assert received == [(player.id, {"player_id": player.id})]
+
+
+async def test_play_activity_reads_total_credits_and_recent_tracks(conn, secrets) -> None:
+    """플레이 횟수 수집의 시작점: 플레이어 정보의 총 플레이 횟수와 최근 목록의 곡 번호·시각(시각 없는 판은 뺀다)."""
+    from datetime import datetime, timedelta, timezone
+    jst = timezone(timedelta(hours=9))
+    played = [replace(_make_recent_score(1), achieved_at=datetime(2026, 10, 24, 17, 22, tzinfo=jst), track_no=3),
+              replace(_make_recent_score(2), achieved_at=None, track_no=2)]
+    players = PlayersService(conn)
+    player = await players.create_player()
+    ctx = ToolContext(player_id=player.id, tags=frozenset(), services={})
+    adapter = _FakeAdapter(recent_scores=played)
+    service = _make_service(conn, secrets, adapter=adapter, players=players)
+    await service.login(player.id, "a" * 64, ctx)
+
+    activity = await service.play_activity(player.id)
+
+    assert activity.total_plays == _fixture_profile().total_credits and activity.total_plays is not None
+    assert [(p.title, p.chart_type, p.track) for p in activity.recent] == [("테스트곡 1", "", 3)]

@@ -111,6 +111,9 @@ async def run(
     # 저장이 일어났으니(기준점만 만든 첫 동기화도) 이 플레이어의 점수가 담긴 작업 표는 옛 값이다.
     if ctx.tables is not None:
         ctx.tables.mark_stale(ctx.player_id)
+    # 저장 직후 알린다(첫 동기화 포함). 받는 쪽은 배경에서 돈다 — 플레이 횟수 수집(report)처럼 오래 걸리는 일이 리포트를 늦추지 않는다.
+    await ctx.emit(f"{ctx.game}.sync.saved", {"player_id": ctx.player_id, "sync_id": result.sync_id,
+                                              "is_first_sync": result.is_first_sync})
     rating_data: dict[str, Any] = {
         "computed_rating": _rating_text(result.computed_rating),
         "displayed_rating": None if result.displayed_rating is None else str(result.displayed_rating),

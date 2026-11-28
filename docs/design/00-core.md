@@ -482,6 +482,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | `sega.login.expired` | 알림 | `chunithm_net` 서비스 | `sega-account` |
 | `chunithm.sync.completed` | 모으기 | `sync` | `report`, `goals`, `updates`, `arcade`, `yuni-bond` |
 | `chunithm.sync.reported` | 알림 | `sync` | `session` |
+| `chunithm.sync.saved` | 알림 | `sync` | `report`(플레이 횟수 수집) |
 | `chunithm.song.viewed` | 모으기 | `song` | `notes`, `goals`, `yuni-bond` |
 | `chunithm.session.viewed` | 모으기 | `session` | `arcade` |
 | `chunithm.session.closed` | 알림 | `session` | 없음 |

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import replace
@@ -58,6 +59,8 @@ from services.game.records import (
 )
 from services.game.registry import profile_for
 from services.game.songdb import ConstRangeHit
+
+logger = logging.getLogger(__name__)
 
 # 판정 수(상세 판정)는 CHUNITHM-NET 플레이 상세 페이지를 한 곡씩 따로 열어야 붙는다.
 # 설계서가 고정한 상한이다 — 바꾸지 않는다.
@@ -501,89 +504,97 @@ def _judgement_cells(score: RecentScore) -> dict[str, Cell]:
     return {name: cell(value) for name, value in zip(_JUDGEMENT_COLUMNS, values, strict=True)}
 
 
-# ---------------------------------------------------------------- 플레이 횟수 (2026-11-27 사용자 요청)
+# ---------------------------------------------------------------- 플레이 횟수 (2026-11-27 사용자 요청, 2026-11-28 저장 방식)
 
 _PLAY_COUNT = "플레이 횟수"
-# 한 번에 받는 곡 수 상한. 곡마다 NET 곡 상세를 하나씩 받는다(초당 10번, 2026-11-27 사용자 결정).
-_PLAY_COUNT_SONG_LIMIT = 50
-_PlayCountKey = int | tuple[str, str]
+_NOT_COLLECTED = "아직 플레이 횟수를 모아 두지 않았어. 동기화하면 뒤에서 모아 둘게."
+_COLLECTING = "지금 플레이 횟수를 모으는 중이야. 조금 뒤에 다시 물어봐 줘."
 
 
-def _play_count_key(ctx: ToolContext, song: Any, chart_type: str) -> _PlayCountKey:
-    """NET 서비스가 곡을 가리키는 값: CHUNITHM은 musicId, maimai는 (제목, 채보 종류)(곡 상세가 종류마다 따로다)."""
-    return (song.title, chart_type) if ctx.game == "maimai" else song.id
-
-
-async def _fetch_play_counts(
-    ctx: ToolContext, keys: list[_PlayCountKey]
-) -> dict[_PlayCountKey, dict[str, int]] | ToolResult:
-    net_name = profile_for(ctx.game).net_name
+async def _collect_play_counts(ctx: ToolContext) -> None:
+    """동기화 저장 직후 배경에서 돈다(알림 이벤트 핸들러는 배경 작업이다). 실패해도 다음 동기화 때 다시 한다."""
     try:
-        return await ctx.chunithm_net.play_counts(ctx.player_id, keys, ctx=ctx)
-    except MaintenanceError:
-        return ToolResult(error=f"{net_name}이 점검 중이야. 점검이 끝나면 다시 해 줘.")
-    except (AuthenticationError, ConnectionError):
-        return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
+        await ctx.play_counts.collect(ctx.player_id, ctx=ctx)
+    except (MaintenanceError, AuthenticationError, ConnectionError):
+        logger.warning("%s 플레이 횟수 수집을 못 했다(점검·로그인)", ctx.game, exc_info=True)
+    except Exception:
+        logger.exception("%s 플레이 횟수 수집 실패", ctx.game)
 
 
-@tool(tags=["sega-linked"], cost="network")
+@on("chunithm.sync.saved")
+async def on_sync_saved(ctx: ToolContext, payload: dict[str, Any]) -> None:
+    await _collect_play_counts(ctx)
+
+
+@on("maimai.sync.saved")
+async def on_maimai_sync_saved(ctx: ToolContext, payload: dict[str, Any]) -> None:
+    await _collect_play_counts(ctx)
+
+
+@tool()
 async def play_count(ctx: ToolContext, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
-    """채보 하나를 지금까지 몇 번 쳤는지 NET 곡 상세에서 바로 읽는다("크로노 마스 몇 번 쳤어?", "크로노 마스 플카"). 본인 기록만이다.
-    여러 채보면 그 채보 표를 add_play_counts에 준다."""
+    """채보 하나를 지금까지 몇 번 쳤는지(플카) 본인 저장값으로 답한다("크로노 마스 몇 번 쳤어?", "크로노 마스 플카").
+    동기화 뒤 배경에서 NET 곡 상세로 모아 둔 값이라 마지막 동기화 기준이다. 여러 채보면 그 채보 표를 add_play_counts에 준다."""
     assert isinstance(chart, ResolvedChart)
-    key = _play_count_key(ctx, chart.song, chart.chart.chart_type)
-    found = await _fetch_play_counts(ctx, [key])
-    if isinstance(found, ToolResult):
-        return found
     label = f"{chart.song.title} {f'{chart.chart.chart_type} ' if chart.chart.chart_type else ''}{chart.chart.difficulty}"
-    if key not in found:
-        return ToolResult(error=f"{label}의 플레이 횟수를 {profile_for(ctx.game).net_name}에서 못 읽었어.")
-    count = found[key].get(chart.chart.difficulty, 0)
+    state = await ctx.play_counts.state(ctx.player_id)
+    if state is None:
+        return ToolResult(error=_COLLECTING if ctx.play_counts.collecting(ctx.player_id) else _NOT_COLLECTED)
+    key = ctx.play_counts.key_for(chart.song.title, chart.chart.chart_type, chart.chart.difficulty)
+    found = await ctx.play_counts.counts(ctx.player_id, [key]) if key is not None else {}
+    if key is not None and key in found:
+        count = found[key].get(chart.chart.difficulty, 0)
+    elif state.complete:
+        count = 0  # 마지막 수집이 친 곡을 모두 받았는데 없으면 안 친 곡이다
+    else:
+        return ToolResult(error=f"{label}의 플레이 횟수는 아직 못 받았어. 다음 동기화 때 다시 받아 둘게.")
     return ToolResult(
         data={"song": chart.song.title, "chart_type": chart.chart.chart_type, "difficulty": chart.chart.difficulty,
-              "play_count": count},
+              "play_count": count, "as_of": state.updated_at},
         display=Display(content=f"{label}  {count}회"),
         display_mode="optional",
     )
 
 
-@tool(tags=["sega-linked"], cost="network")
+@tool()
 async def add_play_counts(
     ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])]
 ) -> ToolResult:
-    """채보 표에 "플레이 횟수"(플카) 칸을 더한 새 표를 돌려준다(본인 기록, NET 곡 상세에서 바로 읽는다). 곡마다 요청이
-    나가서 곡 50개까지만 받는다 — 넘으면 표를 먼저 거른다. 안 친 채보는 0회, 못 읽은 곡은 값이 없다."""
+    """채보 표에 "플레이 횟수"(플카) 칸을 더한 새 표를 돌려준다(본인 저장값, 마지막 동기화 기준). 숫자 칸이라
+    "플카 5 이상"은 이 표에 table_query(where 플레이 횟수 >= 5)를 건다. 안 친 채보는 0회, 아직 못 받은 곡은 "모름"."""
     assert isinstance(table, WorkTable)
-    keys: dict[int, _PlayCountKey] = {}  # 행 위치 → 서비스 키
+    state = await ctx.play_counts.state(ctx.player_id)
+    if state is None:
+        return ToolResult(error=_COLLECTING if ctx.play_counts.collecting(ctx.player_id) else _NOT_COLLECTED)
+    keys: dict[int, Any] = {}  # 행 위치 → 저장 키
     for position, row in enumerate(table.rows):
-        title, chart_type, _difficulty = tc.row_chart_key(row)
-        song = ctx.songdb.song_by_title(title)
-        if song is not None:
-            keys[position] = _play_count_key(ctx, song, chart_type)
-    wanted = list(dict.fromkeys(keys.values()))
-    if len(wanted) > _PLAY_COUNT_SONG_LIMIT:
-        return ToolResult(
-            error=f"플레이 횟수는 한 번에 곡 {_PLAY_COUNT_SONG_LIMIT}개까지만 받을 수 있어(지금 {len(wanted)}개). 표를 먼저 걸러 줘."
-        )
-    found = await _fetch_play_counts(ctx, wanted) if wanted else {}
-    if isinstance(found, ToolResult):
-        return found
+        title, chart_type, difficulty = tc.row_chart_key(row)
+        key = ctx.play_counts.key_for(title, chart_type, difficulty)
+        if key is not None:
+            keys[position] = key
+    found = await ctx.play_counts.counts(ctx.player_id, list(keys.values()))
     positions = {id(row): position for position, row in enumerate(table.rows)}
 
     def cells_for(row: Row) -> dict[str, Cell]:
         key = keys.get(positions[id(row)])
         counts = found.get(key) if key is not None else None
         if counts is None:
+            if key is not None and state.complete:
+                return {_PLAY_COUNT: cell(0, "0회")}
             return {_PLAY_COUNT: cell(None, "모름")}
         n = counts.get(tc.row_chart_key(row)[2], 0)
         return {_PLAY_COUNT: cell(n, f"{n}회")}
 
     extended = extend_table(
         table, [Column(name=_PLAY_COUNT, label=_PLAY_COUNT, value_type="number")], cells_for,
-        steps=[f"{profile_for(ctx.game).net_name} 플레이 횟수"],
+        steps=["플레이 횟수(마지막 동기화 기준)"],
     )
     unknown = sum(1 for row in extended.rows if row.cell(_PLAY_COUNT).raw is None)
-    return ToolResult(data={"count": extended.row_count, "songs": len(wanted), "unknown": unknown}, table=extended)
+    return ToolResult(
+        data={"count": extended.row_count, "unknown": unknown, "as_of": state.updated_at,
+              "collecting": ctx.play_counts.collecting(ctx.player_id)},
+        table=extended,
+    )
 
 
 @tool(cost="network", games=["chunithm"])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from core.decorators import tool
@@ -97,6 +98,10 @@ def _comparable(value_type: str, resolved: Any) -> Any:
     return resolved.canonical
 
 
+# 숫자 칸 조건 값: 숫자 뒤에 공백·한글/영문 단위만 허용한다("5", "5회", "12.5 %"는 되고 "5~7"은 안 된다).
+_NUMBER_WITH_UNIT = re.compile(r"([-+]?\d[\d,]*(?:\.\d+)?|[-+]?\.\d+)\s*[^\d\s.,~\-+]*")
+
+
 async def _parse_where(ctx: ToolContext, table: WorkTable, where: list[WhereClause] | None) -> list[Condition]:
     conditions: list[Condition] = []
     resolvers = ctx.services.get("_ref_resolvers")
@@ -107,10 +112,11 @@ async def _parse_where(ctx: ToolContext, table: WorkTable, where: list[WhereClau
         text = clause["value"]
         value: Any = text
         if column.value_type == "number":
-            try:
-                value = float(text.replace(",", ""))
-            except ValueError:
-                raise TableError(f"'{column.label}' 칸 값 '{text}'은 숫자가 아니다") from None
+            # 사용자 말 그대로 오므로 단위가 붙어 있을 수 있다("5회", "3번", "1,000개"). 숫자 하나에 글자 단위만 붙었을 때 숫자를 쓴다.
+            number = _NUMBER_WITH_UNIT.fullmatch(text.strip())
+            if number is None:
+                raise TableError(f"'{column.label}' 칸 값 '{text}'은 숫자가 아니다")
+            value = float(number.group(1).replace(",", ""))
         elif column.value_type in _VALUE_REF_TYPES and clause["op"] not in TEXT_OPS:
             if not isinstance(resolvers, ResolverRegistry) or not resolvers.is_registered(_VALUE_REF_TYPES[column.value_type]):
                 raise TableError(f"'{column.label}' 칸 값을 해석할 수 없다")

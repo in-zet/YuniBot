@@ -281,6 +281,9 @@ class _FakeAdapter:
             raise self.error
         return parser.parse_music_index((_DIR / "music_index.html").read_text(encoding="utf-8"))
 
+    async def get_total_play_count(self) -> int | None:
+        return 36
+
     async def get_play_counts(self, idx: str) -> dict[tuple[str, str], int]:
         self.detail_requests.append(idx)
         if idx == "IDX0002":
@@ -563,3 +566,19 @@ async def test_play_counts_auth_failure_expires_the_login(conn) -> None:
     with pytest.raises(AuthenticationError):
         await service.play_counts(player.id, [("ゴーストルール", "STD")])
     assert "sega-linked" not in await players.tags_for(player.id)
+
+
+async def test_play_activity_reads_total_play_count_and_recent_tracks(conn) -> None:
+    secrets = SecretsService(Fernet.generate_key())
+    players, player = await _linked_player(conn, secrets)
+    adapter = _FakeAdapter()
+    service = MaimaiNetService(
+        conn=conn, secrets=secrets, players=players, adapter_factory=lambda clal: cast(MaimaiNetAdapterLike, adapter),
+    )
+
+    activity = await service.play_activity(player.id)
+
+    assert activity.total_plays == 36
+    recent = _pages()[2]
+    assert [(p.title, p.chart_type, p.track) for p in activity.recent] == [(e.title, e.chart_type, e.track) for e in recent]
+    assert adapter.closed

@@ -171,3 +171,14 @@ def test_parse_play_counts_reads_each_played_chart() -> None:
     counts = parser.parse_play_counts((_DIR / "music_detail.html").read_text(encoding="utf-8"))
 
     assert counts == {("STD", "MAS"): 1}  # 안 친 난이도는 칸이 없다
+
+
+def test_parse_total_play_count_reads_the_all_time_credit_count() -> None:
+    """플레이어 정보의 두 횟수 중 이번 버전 것이 아니라 총 횟수를 읽는다(2026-11-28 실측 문구)."""
+    html = (
+        '<html><body><div class="m_5 m_b_5 t_r f_12">play count of current version：17</div>'
+        '<div class="m_5 m_t_10 t_r f_12">maimaiDX total play count：1,036</div></body></html>'
+    )
+
+    assert parser.parse_total_play_count(html) == 1036
+    assert parser.parse_total_play_count("<html><body>없음</body></html>") is None

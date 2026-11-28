@@ -181,6 +181,27 @@ async def test_table_query_number_value_must_be_numeric() -> None:
     assert ok.result is not None and ok.result.error is None  # 쉼표는 천 단위 구분으로 본다(10보다 작지 않으면 통과)
 
 
+async def test_table_query_number_value_may_carry_a_unit_word() -> None:
+    """사용자 말 그대로 "5회"·"3 번"이 와도 숫자로 읽는다(플카 거르기, 2026-11-28). 범위 같은 다른 글은 여전히 오류다."""
+    executor, ctx = _env()
+    builder = TableBuilder().column("n", "수", "number")
+    for i, n in enumerate((3, 5, 12)):
+        builder.row(RowRef("k", str(i)), {"n": cell(n)})
+    assert executor.tables is not None
+    _ = executor.tables.put("p1", "c1", builder.build(), now=0)
+
+    for text in ("5회", "5 회"):
+        outcome = await executor.invoke(
+            _tool(table_query), ctx, {"table": "t2", "where": [{"column": "수", "op": ">=", "value": text}]}
+        )
+        assert outcome.result is not None and outcome.result.table is not None
+        assert [row.cell("n").raw for row in outcome.result.table.rows] == [5, 12]
+    ranged = await executor.invoke(
+        _tool(table_query), ctx, {"table": "t2", "where": [{"column": "수", "op": ">=", "value": "5~7"}]}
+    )
+    assert ranged.result is not None and ranged.result.error == "'수' 칸 값 '5~7'은 숫자가 아니다"
+
+
 async def test_table_query_rows_refused_on_this_turns_table() -> None:
     executor, ctx = _env()
     ctx.services["_turn_table_ids"].append("t1")  # pyright: ignore[reportIndexIssue,reportAttributeAccessIssue]

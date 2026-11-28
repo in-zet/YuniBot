@@ -30,6 +30,7 @@ from services.game.net_settings import (
     parse_settings,
     raise_if_not_applied,
 )
+from services.game.play_counts import PlayActivity, RecentPlay
 from services.maimai import parser
 from services.maimai.parser import MaimaiProfile, PlayEntry, RatingTargets, ScoreEntry
 from services.maimai.sync_snapshot import snapshot_from_pages
@@ -66,8 +67,8 @@ SESSION_LOST_CODES = frozenset({100001, 200002, 200004})
 # 난이도별 기록 목록의 `diff` 값. 宴은 10이다.
 _LIST_DIFF = {"BAS": 0, "ADV": 1, "EXP": 2, "MAS": 3, "REM": 4, "UTA": 10}
 LIST_DIFFICULTIES: tuple[str, ...] = tuple(_LIST_DIFF)
-# 플레이 횟수(곡마다 상세 하나)를 받을 때의 초당 요청 수(2026-11-27 사용자 결정).
-PLAY_COUNT_RATE = 10
+# 플레이 횟수(곡마다 상세 하나)를 받을 때의 초당 요청 수(2026-11-28 사용자 결정 — 동기화 뒤 배경 수집).
+PLAY_COUNT_RATE = 5
 
 _NET_ERROR_MESSAGES: dict[int, str] = {}  # 알게 되는 대로 더한다. 모르는 코드는 번호와 함께 일반 문장으로 안내한다.
 
@@ -186,6 +187,10 @@ class MaimaiNetAdapter:
         """(제목, 채보 종류) → 곡 상세로 가는 값. 전체 장르 MAS 목록이라 안 친 곡도 들어 있다(宴은 없다)."""
         return parser.parse_music_index(await self._get(f"{_MOBILE}/record/musicGenre/search/?genre=99&diff=3"))
 
+    async def get_total_play_count(self) -> int | None:
+        """플레이어 정보의 총 플레이 횟수(크레딧)."""
+        return parser.parse_total_play_count(await self._get(f"{_MOBILE}/playerData/"))
+
     async def get_play_counts(self, idx: str) -> dict[tuple[str, str], int]:
         """곡 상세의 (채보 종류, 난이도) → 플레이 횟수."""
         return parser.parse_play_counts(await self._get(f"{_MOBILE}/record/musicDetail/?idx={quote(idx, safe='')}"))
@@ -204,6 +209,7 @@ class MaimaiNetAdapterLike(Protocol):
     async def get_favorite_page(self) -> bytes: ...
     async def post_favorites(self, payload: Mapping[str, str | list[str]]) -> None: ...
     async def get_music_index(self) -> dict[tuple[str, str], str]: ...
+    async def get_total_play_count(self) -> int | None: ...
     async def get_play_counts(self, idx: str) -> dict[tuple[str, str], int]: ...
     async def aclose(self) -> None: ...
 
@@ -217,7 +223,7 @@ def _credential_adapter(username: str, password: str) -> MaimaiNetAdapterLike:
 
 
 def _play_count_adapter(clal: str) -> MaimaiNetAdapterLike:
-    """플레이 횟수 전용 연결: 곡마다 상세를 하나씩 받으므로 초당 10번까지(2026-11-27 사용자 결정, 다른 요청은 초당 1번)."""
+    """플레이 횟수 전용 연결: 곡마다 상세를 하나씩 받으므로 초당 `PLAY_COUNT_RATE`번까지(다른 요청은 초당 1번)."""
     return MaimaiNetAdapter(clal, limiter=aiolimiter.AsyncLimiter(PLAY_COUNT_RATE, 1))
 
 
@@ -351,11 +357,28 @@ class MaimaiNetService:
 
         await self._with_adapter(player_id, ctx, work)
 
+    async def play_activity(self, player_id: str, *, ctx: ToolContext | None = None) -> PlayActivity:
+        """플레이 횟수 수집의 시작점: 플레이어 정보의 총 플레이 횟수(크레딧)와 최근 플레이 목록(곡 번호·시각)."""
+
+        async def work(adapter: MaimaiNetAdapterLike) -> PlayActivity:
+            total = await adapter.get_total_play_count()
+            recent = await adapter.get_recent()
+            return PlayActivity(
+                total_plays=total,
+                recent=[
+                    RecentPlay(title=play.title, chart_type=play.chart_type, played_at=play.played_at, track=play.track,
+                               difficulty=play.difficulty)
+                    for play in recent
+                ],
+            )
+
+        return await self._with_adapter(player_id, ctx, work)
+
     async def play_counts(
         self, player_id: str, charts: Sequence[tuple[str, str]], *, ctx: ToolContext | None = None
     ) -> dict[tuple[str, str], dict[str, int]]:
         """(제목, 채보 종류)마다 난이도 → 플레이 횟수(안 친 난이도는 없다 = 0회). 곡 목록에서 곡 상세로 가는 값을 찾고
-        곡 상세를 동시에 받는다(초당 10번). 목록에 없는 곡(宴 등)이나 상세를 못 읽은 곡은 결과에 없다(모름).
+        곡 상세를 동시에 받는다(초당 `PLAY_COUNT_RATE`번). 목록에 없는 곡(宴 등)이나 상세를 못 읽은 곡은 결과에 없다(모름).
         인증 실패는 만료로 처리하고 다시 던진다."""
         wanted = list(dict.fromkeys(charts))
 

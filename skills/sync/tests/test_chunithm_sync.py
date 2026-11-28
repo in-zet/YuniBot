@@ -256,7 +256,8 @@ async def test_run_first_sync_returns_baseline_message_without_report(skill: Mod
     assert result.data["computed_rating"] == "16.94"
     assert result.data["is_first_sync"] is True
     assert f.bus.gather_calls == []  # 모으기 이벤트를 안 낸다
-    assert f.bus.notify_calls == []  # 리포트 알림도 안 낸다
+    # 리포트 알림은 안 내고, 저장 알림(플레이 횟수 수집 신호)만 낸다.
+    assert f.bus.notify_calls == [("chunithm.sync.saved", {"player_id": "p1", "sync_id": "sync-1", "is_first_sync": True})]
     assert f.yuni.calls == []
     assert f.notify.dms == []
 

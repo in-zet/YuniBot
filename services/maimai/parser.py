@@ -314,6 +314,7 @@ def parse_music_index(html: str | bytes) -> dict[tuple[str, str], str]:
 
 
 _PLAY_COUNT = re.compile(r"PLAY COUNT[：:]\s*([\d,]+)")
+_TOTAL_PLAY_COUNT = re.compile(r"maimaiDX total play count[：:]\s*([\d,]+)", re.IGNORECASE)
 
 
 def parse_play_counts(html: str | bytes) -> dict[tuple[str, str], int]:
@@ -328,3 +329,10 @@ def parse_play_counts(html: str | bytes) -> dict[tuple[str, str], int]:
             continue
         counts[(_chart_type(node.css_first("img.music_kind_icon")), _difficulty_of(node))] = int(found.group(1).replace(",", ""))
     return counts
+
+
+def parse_total_play_count(html: str | bytes) -> int | None:
+    """플레이어 정보(`playerData/`)의 "maimaiDX total play count：36"(크레딧 수, 2026-11-28 실측). 못 찾으면 None."""
+    body = _doc(html).body
+    found = _TOTAL_PLAY_COUNT.search(body.text(separator=" ") if body is not None else "")
+    return int(found.group(1).replace(",", "")) if found else None

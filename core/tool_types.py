@@ -61,7 +61,7 @@ class ToolContext:
         return replace(self, game_services=scoped)
 
     def for_game(self, game: str) -> ToolContext:
-        """다른 게임의 맥락. 스킬이 선언한 서비스 중 게임별인 것(records·songdb·terms·chunithm_net)이 그 게임 것으로 바뀐다.
+        """다른 게임의 맥락. 스킬이 선언한 서비스 중 게임별인 것(records·songdb·terms·chunithm_net·play_counts)이 그 게임 것으로 바뀐다.
         저장된 데이터가 자기 게임을 들고 있는 스킬(goals의 목표 등)이 그 게임으로 계산할 때 쓴다.
         그 게임의 서비스를 모르면 게임 이름만 바꾸고 다른 게임 서비스를 그대로 두게 되므로 오류로 멈춘다."""
         if game == self.game:

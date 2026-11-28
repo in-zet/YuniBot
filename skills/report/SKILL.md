@@ -15,9 +15,9 @@ triggers: [베스트, 신곡, 레이팅, 기록, 점수, 최근, 판정, 추천,
 category: 기록과 리포트
 games: [chunithm, maimai]
 version: 1
-services: [records, songdb, players, chunithm_net, terms]
+services: [records, songdb, players, chunithm_net, terms, play_counts]
 tags_any: [chunithm-synced, maimai-synced]
-listens: [chunithm.sync.completed, maimai.sync.completed]
+listens: [chunithm.sync.completed, maimai.sync.completed, chunithm.sync.saved, maimai.sync.saved]
 ---
 
 - 게임: 사용자가 게임을 말했으면("마이마이", "츄니즘") 그 말 그대로 `game`에 준다. 말하지 않았으면 비운다(코드가 주 게임 → 츄니즘 순으로 고른다). 표를 이어받는 도구(`add_scores`·`analyze`의 `table`)는 그 표의 게임을 따른다.
@@ -41,5 +41,5 @@ listens: [chunithm.sync.completed, maimai.sync.completed]
 - `recent`·`analyze`·`candidates`도 표로 나온다. `best`와 같이 행을 다시 나열하지 않는다.
 - 후보곡 예: "레벨 14 곡 중 후보곡" → `find_songs(level="14")` → `candidates(table=...)`.
 - `recent`는 CHUNITHM-NET에 직접 접속한다. 판정 수는 앞 20개에만 붙는다.
-- "몇 번 쳤어"·"플레이 횟수"·"플카"(플레이 카운트의 줄임말)는 NET 곡 상세를 바로 읽는다(동기화 기록에는 없다). 채보 하나면 `play_count`, 여러 채보면 그 채보 표를 `add_play_counts`에 준다(곡 단위 표는 `charts_of`로 먼저 펼친다). 곡 50개까지라 넘으면 먼저 거른다. 본인 것만 된다.
+- "몇 번 쳤어"·"플레이 횟수"·"플카"(플레이 카운트의 줄임말)는 저장값이다 — 동기화 뒤 배경에서 NET 곡 상세로 모아 두므로 마지막 동기화 기준이고 곡 수 상한이 없다. 채보 하나면 `play_count`, 여러 채보면 그 채보 표를 `add_play_counts`에 준다(곡 단위 표는 `charts_of`로 먼저 펼친다). "플카 5 이상"처럼 거르면 `add_play_counts` 표에 `table_query`(`플레이 횟수` `>=` `5`)를 건다. 범위를 말하지 않았으면("플카 5 이상인 곡") 내가 친 채보 전체(`const_table(min_const=0, only_played=true)`)에 붙인다. "아직 모아 두지 않았어"·"모으는 중" 오류는 그대로 전한다. 본인 것만 된다.
 - 동기화 리포트 반응 단계는 지금 축소판이다: SSS 이상 갱신이 있으면 great, 그 밖의 갱신이 있으면 good, 갱신 없이 플레이만 했으면 close, 변화 없음은 단계 없이 간단한 조각만 낸다(rest와 "평소 점수 수준" 기준은 실제 기록을 보고 다음에 정한다).

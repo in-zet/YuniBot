@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import tempfile
 import time
 from dataclasses import dataclass, field, replace
@@ -249,6 +250,29 @@ async def seed_maimai_fixture(*, executor: ToolExecutor, player_id: str, tags: f
     return len(plays)
 
 
+async def seed_play_counts(*, executor: ToolExecutor, conn: Any, player_id: str) -> None:
+    """두 게임 기록의 채보마다 지어낸 플레이 횟수(1~12회)를 저장하고 "다 받음" 상태로 둔다 — "플카 5 이상" 같은 거르기가
+    걸러질 거리가 있게. 수집(NET)은 평가에서 돌지 않는다."""
+    now = "2026-11-28T00:00:00+00:00"
+    for game, bundle in executor._game_services.items():  # pyright: ignore[reportPrivateUsage]
+        records = cast("RecordsService", bundle["records"])
+        store = cast("Any", bundle["play_counts"])
+        songs: dict[tuple[str, str], dict[str, int]] = {}
+        for i, row in enumerate(await records.all_pb_rows(player_id)):
+            key = store.key_for(row.song_title, row.chart_type, row.difficulty)
+            if key is not None:
+                songs.setdefault(key, {})[row.difficulty] = i % 12 + 1
+        await conn.executemany(
+            "INSERT INTO play_counts (player_id, game, song_key, chart_type, counts_json, fetched_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [(player_id, game, key[0], key[1], json.dumps(counts), now) for key, counts in songs.items()],
+        )
+        await conn.execute(
+            "INSERT INTO play_count_state (player_id, game, total_plays, newest_play_at, complete, updated_at) "
+            "VALUES (?, ?, 100, NULL, 1, ?)", (player_id, game, now),
+        )
+    await conn.commit()
+
+
 async def _run_turn(
     *, config: CoreConfig, llm: LlmAdapter, prompt: PromptAssembler, executor: ToolExecutor, client: YuniClient,
     registry: SkillRegistry, player_id: str, tags: frozenset[str], question: str, context: str = "",
@@ -324,6 +348,7 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
         )
         seeded = await seed_fixture(executor=executor, loop=seeding_loop, player_id=player.id, tags=tags)
         seeded_maimai = await seed_maimai_fixture(executor=executor, player_id=player.id, tags=tags)
+        await seed_play_counts(executor=executor, conn=client.conn, player_id=player.id)
         print(
             f"모델 {config.llm_provider}/{config.agent_model} · 모드 {config.skill_loading_mode} · "
             f"지어낸 기록 츄니즘 {seeded}개 · maimai {seeded_maimai}개"

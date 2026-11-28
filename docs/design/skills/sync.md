@@ -64,6 +64,7 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 | --- | --- | --- |
 | 냄 | `chunithm.sync.completed` (모으기) | 플레이어, 동기화 id, 세션 목록(세션 id, 플레이 날짜), 새 플레이 여부, 첫 동기화 여부, `focus`, 직전 동기화 시각, 오락실(말했으면) |
 | 냄 | `chunithm.sync.reported` (알림) | 위 내용 + 보낸 표시물, 조각별 `data`, 유니의 한마디, 보낸 메시지 위치(채널 또는 DM) |
+| 냄 | `chunithm.sync.saved` (알림) | 저장 직후(첫 동기화 포함) 플레이어, 동기화 id, 첫 동기화 여부. 오래 걸리는 뒷일(플레이 횟수 수집, `report`)이 리포트를 늦추지 않게 배경에서 받는다(2026-11-28) |
 
 변화량 자체는 이벤트에 넣지 않는다. 받는 스킬이 동기화 id로 `records`에서 읽는다.
 

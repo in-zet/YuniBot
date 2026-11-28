@@ -97,8 +97,8 @@ listens: [chunithm.sync.completed]
 | `profile` | 프로필 | `player: PlayerRef`(기본 나) | optional |
 | `best` | 베스트 30, 신곡 20 (표 반환). `version`을 주면 이전 버전 기준 레이팅표 | `player: PlayerRef`, `kind`(best/new/둘 다), `version`(곡 DB 버전 이름, 선택) | 표 |
 | `recent` | 최근 플레이 (CHUNITHM-NET에 직접 접속, `cost="network"`. 판정 수는 앞 20개에만. 표 반환) | `player: PlayerRef`, `count` | 표 |
-| `play_count` | 채보 하나의 플레이 횟수(NET 곡 상세를 바로 읽음, 본인만, 태그 `sega-linked`) | `chart: ChartRef`, `game` | optional |
-| `add_play_counts` | 채보 표에 "플레이 횟수" 칸(곡 50개까지, 본인만) | `table: TableRef`(곡·난이도) | 표 |
+| `play_count` | 채보 하나의 플레이 횟수(저장값, 마지막 동기화 기준, 본인만) | `chart: ChartRef`, `game` | optional |
+| `add_play_counts` | 채보 표에 "플레이 횟수" 숫자 칸(저장값, 곡 수 상한 없음, 본인만) | `table: TableRef`(곡·난이도) | 표 |
 | `record` | 곡별 기록 | `chart: ChartRef`, `player: PlayerRef` | optional |
 | `analyze` | 상수대별 평균, 랭크 분포 (표 반환). 표를 주면 그 표의 채보만으로 통계 | `player: PlayerRef`, 상수 범위(선택), `table: TableRef \| None`(선택, 곡·난이도 필요) | 표 |
 | `candidates` | 레이팅 후보곡 (표 반환) | 상수 범위(선택), `count`, `table: TableRef`(선택, `find_songs`가 거른 표 — 그 채보 안에서만 고른다) | 표 |
@@ -214,8 +214,12 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 - 게임 프로필의 `lamp_rating_bonus`와 `GameProfile.song_rating(점수, 상수, 콤보 램프)`로 넣었다. 기록의 곡 레이팅(저장·읽을 때 다시 계산·프레임 짜기)은 모두 이것을 쓰고, `chart_rating`은 점수만 보는 계산(후보곡 기준 점수·`rating-calc`·목표)에 남는다.
 - 실제 기록에도 그대로 적용된다. 2026-11-21 운영 DB에는 maimai AP 기록이 없어 바뀐 숫자는 없었다. 같은 점수에서 램프만 AP가 되면 다음 동기화의 저장값 갱신이 곡 레이팅을 올린다(갱신 목록에는 램프 변화로만 나온다).
 
-## 플레이 횟수 (2026-11-27 사용자 요청)
+## 플레이 횟수 (2026-11-27 사용자 요청, 2026-11-28 저장 방식으로 바꿈)
 
 - 동기화로 받는 목록에는 플레이 횟수가 없고 곡 상세에만 있다. CHUNITHM은 `sendMusicDetail`(가져온 코드의 `get_personal_bests_on_song`, musicId로), maimai는 `record/musicDetail/?idx=`(전체 장르 MAS 목록 `musicGenre/search/?genre=99&diff=3`에서 (제목, 채보 종류) → idx를 먼저 찾는다, 宴은 없음). 표본 `docs/reference/maimai-net/music_index.html`·`music_detail.html`.
-- 곡마다 상세 하나라 사용자 결정으로 곡 50개까지, 초당 10번 상한(이 요청만, 다른 NET 요청은 그대로). maimai는 곡 목록 GET으로 세션을 만든 뒤 상세를 동시에 받는다(실측 10개 1.8초). **CHUNITHM은 한 곡씩 차례로** 받는다 — 곡 상세는 요청 토큰을 실은 POST라 동시에 보내면 오류 코드 100001로 막히고(실측 10곡 중 7곡), 새 연결의 첫 POST는 토큰이 없어 빈 결과가 오므로 GET 한 번으로 세션을 먼저 만든다(실측 12곡 2.4초). 안 친 채보는 0회, 상세를 못 읽은 곡은 "모름". 저장하지 않는다(매번 NET에서 읽는다). 남의 쿠키로 접속하지 않도록 본인 것만.
+- **저장해 두고 읽는다**(2026-11-28 사용자 결정 — 처음엔 물을 때마다 곡 50개까지 NET에서 바로 읽었다). `sync`가 저장 직후 내는 `{game}.sync.saved`(알림 = 배경)를 받아 `play_counts` 서비스(`services/game/play_counts.py`, 코어 마이그레이션 031)가 모은다. 도구는 저장값만 읽어 곡 수 상한이 없고, 값은 마지막 동기화 기준(`data.as_of`)이다. 수집 전이면 "아직 모아 두지 않았어", 도는 중이면 "모으는 중"이라고 답한다.
+- **무엇을 다시 받나**: NET 플레이어 정보의 총 플레이 횟수(크레딧 — CHUNITHM `playerData`의 play count, maimai "maimaiDX total play count")가 직전 수집보다 늘어난 양과, 최근 플레이 목록에 직전 수집 뒤로 새로 잡힌 크레딧 수(곡 번호 1인 판)를 맞댄다. 같으면 그 판들의 곡만, 다르면(최근 목록 밖에서 친 판이 있다) 친 곡(기록 있는 채보) 전체를 다시 받는다. 처음과, 직전 수집에서 못 읽은 곡이 있었을 때도 전체다. 최근 목록 길이는 정해져 있지 않다(2026-11-28 실측: CHUNITHM 33판 = 마지막 플레이 날 하루치, maimai 50판).
+- **0회와 모름**: 저장본에 곡이 있는데 난이도가 없으면 0회. 곡이 없으면 마지막 수집이 친 곡을 다 받은 상태(`complete`)일 때 0회(안 친 곡), 아니면 "모름". 곡 상세로 받을 수 없는 채보(maimai 宴, CHUNITHM WORLD'S END — NET에서는 따로 된 곡인데 곡 DB는 같은 곡 밑에 둔다)는 늘 "모름"이고 수집 대상에서도 뺀다(넣으면 수집이 늘 미완료라 매번 전체를 다시 받는다).
+- 속도는 초당 5번(2026-11-28 사용자 결정). maimai는 곡 목록 GET으로 세션을 만든 뒤 상세를 동시에 받는다. **CHUNITHM은 한 곡씩 차례로** 받는다 — 곡 상세는 요청 토큰을 실은 POST라 동시에 보내면 오류 코드 100001로 막히고(실측 10곡 중 7곡), 새 연결의 첫 POST는 토큰이 없어 빈 결과가 오므로 GET 한 번으로 세션을 먼저 만든다(실측 12곡 2.4초 — 차례로 받으면 초당 5곡쯤이 한계다). 같은 플레이어·게임의 수집이 돌고 있으면 새 수집은 건너뛴다. 남의 쿠키로 접속하지 않도록 본인 것만.
+- 거르기: "플카 5 이상"은 `add_play_counts` 표에 `table_query`(`플레이 횟수 >= 5`). 숫자 칸 조건 값의 단위("5회")는 코어가 떼고 읽는다. 범위를 말하지 않으면 친 채보 전체(`const_table(min_const=0, only_played=true)`)에 붙인다.
 - "플카"는 플레이 카운트의 줄임말이다(사용자 확인 2026-11-27) — 트리거·지침에 같이 둔다.
