@@ -8,10 +8,10 @@ examples:
   - 마이마이 Link DX 마스에 "후반 조심" 메모해 줘
 triggers: [메모]
 category: 메모
-games: [chunithm, maimai]
+games: [chunithm, maimai, arcaea]
 version: 1
 services: [songdb, players, db]
-listens: [chunithm.song.viewed, maimai.song.viewed, chunithm.plan.requested]
+listens: [chunithm.song.viewed, maimai.song.viewed, arcaea.song.viewed, chunithm.plan.requested]
 ---
 
 태그 조건은 없다. 로그인하지 않아도 쓸 수 있다.

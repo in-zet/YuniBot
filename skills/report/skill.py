@@ -6,7 +6,7 @@ import logging
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import replace
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from enum import StrEnum
 from typing import Annotated, Any, NamedTuple
 
@@ -128,7 +128,12 @@ def _short_date(iso_date: str) -> str:
 def _contribution(rating: Decimal | None, profile: GameProfile) -> str:
     # 전체 레이팅 = 프레임 곡 레이팅 합 / rating_divisor(CHUNITHM 50). 곡 레이팅이 둘째 자리 값이라 /50은
     # 넷째 자리에서 정확히 끝난다(반올림이 필요 없다). maimai는 나누지 않아 곡 레이팅 그대로다.
-    return _UNKNOWN if rating is None else str(rating / profile.rating_divisor)
+    if rating is None:
+        return _UNKNOWN
+    share = rating / profile.rating_divisor
+    # Arcaea(÷60)는 나눗셈이 안 끝난다 — 그때만 다섯째 자리에서 버린다(CHUNITHM ÷50·maimai ÷1은 그대로 끝난다).
+    cut = share.quantize(Decimal("0.00001"), rounding=ROUND_DOWN)
+    return str(share if cut == share else cut)
 
 
 def _const_range_texts(min_const: float | None, max_const: float | None) -> list[str]:
@@ -154,11 +159,14 @@ def _pb_data(row: PbRow, profile: GameProfile) -> dict[str, Any]:
 
 
 def _metric_labels(profile: GameProfile) -> dict[str, str]:
-    return {
-        "computed_rating": "레이팅".ljust(8),
+    """신곡 틀이 없는 게임(Arcaea)은 신곡 평균 줄을 뺀다."""
+    labels = {
+        "computed_rating": profile.rating_label.ljust(8),
         "best30_average": profile.best_label.ljust(8),
-        "new20_average": profile.new_label.ljust(8),
     }
+    if profile.new_frame_size:
+        labels["new20_average"] = profile.new_label.ljust(8)
+    return labels
 
 
 def _metric_text(key: str, value: Decimal | None, profile: GameProfile) -> str:
@@ -190,11 +198,11 @@ async def profile(ctx: ToolContext, player: PlayerRef | None = None, game: GameR
         "new20_average": _average(summary.new20_average),
         "last_synced_at": summary.last_synced_at,
     }
+    if not game_profile.new_frame_size:
+        del data["new20_average"]
     lines = [
         f"{summary.nickname or '(닉네임 없음)'}",
-        f"{labels['computed_rating']}  {data['computed_rating']}",
-        f"{labels['best30_average']}  {data['best30_average']}",
-        f"{labels['new20_average']}  {data['new20_average']}",
+        *(f"{label}  {data[key]}" for key, label in labels.items()),
         f"마지막 동기화  {summary.last_synced_at}",
     ]
     return ToolResult(data=data, display=Display(content="\n".join(lines)), display_mode="optional")
@@ -213,16 +221,18 @@ def _best_row_format(game: str) -> str:
     return f"{tc.identity_format(game)} {{상수}}  {{점수}} {{랭크}}  곡 레이팅 {{곡 레이팅}}"
 
 
-def _pb_row_cells(row: PbRow, rank_scores: dict[str, int], game: str) -> dict[str, Cell]:
+def _pb_row_cells(row: PbRow, rank_scores: dict[str, int], game: str, *, weight: int = 1) -> dict[str, Cell]:
+    """`weight`는 그 곡을 몇 번 세는가(Arcaea 베스트 상위 10곡은 2)."""
     profile = profile_for(game)
     cells = {
         **tc.identity_cells(row.song_title, row.chart_type, row.difficulty, game),
         tc.CONST: tc.const_cell(row.const),
         **tc.pb_cells(row, rank_scores, game=game),
     }
+    rating = row.rating * weight if row.rating is not None else None
     cells[_CONTRIBUTION] = (
-        cell(float(row.rating / profile.rating_divisor), _contribution(row.rating, profile))
-        if row.rating is not None
+        cell(float(rating / profile.rating_divisor), _contribution(rating, profile))
+        if rating is not None
         else cell(None, _UNKNOWN)
     )
     return cells
@@ -269,7 +279,7 @@ async def best(
     frames: list[tuple[str, list[PbRow], Decimal | None]] = []
     if kind in (BestKind.BEST, BestKind.BOTH):
         frames.append((game_profile.best_label, best_rows, best_average))
-    if kind in (BestKind.NEW, BestKind.BOTH):
+    if kind in (BestKind.NEW, BestKind.BOTH) and game_profile.new_frame_size:
         frames.append((game_profile.new_label, new_rows, new_average))
 
     header: dict[str, str] = {"닉네임": summary.nickname or "(닉네임 없음)"}
@@ -315,10 +325,12 @@ def _frame_table(
     builder.summary(header)
 
     rank_scores = ctx.terms.rank_scores()
+    game_profile = _profile(ctx)
     for title, rows, average in frames:
         builder.group(title, {"평균": _average(average)})
-        for r in rows:
-            cells = _pb_row_cells(r, rank_scores, ctx.game)
+        doubled = game_profile.best_double_count if title == game_profile.best_label else 0
+        for position, r in enumerate(rows):
+            cells = _pb_row_cells(r, rank_scores, ctx.game, weight=2 if position < doubled else 1)
             if assumed is not None:
                 mark = assumed.get((r.song_title, r.chart_type, r.difficulty))
                 cells[tc.ASSUMED] = cell(mark) if mark else cell(None, "")
@@ -548,10 +560,11 @@ async def play_count(ctx: ToolContext, chart: ChartRef, game: GameRef | None = N
         count = 0  # 마지막 수집이 친 곡을 모두 받았는데 없으면 안 친 곡이다
     else:
         return ToolResult(error=f"{label}의 플레이 횟수는 아직 못 받았어. 다음 동기화 때 다시 받아 둘게.")
+    scope = _profile(ctx).play_count_scope  # Arcaea Online은 올해 횟수만 준다
     return ToolResult(
         data={"song": chart.song.title, "chart_type": chart.chart.chart_type, "difficulty": chart.chart.difficulty,
-              "play_count": count, "as_of": state.updated_at},
-        display=Display(content=f"{label}  {count}회"),
+              "play_count": count, "as_of": state.updated_at, **({"scope": scope} if scope else {})},
+        display=Display(content=f"{label}  {f'{scope} ' if scope else ''}{count}회"),
         display_mode="optional",
     )
 
@@ -587,7 +600,7 @@ async def add_play_counts(
 
     extended = extend_table(
         table, [Column(name=_PLAY_COUNT, label=_PLAY_COUNT, value_type="number")], cells_for,
-        steps=["플레이 횟수(마지막 동기화 기준)"],
+        steps=[f"플레이 횟수({_profile(ctx).play_count_scope + ', ' if _profile(ctx).play_count_scope else ''}마지막 동기화 기준)"],
     )
     unknown = sum(1 for row in extended.rows if row.cell(_PLAY_COUNT).raw is None)
     return ToolResult(
@@ -957,8 +970,9 @@ async def what_if(
     after, before = result.after, result.before
     frames: list[tuple[str, list[PbRow], Decimal | None]] = [
         (game_profile.best_label, ranked(result.best), after.best30_average),
-        (game_profile.new_label, ranked(result.new), after.new20_average),
     ]
+    if game_profile.new_frame_size:
+        frames.append((game_profile.new_label, ranked(result.new), after.new20_average))
     header: dict[str, str] = {"닉네임": summary.nickname or "(닉네임 없음)"}
     header["레이팅"] = _overall(after.computed_rating, game_profile)
     header["지금 레이팅"] = (
@@ -1115,6 +1129,12 @@ async def on_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Sectio
 @on("maimai.sync.completed")
 async def on_maimai_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section:
     """`on_sync_completed`의 maimai 판. 이벤트 버스가 핸들러의 `records`·`songdb`를 maimai 것으로 바꿔 준다."""
+    return await _sync_section(ctx, payload)
+
+
+@on("arcaea.sync.completed")
+async def on_arcaea_sync_completed(ctx: ToolContext, payload: dict[str, Any]) -> Section:
+    """`on_sync_completed`의 Arcaea 판(플레이 횟수는 동기화가 기록과 함께 저장해 따로 모으지 않는다)."""
     return await _sync_section(ctx, payload)
 
 

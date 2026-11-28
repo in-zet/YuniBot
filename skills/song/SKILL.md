@@ -1,7 +1,7 @@
 ---
 name: song
-description: 국제판 츄니즘과 maimai DX의 곡과 채보를 찾고 상수, 노트 수, 수록 버전을 보여 준다(채보 뷰어 링크는 츄니즘만). 한국어 별칭도 등록한다.
-summary: 츄니즘과 마이마이 곡·채보를 찾아서 상수, 노트 수, 수록 버전을 알려 줄게(채보 링크는 츄니즘만). 별칭도 등록할 수 있어.
+description: 국제판 츄니즘·maimai DX와 Arcaea의 곡과 채보를 찾고 상수, 노트 수, 수록 버전을 보여 준다(채보 뷰어 링크는 츄니즘만). 한국어 별칭도 등록한다.
+summary: 츄니즘·마이마이·아르케아 곡·채보를 찾아서 상수, 노트 수, 수록 버전을 알려 줄게(채보 링크는 츄니즘만). 별칭도 등록할 수 있어.
 examples:
   - 크로노 마스 상수 얼마야?
   - 15.2에서 15.4 사이 마스 곡 보여 줘
@@ -14,12 +14,12 @@ examples:
   - 링버 해금곡 마스터 상수표 보여 줘
   - 마이마이 Link DX 마스터 상수 얼마야?
   - 마이마이 13.5 이상 마스터 곡 보여 줘
-triggers: [상수, 곡, 채보, 노트 수, 난이도, 마스터, 마스, 울티마, 익스퍼트, 수록, 버전, 작곡, 별칭, 링크, 마이마이, maimai]
+triggers: [상수, 곡, 채보, 노트 수, 난이도, 마스터, 마스, 울티마, 익스퍼트, 수록, 버전, 작곡, 별칭, 링크, 마이마이, maimai, 아르케아, arcaea, 퓨처, 비욘드, 이터널]
 category: 곡 정보
-games: [chunithm, maimai]
+games: [chunithm, maimai, arcaea]
 version: 1
 services: [songdb, terms]
-emits: [chunithm.song.viewed, maimai.song.viewed]
+emits: [chunithm.song.viewed, maimai.song.viewed, arcaea.song.viewed]
 ---
 
 - 상수, 노트 수, 레벨은 도구 결과로만 말한다. 기억으로 말하지 않는다.

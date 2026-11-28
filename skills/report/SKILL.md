@@ -1,6 +1,6 @@
 ---
 name: report
-description: 내 레이팅, 베스트 30과 신곡 20, 최근 플레이, 곡별 기록을 보여 주고 레이팅을 올릴 후보곡을 분석한다. 공개한 다른 플레이어의 기록도 볼 수 있다.
+description: 내 레이팅(Arcaea는 포텐셜), 베스트 30과 신곡 20(maimai 구곡 35·신곡 15, Arcaea 베스트 50), 최근 플레이, 곡별 기록을 보여 주고 레이팅을 올릴 후보곡을 분석한다. 공개한 다른 플레이어의 기록도 볼 수 있다.
 summary: 내 레이팅, 베스트 30·신곡 20, 최근 플레이를 보여 주고 올릴 만한 곡도 같이 찾아 줄게.
 examples:
   - 내 베스트 30 보여 줘
@@ -11,17 +11,18 @@ examples:
   - 마이마이 신곡 마스터/리마스터만 상수표 그려 줘
   - 메기도 1003866, 크로노스 1009277을 가정한 레이팅표 그려 줘
   - X-VERSE 기준으로 내 레이팅표 그려 줘
-triggers: [베스트, 신곡, 레이팅, 기록, 점수, 최근, 판정, 추천, 성과, 풀콤, 램프, 클리어, 랭크, 상수표, 가정, 기준, 몇 번, 플레이 횟수, 플레이 카운트, 플카]
+triggers: [베스트, 신곡, 레이팅, 포텐셜, 기록, 점수, 최근, 판정, 추천, 성과, 풀콤, 램프, 클리어, 랭크, 상수표, 가정, 기준, 몇 번, 플레이 횟수, 플레이 카운트, 플카]
 category: 기록과 리포트
-games: [chunithm, maimai]
+games: [chunithm, maimai, arcaea]
 version: 1
 services: [records, songdb, players, chunithm_net, terms, play_counts]
-tags_any: [chunithm-synced, maimai-synced]
-listens: [chunithm.sync.completed, maimai.sync.completed, chunithm.sync.saved, maimai.sync.saved]
+tags_any: [chunithm-synced, maimai-synced, arcaea-synced]
+listens: [chunithm.sync.completed, maimai.sync.completed, arcaea.sync.completed, chunithm.sync.saved, maimai.sync.saved]
 ---
 
 - 게임: 사용자가 게임을 말했으면("마이마이", "츄니즘") 그 말 그대로 `game`에 준다. 말하지 않았으면 비운다(코드가 주 게임 → 츄니즘 순으로 고른다). 표를 이어받는 도구(`add_scores`·`analyze`의 `table`)는 그 표의 게임을 따른다.
 - 마이마이의 레이팅은 구곡 35 + 신곡 15의 곡 레이팅(정수) 합이고 베스트 30·신곡 20이 아니다. 점수는 달성률(%)이다. `recent`(최근 플레이)는 츄니즘만 된다.
+- 아르케아(Arcaea)는 레이팅이 아니라 **포텐셜**이다: 베스트 50(그중 상위 10곡은 두 번 센다) ÷ 60, 셋째 자리까지. 신곡 틀이 없어 `best`는 베스트 50 하나만 내고 `kind`를 주지 않는다. 플레이 횟수는 Arcaea Online이 주는 **올해** 횟수다(결과의 `scope`) — 그렇게 말한다. 점수는 10,000,000점 만점(+ Max Pure 수)이고 랭크는 EX+·EX·AA… 이다.
 - 레이팅과 평균은 지금 값을 말한다. 직전 동기화 대비 변화량은 동기화 리포트에만 나오고, 프로필·베스트 조회에는 안 붙는다.
 - 레이팅 하나만 물으면 말로 답하고, 목록과 분석은 표시물로 보여 준다.
 - `best`의 `kind`는 사용자가 "베스트만"·"신곡만"처럼 한쪽을 명시했을 때만 `best`/`new`로 준다. "레이팅표"·"레이팅 대상"·그냥 "베스트"는 `kind`를 비워 둘 다(베스트 30 + 신곡 20) 낸다.

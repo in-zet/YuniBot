@@ -447,6 +447,12 @@ async def on_maimai_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Se
     return await _song_viewed(ctx, payload, "maimai")
 
 
+@on("arcaea.song.viewed")
+async def on_arcaea_song_viewed(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
+    """`on_song_viewed`의 Arcaea 판."""
+    return await _song_viewed(ctx, payload, "arcaea")
+
+
 @on("chunithm.plan.requested")
 async def on_plan_requested(ctx: ToolContext, payload: dict[str, Any]) -> Section | None:
     """내 메모 중 최근 것 몇 개를 보여준다(페이로드에 후보곡 목록이 없어 후보로 거르지

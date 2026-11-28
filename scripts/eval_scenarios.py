@@ -242,6 +242,28 @@ SCENARIOS: tuple[Scenario, ...] = (
         shown_from=("report_what_if",), must_call=("report_what_if", "image_table_image"),
         must_args=(("report_what_if", "lamps", "AP|퍼"),),
     ),
+    # Arcaea(19단계, 2026-11-28) — 평가 플레이어는 지어낸 Arcaea 기록도 받는다.
+    Scenario(
+        name="아르케아/포텐셜", question="아르케아 내 포텐셜 얼마야?",
+        must_call_any=("report_profile", "report_best"), must_args=(("report_profile", "game", "아르케아|arcaea|Arcaea"),),
+    ),
+    Scenario(
+        name="아르케아/베스트 그림", question="아르케아 베스트 50 그림으로 뽑아 줘",
+        shown_from=("report_best",), must_call=("image_table_image",),
+        must_args=(("report_best", "game", "아르케아|arcaea|Arcaea"),),
+    ),
+    Scenario(
+        name="아르케아/곡 포텐셜 계산", question="아르케아에서 상수 10.5 곡을 익플 하면 곡 포텐셜 몇이야?",
+        must_call=("rating-calc_song_rating",), must_args=(("rating-calc_song_rating", "game", "아르케아|arcaea|Arcaea"),),
+    ),
+    Scenario(
+        name="아르케아/동기화", question="아르케아 동기화해 줘",
+        must_call=("sync_run",), must_args=(("sync_run", "game", "아르케아|arcaea|Arcaea"),),
+    ),
+    Scenario(
+        name="아르케아/로그인 안내", question="아르케아 로그인은 어떻게 해?",
+        must_not_call=("sega-account_status", "sega-account_logout"),
+    ),
     # 이전 버전 기준 레이팅표 — best의 version으로 한 번에(2026-11-21).
     Scenario(
         name="기록/이전 버전 레이팅표 그림", question="엑스버스 기준으로 내 레이팅표 그려줘",

@@ -1,7 +1,7 @@
 ---
 name: terms
-description: 츄니즘과 maimai DX의 용어(랭크·램프·난이도)와 츄니즘 은어(트플플, 이론치, 오버파워, 비비기 등)의 뜻을 설명하고, 서버에서 쓰는 은어를 등록한다.
-summary: 츄니즘·마이마이 용어와 은어의 뜻을 알려 주고, 서버에서 쓰는 은어도 등록해 줄게.
+description: 츄니즘·maimai DX·Arcaea의 용어(랭크·램프·난이도, Arcaea 포텐셜)와 츄니즘 은어(트플플, 이론치, 오버파워, 비비기 등)의 뜻을 설명하고, 서버에서 쓰는 은어를 등록한다.
+summary: 츄니즘·마이마이·아르케아 용어와 은어의 뜻을 알려 주고, 서버에서 쓰는 은어도 등록해 줄게.
 examples:
   - 오버파워가 뭐야?
   - 트플플가 몇 점부터야?
@@ -9,7 +9,7 @@ examples:
   - 마이마이 SSS+는 몇 퍼센트부터야?
 triggers: [뭐야, 뜻, 용어, 은어, 이론치, 오버파워, 트플플, 비비기]
 category: 질문 답변
-games: [chunithm, maimai]
+games: [chunithm, maimai, arcaea]
 version: 1
 services: [terms, songdb, players, notify, settings]
 ---

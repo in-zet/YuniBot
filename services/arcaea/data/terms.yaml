@@ -65,3 +65,7 @@
 - canonical: "TRACK LOST"
   category: lamp
   aliases: [트랙 로스트, 트로, 폭사, TL]
+- canonical: "포텐셜"
+  category: concept
+  aliases: [potential, ptt, 레이팅]
+  meaning: Arcaea의 실력 지표(7.0.0, 2026-08-27 개정). 곡 포텐셜 = 상수 + 점수 보정(1,000만점 이상 +2, 980만점 이상 +1 + 20만점마다 1, 그 아래는 950만점 기준 30만점마다 1, 0 밑으로는 안 내려감) + 클리어 보너스 0.2(TRACK LOST가 아니면). 포텐셜 = 베스트 50곡의 곡 포텐셜 합에 그중 상위 10곡을 한 번 더 더해 60으로 나누고 셋째 자리에서 버린다. 최근 기록은 들어가지 않는다.

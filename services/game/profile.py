@@ -49,6 +49,11 @@ class GameProfile:
     # 로그인하는 계정("sega": CHUNITHM·maimai가 같은 SEGA 계정, "arcaea": lowiro 계정)과 로그인 안내에 쓰는 명령.
     account: str = "sega"
     login_command: str = "/로그인"
+    # 전체 레이팅을 부르는 이름(Arcaea는 포텐셜)과, 플레이 횟수가 세는 기간(Arcaea Online은 올해 것만 준다).
+    rating_label: str = "레이팅"
+    # 곡 레이팅 계산에서 볼 가장 높은 점수(CHUNITHM 1,010,000·maimai 101.0000%, Arcaea는 1,000만점 위로는 포텐셜이 그대로다).
+    max_score: int = 1_010_000
+    play_count_scope: str = ""
     # NET 인게임 설정 페이지에서 이름 붙여 다루는 항목(`arcade`·`settings`). 없으면 그 게임은 설정을 다루지 않는다.
     settings_fields: tuple[SettingField, ...] = ()
     # 풀콤보·올 저스티스(maimai는 올 퍼펙트)에 해당하는 콤보 램프 이름과 사용자에게 보일 이름. 램프 우열표의 키다.

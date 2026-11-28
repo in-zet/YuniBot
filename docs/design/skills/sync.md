@@ -107,3 +107,8 @@ emits: [chunithm.sync.completed, chunithm.sync.reported]
 - 리포트의 레이팅·베스트30평균·신곡20평균 현재값과 직전값은 `/프로필`·`/베스트`와 같은 출처(`RecordsService.rating_deltas`, 동기화 때 저장한 CHUNITHM-NET 스냅샷)에서 가져온다.
 - 동기화 때 프로필 페이지의 플레이어 레벨·환생 별·캐릭터 그림 주소·프레임 주소를 `records_profile`(플레이어당 최신 한 줄, 이력 없음)에 덮어쓴다(2026-10-20, 16단계 Part 0). 추가 접속은 없다. 그림 파일은 받지 않고 주소만 저장한다 — 그릴 때 받아 캐시한다. 읽기는 `RecordsService.player_profile`. 계정 연결 때 버릴 데이터는 `player_id` 열로 자동 발견된다.
 - **램프는 전체 PB 페이지 것이 맞다(2026-10-21).** 베스트30·신곡20(`ratingDetailBest`/`ratingDetailRecent`) 페이지에는 램프 이미지가 아예 없어(`docs/reference/chunithm-net/rating_detail_best.html`로 확인) 파서가 FAILED/NONE을 기본값으로 채운다. 그래서 같은 채보가 여러 곳에 있을 때 점수가 높은 쪽을 쓰되, 점수가 같으면 전체 PB 쪽을 쓴다(`_merge_personal_bests`). 점수가 같은데 램프만 더 좋아졌다면 램프 세 칸만 올린다(`_raise_lamps` — 점수·세션·시각은 그대로, 내리지는 않는다). 예전 저장분의 틀린 램프는 다음 동기화가 이 경로로 고친다. 램프는 판정 내역에서 정해져 점수로 계산할 수 없다.
+
+## Arcaea 대응 (19단계 2단계, 2026-11-28)
+
+- 도구 태그를 `tags_any: [sega-linked, arcaea-linked]`로 바꿨다(Arcaea만 하는 사람도 부를 수 있게). 로그인 안내 문구는 게임 프로필의 `net_name`·`login_command`를 쓴다("Arcaea Online 로그인이 … `/아르케아 로그인`으로 연결해 줘"). Arcaea Online이 거절한 경우(구독 없음 등)는 사이트 문구를 그대로 돌려준다.
+- Arcaea는 최근 플레이 목록이 없어서(마지막 1판뿐) 기록마다 붙은 시각을 최근 플레이로 넘긴다 — 직전 동기화 뒤에 오른 기록이 그날 세션이 된다. 점수가 안 오른 판은 세션에 안 잡힌다.

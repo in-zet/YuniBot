@@ -10,7 +10,7 @@ examples:
   - 마이마이 13.0 상수 곡 폴더 만들어줘
 triggers: [폴더]
 category: 폴더
-games: [chunithm, maimai]
+games: [chunithm, maimai, arcaea]
 version: 1
 services: [songdb, db]
 ---

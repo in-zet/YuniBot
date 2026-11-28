@@ -12,7 +12,6 @@ from services.game.registry import profile_for
 # 곡 DB에 있는 상수의 범위(츄니즘 ULT까지, maimai 15.0까지)를 넉넉히 덮는다.
 _MIN_CONST = 1.0
 _MAX_CONST = 17.0
-_MAX_SCORE = 1_010_000  # 두 게임 모두 만점(츄니즘 1,010,000점, maimai 달성률 101.0000%)
 _MAX_LISTED = 10  # 맞는 상수가 많을 때(낮은 점수에서 곡 레이팅이 0인 경우) 보여 줄 최대 개수
 
 
@@ -112,7 +111,7 @@ async def needed_score(ctx: ToolContext, const: float, rating: float, game: Game
         return error
     profile = _profile(ctx)
     target = Decimal(str(rating))
-    best = _rating(profile, _MAX_SCORE, const)
+    best = _rating(profile, profile.max_score, const)
     if best < target:
         return ToolResult(
             data={"game": profile.game, "const": f"{const:.1f}", "reachable": False, "max_song_rating": _rating_text(profile, best)},
@@ -120,7 +119,7 @@ async def needed_score(ctx: ToolContext, const: float, rating: float, game: Game
                                     f"{_rating_text(profile, target)}에는 못 닿아"),
             display_mode="optional",
         )
-    low, high = 0, _MAX_SCORE  # 점수가 오르면 곡 레이팅은 줄지 않는다 — 이진 탐색으로 처음 목표에 닿는 점수를 찾는다
+    low, high = 0, profile.max_score  # 점수가 오르면 곡 레이팅은 줄지 않는다 — 이진 탐색으로 처음 목표에 닿는 점수를 찾는다
     while low < high:
         middle = (low + high) // 2
         if _rating(profile, middle, const) >= target:

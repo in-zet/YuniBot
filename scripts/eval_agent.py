@@ -250,6 +250,34 @@ async def seed_maimai_fixture(*, executor: ToolExecutor, player_id: str, tags: f
     return len(plays)
 
 
+# Arcaea 지어낸 기록: (점수, 클리어 램프, 콤보 램프)를 이 순서로 돌려 준다.
+_ARCAEA_FIXTURE_PLAYS = (
+    (10_001_000, "HARD CLEAR", "PURE MEMORY"), (9_960_000, "NORMAL CLEAR", "FULL RECALL"), (9_910_000, "HARD CLEAR", ""),
+    (9_850_000, "NORMAL CLEAR", ""), (9_720_000, "EASY CLEAR", ""), (9_400_000, "TRACK LOST", ""),
+)
+
+
+async def seed_arcaea_fixture(*, executor: ToolExecutor, player_id: str, tags: frozenset[str]) -> int:
+    """평가 플레이어에게 Arcaea 기록을 준다. 상수 9.0~11.5 채보를 하나 걸러 하나씩 기록한다. 곡 DB 캐시
+    (`data/arcaea/songs.json`)가 없으면 0개다. 넣은 기록 수를 돌려준다."""
+    services = executor._game_services.get("arcaea")  # pyright: ignore[reportPrivateUsage]
+    if services is None:
+        return 0
+    songdb = cast("SongDb", services["songdb"])
+    records = cast("RecordsService", services["records"])
+    rank_scores = cast("TermsService", services["terms"]).rank_scores()
+    hits = sorted(songdb.find_songs(min_const=9.0, max_const=11.5), key=lambda h: (h.song.title, h.chart.difficulty))
+    plays: list[ChartPlay] = []
+    for i, hit in enumerate(hits[::2]):
+        score, clear, combo = _ARCAEA_FIXTURE_PLAYS[i % len(_ARCAEA_FIXTURE_PLAYS)]
+        rank = max((value, name) for name, value in rank_scores.items() if value <= score)[1]
+        plays.append(ChartPlay(song_title=hit.song.title, difficulty=hit.chart.difficulty, score=score, rank=rank,
+                               clear_lamp=clear, combo_lamp=combo))
+    ctx = ToolContext(player_id=player_id, tags=tags, services={}, event_bus=executor.event_bus, game="arcaea")
+    await records.save_sync(player_id, SyncSnapshot(profile=ProfileSnapshot(username="EVAL"), all_plays=plays), ctx)
+    return len(plays)
+
+
 async def seed_play_counts(*, executor: ToolExecutor, conn: Any, player_id: str) -> None:
     """두 게임 기록의 채보마다 지어낸 플레이 횟수(1~12회)를 저장하고 "다 받음" 상태로 둔다 — "플카 5 이상" 같은 거르기가
     걸러질 거리가 있게. 수집(NET)은 평가에서 돌지 않는다."""
@@ -348,10 +376,11 @@ async def _run_all(args: argparse.Namespace, config: CoreConfig) -> None:
         )
         seeded = await seed_fixture(executor=executor, loop=seeding_loop, player_id=player.id, tags=tags)
         seeded_maimai = await seed_maimai_fixture(executor=executor, player_id=player.id, tags=tags)
+        seeded_arcaea = await seed_arcaea_fixture(executor=executor, player_id=player.id, tags=tags)
         await seed_play_counts(executor=executor, conn=client.conn, player_id=player.id)
         print(
             f"모델 {config.llm_provider}/{config.agent_model} · 모드 {config.skill_loading_mode} · "
-            f"지어낸 기록 츄니즘 {seeded}개 · maimai {seeded_maimai}개"
+            f"지어낸 기록 츄니즘 {seeded}개 · maimai {seeded_maimai}개 · Arcaea {seeded_arcaea}개"
         )
         for suite, label, question, case in jobs:
             for attempt in range(args.repeat):
