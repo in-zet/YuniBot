@@ -7,6 +7,7 @@ must_call: 전부 불려야 한다.
 must_not_call: 하나도 불리면 안 된다.
 must_args: (도구, 인자, 글자) — 그 도구를 부른 호출 중 하나는 그 인자 값(목록이면 항목을 이어 붙인 글)에 그 글자가 들어 있어야 한다.
            글자는 "|"로 나눠 여러 개를 줄 수 있다(하나만 들어 있으면 된다).
+must_not_say: 유니가 쓴 답(도구 표시물 제외)에 이 글자가 하나도 없어야 한다.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ class Scenario:
     must_call: tuple[str, ...] = ()
     must_not_call: tuple[str, ...] = ()
     must_args: tuple[tuple[str, str, str], ...] = ()
+    must_not_say: tuple[str, ...] = ()
     # 대화 스레드 안의 지침처럼 프롬프트 맥락에 더 넣을 글(튜토리얼 DM 대화 시험용).
     context: str = ""
 
@@ -40,6 +42,8 @@ def _tutorial_context(history: str) -> str:
     return f"{module._guidance()}\n{history}"  # pyright: ignore[reportPrivateUsage]
 
 
+# 플레이어에게 다음 행동(동기화 등)을 권하지 않는다(2026-11-28 사용자 결정 "플레이어를 유도하지 마").
+_NO_NUDGE = ("동기화하고", "동기화하면", "동기화한 뒤", "다시 동기화", "동기화해")
 _CONST_TABLE = ("report_const_table",)
 _SEARCH = ("song_find_songs",)
 
@@ -333,6 +337,7 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="기록/플레이 횟수 표", question="내 베스트 곡들 각각 몇 번씩 쳤는지 보여줘",
         must_call=("report_best", "report_add_play_counts"),
+        must_not_say=_NO_NUDGE,
     ),
     Scenario(
         name="기록/플카 하나", question="Climax 마스 플카 몇이야?",
@@ -341,22 +346,26 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         name="기록/플카 표", question="베스트 플카 보여줘",
         must_call=("report_best", "report_add_play_counts"),
+        must_not_say=_NO_NUDGE,
     ),
     # 플카로 거르기 — 저장값 표에 table_query(2026-11-28 사용자 요청).
     Scenario(
         name="기록/플카 거르기 베스트", question="베스트 중에 플카 5 이상인 것만 보여줘",
         must_call=("report_best", "report_add_play_counts", "table_query"),
         must_args=(("table_query", "where", "플레이 횟수"),),
+        must_not_say=_NO_NUDGE,
     ),
     Scenario(
         name="기록/플카 거르기 회", question="베스트에서 5회 이상 친 곡만 보여줘",
         must_call=("report_best", "report_add_play_counts", "table_query"),
         must_args=(("table_query", "where", "플레이 횟수"),),
+        must_not_say=_NO_NUDGE,
     ),
     Scenario(
         name="기록/플카 거르기 전체", question="플카 5 이상인 곡 다 보여줘",
         must_call=("report_const_table", "report_add_play_counts", "table_query"),
         must_args=(("table_query", "where", "플레이 횟수"),),
+        must_not_say=_NO_NUDGE,
     ),
     # 앞 대화의 오류를 지금 상태로 믿지 않는다(2026-11-28 실기 — 수집이 끝났는데 17:41의 "아직"을 보고 도구를 안 불렀다).
     Scenario(
@@ -367,7 +376,7 @@ SCENARIOS: tuple[Scenario, ...] = (
             "유니: 아직 플레이 횟수를 모아 두지 않았어. 동기화를 한 번 해 주면 뒤에서 모아 둘게.\n"
             "플레이어: 츄니즘 동기화\n유니: 동기화 끝났어! 새로 친 기록은 없고 레이팅 그대로야."
         ),
-        must_call=("report_add_play_counts",), must_not_call=("sync_run",),
+        must_call=("report_add_play_counts",), must_not_call=("sync_run",), must_not_say=_NO_NUDGE,
     ),
     Scenario(
         name="기록/플카 방금 동기화 뒤 다시",
@@ -377,7 +386,7 @@ SCENARIOS: tuple[Scenario, ...] = (
             "유니: 아직 플레이 횟수를 모아 두지 않았어. 동기화하면 뒤에서 모아 둘게.\n"
             "플레이어: 츄니즘 동기화\n유니: 동기화 끝났어! 새로 친 기록은 없고 레이팅 그대로야."
         ),
-        must_call=("report_add_play_counts",), must_not_call=("sync_run",),
+        must_call=("report_add_play_counts",), must_not_call=("sync_run",), must_not_say=_NO_NUDGE,
     ),
     # 운영은 최근 대화(플레이어·유니 메시지)를 통째로 user_text에 싣는다 — 앞서 유니가 틀리게 "못 한다"고 한 답이
     # 여러 번 쌓인 채로 같은 요청이 와도 도구를 불러야 한다(2026-11-28 실기, 같은 실패가 네 번 이어졌다).
@@ -393,7 +402,7 @@ SCENARIOS: tuple[Scenario, ...] = (
             "조건에 맞는 채보를 고를 수가 없어.\n"
             "100: <@200> 츄니즘 플레이카운트가 5 이상인 모든 채보를 새 폴더에 추가"
         ),
-        must_call=("report_add_play_counts",), must_not_call=("sync_run",),
+        must_call=("report_add_play_counts",), must_not_call=("sync_run",), must_not_say=_NO_NUDGE,
     ),
     Scenario(
         name="업데이트/마이 신곡", question="마이마이 이번에 들어온 신곡 보여줘",

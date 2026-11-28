@@ -573,7 +573,7 @@ def _judgement_cells(score: RecentScore) -> dict[str, Cell]:
 # ---------------------------------------------------------------- 플레이 횟수 (2026-11-27 사용자 요청, 2026-11-28 저장 방식)
 
 _PLAY_COUNT = "플레이 횟수"
-_NOT_COLLECTED = "아직 플레이 횟수를 모아 두지 않았어. 동기화하면 뒤에서 모아 둘게."
+_NOT_COLLECTED = "플레이 횟수는 동기화할 때 같이 모아 두는데, 아직 모은 적이 없어."
 _COLLECTING = "지금 플레이 횟수를 모으는 중이야. 조금 뒤에 다시 물어봐 줘."
 
 
@@ -600,7 +600,7 @@ async def on_maimai_sync_saved(ctx: ToolContext, payload: dict[str, Any]) -> Non
 @tool()
 async def play_count(ctx: ToolContext, chart: ChartRef, game: GameRef | None = None) -> ToolResult:
     """채보 하나를 지금까지 몇 번 쳤는지(플카) 본인 저장값으로 답한다("크로노 마스 몇 번 쳤어?", "크로노 마스 플카").
-    동기화 뒤 배경에서 NET 곡 상세로 모아 둔 값이라 마지막 동기화 기준이다. 여러 채보면 그 채보 표를 add_play_counts에 준다."""
+    동기화 뒤 배경에서 NET 곡 상세로 모아 둔 값이다. 여러 채보면 그 채보 표를 add_play_counts에 준다."""
     assert isinstance(chart, ResolvedChart)
     label = f"{chart.song.title} {f'{chart.chart.chart_type} ' if chart.chart.chart_type else ''}{chart.chart.difficulty}"
     state = await ctx.play_counts.state(ctx.player_id)
@@ -630,7 +630,7 @@ async def play_count(ctx: ToolContext, chart: ChartRef, game: GameRef | None = N
 async def add_play_counts(
     ctx: ToolContext, table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])]
 ) -> ToolResult:
-    """채보 표에 "플레이 횟수"(플카) 칸을 더한 새 표를 돌려준다(본인 저장값, 마지막 동기화 기준). 숫자 칸이라
+    """채보 표에 "플레이 횟수"(플카) 칸을 더한 새 표를 돌려준다(본인 저장값). 숫자 칸이라
     "플카 5 이상"은 이 표에 table_query(where 플레이 횟수 >= 5)를 건다. 안 친 채보는 0회, 아직 못 받은 곡은 "모름"."""
     assert isinstance(table, WorkTable)
     state = await ctx.play_counts.state(ctx.player_id)
@@ -657,7 +657,8 @@ async def add_play_counts(
 
     extended = extend_table(
         table, [Column(name=_PLAY_COUNT, label=_PLAY_COUNT, value_type="number")], cells_for,
-        steps=[f"플레이 횟수({_profile(ctx).play_count_scope + ', ' if _profile(ctx).play_count_scope else ''}마지막 동기화 기준)"],
+        # 기준 시점(마지막 동기화)은 `data.as_of`에만 둔다 — 표 머리에 적으면 모델이 답마다 따라 말했다(2026-11-28).
+        steps=[f"플레이 횟수({_profile(ctx).play_count_scope})" if _profile(ctx).play_count_scope else "플레이 횟수"],
     )
     unknown = sum(1 for row in extended.rows if row.cell(_PLAY_COUNT).raw is None)
     return ToolResult(

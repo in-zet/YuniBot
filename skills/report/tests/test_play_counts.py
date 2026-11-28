@@ -118,7 +118,7 @@ async def test_add_play_counts_column_is_numeric_for_filters(skill: ModuleType) 
 
 async def test_add_play_counts_before_any_collection_says_so(skill: ModuleType) -> None:
     result = await skill.add_play_counts(_ctx(_FakePlayCounts()), table=_chart_table([("A", "", "MAS")]))
-    assert result.error == "아직 플레이 횟수를 모아 두지 않았어. 동기화하면 뒤에서 모아 둘게."
+    assert result.error == "플레이 횟수는 동기화할 때 같이 모아 두는데, 아직 모은 적이 없어."
 
     result = await skill.add_play_counts(_ctx(_FakePlayCounts(running=True)), table=_chart_table([("A", "", "MAS")]))
     assert result.error == "지금 플레이 횟수를 모으는 중이야. 조금 뒤에 다시 물어봐 줘."

@@ -76,6 +76,8 @@ class TurnTrace:
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     lineage: dict[str, set[str]] = field(default_factory=dict)
     shown_table_ids: list[str] = field(default_factory=list)
+    # 유니가 쓴 답(도구 표시물 제외). `must_not_say` 판정에 쓴다.
+    answer: str = ""
 
     @property
     def tool_names(self) -> list[str]:
@@ -135,6 +137,7 @@ def judge_scenario(scenario: Scenario, trace: TurnTrace) -> list[str]:
         joined = [" ".join(map(str, v)) if isinstance(v, list) else str(v or "") for v in values]
         if not any(option in value for value in joined for option in text.split("|")):
             problems.append(f"{tool_name}의 {arg}에 '{text}'가 없다(받은 값: {values})")
+    problems.extend(f"답에 '{text}'가 있다: {trace.answer[:200]!r}" for text in scenario.must_not_say if text in trace.answer)
     if scenario.shown_from:
         if not trace.shown_table_ids:
             problems.append("보인 표가 없다")
@@ -321,6 +324,7 @@ async def _run_turn(
     elapsed = time.monotonic() - started
     trace = loop.trace
     trace.shown_table_ids = list(result.drawn_table_ids) or ([result.last_table_id] if result.last_table_id else [])
+    trace.answer = result.text or ""
     return result, trace, elapsed
 
 
