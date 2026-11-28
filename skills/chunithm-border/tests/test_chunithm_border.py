@@ -147,7 +147,7 @@ async def test_remaining_locked_without_chunithm_synced_shows_how_to_get_it() ->
     from core.resolvers import ResolverRegistry
     from core.tool_types import ChartRef, RankRef
 
-    registry = SkillRegistry([Path("skills/sega-account"), Path("skills/chunithm-border")])
+    registry = SkillRegistry([Path("skills/sega-account"), Path("skills/arcaea-account"), Path("skills/chunithm-border")])
     registry.load()
     assert registry.failures() == {}
 

@@ -32,7 +32,9 @@ _UNKNOWN_FAILURE = "로그인에 실패했어. 잠시 뒤에 다시 해 줘."
 def _login_order(ctx: ToolContext) -> list[str]:
     """먼저 요청한 게임(없으면 주 게임)의 NET으로, 그 NET이 점검이거나 닿지 않으면 다른 게임의 NET으로 로그인한다
     (2026-11-22 사용자 결정 — CHUNITHM-NET 점검 중에 maimai는 정상인데 로그인이 막혔다). `clal`은 게임 공통이다."""
-    return [ctx.game, *(game for game in ctx.game_services if game != ctx.game)]
+    sega_games = [game for game in ctx.game_services if profile_for(game).account == "sega"]  # Arcaea는 계정이 따로다
+    first = [ctx.game] if profile_for(ctx.game).account == "sega" else []
+    return [*first, *(game for game in sega_games if game not in first)]
 
 
 async def _attempt_login(ctx: ToolContext, username: str, password: str, interaction: discord.Interaction) -> None:
@@ -154,7 +156,7 @@ async def status(ctx: ToolContext) -> ToolResult:
     player = await ctx.players.get_player(ctx.player_id)
     assert player is not None
     # 게임별 서비스 묶음이 없으면(시험 등) 지금 게임 하나만 본다.
-    games = list(ctx.game_services) or [ctx.game]
+    games = [game for game in ctx.game_services if profile_for(game).account == "sega"] or [ctx.game]
     per_game: dict[str, dict[str, str | None]] = {}
     for game in games:
         records = ctx.for_game(game).records
@@ -186,7 +188,7 @@ async def status(ctx: ToolContext) -> ToolResult:
     )
 
 
-@tool(tags=["sega-linked"], mutates=True)
+@tool(tags_any=["sega-linked", "arcaea-linked"], mutates=True)
 async def set_privacy(ctx: ToolContext, public: bool) -> ToolResult:
     """기록(프로필, 베스트, 곡별 기록) 공개 여부를 켜거나 끈다."""
     await ctx.players.set_visibility(ctx.player_id, "records_public", public)

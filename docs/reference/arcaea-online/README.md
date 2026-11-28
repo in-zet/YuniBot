@@ -4,7 +4,7 @@
 
 | 파일 | 경로 | 내용 |
 | --- | --- | --- |
-| `score_rating_me.json` | `/webapi/score/rating/me` | `best_rated_scores` 50개: `song_id`·`difficulty`(0 PST … 4 BYD)·점수·판정 수·`clear_type`·곡별 포텐셜 `rating`(소수 끝까지)·제목(`en`/`ja`) |
+| `score_rating_me.json` | `/webapi/score/rating/me` | `best_rated_scores` 50개: `song_id`·`difficulty`(0 PST·1 PRS·2 FTR·3 BYD·4 ETR — 4가 ETR인 것은 곡 DB와 대조해 확인)·점수·판정 수·`clear_type`·곡별 포텐셜 `rating`(소수 끝까지)·제목(`en`/`ja`) |
 | `score_song_me_all_ftr_p1.json` | `/webapi/score/song/me/all?difficulty=2&page=1&sort=date&term=` | FTR 기록 첫 페이지(10개, `count` 199). 위 칸에 더해 `shiny_perfect_count`·`score_below_max`·`best_clear_type`·`health`·`time_played`(ms)·`yearly_play_count` |
 
 ## 실측으로 안 것

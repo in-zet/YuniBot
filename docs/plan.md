@@ -140,7 +140,7 @@
 
 - [ ] 19. Arcaea(사용자 결정 2026-11-28) — 세 단계, 단계마다 설명·승인 뒤 진행
   - [X] 1단계 게임 정보·곡 DB — 구현 완료(2026-11-28). `services/arcaea/`(프로필·포텐셜 `rating`·용어 사전·곡 DB `songdb`), 게임 공통 틀에 `best_double_count`(상위 N곡 두 배)·`clear_lamp_rating_bonus`. 등록만 하고 접속 서비스·스킬 `games`는 아직 없다
-  - [ ] 2단계 계정 연결(아이디·비밀번호 로그인과 `sid` 쿠키 직접 넣기, 별도 상태 태그)과 동기화(`/webapi/score/song/me/all` 날짜순 페이지, 베스트 50에서 상수 역산, `song_id` ↔ 곡 DB 제목 잇기)
+  - [X] 2단계 계정 연결과 동기화 — 구현 완료(2026-11-28). `arcaea-account`(`/아르케아 로그인`: 아이디·비밀번호 또는 쿠키, 코어 마이그레이션 032), `services/arcaea/arcaea_net.py`(초당 5번, 난이도별 전체 페이지 — 실측 246곡 8.2초), 베스트 50에서 상수 역산(`arcaea_const_observed`), 올해 플레이 횟수 저장, `sync`가 `tags_any`로 Arcaea를 받는다. 실측: 계산 포텐셜 11.366 = Arcaea Online 표시값. 실기 미확인: 아이디·비밀번호 로그인, `sid` 만료
   - [ ] 3단계 스킬 확장(`sync`·`report`·`song`·`terms`·`rating-calc` 등, 신곡 틀 없는 표시 정리)
 
 고정 원칙: 5단계까지는 LLM 없이 슬래시로 동작한다. `yuni` 서비스는 11단계 전까지 정해진 문구를 돌려주고, 7~10단계 스킬은 이 인터페이스만 쓴다.

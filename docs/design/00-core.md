@@ -480,6 +480,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | `players.first_seen` | 알림 | 코어 | `yuni-bond` |
 | `players.linked` | 알림 | `account-link` | 없음 |
 | `sega.login.expired` | 알림 | `chunithm_net` 서비스 | `sega-account` |
+| `arcaea.login.expired` | 알림 | Arcaea NET 서비스(`chunithm_net` 자리) | `arcaea-account` |
 | `chunithm.sync.completed` | 모으기 | `sync` | `report`, `goals`, `updates`, `arcade`, `yuni-bond` |
 | `chunithm.sync.reported` | 알림 | `sync` | `session` |
 | `chunithm.sync.saved` | 알림 | `sync` | `report`(플레이 횟수 수집) |
@@ -696,6 +697,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 | [memory](skills/memory.md) | 공통 | 기억한 내용 보기, 지우기, 자동 저장 끄기 | 없음 |
 | [yuni-bond](skills/yuni-bond.md) | 공통 | 이정표, 동기화 때 덧붙이는 귀띔, 플레이 계획과 약속 | 없음 |
 | [sega-account](skills/sega-account.md) | 츄니즘 | CHUNITHM-NET 로그인(입력창), 쿠키 만료 안내, 기록 공개 설정 | 없음 |
+| [arcaea-account](skills/arcaea-account.md) | Arcaea | Arcaea Online 로그인(입력창: 아이디·비밀번호 또는 쿠키), 쿠키 만료 안내 | 없음 |
 | [song](skills/song.md) | 츄니즘 | 곡·별칭 검색, 상수, 노트 수, 채보 뷰어 링크, 한국어 별칭 | 없음 |
 | [terms](skills/terms.md) | 츄니즘 | 용어와 은어의 뜻, 서버 은어 제안·승인 | 없음. 승인만 `admin` |
 | [chunithm-border](skills/chunithm-border.md) | 츄니즘 | 허용 어택 개수, 목표까지 남은 어택 | 없음. 남은 어택만 `chunithm-synced` |

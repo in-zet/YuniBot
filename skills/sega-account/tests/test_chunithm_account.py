@@ -349,11 +349,11 @@ async def test_logout_locked_without_chunithm_linked_shows_how_to_get_it() -> No
     from core.registry import SkillRegistry
     from core.resolvers import ResolverRegistry
 
-    registry = SkillRegistry([Path("skills/sega-account")])
+    registry = SkillRegistry([Path("skills/sega-account"), Path("skills/arcaea-account")])
     registry.load()
     assert registry.failures() == {}
 
-    [(skill, spec)] = [(s, sp) for s, sp in registry.tool_specs() if sp.name == "logout"]
+    [(skill, spec)] = [(s, sp) for s, sp in registry.tool_specs() if sp.name == "logout" and s.manifest.name == "sega-account"]
 
     executor = ToolExecutor(
         resolvers=ResolverRegistry(),

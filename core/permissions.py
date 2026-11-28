@@ -7,15 +7,15 @@ from typing import Protocol
 from core.manifest import DefinedTag
 
 # "상태 태그"는 서비스가 상태를 보고 자동으로만 붙이고 뗀다. 손으로(admin의 grant_tag/
-# revoke_tag 포함) 못 바꾼다. 로그인 때 `sega-linked`를, 게임별 첫 동기화 때 `<게임>-synced`
-# (`GameProfile.synced_tag`)를 서비스가 붙인다. 설명(description/how_to_get)은 sega-account 스킬의
-# defines_tags가 소유한다.
+# revoke_tag 포함) 못 바꾼다. 로그인 때 계정별 `<계정>-linked`(`sega-linked`·`arcaea-linked`)를, 게임별 첫
+# 동기화 때 `<게임>-synced`(`GameProfile.synced_tag`)를 서비스가 붙인다. 설명(description/how_to_get)은
+# 그 계정 스킬(sega-account·arcaea-account)의 defines_tags가 소유한다.
 SEGA_LINKED_TAG = "sega-linked"
-_SYNCED_TAG_SUFFIX = "-synced"
+_STATUS_TAG_SUFFIXES = ("-linked", "-synced")
 
 
 def is_status_only_tag(tag: str) -> bool:
-    return tag == SEGA_LINKED_TAG or tag.endswith(_SYNCED_TAG_SUFFIX)
+    return tag.endswith(_STATUS_TAG_SUFFIXES)
 
 
 @dataclass(slots=True, kw_only=True)

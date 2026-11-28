@@ -22,6 +22,7 @@ from core.tool_types import (
     SongQuery,
     ToolContext,
 )
+from services.arcaea.arcaea_net import ArcaeaNetService
 from services.arcaea.songdb import ArcaeaSongDbService
 from services.chunithm.chunithm_net import ChunithmNetService
 from services.chunithm.songdb import SongDbService
@@ -93,7 +94,7 @@ class GameServices:
     terms: TermsService
     records: RecordsService
     chart_ref: ChartRefResolver
-    net: ChunithmNetService | MaimaiNetService | None
+    net: ChunithmNetService | MaimaiNetService | ArcaeaNetService | None
     play_counts: PlayCountService
 
     def skill_services(self) -> dict[str, object]:
@@ -157,20 +158,18 @@ async def build_game_services(
     data_dir: Path,
 ) -> GameServices:
     profile = profile_for(game)
+    terms = TermsService(profile.terms_path, conn=conn, game=game, percent_scores=profile.score_is_percent)
+    await terms.load_aliases()
+    if game == "arcaea":
+        return await _build_arcaea(profile, terms, conn=conn, players=players, secrets=secrets, data_dir=data_dir)
     songdb: SongDb
     net: ChunithmNetService | MaimaiNetService | None
     if game == "maimai":
         songdb = MaimaiSongDbService(data_dir / "maimai" / "music-ex-intl.json", conn=conn)
         net = MaimaiNetService(conn=conn, secrets=secrets, players=players) if secrets is not None else None
-    elif game == "arcaea":
-        # Arcaea Online 접속(로그인·동기화)은 2단계에서 붙인다. 그때까지는 곡 DB·용어·계산만 있다.
-        songdb = ArcaeaSongDbService(data_dir / "arcaea" / "songs.json", conn=conn)
-        net = None
     else:
         songdb = SongDbService(conn=conn, profile=profile)
         net = ChunithmNetService(conn=conn, secrets=secrets, players=players) if secrets is not None else None
-    terms = TermsService(profile.terms_path, conn=conn, game=game, percent_scores=profile.score_is_percent)
-    await terms.load_aliases()
     records = RecordsService(conn=conn, songdb=songdb, players=players, game=game)
     return GameServices(
         profile=profile,
@@ -180,6 +179,32 @@ async def build_game_services(
         chart_ref=ChartRefResolver(songdb=songdb, terms=terms),
         net=net,
         play_counts=PlayCountService(conn=conn, game=game, records=records, songdb=songdb, net=net),
+    )
+
+
+async def _build_arcaea(
+    profile: GameProfile,
+    terms: TermsService,
+    *,
+    conn: aiosqlite.Connection,
+    players: PlayersService,
+    secrets: SecretsService | None,
+    data_dir: Path,
+) -> GameServices:
+    """Arcaea는 플레이 횟수를 동기화 때 기록과 함께 받는다 — 플레이 횟수 서비스는 NET 없이 두고, NET 서비스가 받은 것을
+    넘긴다. 거꾸로 낸 상수(`arcaea_const_observed`)를 곡 DB에 먼저 덮는다."""
+    songdb = ArcaeaSongDbService(data_dir / "arcaea" / "songs.json", conn=conn)
+    await songdb.load_observed()
+    records = RecordsService(conn=conn, songdb=songdb, players=players, game=profile.game)
+    play_counts = PlayCountService(conn=conn, game=profile.game, records=records, songdb=songdb, net=None)
+    net = (
+        ArcaeaNetService(conn=conn, secrets=secrets, players=players, songdb=songdb,
+                         save_play_counts=play_counts.store_counts)
+        if secrets is not None else None
+    )
+    return GameServices(
+        profile=profile, songdb=songdb, terms=terms, records=records,
+        chart_ref=ChartRefResolver(songdb=songdb, terms=terms), net=net, play_counts=play_counts,
     )
 
 

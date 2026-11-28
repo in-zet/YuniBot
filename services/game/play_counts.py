@@ -107,6 +107,8 @@ class PlayCountService:
             return None
         if self._game == "maimai":
             return (title, chart_type)
+        if self._game == "arcaea":
+            return (title, "")  # Arcaea는 동기화 때 기록과 함께 받아 제목으로 저장한다(`store_counts`)
         song = self._songdb.song_by_title(title)
         return (str(song.id), "") if song is not None and song.id else None
 
@@ -187,6 +189,13 @@ class PlayCountService:
         await self._save_state(player_id, activity.total_plays, newest_text, complete=complete)
         logger.info("%s 플레이 횟수 수집(%s): %d곡 중 %d곡", self._game, mode, len(targets), stored)
         return CollectResult(mode=mode, asked=len(targets), fetched=stored)
+
+    async def store_counts(self, player_id: str, counts: Mapping[PlayCountKey, dict[str, int]]) -> None:
+        """NET이 기록과 함께 준 플레이 횟수를 통째로 저장한다(Arcaea Online의 올해 플레이 횟수). 받은 곡이 친 곡 전부라
+        "다 받음"으로 둔다 — 없는 곡은 0회다."""
+        stored = await self._store(player_id, counts)
+        await self._save_state(player_id, None, None, complete=True)
+        logger.info("%s 플레이 횟수 저장: %d곡", self._game, stored)
 
     def _net_keys(self, keys: Sequence[PlayCountKey]) -> list[Any]:
         return list(keys) if self._game == "maimai" else [int(song_key) for song_key, _ in keys]

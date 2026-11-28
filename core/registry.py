@@ -32,7 +32,7 @@ KNOWN_SERVICE_NAMES: frozenset[str] = frozenset(
 # 00-core.md "이벤트 목록"에서 코어/서비스가 내는 것으로 적힌 이벤트.
 # 스킬 manifest의 emits에는 없으므로 여기서 "정의된 이벤트"로 등록한다.
 # 스킬이 내는 이벤트는 여기 두지 않는다 — 찾아낸 모든 스킬의 emits가 정의로 합쳐진다.
-CORE_EMITTED_EVENTS: frozenset[str] = frozenset({"players.first_seen", "sega.login.expired"})
+CORE_EMITTED_EVENTS: frozenset[str] = frozenset({"players.first_seen", "sega.login.expired", "arcaea.login.expired"})
 
 # admin/tester는 어떤 스킬도 defines_tags로 정의할 수 없다 — 빠졌을 때 항상 숨김
 # (describe_lock이 정의를 못 찾으면 fail-closed) 처리되어야 하는 진짜 코어 전용 태그다.

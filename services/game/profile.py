@@ -46,6 +46,9 @@ class GameProfile:
     candidate_target_label: str = "SSS"
     # 기록을 가져오는 사이트 이름. 오류 문구에 쓴다.
     net_name: str = "CHUNITHM-NET"
+    # 로그인하는 계정("sega": CHUNITHM·maimai가 같은 SEGA 계정, "arcaea": lowiro 계정)과 로그인 안내에 쓰는 명령.
+    account: str = "sega"
+    login_command: str = "/로그인"
     # NET 인게임 설정 페이지에서 이름 붙여 다루는 항목(`arcade`·`settings`). 없으면 그 게임은 설정을 다루지 않는다.
     settings_fields: tuple[SettingField, ...] = ()
     # 풀콤보·올 저스티스(maimai는 올 퍼펙트)에 해당하는 콤보 램프 이름과 사용자에게 보일 이름. 램프 우열표의 키다.

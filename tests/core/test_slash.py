@@ -823,7 +823,8 @@ async def test_modal_command_with_a_game_argument_picks_the_requested_then_main_
 
 def test_real_skills_open_only_the_essential_slash_commands() -> None:
     # 2026-11-06 사용자 결정: 슬래시는 로그인·계정 연결·동기화만(코어의 /설정은 따로 붙는다). 나머지는 멘션으로만 쓴다.
+    # Arcaea 로그인은 SEGA와 계정이 따로라 `/아르케아 로그인`을 더한다(2026-11-28).
     registry = SkillRegistry([Path("skills")])
     registry.load()
     paths = {" ".join(entry.path) for entry in build_slash_plan(registry.tool_specs()).entries}
-    assert paths == {"로그인", "연결 시작", "연결 참여", "연결 목록", "연결 대표", "연결 해제", "동기화"}
+    assert paths == {"로그인", "아르케아 로그인", "연결 시작", "연결 참여", "연결 목록", "연결 대표", "연결 해제", "동기화"}

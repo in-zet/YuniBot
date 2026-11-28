@@ -3,7 +3,10 @@
 wikiwiki.jp/arcaea를 긁은 것)의 `songs.json`을 `data/arcaea/`에 캐시해 두고 읽는다(저장소에는 넣지 않는다).
 
 2026-11-28 Arcaea Online 베스트 50의 곡별 포텐셜과 대조해 상수가 있는 41채보 중 40개가 맞았다. 상수가 빈 채보는 대부분
-만우절·숨김 곡(레벨 "-"·"?")이다. 같은 제목의 다른 곡(Genesis, Quon)은 제목 뒤에 작곡가를 붙여 가른다."""
+만우절·숨김 곡(레벨 "-"·"?")이다. 같은 제목의 다른 곡(Genesis, Quon)은 제목 뒤에 작곡가를 붙여 가른다.
+
+자료에 없는 새 곡·바뀐 상수는 동기화 때 Arcaea Online 베스트 50에서 거꾸로 낸 상수(`learn_consts`, 테이블
+`arcaea_const_observed`)로 덮는다."""
 
 from __future__ import annotations
 
@@ -12,7 +15,11 @@ import json
 import logging
 import os
 import time
+import unicodedata
 from collections import Counter
+from collections.abc import Sequence
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -109,6 +116,21 @@ def _write_cache(path: Path, data: Any) -> None:
     os.replace(tmp, path)
 
 
+def title_key(text: str) -> str:
+    """제목 비교용 글: 전각·반각(NFKC)·대소문자·띄어쓰기를 무시한다."""
+    return "".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+@dataclass(slots=True, kw_only=True, frozen=True)
+class ObservedConst:
+    """Arcaea Online이 준 곡 포텐셜에서 거꾸로 낸 상수 하나."""
+
+    song_title: str
+    difficulty: str
+    const: float
+    artist: str = ""
+
+
 class ArcaeaSongDbService(SongDb):
     """캐시 파일이 있으면 그것으로 시작하고, 하루에 한 번 새로 받아 캐시와 메모리를 함께 바꾼다. 캐시가 없고 아직 못
     받았으면 곡이 비어 있다. Arcaea에는 신곡 틀이 없어 신곡 표시는 늘 꺼져 있다."""
@@ -117,6 +139,8 @@ class ArcaeaSongDbService(SongDb):
         super().__init__(conn=conn, profile=ARCAEA, songs={}, available=set())
         self._cache_path = cache_path
         self._next_refresh_at = 0.0
+        self._observed: dict[tuple[str, str], ObservedConst] = {}
+        self._title_index: dict[str, list[SongRecord]] = {}
         if cache_path.is_file():
             try:
                 self._adopt(_load(_entries_from(json.loads(cache_path.read_text(encoding="utf-8")))))
@@ -125,7 +149,77 @@ class ArcaeaSongDbService(SongDb):
 
     def _adopt(self, songs: dict[str, SongRecord]) -> None:
         self._songs = songs
-        self._available_intl = set(songs)
+        self._apply_observed()
+
+    def _apply_observed(self) -> None:
+        """거꾸로 낸 상수를 곡 DB에 덮는다. 곡 DB에 없는 곡·채보는 그 상수만 가진 곡·채보로 더한다."""
+        for observed in self._observed.values():
+            song = self._songs.get(observed.song_title)
+            if song is None:
+                song = SongRecord(title=observed.song_title, aliases=(), artist=observed.artist, id=-1)
+                self._songs[observed.song_title] = song
+            chart = song.charts.get(observed.difficulty)
+            song.charts[observed.difficulty] = (
+                ChartRecord(difficulty=observed.difficulty, const=observed.const, note_count=None)
+                if chart is None
+                else replace(chart, const=observed.const, is_const_unknown=False)
+            )
+        self._available_intl = set(self._songs)
+        self._title_index = {}
+        for song in self._songs.values():
+            suffix = f" ({song.artist})"
+            base = song.title.removesuffix(suffix) if song.artist else song.title  # 같은 제목 곡은 작곡가를 붙여 뒀다
+            self._title_index.setdefault(title_key(base), []).append(song)
+
+    async def load_observed(self) -> None:
+        """저장해 둔 거꾸로 낸 상수를 읽어 덮는다(봇이 켜질 때 한 번)."""
+        if self._conn is None:
+            return
+        cursor = await self._conn.execute("SELECT song_title, difficulty, const, artist FROM arcaea_const_observed")
+        for row in await cursor.fetchall():
+            self._observed[(row[0], row[1])] = ObservedConst(
+                song_title=row[0], difficulty=row[1], const=row[2], artist=row[3] or ""
+            )
+        self._apply_observed()
+
+    async def learn_consts(self, observed: Sequence[ObservedConst]) -> int:
+        """동기화가 거꾸로 낸 상수를 저장하고 덮는다. 곡 DB와 같은 값이면 저장하지 않는다. 바꾼 채보 수를 돌려준다."""
+        changed = [
+            item for item in observed
+            if self.const_for(item.song_title, item.difficulty) != item.const
+        ]
+        if not changed:
+            return 0
+        for item in changed:
+            logger.info(
+                "Arcaea 상수 보정: %s %s %s → %s", item.song_title, item.difficulty,
+                self.const_for(item.song_title, item.difficulty), item.const,
+            )
+            self._observed[(item.song_title, item.difficulty)] = item
+        if self._conn is not None:
+            now = datetime.now(UTC).isoformat()
+            await self._conn.executemany(
+                "INSERT INTO arcaea_const_observed (song_title, difficulty, const, artist, observed_at) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT (song_title, difficulty) DO UPDATE SET const = excluded.const, "
+                "artist = excluded.artist, observed_at = excluded.observed_at",
+                [(item.song_title, item.difficulty, item.const, item.artist, now) for item in changed],
+            )
+            await self._conn.commit()
+        self._apply_observed()
+        return len(changed)
+
+    def title_for(self, titles: Sequence[str], artist: str) -> str:
+        """Arcaea Online의 제목들(일본어·영어) → 곡 DB 제목. 같은 제목 곡이 둘이면 작곡가로 고른다. 곡 DB에 없으면 앞의
+        제목(일본어) 그대로다 — 곡 DB(일본 위키)가 원제를 쓰기 때문이다."""
+        for title in titles:
+            matches = self._title_index.get(title_key(title), [])
+            if len(matches) == 1:
+                return matches[0].title
+            if matches:
+                same_artist = [song for song in matches if title_key(song.artist) == title_key(artist)]
+                if len(same_artist) == 1:
+                    return same_artist[0].title
+        return next((title for title in titles if title), "")
 
     def current_version(self) -> str | None:
         versions = [song.version for song in self._songs.values() if song.version in ARCAEA.version_order]

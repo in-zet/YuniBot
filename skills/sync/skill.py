@@ -18,6 +18,7 @@ from core.tool_types import (
     GameRef,
     ToolContext,
     ToolResult,
+    UserFacingError,
 )
 from services.common.arcades import Arcade
 from services.game.chart_ref import ResolvedChart
@@ -78,7 +79,7 @@ def _render(yuni_line: str, sections: list[Section], footer: str | None) -> str:
     return _SECTION_SEPARATOR.join(parts)
 
 
-@tool(slash="동기화", tags=["sega-linked"], cost="network")
+@tool(slash="동기화", tags_any=["sega-linked", "arcaea-linked"], cost="network")
 async def run(
     ctx: ToolContext,
     focus: ChartRef | None = None,
@@ -86,10 +87,11 @@ async def run(
     arcade: ArcadeRef | None = None,
     game: GameRef | None = None,
 ) -> ToolResult:
-    """CHUNITHM-NET이나 maimai DX NET에서 최신 기록을 가져와 저장하고, 지난 동기화와의 차이를 리포트로 낸다. focus로 볼 채보 하나, arcade로 친 오락실, game으로 게임(츄니즘·마이마이)을 넘길 수 있다."""
+    """CHUNITHM-NET·maimai DX NET·Arcaea Online에서 최신 기록을 가져와 저장하고, 지난 동기화와의 차이를 리포트로 낸다. focus로 볼 채보 하나, arcade로 친 오락실, game으로 게임(츄니즘·마이마이·아르케아)을 넘길 수 있다."""
     assert focus is None or isinstance(focus, ResolvedChart)
     assert arcade is None or isinstance(arcade, Arcade)
-    net_name = profile_for(ctx.game).net_name
+    game_profile = profile_for(ctx.game)
+    net_name = game_profile.net_name
 
     # save_sync가 이번 시각으로 덮어쓰기 전에 "직전" 동기화 시각을 읽어 둔다.
     previous_synced_at: str | None = await ctx.records.last_sync_at(ctx.player_id)
@@ -105,7 +107,9 @@ async def run(
     except MaintenanceError:
         return ToolResult(error=f"{net_name}이 점검 중이야. 점검이 끝나면 다시 동기화해 줘.")
     except (AuthenticationError, ConnectionError):
-        return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
+        return ToolResult(error=f"{net_name} 로그인이 안 돼 있거나 풀렸어. {game_profile.login_command}으로 연결해 줘.")
+    except UserFacingError as error:  # Arcaea Online 구독 없음 등 사이트가 거절한 경우
+        return ToolResult(error=str(error))
 
     result = await ctx.records.save_sync(ctx.player_id, snapshot, ctx)
     # 저장이 일어났으니(기준점만 만든 첫 동기화도) 이 플레이어의 점수가 담긴 작업 표는 옛 값이다.

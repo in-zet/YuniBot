@@ -303,3 +303,23 @@ async def test_031_play_counts_tables_go_with_the_player(tmp_path: Path) -> None
         for table in ("play_counts", "play_count_state"):
             row = await (await conn.execute(f"SELECT COUNT(*) FROM {table}")).fetchone()
             assert row is not None and row[0] == 0
+
+
+async def test_032_arcaea_login_goes_with_the_player_and_observed_consts_stay(tmp_path: Path) -> None:
+    """Arcaea 로그인 쿠키는 플레이어와 같이 지워지고, 거꾸로 낸 상수는 봇 전역이라 남는다(2026-11-28)."""
+    async with aiosqlite.connect(":memory:") as conn:
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await run_migrations(conn, roots=[("core", Path("migrations/core"))])
+        await conn.execute("INSERT INTO players (id, first_seen_at) VALUES ('p1', 't')")
+        await conn.execute(
+            "INSERT INTO arcaea_sessions (player_id, encrypted_cookie, linked_at) VALUES ('p1', x'00', 't')"
+        )
+        await conn.execute(
+            "INSERT INTO arcaea_const_observed (song_title, difficulty, const, observed_at) VALUES ('A', 'FTR', 9.8, 't')"
+        )
+        await conn.execute("DELETE FROM players WHERE id = 'p1'")
+
+        sessions = await (await conn.execute("SELECT COUNT(*) FROM arcaea_sessions")).fetchone()
+        observed = await (await conn.execute("SELECT COUNT(*) FROM arcaea_const_observed")).fetchone()
+        assert sessions is not None and sessions[0] == 0
+        assert observed is not None and observed[0] == 1
