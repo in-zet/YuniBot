@@ -366,3 +366,25 @@ async def test_adapter_login_with_a_wrong_password_is_an_authentication_error() 
             await adapter.login("me", "wrong")
     finally:
         await adapter.aclose()
+
+
+async def test_sync_keeps_the_official_jacket_and_the_current_character(conn, songdb) -> None:
+    """곡 DB에 재킷이 없는 신곡은 공식 재킷을 쓰고, 프로필의 지금 캐릭터 그림을 머리말에 넘긴다(2026-11-28)."""
+    adapter = _FakeAdapter(
+        user={"display_name": "Hikari", "rating": 1000, "recent_score": [], "character": 5,
+              "character_stats": [{"character_id": 1, "icon": "1"}, {"character_id": 5, "icon": "5u"}]},
+        pages={2: [_entry("new", "Brand New", 2, 9_900_000) | {"bg": "abc123"},
+                   _entry("sheri", "Sheriruth", 2, 9_900_000) | {"bg": "def456"}]},
+    )
+    service, players, _ = await _service(conn, songdb, adapter)
+    player = await players.create_player()
+    await service.login_with_cookie(player.id, "sid=abc")
+
+    snapshot = await service.fetch_snapshot(player.id)
+
+    assert snapshot.profile.character_image_url == "https://webassets.lowiro.com/chr/5u.png"
+    sheri = songdb.song_by_title("Sheriruth")
+    assert sheri is not None and sheri.jacket == "https://webassets.lowiro.com/def456.jpg"  # 곡 자료에 재킷이 없던 곡
+    reloaded = ArcaeaSongDbService(Path("missing.json"), conn=conn)
+    await reloaded.load_observed()
+    assert reloaded.song_by_title("Brand New") is None  # 곡 DB에도 상수에도 없는 곡은 만들지 않는다

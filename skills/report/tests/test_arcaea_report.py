@@ -93,7 +93,7 @@ async def test_best_is_one_frame_and_the_top_ten_count_twice(skill, conn, tmp_pa
 
     assert result.table is not None
     text = render_text(result.table).content
-    assert "베스트 50" in text and "신곡" not in text
+    assert "상위 10" in text and "하위 40" in text and "신곡" not in text
     contribution = [row.cell("기여").raw for row in result.table.rows]
     assert contribution[0] == pytest.approx(2 * 12.8 / 60)  # Song 11: 11.1 + 1.5 + 0.2, 상위 10곡이라 두 번
     assert contribution[10] == pytest.approx(11.8 / 60)  # Song 01: 10.1 + 1.7, 11위는 한 번

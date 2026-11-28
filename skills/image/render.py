@@ -423,14 +423,13 @@ _MAIMAI_TIER_COLORS: dict[str, tuple[int, int, int] | None] = {
 _ARCAEA_TIER_COLORS: dict[str, tuple[int, int, int]] = {
     "하늘": (90, 200, 220),
     "초록": (110, 210, 80),
-    "보라": (190, 100, 230),
-    "빛나는 보라": (200, 110, 240),
-    "빛나는 빨강": (245, 70, 100),
-    "빨강 1성": (250, 70, 120),
-    "빨강 2성": (255, 60, 140),
-    "3성": (255, 120, 190),
+    "보라": (205, 150, 240),  # 7 구간: 10 구간보다 살짝 연한 보라(2026-11-28 사용자 지적)
+    "빛나는 보라": (185, 95, 230),
+    "빛나는 빨강": (240, 60, 90),
+    "빨강 1성": (242, 66, 112),  # 12 이상: 빨강에 핑크를 살짝 섞는다
+    "빨강 2성": (244, 70, 120),
+    "3성": (250, 110, 170),
 }
-_STAR_GOLD = (255, 214, 90)  # 무지개 계열 단계의 별(단색이 없는 단계)
 
 
 def _decimal(rating: str) -> Decimal | None:
@@ -549,7 +548,8 @@ def _draw_rating_value(
     canvas.paste(_highlight_top(fill, box) if extreme else fill, (x - pad, y - pad), mask)
 
 
-_GLOW_RADIUS = 9  # Arcaea 빛: 글자 모양을 굵게 칠해 흐린 것
+_GLOW_RADIUS = 5  # Arcaea 빛: 글자 모양을 흐린 것(2026-11-28 사용자 요청으로 훨씬 약하게)
+_GLOW_ALPHA = 90
 
 
 def _draw_glow(
@@ -560,17 +560,33 @@ def _draw_glow(
     pad = _GLOW_RADIUS * 3
     size = (_width(font, text) + 2 * pad, _fs(40) + 12 + 2 * pad)
     mask = Image.new("L", size, 0)
-    ImageDraw.Draw(mask).text((pad, pad), text, font=font, fill=200, stroke_width=4, stroke_fill=200)
+    ImageDraw.Draw(mask).text((pad, pad), text, font=font, fill=_GLOW_ALPHA, stroke_width=2, stroke_fill=_GLOW_ALPHA)
     mask = mask.filter(ImageFilter.GaussianBlur(_GLOW_RADIUS))
     canvas.paste(Image.new("RGB", size, color), (xy[0] - pad, xy[1] - pad), mask)
 
 
-def _draw_stars(draw: ImageDraw.ImageDraw, right: int, y: int, count: int, color: tuple[int, int, int]) -> int:
-    """오른쪽 끝을 `right`에 맞춰 ★을 `count`개 그리고 왼쪽 끝 x를 돌려준다."""
+def _draw_stars(
+    canvas: Image.Image, right: int, y: int, count: int, color: tuple[int, int, int] | None, *, extreme: bool = False
+) -> int:
+    """오른쪽 끝을 `right`에 맞춰 ★을 `count`개 그리고 왼쪽 끝 x를 돌려준다. 색은 레이팅 숫자를 따른다(2026-11-28
+    사용자 요청) — 단색 단계는 그 색, 무지개 계열(`color`가 None)은 숫자와 같은 무지개 그라데이션."""
     font = _font(13, True)
     text = "★" * count
     left = right - _width(font, text)
-    draw.text((left, y), text, font=font, fill=color, stroke_width=1, stroke_fill=_RATING_OUTLINE)
+    draw = ImageDraw.Draw(canvas)
+    if color is not None:
+        draw.text((left, y), text, font=font, fill=color, stroke_width=1, stroke_fill=_RATING_OUTLINE)
+        return left
+    pad = 4
+    size = (_width(font, text) + 2 * pad, _fs(13) + 2 * pad + 4)
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).text((pad, pad), text, font=font, fill=255)
+    outline = Image.new("L", size, 0)
+    ImageDraw.Draw(outline).text((pad, pad), text, font=font, fill=255, stroke_width=1, stroke_fill=255)
+    canvas.paste(Image.new("RGB", size, _RATING_OUTLINE), (left - pad, y - pad), outline)
+    box = mask.getbbox() or (0, 0, *size)
+    saturation, value = _RAINBOW_EXTREME if extreme else _RAINBOW_PASTEL
+    canvas.paste(_rainbow(size, box, saturation=saturation, value=value, vertical=False), (left - pad, y - pad), mask)
     return left
 
 
@@ -611,8 +627,9 @@ def _draw_final_rating(
     stars = rating_stars(rating, game)
     if stars:
         tier = rating_tier(rating, game)
-        color = tier[1] if tier is not None and tier[1] is not None else _STAR_GOLD
-        caption_left = _draw_stars(draw, caption_left - 6, y, stars, color)
+        color = tier[1] if tier is not None else _TEXT
+        extreme = tier is not None and tier[0] == "극무지개"
+        caption_left = _draw_stars(canvas, caption_left - 6, y, stars, color, extreme=extreme)
     value_y = y + _fs(13) + 4
     _draw_rating_value(canvas, (right - value_width, value_y), main, font, game=game)
     if tail:  # 큰 글자와 바닥선을 맞춘다

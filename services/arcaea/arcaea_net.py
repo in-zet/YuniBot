@@ -21,7 +21,7 @@ from chuni_penguin.adapters.errors import AuthenticationError
 from core.tool_types import ToolContext, UserFacingError
 from services.arcaea.profile import ARCAEA
 from services.arcaea.rating import CLEAR_BONUS, score_modifier
-from services.arcaea.songdb import ObservedConst
+from services.arcaea.songdb import ObservedConst, character_icon_url
 from services.common.account_cookies import (
     ARCAEA_ACCOUNT,
     AccountCookieStore,
@@ -244,6 +244,15 @@ class _Converter:
         )
 
 
+def _character_image(user: Mapping[str, Any]) -> str | None:
+    """지금 고른 캐릭터의 그림 주소. 캐릭터 목록(`character_stats`)에서 같은 번호의 `icon`을 쓴다(없으면 None)."""
+    current = user.get("character")
+    for stats in user.get("character_stats") or []:
+        if isinstance(stats, dict) and stats.get("character_id") == current and isinstance(icon := stats.get("icon"), str) and icon:
+            return character_icon_url(icon)
+    return None
+
+
 def snapshot_from(fetched: _Fetched, converter: _Converter) -> SyncSnapshot:
     """프로필 포텐셜은 ×1000 정수다(11366 = 11.366). 숨김 등으로 값이 없으면 대조하지 않는다. 최근 플레이 목록은 따로
     없어서(마지막 1판뿐) 기록마다 붙은 시각을 최근 플레이로 쓴다 — 직전 동기화 뒤에 오른 기록이 그날 세션이 된다."""
@@ -256,7 +265,8 @@ def snapshot_from(fetched: _Fetched, converter: _Converter) -> SyncSnapshot:
     recent = [play for entry in recent_entries if (play := converter.play(entry, with_time=True)) is not None
               and play.achieved_at is not None]
     return SyncSnapshot(
-        profile=ProfileSnapshot(username=str(name), displayed_rating=displayed),
+        profile=ProfileSnapshot(username=str(name), displayed_rating=displayed,
+                                character_image_url=_character_image(fetched.user)),
         best=best, new=[], recent=recent, all_plays=plays,
     )
 
@@ -353,6 +363,10 @@ class ArcaeaNetService:
         fetched = await self._with_adapter(player_id, ctx, work)
         converter = _Converter(self._songdb)
         await self._learn(fetched.best, converter)
+        await self._songdb.learn_art({
+            converter.title(entry): bg for entry in (*fetched.best, *fetched.scores)
+            if isinstance(bg := entry.get("bg"), str) and bg
+        })
         if self._save_play_counts is not None:
             await self._save_play_counts(player_id, yearly_play_counts(fetched.scores, converter))
         return snapshot_from(fetched, converter)

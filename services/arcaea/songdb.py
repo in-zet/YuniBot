@@ -118,6 +118,19 @@ def _write_cache(path: Path, data: Any) -> None:
     os.replace(tmp, path)
 
 
+_ASSET_BASE = "https://webassets.lowiro.com"
+
+
+def official_jacket_url(bg: str) -> str:
+    """Arcaea Online 공식 재킷(사이트 코드와 같은 주소, 2026-11-28 받아지는 것 확인)."""
+    return f"{_ASSET_BASE}/{bg}.jpg"
+
+
+def character_icon_url(icon: str) -> str:
+    """Arcaea Online 프로필의 캐릭터 그림(사이트 코드의 `getCharacterDiamondImageAsset`)."""
+    return f"{_ASSET_BASE}/chr/{icon}.png"
+
+
 def title_key(text: str) -> str:
     """제목 비교용 글: 전각·반각(NFKC)·대소문자·띄어쓰기를 무시한다."""
     return "".join(unicodedata.normalize("NFKC", text).casefold().split())
@@ -143,6 +156,7 @@ class ArcaeaSongDbService(SongDb):
         self._next_refresh_at = 0.0
         self._observed: dict[tuple[str, str], ObservedConst] = {}
         self._title_index: dict[str, list[SongRecord]] = {}
+        self._art: dict[str, str] = {}  # 곡 제목 → 공식 재킷 번호(bg)
         if cache_path.is_file():
             try:
                 self._adopt(_load(_entries_from(json.loads(cache_path.read_text(encoding="utf-8")))))
@@ -166,6 +180,15 @@ class ArcaeaSongDbService(SongDb):
                 if chart is None
                 else replace(chart, const=observed.const, is_const_unknown=False)
             )
+        for title, bg in self._art.items():
+            song = self._songs.get(title)
+            if song is None:
+                continue
+            url = official_jacket_url(bg)
+            if song.jacket is None or song.jacket == url:
+                song.jacket = url
+            else:
+                song.jacket_fallback = url  # 위키 재킷을 못 받으면 공식 재킷으로
         self._available_intl = set(self._songs)
         self._title_index = {}
         for song in self._songs.values():
@@ -182,6 +205,24 @@ class ArcaeaSongDbService(SongDb):
             self._observed[(row[0], row[1])] = ObservedConst(
                 song_title=row[0], difficulty=row[1], const=row[2], artist=row[3] or ""
             )
+        cursor = await self._conn.execute("SELECT song_title, bg FROM arcaea_song_art")
+        self._art = {row[0]: row[1] for row in await cursor.fetchall()}
+        self._apply_observed()
+
+    async def learn_art(self, art: dict[str, str]) -> None:
+        """동기화가 받은 곡별 공식 재킷 번호를 저장하고 곡 DB에 붙인다(바뀐 것만 저장)."""
+        changed = {title: bg for title, bg in art.items() if bg and self._art.get(title) != bg}
+        if not changed:
+            return
+        self._art.update(changed)
+        if self._conn is not None:
+            now = datetime.now(UTC).isoformat()
+            await self._conn.executemany(
+                "INSERT INTO arcaea_song_art (song_title, bg, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT (song_title) DO UPDATE SET bg = excluded.bg, updated_at = excluded.updated_at",
+                [(title, bg, now) for title, bg in changed.items()],
+            )
+            await self._conn.commit()
         self._apply_observed()
 
     async def learn_consts(self, observed: Sequence[ObservedConst]) -> int:

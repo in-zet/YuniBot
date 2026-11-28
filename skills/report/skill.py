@@ -346,7 +346,7 @@ def _frame_table(
         builder.row_formats([f"{row_format}  ({{{tc.ASSUMED}}})", row_format])
     else:
         builder.row_formats([row_format])
-    builder.step(" · ".join(title for title, _, _ in frames))
+    builder.step(" · ".join(title for title, _, _ in _split_doubled(frames, _profile(ctx))))
     builder.summary(header)
 
     rank_scores = ctx.terms.rank_scores()
