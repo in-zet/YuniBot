@@ -22,6 +22,7 @@ from core.tool_types import (
     SongQuery,
     ToolContext,
 )
+from services.arcaea.songdb import ArcaeaSongDbService
 from services.chunithm.chunithm_net import ChunithmNetService
 from services.chunithm.songdb import SongDbService
 from services.common.players import PlayersService
@@ -161,6 +162,10 @@ async def build_game_services(
     if game == "maimai":
         songdb = MaimaiSongDbService(data_dir / "maimai" / "music-ex-intl.json", conn=conn)
         net = MaimaiNetService(conn=conn, secrets=secrets, players=players) if secrets is not None else None
+    elif game == "arcaea":
+        # Arcaea Online 접속(로그인·동기화)은 2단계에서 붙인다. 그때까지는 곡 DB·용어·계산만 있다.
+        songdb = ArcaeaSongDbService(data_dir / "arcaea" / "songs.json", conn=conn)
+        net = None
     else:
         songdb = SongDbService(conn=conn, profile=profile)
         net = ChunithmNetService(conn=conn, secrets=secrets, players=players) if secrets is not None else None

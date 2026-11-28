@@ -1,0 +1,238 @@
+{
+ "success": true,
+ "value": {
+  "scores": [
+   {
+    "song_id": "sheriruth",
+    "difficulty": 2,
+    "score": 9848996,
+    "score_below_max": 10151004,
+    "shiny_perfect_count": 1038,
+    "perfect_count": 1127,
+    "near_count": 13,
+    "miss_count": 11,
+    "clear_type": 1,
+    "best_clear_type": 1,
+    "health": 100,
+    "time_played": 1795835208748,
+    "modifier": 0,
+    "title": {
+     "en": "Sheriruth",
+     "ja": "Sheriruth"
+    },
+    "artist": "Team Grimoire",
+    "bg": "0eb8b1b02de330fb0558eb18757b7d18",
+    "yearly_play_count": 5,
+    "artwork": "シエラ"
+   },
+   {
+    "song_id": "clotho",
+    "difficulty": 2,
+    "score": 9966712,
+    "score_below_max": 10033288,
+    "shiny_perfect_count": 993,
+    "perfect_count": 1017,
+    "near_count": 1,
+    "miss_count": 3,
+    "clear_type": 4,
+    "best_clear_type": 4,
+    "health": 94,
+    "time_played": 1795834955609,
+    "modifier": 0,
+    "title": {
+     "en": "Clotho and the stargazer",
+     "ja": "クロートーと星の観測者"
+    },
+    "artist": "しーけー",
+    "bg": "cab6582aea11447544109529c5637698",
+    "yearly_play_count": 1,
+    "artwork": "yoshimo"
+   },
+   {
+    "song_id": "vexaria",
+    "difficulty": 2,
+    "score": 10000720,
+    "score_below_max": 14,
+    "shiny_perfect_count": 720,
+    "perfect_count": 734,
+    "near_count": 0,
+    "miss_count": 0,
+    "clear_type": 3,
+    "best_clear_type": 3,
+    "health": 100,
+    "time_played": 1795834794417,
+    "modifier": 0,
+    "title": {
+     "en": "Vexaria",
+     "ja": "Vexaria"
+    },
+    "artist": "ak+q",
+    "bg": "5b1e37204496fee3ec300daec8efd502",
+    "yearly_play_count": 1,
+    "artwork": "Koyama Mai"
+   },
+   {
+    "song_id": "signal",
+    "difficulty": 2,
+    "score": 9866395,
+    "score_below_max": 10133605,
+    "shiny_perfect_count": 1061,
+    "perfect_count": 1135,
+    "near_count": 1,
+    "miss_count": 15,
+    "clear_type": 1,
+    "best_clear_type": 1,
+    "health": 100,
+    "time_played": 1795834462235,
+    "modifier": 0,
+    "title": {
+     "en": "Signal",
+     "ja": "Signal"
+    },
+    "artist": "rejection feat. Such",
+    "bg": "672c8aeadc8fb1f7c5f29c0452856ea1",
+    "yearly_play_count": 5,
+    "artwork": "Poyoshi"
+   },
+   {
+    "song_id": "ouverture",
+    "difficulty": 2,
+    "score": 9869399,
+    "score_below_max": 10130601,
+    "shiny_perfect_count": 834,
+    "perfect_count": 895,
+    "near_count": 12,
+    "miss_count": 6,
+    "clear_type": 1,
+    "best_clear_type": 1,
+    "health": 100,
+    "time_played": 1795834247328,
+    "modifier": 0,
+    "title": {
+     "en": "Ouvertüre",
+     "ja": "Ouvertüre"
+    },
+    "artist": "USAO & DJ Genki feat. ルーン(CV:河瀬茉希)",
+    "bg": "499c15b6459075199c45cbadfbcc83b5",
+    "yearly_play_count": 1,
+    "artwork": ""
+   },
+   {
+    "song_id": "newyorkbackraise",
+    "difficulty": 2,
+    "score": 9615953,
+    "score_below_max": 10384047,
+    "shiny_perfect_count": 921,
+    "perfect_count": 1034,
+    "near_count": 30,
+    "miss_count": 27,
+    "clear_type": 1,
+    "best_clear_type": 1,
+    "health": 100,
+    "time_played": 1795834069546,
+    "modifier": 0,
+    "title": {
+     "en": "New York Back Raise",
+     "ja": "New York Back Raise"
+    },
+    "artist": "saaa + kei_iwata + stuv + わかどり",
+    "bg": "2d10aad4c4696f5445995ff9b895ece0",
+    "yearly_play_count": 2,
+    "artwork": "すずあ"
+   },
+   {
+    "song_id": "init",
+    "difficulty": 2,
+    "score": 9718632,
+    "score_below_max": 10281368,
+    "shiny_perfect_count": 1025,
+    "perfect_count": 1158,
+    "near_count": 24,
+    "miss_count": 22,
+    "clear_type": 1,
+    "best_clear_type": 1,
+    "health": 100,
+    "time_played": 1795833869422,
+    "modifier": 0,
+    "title": {
+     "en": "init()",
+     "ja": "init()"
+    },
+    "artist": "kamome sano",
+    "bg": "52262c8262d09b2aa3654b39a74f81fc",
+    "yearly_play_count": 2,
+    "artwork": "そゐち"
+   },
+   {
+    "song_id": "hybris",
+    "difficulty": 2,
+    "score": 9875680,
+    "score_below_max": 10124320,
+    "shiny_perfect_count": 1099,
+    "perfect_count": 1178,
+    "near_count": 6,
+    "miss_count": 12,
+    "clear_type": 1,
+    "best_clear_type": 1,
+    "health": 100,
+    "time_played": 1795833676998,
+    "modifier": 0,
+    "title": {
+     "en": "Hybris (The one who shattered)",
+     "ja": "ヒュブリスの頂に聳えるのは"
+    },
+    "artist": "qfeileadh feat.のあ",
+    "bg": "adbf203f51c165200e2f037d05ef661a",
+    "yearly_play_count": 4,
+    "artwork": ""
+   },
+   {
+    "song_id": "akinokagerou",
+    "difficulty": 2,
+    "score": 9880299,
+    "score_below_max": 10119701,
+    "shiny_perfect_count": 1005,
+    "perfect_count": 1061,
+    "near_count": 6,
+    "miss_count": 10,
+    "clear_type": 1,
+    "best_clear_type": 1,
+    "health": 100,
+    "time_played": 1795833433027,
+    "modifier": 0,
+    "title": {
+     "en": "Haze of Autumn",
+     "ja": "秋の陽炎"
+    },
+    "artist": "karatoPαnchii feat.はるの",
+    "bg": "f9699350343e98ebebd8ea786ae415be",
+    "yearly_play_count": 2,
+    "artwork": "MiyU"
+   },
+   {
+    "song_id": "yourvoiceso",
+    "difficulty": 2,
+    "score": 9986163,
+    "score_below_max": 10013837,
+    "shiny_perfect_count": 971,
+    "perfect_count": 1011,
+    "near_count": 1,
+    "miss_count": 1,
+    "clear_type": 1,
+    "best_clear_type": 1,
+    "health": 100,
+    "time_played": 1795833135368,
+    "modifier": 0,
+    "title": {
+     "en": "Your voice so... feat. Such",
+     "ja": "Your voice so... feat. Such"
+    },
+    "artist": "PSYQUI",
+    "bg": "d9e89e56978cb62d2ffcb6fdb067d4bf",
+    "yearly_play_count": 5,
+    "artwork": "DJ Poyoshi"
+   }
+  ],
+  "count": 199
+ }
+}

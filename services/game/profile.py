@@ -65,10 +65,14 @@ class GameProfile:
     chart_rating: Callable[[int, float | None], Decimal | None]
     # 콤보 램프마다 곡 레이팅에 더하는 보너스(maimai AP·AP+ +1). 없는 게임은 비워 둔다. `song_rating`이 더한다.
     lamp_rating_bonus: Mapping[str, Decimal] = field(default_factory=dict)
+    # 클리어 램프마다 곡 레이팅에 더하는 값(Arcaea는 `chart_rating`이 클리어 보너스 +0.2를 넣어 두고 TRACK LOST만 -0.2).
+    clear_lamp_rating_bonus: Mapping[str, Decimal] = field(default_factory=dict)
     # 곡 레이팅을 보일 때 소수 자리수(CHUNITHM 2, maimai 0).
     song_rating_places: int
     # 전체 레이팅 = 프레임 곡 레이팅 합 ÷ rating_divisor, overall_places 자리에서 버림(CHUNITHM 50·4, maimai 1·0).
     rating_divisor: int
+    # 베스트 프레임 위쪽 몇 곡을 한 번 더 세는가(Arcaea 7.0: 베스트 50 중 상위 10곡 두 배 ÷ 60). 없는 게임은 0.
+    best_double_count: int = 0
     overall_places: int
     # NET이 보여 주는 레이팅의 자리수. 계산값을 이 자리에서 버려 표시값과 대조한다.
     displayed_places: int
@@ -81,10 +85,16 @@ class GameProfile:
     # 첫 동기화를 마친 플레이어에게 붙는 상태 태그. 게임마다 따로 있다.
     synced_tag: str
 
-    def song_rating(self, score: int, const: float | None, combo_lamp: str | None = None) -> Decimal | None:
-        """콤보 램프 보너스까지 더한 곡 레이팅. 기록의 곡 레이팅은 모두 이것으로 계산한다(`chart_rating`은 점수만 본다).
+    def song_rating(
+        self, score: int, const: float | None, combo_lamp: str | None = None, *, clear_lamp: str | None = None
+    ) -> Decimal | None:
+        """램프 보너스까지 더한 곡 레이팅. 기록의 곡 레이팅은 모두 이것으로 계산한다(`chart_rating`은 점수만 본다).
         상수를 모르면 None("계산 불가")이다."""
         rating = self.chart_rating(score, const)
         if rating is None:
             return None
-        return rating + self.lamp_rating_bonus.get(combo_lamp or "", Decimal(0))
+        return (
+            rating
+            + self.lamp_rating_bonus.get(combo_lamp or "", Decimal(0))
+            + self.clear_lamp_rating_bonus.get(clear_lamp or "", Decimal(0))
+        )

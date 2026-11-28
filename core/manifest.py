@@ -31,7 +31,7 @@ VALID_CATEGORIES: frozenset[str] = frozenset(
     }
 )
 # 등록된 게임 이름. 새 게임을 services/game/registry.py에 등록할 때 여기에도 더한다.
-VALID_GAMES: frozenset[str] = frozenset({"chunithm", "maimai"})
+VALID_GAMES: frozenset[str] = frozenset({"chunithm", "maimai", "arcaea"})
 
 # 00-core.md: name은 "소문자, 숫자, 하이픈"이고 64자 이내다.
 MAX_NAME_LENGTH = 64

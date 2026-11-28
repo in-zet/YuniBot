@@ -13,12 +13,12 @@
 | `docs/plan/` | 날짜별 계획 수정(`YYYY-MM-DD_수정.md`) — 계획 밖에서 더한 단계의 상세. `plan.md` §4가 단계마다 가리킨다 | **관리대상** |
 | `docs/conventions.md` · `docs/pitfalls.md` | 개발 규칙 · 겪은 함정 | **관리대상** |
 | `docs/design/` | 기준 설계서: `00-core.md`(코어) + `skills/<스킬>.md` 21개 | **관리대상** |
-| `docs/reference/` | CHUNITHM-NET·maimai DX NET(`maimai-net/`, 개인 정보를 지움) 페이지·Chunimaru 응답·업데이트 공지(`chunithm-updates/`·`maimai-updates/`) 저장본 — 파서 시험이 읽는다 | **읽기전용** |
+| `docs/reference/` | CHUNITHM-NET·maimai DX NET(`maimai-net/`, 개인 정보를 지움) 페이지·Arcaea Online API 응답(`arcaea-online/`, 개인 정보를 지움)·Chunimaru 응답·업데이트 공지(`chunithm-updates/`·`maimai-updates/`) 저장본 — 파서 시험이 읽는다 | **읽기전용** |
 | `docs/persona/yuni-lines/` | 유니 일본어 대사 원문: `uni/`(유니)·`navi/`(나비)·`setting/`(설정 안내문). 말투 튜닝 자료, 봇은 읽지 않는다 | **관리대상** |
 | `skills/yuni-lore/lore.md` | 유니 설정집(우리말, 구간·스포일러 구분). `yuni-lore` 스킬의 `read_lore`가 읽는다 | **관리대상** |
 | `progress/` | 날짜별 작업 일지(`YYYY-MM-DD.md`) — 실제 작업의 유일한 확정 기록 | **관리대상** |
 | `core/` | 입구·에이전트·도구 실행기·레지스트리·이벤트·예약·LLM 어댑터 | **관리대상** |
-| `services/common/` (aime 로그인 `aime_auth`·쿠키 `sega_cookies` 포함) · `services/game/` · `services/chunithm/` · `services/maimai/` | 공통 서비스 · 게임 공통 틀(기록·동기화 자료형 `sync_types`·곡 DB 틀·용어 `terms`·표 칸·프로필·등록부·builder·NET 설정 페이지 틀 `net_settings`·플레이 횟수 저장·수집 `play_counts`) · 츄니즘 전용(`data/terms.yaml`·`data/linked_verse.yaml`·한글 곡 별칭 `data/song_aliases_ko.yaml` 포함) · maimai 전용(곡 DB·프로필·레이팅 계산·NET 파서와 어댑터 `parser`·`maimai_net`·`sync_snapshot`·설정·즐겨찾기 `user_option`·용어 사전 `data/terms.yaml`) | **관리대상** |
+| `services/common/` (aime 로그인 `aime_auth`·쿠키 `sega_cookies` 포함) · `services/game/` · `services/chunithm/` · `services/maimai/` · `services/arcaea/` | 공통 서비스 · 게임 공통 틀(기록·동기화 자료형 `sync_types`·곡 DB 틀·용어 `terms`·표 칸·프로필·등록부·builder·NET 설정 페이지 틀 `net_settings`·플레이 횟수 저장·수집 `play_counts`) · 츄니즘 전용(`data/terms.yaml`·`data/linked_verse.yaml`·한글 곡 별칭 `data/song_aliases_ko.yaml` 포함) · maimai 전용(곡 DB·프로필·레이팅 계산·NET 파서와 어댑터 `parser`·`maimai_net`·`sync_snapshot`·설정·즐겨찾기 `user_option`·용어 사전 `data/terms.yaml`) · Arcaea 전용(프로필·포텐셜 `rating`·곡 DB `songdb`(DoriTran 자료 캐시)·용어 사전 `data/terms.yaml`) | **관리대상** |
 | `skills/` | 스킬 폴더(`SKILL.md`·`skill.py`·`migrations/`·`tests/`), `_template/` | **관리대상** |
 | `prompts/` | `rules.md`(규칙) · `persona.md`(말투) — 모델에 그대로 들어간다 | **관리대상** |
 | `migrations/core/` | 코어·서비스 SQL. 적용한 파일은 고치지 않는다 | **관리대상** |

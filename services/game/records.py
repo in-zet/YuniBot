@@ -858,7 +858,12 @@ class RecordsService:
                 rank=base.rank if base is not None and best_score == base.score else "",
                 clear_lamp=base.clear_lamp if base is not None else "", combo_lamp=best_lamp,
                 chain_lamp=base.chain_lamp if base is not None else "", const=const,
-                rating=self._profile.song_rating(best_score, const, best_lamp), session_id=None, updated_at="",
+                rating=self._profile.song_rating(
+                    best_score, const, best_lamp,
+                    # 가정한 점수는 클리어한 것으로 본다(점수가 그대로면 원래 클리어 램프).
+                    clear_lamp=base.clear_lamp if base is not None and best_score == base.score else None,
+                ),
+                session_id=None, updated_at="",
             )
         best, new = self._frames(list(merged.values()))
         frame_of = {_row_key(r): "best" for r in best} | {_row_key(r): "new" for r in new}
@@ -1012,7 +1017,7 @@ class RecordsService:
 
     def _rating_of(self, play: ChartPlay) -> Decimal | None:
         const = self._songdb.const_for(play.song_title, play.difficulty, play.chart_type)
-        return self._profile.song_rating(play.score, const, play.combo_lamp)
+        return self._profile.song_rating(play.score, const, play.combo_lamp, clear_lamp=play.clear_lamp)
 
     def _overall(self, best: Sequence[Decimal | None], new: Sequence[Decimal | None]) -> Decimal | None:
         """전체 레이팅. 합산·나눗셈·자리수는 게임 프로필의 규칙이다."""
@@ -1020,6 +1025,7 @@ class RecordsService:
             best, new,
             best_size=self._profile.best_frame_size, new_size=self._profile.new_frame_size,
             divisor=self._profile.rating_divisor, places=self._profile.overall_places,
+            double_top=self._profile.best_double_count,
         )
 
     def _derive_frames(self, merged: dict[ChartKey, ChartPlay]) -> tuple[list[ChartPlay], list[ChartPlay]]:
@@ -1044,7 +1050,7 @@ class RecordsService:
         const = self._songdb.const_for(row.song_title, row.difficulty, row.chart_type)
         if const is None:
             return row
-        return replace(row, const=const, rating=self._profile.song_rating(row.score, const, row.combo_lamp))
+        return replace(row, const=const, rating=self._profile.song_rating(row.score, const, row.combo_lamp, clear_lamp=row.clear_lamp))
 
     async def _refresh_stored_ratings(self, player_id: str) -> None:
         """저장된 상수·곡 레이팅을 지금 곡 DB 기준으로 맞춘다. `_upsert_pb`는 점수가 오른 채보만 쓰므로,

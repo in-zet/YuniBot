@@ -61,15 +61,18 @@ def overall_rating(
     new_size: int = 20,
     divisor: int | None = None,
     places: int = 4,
+    double_top: int = 0,
 ) -> Decimal | None:
     """전체 레이팅 — 베스트30·신곡20의 곡 레이팅 합을 50으로 나눈다(divisor를 안 주면 프레임 크기 합).
     프레임이 덜 찼으면(버전이 바뀌어 신곡이 아직 없을 때 등) 빈 칸은 0으로 센다. 그래서 신곡20이 비면
     레이팅이 크게 떨어진다. 하나라도 "계산 불가"(None)면 None이다. maimai는 나누지 않고(divisor=1)
-    정수로 버린다(places=0)."""
+    정수로 버린다(places=0). `double_top`이면 베스트에서 높은 곡 그만큼을 한 번 더 센다(Arcaea 상위 10곡)."""
     padded = [
         *best30, *[Decimal(0)] * max(0, best_size - len(best30)),
         *new20, *[Decimal(0)] * max(0, new_size - len(new20)),
     ]
+    if double_top and all(r is not None for r in best30):
+        padded += sorted((r for r in best30 if r is not None), reverse=True)[:double_top]
     return average_rating(padded, places=places, divisor=divisor)
 
 

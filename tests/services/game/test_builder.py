@@ -106,8 +106,8 @@ async def test_nickname_source_falls_back_to_the_login_name_before_the_main_game
         return LoginStatus(linked=True, nickname="로그인이름")
 
     for bundle in games.values():
-        assert bundle.net is not None
-        bundle.net.status = login_status  # type: ignore[method-assign]
+        if bundle.net is not None:  # Arcaea는 아직 접속 서비스가 없다(1단계)
+            bundle.net.status = login_status  # type: ignore[method-assign]
 
     assert await main_game_nickname_source(games, main_game)(player.id) == "로그인이름"
 

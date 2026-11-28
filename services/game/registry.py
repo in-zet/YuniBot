@@ -9,11 +9,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from core.tool_types import DEFAULT_GAME, UserFacingError
+from services.arcaea.profile import ARCAEA
 from services.chunithm.profile import CHUNITHM
 from services.game.profile import GameProfile
 from services.maimai.profile import MAIMAI
 
-GAME_PROFILES: Mapping[str, GameProfile] = {CHUNITHM.game: CHUNITHM, MAIMAI.game: MAIMAI}
+GAME_PROFILES: Mapping[str, GameProfile] = {CHUNITHM.game: CHUNITHM, MAIMAI.game: MAIMAI, ARCAEA.game: ARCAEA}
 
 
 class UnknownGameError(UserFacingError):

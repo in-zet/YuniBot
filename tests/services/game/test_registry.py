@@ -13,7 +13,7 @@ from services.game.registry import (
 
 def test_default_game_is_registered() -> None:
     assert profile_for(DEFAULT_GAME) is CHUNITHM
-    assert set(GAME_PROFILES) == {"chunithm", "maimai"}
+    assert set(GAME_PROFILES) == {"chunithm", "maimai", "arcaea"}
 
 
 def test_profile_for_unknown_game_is_a_user_facing_error() -> None:
@@ -51,6 +51,7 @@ def test_manifest_valid_games_match_the_registry() -> None:
     [
         ("maimai", "maimai"), ("마이마이", "maimai"), ("마이", "maimai"), (" Maimai DX ", "maimai"),
         ("chunithm", "chunithm"), ("츄니즘", "chunithm"), ("CHUNITHM", "chunithm"), ("츄니", "chunithm"),
+        ("arcaea", "arcaea"), ("아르케아", "arcaea"), ("Arcaea", "arcaea"),
     ],
 )
 def test_resolve_game_name_accepts_ids_labels_and_aliases(said: str, game: str) -> None:

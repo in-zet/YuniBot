@@ -1,0 +1,907 @@
+{
+ "success": true,
+ "value": {
+  "best_rated_scores": [
+   {
+    "song_id": "disintegration",
+    "difficulty": 4,
+    "modifier": 0,
+    "rating": 11.760205000000001,
+    "score": 9952041,
+    "perfect_count": 815,
+    "near_count": 4,
+    "miss_count": 2,
+    "clear_type": 1,
+    "title": {
+     "en": "disintegration",
+     "ja": "disintegration"
+    },
+    "artist": "ひゅ〜ぶ",
+    "time_played": 1795764803437,
+    "bg": "88932787442e55e1922779b48c335561"
+   },
+   {
+    "song_id": "gothiveofra",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.68844,
+    "score": 9937688,
+    "perfect_count": 785,
+    "near_count": 8,
+    "miss_count": 1,
+    "clear_type": 1,
+    "title": {
+     "en": "Got hive of Ra",
+     "ja": "Got hive of Ra"
+    },
+    "artist": "E.G.G.",
+    "time_played": 1795330789162,
+    "bg": "ea13bc2b3c3db679d3609ec18f1b6d4d"
+   },
+   {
+    "song_id": "telepathy",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.661985,
+    "score": 9972397,
+    "perfect_count": 876,
+    "near_count": 3,
+    "miss_count": 1,
+    "clear_type": 1,
+    "title": {
+     "en": "Telepathy",
+     "ja": "テレパシ"
+    },
+    "artist": "DECO*27",
+    "time_played": 1794280417653,
+    "bg": "f9a0b54062dd7466954fdbef5eadc630"
+   },
+   {
+    "song_id": "dxfullmetal",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.656089999999999,
+    "score": 9951218,
+    "perfect_count": 802,
+    "near_count": 4,
+    "miss_count": 2,
+    "clear_type": 1,
+    "title": {
+     "en": "DX Choseinou Full Metal Shojo",
+     "ja": "DX超性能フルメタル少女"
+    },
+    "artist": "IOSYS TRAX (uno with.ちよこ)",
+    "time_played": 1794313049058,
+    "bg": "2381c7981df0f1c4a230a6b931f11140"
+   },
+   {
+    "song_id": "tabootears",
+    "difficulty": 4,
+    "modifier": 0,
+    "rating": 11.60528,
+    "score": 9921056,
+    "perfect_count": 1115,
+    "near_count": 2,
+    "miss_count": 8,
+    "clear_type": 1,
+    "title": {
+     "en": "taboo tears you up 2017",
+     "ja": "taboo tears you up 2017"
+    },
+    "artist": "REDALiCE",
+    "time_played": 1795764213602,
+    "bg": "ac1be7beb79ba5c6fa92a3c8d3e61592"
+   },
+   {
+    "song_id": "innocence",
+    "difficulty": 4,
+    "modifier": 0,
+    "rating": 11.581199999999999,
+    "score": 9936240,
+    "perfect_count": 1147,
+    "near_count": 5,
+    "miss_count": 5,
+    "clear_type": 1,
+    "title": {
+     "en": "Innocence",
+     "ja": "Innocence"
+    },
+    "artist": "Powerless feat. Sennzai",
+    "time_played": 1795765119711,
+    "bg": "356a9100a0bee04cd32af72d13e596ba"
+   },
+   {
+    "song_id": "dontdie",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.57226,
+    "score": 9994452,
+    "perfect_count": 792,
+    "near_count": 1,
+    "miss_count": 0,
+    "clear_type": 2,
+    "title": {
+     "en": "Don't Die",
+     "ja": "Don't Die"
+    },
+    "artist": "Paul Bazooka",
+    "time_played": 1794280203341,
+    "bg": "3ac0b79630fced1ab962cd4af50d0cc8"
+   },
+   {
+    "song_id": "yourvoiceso",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.530815,
+    "score": 9986163,
+    "perfect_count": 1011,
+    "near_count": 1,
+    "miss_count": 1,
+    "clear_type": 1,
+    "title": {
+     "en": "Your voice so... feat. Such",
+     "ja": "Your voice so... feat. Such"
+    },
+    "artist": "PSYQUI",
+    "time_played": 1795833135368,
+    "bg": "d9e89e56978cb62d2ffcb6fdb067d4bf"
+   },
+   {
+    "song_id": "oshamascramble",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.529245,
+    "score": 9865849,
+    "perfect_count": 1052,
+    "near_count": 13,
+    "miss_count": 8,
+    "clear_type": 1,
+    "title": {
+     "en": "Oshama Scramble!",
+     "ja": "Oshama Scramble!"
+    },
+    "artist": "t+pazolite",
+    "time_played": 1795602252650,
+    "bg": "0082f21756b6efa6c1e5c62cf86d5ea8"
+   },
+   {
+    "song_id": "opspectheme",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.51225,
+    "score": 9942450,
+    "perfect_count": 933,
+    "near_count": 5,
+    "miss_count": 3,
+    "clear_type": 1,
+    "title": {
+     "en": "Operation Spectrum Battle Theme",
+     "ja": "Operation Spectrum Battle Theme"
+    },
+    "artist": "cybermiso, DOT96, tigerlily",
+    "time_played": 1795080724088,
+    "bg": "afb361f757c12dbe42563e211d1d4d6d"
+   },
+   {
+    "song_id": "goodtek",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.5,
+    "score": 10000930,
+    "perfect_count": 968,
+    "near_count": 0,
+    "miss_count": 0,
+    "clear_type": 3,
+    "title": {
+     "en": "GOODTEK (Arcaea Edit)",
+     "ja": "GOODTEK (Arcaea Edit)"
+    },
+    "artist": "EBIMAYO",
+    "time_played": 1795331241487,
+    "bg": "fa253deaeabe2378da13f20d537ffb8c"
+   },
+   {
+    "song_id": "oblivion",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.47294,
+    "score": 9954588,
+    "perfect_count": 754,
+    "near_count": 3,
+    "miss_count": 2,
+    "clear_type": 1,
+    "title": {
+     "en": "OBLIVION",
+     "ja": "OBLIVION"
+    },
+    "artist": "ESTi",
+    "time_played": 1795599939286,
+    "bg": "3cd241e84f788dc5bedb8340ebb6709e"
+   },
+   {
+    "song_id": "invertedworld",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.46488,
+    "score": 9952976,
+    "perfect_count": 933,
+    "near_count": 5,
+    "miss_count": 2,
+    "clear_type": 1,
+    "title": {
+     "en": "Inverted World",
+     "ja": "Inverted World"
+    },
+    "artist": "ARForest",
+    "time_played": 1795170041893,
+    "bg": "3a810b0d2c90d1e136d5b4bca34d6e53"
+   },
+   {
+    "song_id": "axiumcrisis",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.464016599999999,
+    "score": 9699205,
+    "perfect_count": 1049,
+    "near_count": 24,
+    "miss_count": 21,
+    "clear_type": 1,
+    "title": {
+     "en": "Axium Crisis",
+     "ja": "Axium Crisis"
+    },
+    "artist": "ak+q",
+    "time_played": 1795766380202,
+    "bg": "853a135e0c9c5dd8c562585f30111aa4"
+   },
+   {
+    "song_id": "sheriruth",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.44498,
+    "score": 9848996,
+    "perfect_count": 1127,
+    "near_count": 13,
+    "miss_count": 11,
+    "clear_type": 1,
+    "title": {
+     "en": "Sheriruth",
+     "ja": "Sheriruth"
+    },
+    "artist": "Team Grimoire",
+    "time_played": 1795835208748,
+    "bg": "0eb8b1b02de330fb0558eb18757b7d18"
+   },
+   {
+    "song_id": "voyagetofuture",
+    "difficulty": 4,
+    "modifier": 0,
+    "rating": 11.427085,
+    "score": 9965417,
+    "perfect_count": 843,
+    "near_count": 4,
+    "miss_count": 1,
+    "clear_type": 1,
+    "title": {
+     "en": "Voyage to the Future",
+     "ja": "Voyage to the Future"
+    },
+    "artist": "Shunji Fujii feat. 千花",
+    "time_played": 1794214552157,
+    "bg": "fa9d6044d8e2dea82be3c4b8afd4720d"
+   },
+   {
+    "song_id": "ikazuchi",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.403516600000001,
+    "score": 9771055,
+    "perfect_count": 1304,
+    "near_count": 24,
+    "miss_count": 19,
+    "clear_type": 1,
+    "title": {
+     "en": "Ikazuchi",
+     "ja": "怒槌"
+    },
+    "artist": "光吉猛修",
+    "time_played": 1795766687725,
+    "bg": "e6569bb811e3db66238fbeaefdc5829c"
+   },
+   {
+    "song_id": "akinokagerou",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.401495,
+    "score": 9880299,
+    "perfect_count": 1061,
+    "near_count": 6,
+    "miss_count": 10,
+    "clear_type": 1,
+    "title": {
+     "en": "Haze of Autumn",
+     "ja": "秋の陽炎"
+    },
+    "artist": "karatoPαnchii feat.はるの",
+    "time_played": 1795833433027,
+    "bg": "f9699350343e98ebebd8ea786ae415be"
+   },
+   {
+    "song_id": "synthesis",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.381115,
+    "score": 9896223,
+    "perfect_count": 1176,
+    "near_count": 7,
+    "miss_count": 9,
+    "clear_type": 1,
+    "title": {
+     "en": "Synthesis.",
+     "ja": "Synthesis."
+    },
+    "artist": "tn-shi",
+    "time_played": 1793784447620,
+    "bg": "9af197ed79a427febb3274bf202cf7f5"
+   },
+   {
+    "song_id": "hybris",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.378400000000001,
+    "score": 9875680,
+    "perfect_count": 1178,
+    "near_count": 6,
+    "miss_count": 12,
+    "clear_type": 1,
+    "title": {
+     "en": "Hybris (The one who shattered)",
+     "ja": "ヒュブリスの頂に聳えるのは"
+    },
+    "artist": "qfeileadh feat.のあ",
+    "time_played": 1795833676998,
+    "bg": "adbf203f51c165200e2f037d05ef661a"
+   },
+   {
+    "song_id": "ouverture",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.346995,
+    "score": 9869399,
+    "perfect_count": 895,
+    "near_count": 12,
+    "miss_count": 6,
+    "clear_type": 1,
+    "title": {
+     "en": "Ouvertüre",
+     "ja": "Ouvertüre"
+    },
+    "artist": "USAO & DJ Genki feat. ルーン(CV:河瀬茉希)",
+    "time_played": 1795834247328,
+    "bg": "499c15b6459075199c45cbadfbcc83b5"
+   },
+   {
+    "song_id": "nightmare",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.338135000000001,
+    "score": 9867627,
+    "perfect_count": 885,
+    "near_count": 8,
+    "miss_count": 8,
+    "clear_type": 1,
+    "title": {
+     "en": "Nightmare",
+     "ja": "Nightmare"
+    },
+    "artist": "M2U",
+    "time_played": 1795603392167,
+    "bg": "8f08bbf0218c299644a4be67d7de2df0"
+   },
+   {
+    "song_id": "signal",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.331975,
+    "score": 9866395,
+    "perfect_count": 1135,
+    "near_count": 1,
+    "miss_count": 15,
+    "clear_type": 1,
+    "title": {
+     "en": "Signal",
+     "ja": "Signal"
+    },
+    "artist": "rejection feat. Such",
+    "time_played": 1795834462235,
+    "bg": "672c8aeadc8fb1f7c5f29c0452856ea1"
+   },
+   {
+    "song_id": "finalstep",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.320915,
+    "score": 9944183,
+    "perfect_count": 1049,
+    "near_count": 2,
+    "miss_count": 5,
+    "clear_type": 1,
+    "title": {
+     "en": "Final Step!",
+     "ja": "Final Step!"
+    },
+    "artist": "Lime",
+    "time_played": 1795831853803,
+    "bg": "69aaf5b357e454ae1bc88143d598e452"
+   },
+   {
+    "song_id": "antagonism",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.31692,
+    "score": 9843384,
+    "perfect_count": 1113,
+    "near_count": 22,
+    "miss_count": 7,
+    "clear_type": 1,
+    "title": {
+     "en": "Antagonism",
+     "ja": "Antagonism"
+    },
+    "artist": "Yooh vs. siromaru",
+    "time_played": 1794478820766,
+    "bg": "47221ddc3fdb13b6848a8a408f37fa38"
+   },
+   {
+    "song_id": "onandon",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.31511,
+    "score": 9923022,
+    "perfect_count": 827,
+    "near_count": 5,
+    "miss_count": 4,
+    "clear_type": 1,
+    "title": {
+     "en": "On And On!! feat. Jenga",
+     "ja": "On And On!! feat. Jenga"
+    },
+    "artist": "ETIA.",
+    "time_played": 1794043952198,
+    "bg": "b9ee4d0532fd02274ea5348d6d958371"
+   },
+   {
+    "song_id": "meltyrhapsody",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.291849899999999,
+    "score": 9898370,
+    "perfect_count": 965,
+    "near_count": 0,
+    "miss_count": 10,
+    "clear_type": 1,
+    "title": {
+     "en": "Melty Rhapsody",
+     "ja": "メルティーラプソディー"
+    },
+    "artist": "lapix feat. PANXI",
+    "time_played": 1795832733928,
+    "bg": "c0c44f912db7ad4dc24ef87cf89d8065"
+   },
+   {
+    "song_id": "lostdesire",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.2903,
+    "score": 9858060,
+    "perfect_count": 1130,
+    "near_count": 15,
+    "miss_count": 9,
+    "clear_type": 1,
+    "title": {
+     "en": "Lost Desire",
+     "ja": "Lost Desire"
+    },
+    "artist": "Powerless feat. Sennzai",
+    "time_played": 1794914681289,
+    "bg": "4c6a6f5fde13e0f3a64407c90ef479ec"
+   },
+   {
+    "song_id": "eightem",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.288695,
+    "score": 9917739,
+    "perfect_count": 1069,
+    "near_count": 6,
+    "miss_count": 6,
+    "clear_type": 1,
+    "title": {
+     "en": "8-EM",
+     "ja": "8-EM"
+    },
+    "artist": "Sampling Masters AYA",
+    "time_played": 1795169690341,
+    "bg": "f32e2734927890e578e7f719e80a8687"
+   },
+   {
+    "song_id": "felys",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.28474,
+    "score": 9916948,
+    "perfect_count": 1118,
+    "near_count": 5,
+    "miss_count": 7,
+    "clear_type": 1,
+    "title": {
+     "en": "felys final remix",
+     "ja": "felys final remix"
+    },
+    "artist": "onoken",
+    "time_played": 1794214973482,
+    "bg": "0839fa23741800a57b02139f99f7f528"
+   },
+   {
+    "song_id": "hascome",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.276105,
+    "score": 9975221,
+    "perfect_count": 781,
+    "near_count": 0,
+    "miss_count": 2,
+    "clear_type": 1,
+    "title": {
+     "en": "......已至。",
+     "ja": "......已至。"
+    },
+    "artist": "秋田真典",
+    "time_played": 1795329023124,
+    "bg": "f6b8907afd71f2c989c8567f21e3c02a"
+   },
+   {
+    "song_id": "theformula",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.26924,
+    "score": 9953848,
+    "perfect_count": 950,
+    "near_count": 5,
+    "miss_count": 2,
+    "clear_type": 1,
+    "title": {
+     "en": "The Formula",
+     "ja": "The Formula"
+    },
+    "artist": "Junk",
+    "time_played": 1795169134995,
+    "bg": "3d4ae5b2d82a4601c3d455f38bf1aba6"
+   },
+   {
+    "song_id": "sakurafubuki",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.215565,
+    "score": 9923113,
+    "perfect_count": 828,
+    "near_count": 5,
+    "miss_count": 4,
+    "clear_type": 1,
+    "title": {
+     "en": "Sakura Fubuki",
+     "ja": "Sakura Fubuki"
+    },
+    "artist": "Street",
+    "time_played": 1795832914645,
+    "bg": "2f99a25fac19c223536d09afaae3342f"
+   },
+   {
+    "song_id": "kamippoi",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.2134,
+    "score": 9942680,
+    "perfect_count": 939,
+    "near_count": 1,
+    "miss_count": 5,
+    "clear_type": 1,
+    "title": {
+     "en": "God-ish",
+     "ja": "神っぽいな"
+    },
+    "artist": "ピノキオピー",
+    "time_played": 1794913801249,
+    "bg": "8b8477e3a5aa1f948f53f405e10abe05"
+   },
+   {
+    "song_id": "mirinae",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.2132133,
+    "score": 9683964,
+    "perfect_count": 1229,
+    "near_count": 15,
+    "miss_count": 33,
+    "clear_type": 1,
+    "title": {
+     "en": "MIRINAE",
+     "ja": "MIRINAE"
+    },
+    "artist": "TAK × Zekk",
+    "time_played": 1794045100547,
+    "bg": "61f2db8e3d254f9eb571a0a564e3beca"
+   },
+   {
+    "song_id": "gloryroad",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.2102233,
+    "score": 9653067,
+    "perfect_count": 1406,
+    "near_count": 43,
+    "miss_count": 30,
+    "clear_type": 1,
+    "title": {
+     "en": "GLORY：ROAD",
+     "ja": "GLORY：ROAD"
+    },
+    "artist": "uma vs. モリモリあつし",
+    "time_played": 1795171633307,
+    "bg": "72bf2c8071523e529975dbf418770a76"
+   },
+   {
+    "song_id": "endmoonlight",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.16117,
+    "score": 9892234,
+    "perfect_count": 724,
+    "near_count": 12,
+    "miss_count": 2,
+    "clear_type": 1,
+    "title": {
+     "en": "End of The Moonlight",
+     "ja": "End of The Moonlight"
+    },
+    "artist": "Forte Escape",
+    "time_played": 1795599623635,
+    "bg": "bb1d1782e8de8896808ce0a8b4e1c18f"
+   },
+   {
+    "song_id": "equilibrium",
+    "difficulty": 2,
+    "modifier": 1,
+    "rating": 11.15743,
+    "score": 9911486,
+    "perfect_count": 939,
+    "near_count": 7,
+    "miss_count": 5,
+    "clear_type": 4,
+    "title": {
+     "en": "Equilibrium",
+     "ja": "Equilibrium"
+    },
+    "artist": "Maozon",
+    "time_played": 1794479014694,
+    "bg": "581aaeb792dc2f5edfbeb19a1fa0b2aa"
+   },
+   {
+    "song_id": "oblivion",
+    "difficulty": 4,
+    "modifier": 0,
+    "rating": 11.1271066,
+    "score": 9748132,
+    "perfect_count": 837,
+    "near_count": 24,
+    "miss_count": 10,
+    "clear_type": 1,
+    "title": {
+     "en": "OBLIVION",
+     "ja": "OBLIVION"
+    },
+    "artist": "ESTi",
+    "time_played": 1795765529266,
+    "bg": "3cd241e84f788dc5bedb8340ebb6709e"
+   },
+   {
+    "song_id": "anokumene",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.080805,
+    "score": 9936161,
+    "perfect_count": 844,
+    "near_count": 3,
+    "miss_count": 4,
+    "clear_type": 1,
+    "title": {
+     "en": "Anökumene",
+     "ja": "Anökumene"
+    },
+    "artist": "Jun Kuroda",
+    "time_played": 1795169328520,
+    "bg": "62adea3ac4d4eb8cc89875020acc13c4"
+   },
+   {
+    "song_id": "internetyamero",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.0792566,
+    "score": 9763777,
+    "perfect_count": 1191,
+    "near_count": 4,
+    "miss_count": 27,
+    "clear_type": 1,
+    "title": {
+     "en": "INTERNET YAMERO",
+     "ja": "INTERNET YAMERO"
+    },
+    "artist": "Aiobahn feat. KOTOKO",
+    "time_played": 1795602897767,
+    "bg": "ae64a8500328081f3432dc2d3f5896fd"
+   },
+   {
+    "song_id": "trickmaster",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.0715399,
+    "score": 9854308,
+    "perfect_count": 1001,
+    "near_count": 14,
+    "miss_count": 8,
+    "clear_type": 1,
+    "title": {
+     "en": "Tr!cK Ma?tEr",
+     "ja": "Tr!cK Ma?tEr"
+    },
+    "artist": "Nothing But Requiem",
+    "time_played": 1794211506693,
+    "bg": "c6544139f1ab277bedce08a72d26c073"
+   },
+   {
+    "song_id": "ifi",
+    "difficulty": 1,
+    "modifier": 0,
+    "rating": 11.055684999999999,
+    "score": 9931137,
+    "perfect_count": 1131,
+    "near_count": 10,
+    "miss_count": 3,
+    "clear_type": 1,
+    "title": {
+     "en": "#1f1e33",
+     "ja": "#1f1e33"
+    },
+    "artist": "かめりあ(EDP)",
+    "time_played": 1793697023123,
+    "bg": "bcb9c5f5ccf5cb33509c8c5b4ef51654"
+   },
+   {
+    "song_id": "astralexe",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.04383,
+    "score": 9868766,
+    "perfect_count": 1041,
+    "near_count": 8,
+    "miss_count": 10,
+    "clear_type": 1,
+    "title": {
+     "en": "astral.exe",
+     "ja": "astral.exe"
+    },
+    "artist": "Synzak & Laxeno57",
+    "time_played": 1795081268610,
+    "bg": "42b34e71c7e0ff1d7acba547364d1831"
+   },
+   {
+    "song_id": "withu",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.04071,
+    "score": 9888142,
+    "perfect_count": 915,
+    "near_count": 13,
+    "miss_count": 4,
+    "clear_type": 1,
+    "title": {
+     "en": "with U",
+     "ja": "with U"
+    },
+    "artist": "t+pazolite & Massive New Krew feat. リリィ(CV:青木志貴)",
+    "time_played": 1794314593548,
+    "bg": "cd386dcdafc85bf7533651e309ae87cc"
+   },
+   {
+    "song_id": "ladymadestar",
+    "difficulty": 4,
+    "modifier": 0,
+    "rating": 11.038205,
+    "score": 9927641,
+    "perfect_count": 745,
+    "near_count": 5,
+    "miss_count": 3,
+    "clear_type": 1,
+    "title": {
+     "en": "Ladymade Star",
+     "ja": "Ladymade Star"
+    },
+    "artist": "ESTi",
+    "time_played": 1795765353249,
+    "bg": "630e259b3945761ba49fef85ad00dc31"
+   },
+   {
+    "song_id": "qualia",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.035695,
+    "score": 9947139,
+    "perfect_count": 1011,
+    "near_count": 11,
+    "miss_count": 0,
+    "clear_type": 2,
+    "title": {
+     "en": "qualia -ideaesthesia-",
+     "ja": "qualia -ideaesthesia-"
+    },
+    "artist": "nitro",
+    "time_played": 1795602661834,
+    "bg": "7359f9af5ac90fe9b66de1ee33c26ec0"
+   },
+   {
+    "song_id": "merlin",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.032960000000001,
+    "score": 9986592,
+    "perfect_count": 710,
+    "near_count": 2,
+    "miss_count": 0,
+    "clear_type": 2,
+    "title": {
+     "en": "MERLIN",
+     "ja": "MERLIN"
+    },
+    "artist": "REDALiCE",
+    "time_played": 1795330429607,
+    "bg": "213c08041ba744f5436f4a191302aa69"
+   },
+   {
+    "song_id": "override",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.022725,
+    "score": 9864545,
+    "perfect_count": 903,
+    "near_count": 3,
+    "miss_count": 11,
+    "clear_type": 1,
+    "title": {
+     "en": "Override",
+     "ja": "オーバーライド"
+    },
+    "artist": "吉田夜世",
+    "time_played": 1795168948332,
+    "bg": "6b4780a4f739312e6b6edf2c40bb92a6"
+   },
+   {
+    "song_id": "ultimatetaste",
+    "difficulty": 2,
+    "modifier": 0,
+    "rating": 11.0116499,
+    "score": 9773495,
+    "perfect_count": 1364,
+    "near_count": 18,
+    "miss_count": 23,
+    "clear_type": 1,
+    "title": {
+     "en": "Ultimate taste",
+     "ja": "Ultimate taste"
+    },
+    "artist": "ぱらどっと",
+    "time_played": 1795170588900,
+    "bg": "0e5a8aa12fa93e934b1423db4aa219d9"
+   }
+  ]
+ }
+}

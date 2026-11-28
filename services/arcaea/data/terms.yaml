@@ -1,0 +1,67 @@
+# services/arcaea/data/terms.yaml
+# Arcaea의 값 용어(랭크·난이도·램프)의 정식 이름과 기준 점수. 점수는 10,000,000점 + Max Pure 수다.
+# 랭크 경계는 팬 위키 "Gameplay and scoring"(2026-11-28). 은어는 사용자 확인 전 추정이고, 도구가 못 알아들으면
+# 확인받아 별칭으로 쌓는다(terms_aliases, 게임별).
+- canonical: "EX+"
+  category: rank
+  value: 9900000
+  aliases: [익플, 익스플, 엑플, 엑스플]
+- canonical: "EX"
+  category: rank
+  value: 9800000
+  aliases: [익스, 엑스]
+- canonical: "AA"
+  category: rank
+  value: 9500000
+  aliases: []
+- canonical: "A"
+  category: rank
+  value: 9200000
+  aliases: []
+- canonical: "B"
+  category: rank
+  value: 8900000
+  aliases: []
+- canonical: "C"
+  category: rank
+  value: 8600000
+  aliases: []
+- canonical: "D"
+  category: rank
+  value: 0
+  aliases: []
+- canonical: "PAST"
+  category: difficulty
+  aliases: [패스트, PST]
+- canonical: "PRESENT"
+  category: difficulty
+  aliases: [프레젠트, 프레, PRS]
+- canonical: "FUTURE"
+  category: difficulty
+  aliases: [퓨처, 퓨쳐, FTR]
+- canonical: "ETERNAL"
+  category: difficulty
+  aliases: [이터널, ETR]
+- canonical: "BEYOND"
+  category: difficulty
+  aliases: [비욘드, 비욘, BYD]
+# PURE MEMORY는 Far·Lost 0이라 10,000,000점 이상과 같은 말이다.
+- canonical: "PURE MEMORY"
+  category: lamp
+  value: 10000000
+  aliases: [퓨메, 퓨어메모리, 퓨어 메모리, PM]
+- canonical: "FULL RECALL"
+  category: lamp
+  aliases: [풀리콜, 풀 리콜, FR]
+- canonical: "HARD CLEAR"
+  category: lamp
+  aliases: [하드, 하클, 하드 클리어, HC]
+- canonical: "NORMAL CLEAR"
+  category: lamp
+  aliases: [노말, 노클, 노말 클리어, NC]
+- canonical: "EASY CLEAR"
+  category: lamp
+  aliases: [이지, 이클, 이지 클리어, EC]
+- canonical: "TRACK LOST"
+  category: lamp
+  aliases: [트랙 로스트, 트로, 폭사, TL]

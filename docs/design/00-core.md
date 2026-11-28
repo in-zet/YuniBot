@@ -791,6 +791,7 @@ async def lookup(ctx: ToolContext, chart: ChartRef, rank: RankRef | None = None)
 - **게임과 무관한 것**: 플레이어와 디스코드 계정, 태그 틀, 메모리, 약속과 이정표, 오락실 목록과 별칭, 예약과 이벤트 틀, 인격과 반응 단계의 구조.
 - **츄니즘 동작은 바뀌지 않는다**: 공통화는 리팩터다. 츄니즘 이벤트 이름과 슬래시 명령 이름은 그대로다.
 - 유니는 츄니즘 캐릭터다. maimai 이야기를 할 때의 인격은 아직 정하지 않았다(§17.9, Part 6 프롬프트 전에 정한다).
+- **세 번째 게임 Arcaea(2026-11-28, 19단계)**: 모바일 게임이라 SEGA 계정과 따로 로그인한다(Arcaea Online `sid` 쿠키, 구독자만). 게임 프로필 `services/arcaea/profile.py` — 난이도 PST/PRS/FTR/ETR/BYD, 포텐셜은 베스트 50 + 그중 상위 10곡을 한 번 더 센 합 ÷ 60(`GameProfile.best_double_count`), 곡마다 클리어 보너스 +0.2(TRACK LOST는 `clear_lamp_rating_bonus`로 뺀다), 신곡 틀 없음. 클리어 종류 하나를 게이지(클리어 램프 TL/EC/NC/HC)와 FR·PM(콤보 램프)으로 나눠 담는다. 근거와 실측은 `docs/reference/arcaea-online/README.md`.
 
 ## 저장소 구조, 작업 순서, 리스크
 
