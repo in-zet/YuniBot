@@ -94,6 +94,7 @@ emits: [chunithm.song.viewed]
 | `songs_of` | 표의 채보 행을 곡 단위 행으로 합친 새 표(`charts_of`의 반대) | `table: TableRef`(곡 칸 필요) | 없음 | 표 | never |
 | `chart_link` | 채보 뷰어 링크 | `chart: ChartRef` | 없음 | optional | never |
 | `add_links` | 채보 표에 "채보 링크" 칸 더하기 | `table: TableRef`(곡·난이도 필요) | 없음 | 표 | never |
+| `add_song_info` | 표에 곡 정보 칸(버전·작곡가·레벨·노트 수, Arcaea는 팩)을 더해 보이게 하기 | `table: TableRef`(곡 필요), `columns: list[str]`(칸 이름) | 없음 | 표 | never |
 | `alias_add` | 별칭 추가 | `song: SongQuery`, `alias` | 없음 | optional | never |
 | `alias_remove` | 별칭 삭제 | `alias` | 없음(함수 안에서 추가한 사람 또는 `admin` 확인) | optional | never |
 
@@ -233,3 +234,10 @@ emits: [chunithm.song.viewed]
 ## 수록 팩 (2026-11-28 사용자 요청)
 
 - Arcaea 곡은 곡 자료의 팩 이름(`SongRecord.pack`)을 곡 정보에 보이고, `find_songs(pack=…)`가 팩 이름의 일부로 거른다(영어 이름, 한글로 들으면 모델이 바꾼다). 팩이 없는 게임은 비어 있다.
+- 표의 공통 칸에 `팩`(`tc.PACK`)이 있다. 게임 프로필 `has_packs`(Arcaea만 참)가 켜진 게임에서만 `add_song_info`로 붙인다.
+
+## 어떤 표에든 곡 정보 칸 붙이기 `add_song_info` (2026-11-28 사용자 요청)
+
+- 실기: "포텐셜표에 팩 이름 넣어서 그려줘"·"레이팅표에 버전"이 안 됐다 — `table_query`는 표에 있는 칸만 고르고, 곡 정보 칸은 검색 표에만 있었다. 표마다 숨은 칸을 넣지 않고 칸 더하기 도구 하나로 했다(사용자 결정).
+- 받는 칸 이름: 버전·작곡가·레벨·노트 수·팩(팩 없는 게임에서 팩을 주면 받을 수 있는 칸 목록을 오류로 돌려준다). 곡 단위 행은 곡에서 아는 칸만 차고 레벨·노트 수는 "-"다. 이미 있는 칸이면 값을 다시 채우고 보이게만 한다.
+- 칸 정보는 요약과 무관해 `extend_table(keep_summary=True)`로 표·묶음 요약을 남긴다 — 레이팅표·포텐셜표의 머리말(최종 값·평균)이 그림에 그대로 나온다.

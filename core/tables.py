@@ -196,10 +196,12 @@ def extend_table(
     cells_for: Callable[[Row], Mapping[str, Cell]],
     *,
     steps: Iterable[str] = (),
+    keep_summary: bool = False,
 ) -> WorkTable:
     """칸을 더한 새 표(칸 더하기 도구의 바탕). 행은 그대로이고 `cells_for(행)`이 돌려준 셀이 그 행에 더해진다.
     이미 있는 칸(이름이 같음)이면 정의는 그대로 두고 셀만 덮어쓴다. 보이는 이름만 겹치면 에러.
-    `derive_table`처럼 id와 요약은 비우고 표지 이름은 남긴다."""
+    `derive_table`처럼 id와 요약은 비우고 표지 이름은 남긴다. 더하는 칸이 요약과 무관하면(곡 정보 칸)
+    `keep_summary`로 표·묶음 요약을 남긴다 — 레이팅표 머리말의 최종 레이팅이 그대로 그려진다."""
     added = _new_columns(table, columns)
     groups = [
         Group(
@@ -209,6 +211,15 @@ def extend_table(
         for group in table.groups
     ]
     derived = derive_table(table, groups, steps=steps)
+    if keep_summary:
+        derived = replace(
+            derived,
+            summary=table.summary,
+            groups=tuple(
+                replace(new, summary=old.summary)
+                for new, old in zip(derived.groups, (g for g in table.groups if g.rows), strict=True)  # 빈 묶음은 derive가 뺐다
+            ),
+        )
     return replace(derived, columns=(*table.columns, *added))
 
 

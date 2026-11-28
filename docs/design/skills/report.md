@@ -105,7 +105,7 @@ listens: [chunithm.sync.completed]
 
 | `const_table` | 상수표: 상수 범위의 채보에 점수·랭크·램프·곡 레이팅을 붙인 표(표 반환) | `min_const`(기본 0), `max_const`(선택), `difficulty: DifficultyRef`(선택, 하나), `only_played`(기본 꺼짐), `table: TableRef`(선택, `find_songs`가 찾은 표를 상수표로 가공만 — 신곡·난이도 둘 이상·레벨 등 그 밖의 조건은 이쪽, 상수 범위와 같이 주면 둘 다 적용) | `table` 줄 땐 Row(곡·난이도) | 표 |
 | `what_if` | 가정 레이팅표: 채보마다 그 점수(와 콤보 램프)를 냈다고 치고 다시 짠 베스트·신곡 프레임 표 전체(표 반환, 기록은 안 바꾼다) | `charts: list[ChartRef]`·`table: TableRef`(둘 중 하나 이상, 표면 그 표의 채보 전부), `scores: list[ScoreRef]`, `lamps: list[str]`(같은 순서·같은 개수, 하나만 주면 모든 채보에, 안 말한 채보는 "") | 없음 | 표 |
-| `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나) | 없음 | 표 |
+| `add_scores` | 채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표 (표 반환) | `table: TableRef`(곡·난이도 칸이 찬 행만), `player: PlayerRef`(기본 나), `only_played`(기본 꺼짐 — 기록 있는 채보만, 묶음 안 상수 → 점수 높은 순) | 없음 | 표 |
 
 모두 읽기 전용이고 confirm은 never다.
 
@@ -231,3 +231,9 @@ M채보만"이 붙는다. 기록이 하나도 없으면 에러다. 표에 곡 �
 - 플레이 횟수: Arcaea Online은 기록마다 **올해** 플레이 횟수를 줘서 동기화 때 같이 저장한다(따로 모으지 않는다). 도구 결과에 `scope: 올해`, 표시는 "올해 7회".
 - `recent`(최근 플레이 판정)는 그대로 츄니즘만이다 — Arcaea Online의 최근 기록은 마지막 1판뿐이다.
 - 베스트 표(그림 포함)는 Arcaea일 때 "상위 10"·"하위 40" 두 묶음으로 나누고 묶음마다 평균을 낸다(2026-11-28 사용자 요청). 요약 칸 이름은 게임 프로필의 `rating_label`("포텐셜")이다.
+
+## 조건 + 내 기록은 상수표가 아니다·포텐셜표 (2026-11-28 실기 피드백, 사용자 결정)
+
+- "Memory Archive 팩 곡 중 내가 친 채보만 내 점수와 함께 그려줘"가 지침대로 `const_table(only_played)`로 가 상수 묶음 표가 나왔다. "상수표"라는 말이 없으면 `find_songs` → `add_scores(only_played=true)`다. 정렬은 상수 높은 순 → 같은 상수는 점수 높은 순(사용자 결정), 상수를 모르면 맨 뒤.
+- 조건 없는 "내가 친 채보 전체"는 그대로 `const_table(min_const=0, only_played=true)` 뒤 `table_query`다.
+- Arcaea에서 `best` 표는 "포텐셜표"라고 부른다(지침·트리거). 이전 버전·가정 표의 `steps` 문구도 프로필 `rating_label`을 따라 "{레이팅|포텐셜}표"다. "베스트 50" 이름은 그대로 둔다(사용자 결정).

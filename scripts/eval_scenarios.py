@@ -274,6 +274,29 @@ SCENARIOS: tuple[Scenario, ...] = (
         name="아르케아/로그인 안내", question="아르케아 로그인은 어떻게 해?",
         must_not_call=("sega-account_status", "sega-account_logout"),
     ),
+    # 표에 곡 정보 칸 붙이기·포텐셜표·조건 + 내 기록(2026-11-28 실기 피드백).
+    Scenario(
+        name="아르케아/포텐셜표 그림", question="아르케아 포텐셜표 그려줘",
+        shown_from=("report_best",), must_call=("image_table_image",),
+        must_args=(("report_best", "game", "아르케아|arcaea|Arcaea"),),
+    ),
+    Scenario(
+        name="아르케아/포텐셜표 팩 칸", question="아르케아 포텐셜표를, 팩 이름 넣어서 그려줘",
+        shown_from=("report_best",), must_call=("song_add_song_info", "image_table_image"),
+        must_args=(("song_add_song_info", "columns", "팩"),),
+    ),
+    Scenario(
+        name="기록/레이팅표 버전 칸", question="레이팅표에 버전 넣어서 그려줘",
+        shown_from=("report_best",), must_call=("song_add_song_info", "image_table_image"),
+        must_args=(("song_add_song_info", "columns", "버전"),),
+    ),
+    Scenario(
+        name="아르케아/팩 내 기록 그림",
+        question="아르케아 메모리 아카이브 팩의 곡 중 내가 친 채보만 내 점수와 함께 그려줘",
+        shown_from=("report_add_scores",), must_call=("song_find_songs", "image_table_image"),
+        must_not_call=("report_const_table",),
+        must_args=(("song_find_songs", "pack", "Memory Archive|memory archive"), ("report_add_scores", "only_played", "True")),
+    ),
     # 이전 버전 기준 레이팅표 — best의 version으로 한 번에(2026-11-21).
     Scenario(
         name="기록/이전 버전 레이팅표 그림", question="엑스버스 기준으로 내 레이팅표 그려줘",

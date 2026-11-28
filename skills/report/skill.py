@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from decimal import ROUND_DOWN, Decimal
 from enum import StrEnum
@@ -20,12 +20,14 @@ from core.tables import (
     EMPTY_CELL,
     Cell,
     Column,
+    Group,
     Row,
     RowRef,
     TableBuilder,
     TableNeeds,
     WorkTable,
     cell,
+    derive_table,
     extend_table,
 )
 from core.tool_types import (
@@ -299,7 +301,10 @@ async def best(
     if as_of is not None:
         table = replace(
             table,
-            steps=(f"{version} 기준 레이팅표 (기록·상수·레이팅 공식은 지금, 나중에 추가된 채보는 못 가림)", *table.steps),
+            steps=(
+                f"{version} 기준 {game_profile.rating_label}표 (기록·상수·{game_profile.rating_label} 공식은 지금, 나중에 추가된 채보는 못 가림)",
+                *table.steps,
+            ),
         )
         data |= {
             "version": version,
@@ -379,8 +384,11 @@ async def add_scores(
     ctx: ToolContext,
     table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG, tc.DIFFICULTY])],
     player: PlayerRef | None = None,
+    only_played: bool = False,
 ) -> ToolResult:
-    """채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표를 돌려준다. player를 비우면 본인 기록이고, 기록이 없는 채보는 "기록 없음"이다."""
+    """채보 표에 점수·랭크·램프·곡 레이팅 칸을 더한 새 표를 돌려준다. player를 비우면 본인 기록이고, 기록이 없는 채보는 "기록 없음"이다.
+    "내가 친 채보만", "점수 있는 것만"이면 only_played를 켠다 — 기록 있는 채보만 남기고 묶음 안을 상수 높은 순, 같은 상수는
+    점수 높은 순으로 줄 세운다."""
     assert isinstance(table, WorkTable)
     target = await _target_player(ctx, player)
     if isinstance(target, ToolResult):
@@ -397,10 +405,31 @@ async def add_scores(
         lambda row: tc.pb_cells(pbs.get(key_of(row)), rank_scores, game=ctx.game),
         steps=[owner],
     )
+    if only_played:
+        extended = _played_by_const_then_score(extended, lambda row: key_of(row) in pbs)
+        if not extended.row_count:
+            return ToolResult(
+                data={"player_id": target.id, "count": 0}, table=replace(extended, subject=target.id),
+                display=Display(content="점수가 있는 채보가 없어."),
+            )
     return ToolResult(
-        data={"player_id": target.id, "with_record": len(pbs)},
+        data={"player_id": target.id, "with_record": len(pbs), "count": extended.row_count},
         table=replace(extended, subject=target.id),
     )
+
+
+def _played_by_const_then_score(table: WorkTable, played: Callable[[Row], bool]) -> WorkTable:
+    """기록 있는 행만 남기고 묶음 안을 상수 높은 순 → 점수 높은 순으로(2026-11-28 사용자 결정). 상수를 모르면 맨 뒤."""
+
+    def order(row: Row) -> tuple[float, int]:
+        const, score = row.cell(tc.CONST).raw, row.cell(tc.SCORE).raw
+        return (
+            -(float(const) if isinstance(const, int | float) else float("-inf")),
+            -(score if isinstance(score, int) else -1),
+        )
+
+    groups = [Group(group.title, tuple(sorted((r for r in group.rows if played(r)), key=order))) for group in table.groups]
+    return derive_table(table, groups, steps=["점수 있는 것만 · 상수→점수 순"])
 
 
 _CONST_TABLE_TAIL = (tc.CONST, tc.SCORE, tc.RANK, tc.LAMP, tc.RATING)
@@ -1010,7 +1039,7 @@ async def what_if(
     if kept:
         header["지금 기록이 더 좋아 그대로"] = f"{len(kept)}채보"
     frame_table = _frame_table(ctx, ctx.player_id, frames, header, assumed=marks)
-    frame_table = replace(frame_table, steps=("점수를 가정한 레이팅표 (기록은 그대로)", *frame_table.steps))
+    frame_table = replace(frame_table, steps=(f"점수를 가정한 {game_profile.rating_label}표 (기록은 그대로)", *frame_table.steps))
 
     labels = _metric_labels(game_profile)
     data: dict[str, Any] = {

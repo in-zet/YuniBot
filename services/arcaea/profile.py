@@ -36,6 +36,7 @@ ARCAEA = GameProfile(
     all_justice_lamp="PURE MEMORY",
     all_justice_label="퓨어 메모리",
     has_overpower=False,
+    has_packs=True,
     terms_path=Path(__file__).parent / "data" / "terms.yaml",
     chart_rating=chart_rating,
     clear_lamp_rating_bonus={"TRACK LOST": -CLEAR_BONUS},

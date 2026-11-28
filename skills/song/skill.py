@@ -473,6 +473,48 @@ def _row_key(row: Row) -> tuple[str, str]:
     return title, code
 
 
+# 어떤 표에든 붙일 수 있는 곡 정보 칸(2026-11-28 사용자 요청 "표에 버전 추가해줘"). 팩은 팩이 있는 게임만.
+_SONG_INFO_COLUMNS = (tc.VERSION, tc.PACK, tc.ARTIST, tc.LEVEL, tc.NOTE_COUNT)
+
+
+@tool()
+async def add_song_info(
+    ctx: ToolContext,
+    table: Annotated[TableRef, TableNeeds(nonempty=[tc.SONG])],
+    columns: list[str],
+) -> ToolResult:
+    """표에 곡 정보 칸(버전·작곡가·레벨·노트 수, Arcaea는 팩)을 더해 보이게 한 새 표를 돌려준다. 레이팅표(best)·상수표·
+    폴더·점수 붙인 표처럼 곡 칸이 있는 표면 무엇이든 받고, 행 순서·묶음·머리말(최종 레이팅)은 그대로다.
+    "레이팅표에 버전 넣어서 그려줘"는 best → add_song_info(columns=["버전"]) → table_image다. 표에 이미 있는 칸이면
+    보이게만 한다. 레벨·노트 수는 채보 행에서만 찬다."""
+    assert isinstance(table, WorkTable)
+    allowed = tuple(name for name in _SONG_INFO_COLUMNS if name != tc.PACK or profile_for(ctx.game).has_packs)
+    unknown = [name for name in columns if name not in allowed]
+    if not columns or unknown:
+        got = f" (받은 것: {'·'.join(unknown)})" if unknown else ""
+        return ToolResult(error=f"더할 수 있는 칸은 {'·'.join(allowed)}이다{got}")
+    wanted = tuple(dict.fromkeys(columns))
+
+    def cells_for(row: Row) -> dict[str, Cell]:
+        title, chart_type, code = tc.row_chart_key(row)
+        song = ctx.songdb.song_by_title(title)
+        if song is None:
+            return {name: tc.text_cell(None) for name in wanted}
+        chart_record = ctx.songdb.chart_for(title, code, chart_type) if row.cell(tc.DIFFICULTY).filled else None
+        cells = tc.song_cells(song, wanted) if chart_record is None else tc.chart_cells(song, chart_record, wanted)
+        return {name: cells.get(name, tc.text_cell(None)) for name in wanted}
+
+    extended = extend_table(
+        table, tc.common_columns(*wanted, game=ctx.game), cells_for, steps=["·".join(wanted)], keep_summary=True
+    )
+    # 이미 있던 칸(검색 표의 숨은 버전 칸 등)도 보이게 한다.
+    shown = replace(
+        extended,
+        columns=tuple(replace(c, hidden_in_text=False) if c.name in wanted else c for c in extended.columns),
+    )
+    return ToolResult(data={"count": shown.row_count, "columns": list(wanted)}, table=shown)
+
+
 @tool(mutates=True)
 async def alias_add(ctx: ToolContext, song: SongQuery, alias: str, game: GameRef | None = None) -> ToolResult:
     """곡 별칭을 봇 전역으로 등록한다(모든 서버·모든 플레이어에게 적용). 사용자가 그 곡이 맞다고 확인한 뒤에만 부른다."""

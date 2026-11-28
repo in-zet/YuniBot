@@ -904,6 +904,17 @@ def test_extend_table_adds_columns_cells_and_keeps_rows_groups_and_format() -> N
     assert source.column_by_name("score") is None
 
 
+def test_extend_table_can_keep_table_and_group_summaries() -> None:
+    builder = TableBuilder(unit="채보").column("song").summary({"레이팅": "17.00"})
+    builder.group("베스트", {"평균": "16.90"}).row(RowRef("k", "a"), {"song": cell("A")})
+    source = builder.build()
+
+    kept = extend_table(source, [Column(name="v", label="버전")], lambda _row: {"v": cell("X")}, keep_summary=True)
+
+    assert dict(kept.summary) == {"레이팅": "17.00"} and dict(kept.groups[0].summary) == {"평균": "16.90"}
+    assert kept.rows[0].cell("v").raw == "X"
+
+
 def test_expand_rows_replaces_keeps_and_drops_rows_and_adds_columns() -> None:
     source = _table()
     first, second = source.rows[0], source.rows[1]

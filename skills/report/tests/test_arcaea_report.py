@@ -28,7 +28,7 @@ from services.game.terms import TermsService
 _SKILL_PY = Path(__file__).parent.parent / "skill.py"
 # 상수 10.0~11.1인 FTR 12곡. 모두 9,900,000점(EX+)이라 곡 포텐셜 = 상수 + 1.5 + 0.2.
 _SONGS = {"songs": [
-    {"title": f"Song {i:02d}", "artist": "A", "version": "6.0.0",
+    {"title": f"Song {i:02d}", "artist": "A", "version": "6.0.0", "pack": "Memory Archive" if i % 2 else "Base",
      "charts": [{"difficulty": "FTR", "level": "10", "constant": round(10.0 + i / 10, 1), "notes": 1000}]}
     for i in range(12)
 ]}
@@ -135,3 +135,20 @@ async def test_sync_section_has_potential_lines_without_a_new_frame(skill, conn,
     content = section.display.content
     assert "포텐셜" in content and "베스트 50" in content and "신곡" not in content
     assert "Song 00 FTR 10.0" in content and "9,900,000 → 10,000,500" in content
+
+
+async def test_potential_table_keeps_its_header_when_pack_is_added(skill, conn, tmp_path) -> None:
+    song_spec = importlib.util.spec_from_file_location("_arcaea_song_skill_under_test", _SKILL_PY.parent.parent / "song" / "skill.py")
+    assert song_spec is not None and song_spec.loader is not None
+    song_skill = importlib.util.module_from_spec(song_spec)
+    song_spec.loader.exec_module(song_skill)
+    ctx = await _synced(conn, tmp_path)
+    best = await skill.best(ctx)
+    assert best.table is not None
+
+    result = await song_skill.add_song_info(ctx, table=best.table, columns=["팩"])
+
+    assert result.error is None and result.table is not None
+    assert [row.cell("팩").raw for row in result.table.rows[:2]] == ["Memory Archive", "Base"]  # Song 11, Song 10
+    assert dict(result.table.summary) == dict(best.table.summary) and result.table.summary
+    assert [g.summary for g in result.table.groups] == [g.summary for g in best.table.groups]

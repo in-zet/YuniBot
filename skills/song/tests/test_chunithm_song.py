@@ -755,3 +755,41 @@ async def test_highest_charts_keeps_one_top_const_row_per_song_in_place() -> Non
     rows = [(plain, "EXP"), (ult_song, "MAS"), (plain, "MAS"), (ult_song, "ULT")]
     assert kept == [pair for pair in rows if pair[1] == _top_const_code(songdb, pair[0])]
     assert len(kept) == 2 and result.data == {"count": 2, "dropped": 2}
+
+
+# ---------------------------------------------------------------- add_song_info
+
+
+async def test_add_song_info_adds_visible_version_to_any_chart_table() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    title = _titles_with(songdb, "MAS", want=True, count=1)[0]
+    song = songdb.song_by_title(title)
+    assert song is not None
+
+    result = await skill.add_song_info(_ctx_with_songdb(songdb), table=_chart_table((title, "MAS")), columns=["버전", "노트 수"])
+
+    assert result.error is None and result.table is not None
+    row = result.table.rows[0]
+    assert row.cell(tc.VERSION).raw == song.version
+    assert row.cell(tc.NOTE_COUNT).raw == song.charts["MAS"].note_count
+    shown = {c.name for c in result.table.columns if not c.hidden_in_text}
+    assert {tc.VERSION, tc.NOTE_COUNT} <= shown
+    assert result.table.steps[-1] == "버전·노트 수"
+
+
+async def test_add_song_info_reveals_a_hidden_column_and_rejects_pack_outside_arcaea() -> None:
+    skill = _load_skill()
+    songdb = SongDbService()
+    ctx = _ctx_with_songdb(songdb)
+    searched = await skill.find_songs(ctx, min_const=15.0, max_const=15.1)
+    assert searched.table is not None
+    assert searched.table.column_by_name(tc.VERSION).hidden_in_text  # pyright: ignore[reportOptionalMemberAccess]
+
+    result = await skill.add_song_info(ctx, table=searched.table, columns=["버전"])
+    assert result.table is not None
+    assert not result.table.column_by_name(tc.VERSION).hidden_in_text  # pyright: ignore[reportOptionalMemberAccess]
+    assert [c.name for c in result.table.columns].count(tc.VERSION) == 1
+
+    refused = await skill.add_song_info(ctx, table=searched.table, columns=["팩"])
+    assert refused.error == "더할 수 있는 칸은 버전·작곡가·레벨·노트 수이다 (받은 것: 팩)"

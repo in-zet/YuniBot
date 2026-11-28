@@ -511,6 +511,30 @@ async def test_add_scores_adds_pb_columns_and_marks_missing_records(skill: Modul
     assert result.data["with_record"] == 1
 
 
+async def test_add_scores_only_played_keeps_records_ordered_by_const_then_score(skill: ModuleType) -> None:
+    records = _FakeRecords(pbs={"me": [
+        _pb("곡 A", "MAS", 1_000_000, "SS", 14.5, "15.50"),
+        _pb("곡 B", "MAS", 1_007_000, "SSS", 14.5, "16.50"),
+        _pb("곡 C", "MAS", 990_000, "S+", 15.0, "15.00"),
+    ]})
+    f = _ctx(records=records)
+    builder = TableBuilder(subject=None, unit="채보")
+    tc.add_columns(builder, tc.SONG, tc.DIFFICULTY, tc.CONST)
+    for title, const in (("곡 A", 14.5), ("곡 D", 15.5), ("곡 B", 14.5), ("곡 C", 15.0)):
+        builder.row(tc.chart_ref(title, "MAS"), {
+            tc.SONG: tc.song_cell(title), tc.DIFFICULTY: tc.difficulty_cell("MAS"), tc.CONST: tc.const_cell(const),
+        })
+
+    result = await skill.add_scores(f.ctx, table=builder.build(), only_played=True)
+
+    assert result.table is not None
+    assert [row.cell(tc.SONG).raw for row in result.table.rows] == ["곡 C", "곡 B", "곡 A"]  # 기록 없는 곡 D는 빠진다
+    assert result.data["count"] == 3 and "점수 있는 것만" in result.table.steps[-1]
+
+    none = await skill.add_scores(f.ctx, table=_chart_table(("곡 Z", "MAS")), only_played=True)
+    assert none.data["count"] == 0 and none.display is not None
+
+
 async def test_add_scores_keeps_original_rows_and_refs(skill: ModuleType) -> None:
     f = _ctx(records=_records_with_pbs())
     source = _chart_table(("곡 A", "MAS"))

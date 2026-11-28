@@ -62,6 +62,8 @@ class GameProfile:
     all_justice_label: str = "올 저스티스"
     # 오버파워가 있는 게임인가(maimai는 없다).
     has_overpower: bool = True
+    # 곡 DB에 수록 팩이 있는 게임인가(Arcaea). 표의 `팩` 칸을 이 게임에서만 붙인다.
+    has_packs: bool = False
     # 후보곡 상승폭·남은 점수의 기준점이 되는 점수(츄니즘은 SSS).
     candidate_target_score: int
 

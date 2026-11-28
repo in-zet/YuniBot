@@ -39,6 +39,8 @@ LEVEL = "레벨"
 CONST = "상수"
 NOTE_COUNT = "노트 수"
 VERSION = "버전"
+# Arcaea 수록 팩. 팩이 없는 게임(츄니즘·maimai)은 값이 늘 빈칸이다.
+PACK = "팩"
 ARTIST = "작곡가"
 # 레이팅 프레임 구분: "구곡"(베스트·구곡 칸 대상) 또는 "신곡". 곡 DB의 지금 신곡 판정이다 — 모델이 지금 버전 이름을 몰라도
 # `table_query`로 "구곡 중 상수 상위 30"을 거를 수 있게 둔다(2026-11-22).
@@ -119,6 +121,7 @@ def _columns_of(game: str) -> dict[str, Column]:
         CONST: Column(name=CONST, label=CONST, value_type="number"),
         NOTE_COUNT: Column(name=NOTE_COUNT, label=NOTE_COUNT, value_type="number"),
         VERSION: Column(name=VERSION, label=VERSION, order=profile.version_order),
+        PACK: Column(name=PACK, label=PACK),
         ARTIST: Column(name=ARTIST, label=ARTIST),
         FRAME: Column(name=FRAME, label=FRAME),
         SCORE: Column(name=SCORE, label=SCORE, value_type="ScoreRef"),
@@ -301,6 +304,7 @@ def chart_cells(song: SongRecord, chart: ChartRecord, names: Sequence[str]) -> d
         CONST: const_cell(chart.const, estimated=chart.is_const_unknown),
         NOTE_COUNT: note_count_cell(chart.note_count),
         VERSION: text_cell(song.version),
+        PACK: text_cell(song.pack),
         ARTIST: text_cell(song.artist),
         FRAME: frame_cell(song),
     }
@@ -318,6 +322,7 @@ def song_cells(song: SongRecord, names: Sequence[str]) -> dict[str, Cell]:
         CHART_TYPE: EMPTY_CELL,
         DIFFICULTY: EMPTY_CELL,
         VERSION: text_cell(song.version),
+        PACK: text_cell(song.pack),
         ARTIST: text_cell(song.artist),
         FRAME: frame_cell(song),
     }
