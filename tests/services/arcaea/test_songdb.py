@@ -119,3 +119,12 @@ async def test_refresh_if_due_waits_a_day_after_success_and_an_hour_after_failur
     assert not await db.refresh_if_due(broken, now=1000.0 + 24 * 3600)
     assert not await db.refresh_if_due(broken, now=1000.0 + 24 * 3600 + 1800)
     assert len(broken.urls) == 1
+
+
+def test_titles_match_across_wave_dash_shapes(cache: Path) -> None:
+    """Arcaea Online은 U+301C(〜), 곡 자료는 U+FF5E(～)로 적은 곡이 있다(2026-11-28 실기)."""
+    data = {"songs": [{"title": "キャラメルポップコーンたべたいよ～", "artist": "A", "version": "6.0.0", "charts": []}]}
+    cache.write_text(json.dumps(data), encoding="utf-8")
+    db = ArcaeaSongDbService(cache)
+
+    assert db.title_for(["キャラメルポップコーンたべたいよ〜"], "A") == "キャラメルポップコーンたべたいよ～"

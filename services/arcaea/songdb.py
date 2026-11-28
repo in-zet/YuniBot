@@ -131,9 +131,14 @@ def character_icon_url(icon: str) -> str:
     return f"{_ASSET_BASE}/chr/{icon}.png"
 
 
+# 물결표 모양 차이(2026-11-28 실기: Arcaea Online은 「…たべたいよ〜」(U+301C), 곡 자료는 「…よ～」(U+FF5E)라 기록이 곡에
+# 안 이어졌다). NFKC는 U+FF5E만 "~"로 바꾸므로 나머지도 같게 본다.
+_WAVES = str.maketrans({"\u301c": "~", "\u3030": "~", "\u2053": "~", "\u223c": "~"})
+
+
 def title_key(text: str) -> str:
-    """제목 비교용 글: 전각·반각(NFKC)·대소문자·띄어쓰기를 무시한다."""
-    return "".join(unicodedata.normalize("NFKC", text).casefold().split())
+    """제목 비교용 글: 전각·반각(NFKC)·대소문자·띄어쓰기·물결표 모양을 무시한다."""
+    return "".join(unicodedata.normalize("NFKC", text).translate(_WAVES).casefold().split())
 
 
 @dataclass(slots=True, kw_only=True, frozen=True)

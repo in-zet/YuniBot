@@ -26,7 +26,7 @@ _MIGRATIONS = "".join(
         "001_players.sql", "002_player_tags.sql", "008_records.sql", "013_records_overpower.sql",
         "014_records_sync_log_snapshot_averages.sql", "018_records_profile.sql", "030_records_profile_username.sql", "019_records_session_state.sql",
         "024_records_chart_type.sql", "009_terms_server.sql", "021_terms_aliases.sql",
-        "028_terms_aliases_game.sql", "032_arcaea.sql", "033_arcaea_song_art.sql",
+        "028_terms_aliases_game.sql", "031_play_counts.sql", "032_arcaea.sql", "033_arcaea_song_art.sql", "034_arcaea_wave_dash_title.sql",
     )
 ) + Path("migrations/core/011_songdb_aliases.sql").read_text() + Path("migrations/core/025_songdb_aliases_game.sql").read_text()
 
