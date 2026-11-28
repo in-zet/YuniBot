@@ -115,7 +115,7 @@ class MaimaiNetAdapter:
         transport: httpx.AsyncBaseTransport | None = None,
         limiter: aiolimiter.AsyncLimiter | None = None,
     ) -> None:
-        """`clal`이 없으면 username/password로 로그인한다(`/로그인`). 둘은 이 연결의 인증 객체에만 있다."""
+        """`clal`이 없으면 username/password로 로그인한다(`/로그인 세가`). 둘은 이 연결의 인증 객체에만 있다."""
         limiter = limiter if limiter is not None else aiolimiter.AsyncLimiter(1, 1)
 
         async def throttle(request: httpx.Request) -> None:

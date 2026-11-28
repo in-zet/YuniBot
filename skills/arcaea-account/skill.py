@@ -85,7 +85,7 @@ class _LoginModal(discord.ui.Modal, title="Arcaea 로그인"):
         await _attempt_login(self._ctx, interaction, username=username, password=password, cookie=cookie)
 
 
-@slash_only("아르케아 로그인")
+@slash_only("로그인 아르케아")
 async def start_login(ctx: ToolContext) -> discord.ui.Modal:
     """Arcaea 아이디·비밀번호나 쿠키를 넣는 창을 연다. 입력값은 채널에 남지 않고, 로그인에 성공하면 세션 쿠키(sid)만
     저장한다 — 아이디·비밀번호는 저장하지 않는다. 이미 로그인돼 있으면 새 계정으로 덮어쓴다."""
@@ -122,5 +122,5 @@ async def on_login_expired(ctx: ToolContext, payload: dict[str, object]) -> None
     player_id = str(payload["player_id"])
     if player_id in _notified_expiries:
         return
-    await ctx.notify.dm(player_id, "Arcaea Online 로그인이 풀렸어. `/아르케아 로그인`으로 다시 로그인해 줘.")
+    await ctx.notify.dm(player_id, "Arcaea Online 로그인이 풀렸어. `/로그인 아르케아`으로 다시 로그인해 줘.")
     _notified_expiries.add(player_id)

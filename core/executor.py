@@ -144,13 +144,29 @@ class ToolExecutor:
         # 게임별 서비스 묶음을 모르는 설치(게임이 하나뿐인 시험 등)는 게임 이름만 정한다.
         return ctx.for_game(game) if game in self._game_services else replace(ctx, game=game)
 
-    async def context_for_game(self, ctx: ToolContext, requested: str | None) -> ToolContext:
+    async def context_for_game(
+        self, ctx: ToolContext, requested: str | None, *, spec: ToolSpec | SlashOnlySpec | None = None,
+        skill_name: str | None = None,
+    ) -> ToolContext:
         """실행기를 거치지 않는 경로(입력 창을 여는 슬래시 명령)의 게임 고르기: 요청한 게임 → 주 게임 → 기본 게임.
-        게임별 서비스 묶음도 붙여 `ctx.for_game`으로 다른 게임으로 바꿀 수 있게 한다. 모르는 게임이면 UserFacingError."""
+        게임별 서비스 묶음도 붙여 `ctx.for_game`으로 다른 게임으로 바꿀 수 있게 한다. 모르는 게임이면 UserFacingError.
+        `spec`·`skill_name`을 주면 `invoke`처럼, 게임을 말하지 않았는데 고른 게임을 그 도구·스킬이 다루지 않으면 다루는
+        게임으로 간다(2026-11-28 — Arcaea 로그인 창이 주 게임 CHUNITHM의 서비스로 로그인하려다 TypeError)."""
         if self._game_chooser is None:
             return ctx
         preferred = await self._preferred_game(ctx.player_id) if self._preferred_game is not None else None
-        return self._with_game(ctx, self._game_chooser(requested, preferred))
+        game = self._game_chooser(requested, preferred)
+        games = self._games_of(spec, skill_name) if spec is not None else ()
+        if games and game not in games and not requested:
+            game = games[0]
+        return self._with_game(ctx, game)
+
+    def _games_of(self, spec: ToolSpec | SlashOnlySpec, skill_name: str | None) -> tuple[str, ...]:
+        """도구가 다루는 게임: 도구의 `games` → 없으면 스킬 manifest의 `games`. 둘 다 없으면 게임을 가리지 않는다."""
+        games = tuple(getattr(spec, "games", None) or ())
+        if not games and skill_name is not None:
+            games = tuple(self._skill_games.get(skill_name, ()))
+        return games
 
     async def invoke(
         self,
@@ -212,9 +228,7 @@ class ToolExecutor:
                 game = self._game_chooser(requested if isinstance(requested, str) else None, preferred)
             except UserFacingError as exc:
                 return ExecutionOutcome(result=ToolResult(error=str(exc)))
-            games = tuple(getattr(spec, "games", None) or ())
-            if not games and skill_name is not None:
-                games = tuple(self._skill_games.get(skill_name, ()))
+            games = self._games_of(spec, skill_name)
             if games and game not in games:
                 if requested:
                     return ExecutionOutcome(result=ToolResult(error=f"이 기능은 {game}에서는 아직 지원하지 않아"))

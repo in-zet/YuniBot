@@ -402,13 +402,15 @@ def _build_modal_command(
             await interaction.response.send_message("모르는 명령이야", ephemeral=True)
             return
 
-        if takes_game:
-            # 입력 창 함수가 `game`을 받으면 요청한 게임 → 주 게임 → 기본 게임으로 맥락을 정해 준다(실행기와 같은 규칙).
-            try:
-                ctx = await executor.context_for_game(ctx, requested_game)
-            except UserFacingError as exc:
-                await interaction.response.send_message(str(exc), ephemeral=True)
-                return
+        # 요청한 게임 → 주 게임 → 기본 게임으로 맥락을 정하고, 그 게임을 이 스킬이 안 다루면 스킬의 게임으로 간다(실행기와
+        # 같은 규칙). `game`을 안 받는 입력 창도 정한다 — `/로그인 아르케아`는 주 게임과 상관없이 Arcaea다.
+        try:
+            ctx = await executor.context_for_game(
+                ctx, requested_game if takes_game else None, spec=entry.spec, skill_name=entry.skill_name
+            )
+        except UserFacingError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
         modal = await entry.spec.fn(ctx)
         await interaction.response.send_modal(modal)
 

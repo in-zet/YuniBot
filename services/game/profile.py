@@ -48,7 +48,7 @@ class GameProfile:
     net_name: str = "CHUNITHM-NET"
     # 로그인하는 계정("sega": CHUNITHM·maimai가 같은 SEGA 계정, "arcaea": lowiro 계정)과 로그인 안내에 쓰는 명령.
     account: str = "sega"
-    login_command: str = "/로그인"
+    login_command: str = "/로그인 세가"
     # 전체 레이팅을 부르는 이름(Arcaea는 포텐셜)과, 플레이 횟수가 세는 기간(Arcaea Online은 올해 것만 준다).
     rating_label: str = "레이팅"
     # 곡 레이팅 계산에서 볼 가장 높은 점수(CHUNITHM 1,010,000·maimai 101.0000%, Arcaea는 1,000만점 위로는 포텐셜이 그대로다).

@@ -141,7 +141,7 @@ class _LoginModal(discord.ui.Modal, title="SEGA 로그인"):
         await _attempt_login(self._ctx, username, password, interaction)
 
 
-@slash_only("로그인")
+@slash_only("로그인 세가")
 async def start_login(ctx: ToolContext, game: GameRef | None = None) -> discord.ui.Modal:
     """SEGA ID/비밀번호를 입력하는 창을 연다. 입력값은 채널에 남지 않고, 로그인에
     성공하면 거기서 나온 clal 쿠키만 저장한다 — ID/비밀번호는 저장하지 않는다.
@@ -214,5 +214,5 @@ async def on_login_expired(ctx: ToolContext, payload: dict[str, object]) -> None
     player_id = str(payload["player_id"])
     if player_id in _notified_expiries:
         return
-    await ctx.notify.dm(player_id, "CHUNITHM-NET 로그인이 풀렸어. `/로그인`으로 다시 로그인해 줘.")
+    await ctx.notify.dm(player_id, "CHUNITHM-NET 로그인이 풀렸어. `/로그인 세가`로 다시 로그인해 줘.")
     _notified_expiries.add(player_id)  # 보낸 뒤에 적는다 — DM이 막혀 실패하면 다음 만료 때 다시 시도한다.

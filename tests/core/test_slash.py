@@ -823,8 +823,49 @@ async def test_modal_command_with_a_game_argument_picks_the_requested_then_main_
 
 def test_real_skills_open_only_the_essential_slash_commands() -> None:
     # 2026-11-06 사용자 결정: 슬래시는 로그인·계정 연결·동기화만(코어의 /설정은 따로 붙는다). 나머지는 멘션으로만 쓴다.
-    # Arcaea 로그인은 SEGA와 계정이 따로라 `/아르케아 로그인`을 더한다(2026-11-28).
+    # 로그인은 계정마다 `/로그인 세가`·`/로그인 아르케아`(2026-11-28 사용자 결정).
     registry = SkillRegistry([Path("skills")])
     registry.load()
     paths = {" ".join(entry.path) for entry in build_slash_plan(registry.tool_specs()).entries}
-    assert paths == {"로그인", "아르케아 로그인", "연결 시작", "연결 참여", "연결 목록", "연결 대표", "연결 해제", "동기화"}
+    assert paths == {"로그인 세가", "로그인 아르케아", "연결 시작", "연결 참여", "연결 목록", "연결 대표", "연결 해제", "동기화"}
+
+
+async def test_modal_command_of_a_one_game_skill_opens_in_that_game_whatever_the_main_game() -> None:
+    """2026-11-28: `/로그인 아르케아`(Arcaea만 다루는 스킬의 입력 창)가 주 게임 CHUNITHM의 서비스로 로그인하려다 TypeError가
+    났다. `game`을 안 받는 입력 창도 실행기와 같이, 주 게임을 그 스킬이 안 다루면 스킬의 게임으로 연다."""
+    seen: list[str] = []
+
+    @slash_only("한게임모달")
+    async def one_game_modal(ctx: ToolContext) -> discord.ui.Modal:
+        """한 게임 스킬의 입력창."""
+        seen.append(ctx.game)
+        return _FakeModal()
+
+    conn = await aiosqlite.connect(":memory:")
+    await conn.executescript(_PLAYERS_MIGRATION)
+    await conn.commit()
+    players = PlayersService(conn)
+
+    async def main_game(player_id: str) -> str | None:
+        return "chunithm"
+
+    executor = ToolExecutor(
+        resolvers=ResolverRegistry(), tag_provider=players, tag_definitions={}, services={"players": players},
+        game_chooser=lambda requested, preferred: requested or preferred or "chunithm", preferred_game=main_game,
+        skill_games={"x": ["arcaea"]},
+    )
+    plan = build_slash_plan(
+        [(_FakeSkill("x"), one_game_modal.__yuni_slash_only__)]  # pyright: ignore[reportFunctionMemberAccess, reportArgumentType]
+    )
+    tree: discord.app_commands.CommandTree[Any] = discord.app_commands.CommandTree(
+        discord.Client(intents=discord.Intents.none())
+    )
+    attach_to_tree(tree, plan, executor=executor, db=_NO_DB, registry_snapshot=_NO_SNAPSHOT)
+
+    try:
+        command = tree.get_command("한게임모달")
+        assert isinstance(command, discord.app_commands.Command)
+        await command.callback(_fake(1))  # pyright: ignore[reportCallIssue]
+        assert seen == ["arcaea"]
+    finally:
+        await conn.close()

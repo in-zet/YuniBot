@@ -627,7 +627,7 @@ async def recent(ctx: ToolContext, player: PlayerRef | None = None, count: int =
         return ToolResult(error="CHUNITHM-NET이 점검 중이야. 점검이 끝나면 다시 해 줘.")
     except (AuthenticationError, ConnectionError):
         if target.id == ctx.player_id:
-            return ToolResult(error="로그인이 풀렸어. /로그인으로 다시 연결해 줘.")
+            return ToolResult(error="로그인이 풀렸어. /로그인 세가로 다시 연결해 줘.")
         return ToolResult(error="그 사람은 CHUNITHM-NET 로그인이 안 돼 있어서 최근 기록을 못 가져와.")
 
     if not scores:
