@@ -17,3 +17,13 @@
 - 노트 수 = Pure + Far + Lost.
 - **포텐셜 공식(7.0.0, 2026-08-27 개정 — [팬 위키](https://arcaea.miraheze.org/wiki/Gameplay_and_scoring))**: 곡별 = 상수 + 점수 보정(10,000,000↑ +2, 9,800,000↑ +1+(점수−9.8M)/200k, 그 아래 (점수−9.5M)/300k) + 클리어 보너스 0.2(TRACK LOST가 아니면). 전체 = (베스트 상위 10개 ×2 + 나머지 40개) ÷ 60, 셋째 자리에서 버림. 최근 기록은 더 이상 안 들어간다. 표본 50개로 계산하면 11.36693… → 11.366으로 프로필 값과 같다.
 - 곡별 `rating`에서 위 공식으로 거꾸로 낸 상수는 비공식 상수 자료(DoriTran 2026-08, OllyDoge 2026-02)와 거의 다 맞는다(처음엔 클리어 보너스를 몰라 0.2씩 어긋나 보였다).
+
+## 곡·상수 자료 저장소 (2026-11-28 조사)
+
+| 저장소 | 쓰임 | 기준·형식 | 메모 |
+| --- | --- | --- | --- |
+| [DoriTran/arcaea-chart-constant-wiki](https://github.com/DoriTran/arcaea-chart-constant-wiki) | **채택** — `public/data/songs.json`을 `services/arcaea/songdb.py`가 받는다 | 2026-08-25, 게임 6.16.0(7.0 곡 4개), 556곡·1,830채보, 상수·노트 수·레벨·채보자, 키는 일본 위키 제목 | MIT. 일본 위키(wikiwiki.jp/arcaea)를 긁는 스크립트(`scripts/arcaea/`)가 같이 있다 — 갱신이 끊기면 직접 수집할 때 참고 |
+| [OllyDoge/ASCPSongConstant](https://github.com/OllyDoge/ASCPSongConstant) | 예비 | 2026-02-02(자동 갱신), `ptt.json` 518곡·1,692채보, 키가 공식 `song_id`, 상수만 | 라이선스 표기 없음. 값은 DoriTran과 같았다 |
+| [Arcaea-Infinity/ArcaeaSongDatabase](https://github.com/Arcaea-Infinity/ArcaeaSongDatabase) | 안 씀 | 2023-07(4.6.0)에서 멈춤 | |
+| 중국 Arcwiki(`wiki.arcaea.cn`, 옛 `arcwiki.mcd.blue`)의 상수 데이터 페이지 | 안 씀 | — | 봇 차단 화면이 떠 받지 못했다(우회하지 않음) |
+| [일본 위키](https://wikiwiki.jp/arcaea/) | DoriTran의 원 출처 | 곡 페이지마다 譜面定数 | 직접 수집은 갱신이 끊길 때 검토(사용자 결정) |
