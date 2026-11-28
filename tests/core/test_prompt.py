@@ -80,6 +80,14 @@ def test_triggered_skills_matches_lowercased_trigger_words_in_message() -> None:
     assert "chunithm-border" not in names
 
 
+def test_triggered_skills_ignores_spacing_and_case() -> None:
+    assembler = PromptAssembler(rules_text="규칙", persona_text="말투", registry=_registry())
+    tags = {"chunithm-synced"}
+    # 트리거는 "플레이 카운트"(띄어 씀) — 붙여 써도 펼친다(2026-11-28 실기).
+    assert "report" in assembler.triggered_skills("츄니즘 플레이카운트가 5 이상인 채보", player_tags=tags)
+    assert "report" in assembler.triggered_skills("플레이횟수 보여줘", player_tags=tags)
+
+
 def test_triggered_skills_skips_skills_hidden_by_tags() -> None:
     assembler = PromptAssembler(rules_text="규칙", persona_text="말투", registry=_registry())
     assert "admin" not in assembler.triggered_skills("이번 달 비용 얼마야", player_tags=set())

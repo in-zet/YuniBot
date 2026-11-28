@@ -5,7 +5,7 @@ summary: 봇 사용량, 서버별 스킬 설정, 태그 부여 같은 관리 일
 examples:
   - 이번 달 LLM 비용 얼마야?
   - 이 서버에서 web-qa 꺼 줘
-triggers: [비용, 사용량, 태그, 스킬 꺼, 스킬 켜, 스킬 등록, 곡 버전]
+triggers: [비용, 사용량, 태그, 스킬 꺼, 스킬 켜, 스킬 등록, 곡 버전, 꺼 줘, 켜 줘]
 category: 관리
 games: []
 version: 1

@@ -6,6 +6,7 @@ from core.llm import ToolDeclaration
 from core.permissions import TagRequirement, check_tags
 from core.registry import LoadedSkill, SkillRegistry
 from core.skill_loading import SkillLoadState
+from core.text_match import text_contains
 
 
 def _skill_tag_requirement(skill: LoadedSkill) -> TagRequirement:
@@ -27,12 +28,13 @@ class PromptAssembler:
         ]
 
     def triggered_skills(self, text: str, *, player_tags: set[str]) -> list[str]:
-        """메시지에 `triggers` 낱말이 하나라도 들어 있는 보이는 스킬의 이름(스킬 등록 순서)."""
-        lowered = text.lower()
+        """메시지에 `triggers` 낱말이 하나라도 들어 있는 보이는 스킬의 이름(스킬 등록 순서). 띄어쓰기·대소문자·전각반각·
+        구두점은 가리지 않는다(`text_contains` — 2026-11-28 실기: "플레이카운트"가 트리거 "플레이 카운트"에 안 걸려
+        report가 안 펼쳐졌고, 모델이 플카 도구 없이 답을 지어냈다)."""
         return [
             skill.manifest.name
             for skill in self.visible_skill_cards(player_tags=player_tags)
-            if any(word.lower() in lowered for word in skill.manifest.triggers)
+            if any(text_contains(text, word) for word in skill.manifest.triggers)
         ]
 
     def _card_text(self, skill: LoadedSkill) -> str:

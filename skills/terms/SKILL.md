@@ -7,7 +7,7 @@ examples:
   - 트플플가 몇 점부터야?
   - 비비기가 뭐야?
   - 마이마이 SSS+는 몇 퍼센트부터야?
-triggers: [뭐야, 뜻, 용어, 은어, 이론치, 오버파워, 트플플, 비비기]
+triggers: [뭐야, 뜻, 용어, 은어, 이론치, 오버파워, 트플플, 비비기, 방식, 몇 퍼센트]
 category: 질문 답변
 games: [chunithm, maimai, arcaea]
 version: 1
