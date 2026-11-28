@@ -95,6 +95,8 @@ class SongRecord:
     is_new: bool = False
     bpm: float | None = None
     version: str | None = None
+    # 수록 팩(Arcaea — 곡 자료의 팩 이름, 2026-11-28 사용자 요청). 팩이 없는 게임은 None.
+    pack: str | None = None
     # 재킷 그림. 시드의 재킷 파일 이름이거나, 시드에 없던 곡이면 Chunimaru가 준 전체 주소.
     # 주소로 바꾸는 일은 `image_cache.jacket_url`이 한다.
     jacket: str | None = None
@@ -385,6 +387,7 @@ class SongDb:
         chart_type: str | None = None,
         title: str | None = None,
         exclude_title: str | None = None,
+        pack: str | None = None,
     ) -> list[ConstRangeHit]:
         """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부·곡명 글자를 한 번에 AND로 겹쳐 찾는다. title은 곡명에 들어
         있어야 하는 글자, exclude_title은 없어야 하는 글자다(둘 다 `core/text_match.py`의 느슨한 부분 일치). difficulty는
@@ -413,6 +416,9 @@ class SongDb:
             if title is not None and not text_contains(song.title, title):
                 continue
             if exclude_title is not None and text_contains(song.title, exclude_title):
+                continue
+            # 팩은 이름의 일부만 말해도 맞는다("Memory Archive", "Collaboration Chapter 2").
+            if pack is not None and (song.pack is None or not text_contains(song.pack, pack)):
                 continue
             for chart in _select_charts(song, wanted, chart_type):
                 if not chart.is_available:

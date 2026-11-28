@@ -128,3 +128,19 @@ def test_titles_match_across_wave_dash_shapes(cache: Path) -> None:
     db = ArcaeaSongDbService(cache)
 
     assert db.title_for(["キャラメルポップコーンたべたいよ〜"], "A") == "キャラメルポップコーンたべたいよ～"
+
+
+def test_songs_carry_their_pack_and_can_be_searched_by_part_of_it(cache: Path) -> None:
+    data = {"songs": [
+        {"title": "[X]", "artist": "B", "version": "4.3.0", "pack": "maimai Collaboration(Collaboration Chapter 2)",
+         "charts": [{"difficulty": "FTR", "constant": 10.6}]},
+        {"title": "Twilight", "artist": "S", "version": "5.7.0", "pack": "Memory Archive",
+         "charts": [{"difficulty": "FTR", "constant": 9.7}]},
+    ]}
+    cache.write_text(json.dumps(data), encoding="utf-8")
+    db = ArcaeaSongDbService(cache)
+
+    song = db.song_by_title("[X]")
+    assert song is not None and song.pack == "maimai Collaboration(Collaboration Chapter 2)"
+    assert [h.song.title for h in db.find_songs(pack="memory archive")] == ["Twilight"]
+    assert [h.song.title for h in db.find_songs(pack="Collaboration Chapter 2", min_const=10)] == ["[X]"]

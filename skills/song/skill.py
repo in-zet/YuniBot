@@ -79,6 +79,8 @@ async def info(ctx: ToolContext, song: SongQuery, game: GameRef | None = None) -
         lines.append(f"BPM {song.bpm}")
     if song.version is not None:
         lines.append(f"수록 버전: {song.version}")
+    if song.pack:
+        lines.append(f"수록 팩: {song.pack}")
     for chart in _charts_in_display_order(song, ctx.game):
         const_suffix = "(추정)" if chart.is_const_unknown else ""
         note_text = f"{chart.note_count}노트" if chart.note_count is not None else "노트 수 알 수 없음"
@@ -206,9 +208,10 @@ async def find_songs(
     new_only: bool = False,
     title: str | None = None,
     exclude_title: str | None = None,
+    pack: str | None = None,
     game: GameRef | None = None,
 ) -> ToolResult:
-    """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부·곡명 글자로 채보를 찾는 검색 입구다. 조건이 하나여도
+    """상수 범위·레벨·수록 버전·난이도·노트 수 범위·신곡 여부·곡명 글자·수록 팩(Arcaea)으로 채보를 찾는 검색 입구다. 조건이 하나여도
     이걸 쓰고, 여러 개면 한 번에 겹쳐 준다. 단 "상수표"(상수별로 묶고 내 점수를 붙인 표)는 이 도구가 아니라 report의
     const_table이다 — 조건이 상수 범위·난이도 하나뿐이면 const_table을 바로 부른다(2026-11-28 실기: 상수표를 달라는데 이
     표만 그렸다). 말하지 않은 조건은 비운다 — "14.7 이상"처럼 위쪽 한계를 말하지 않았으면
@@ -221,15 +224,16 @@ async def find_songs(
     "마스터나 울티마"처럼 난이도를 둘 말했으면 difficulty와 other_difficulty에 하나씩 준다(둘 중 어느 쪽이든 맞는 채보).
     난이도가 셋 이상이거나 "익스퍼트 이상", "마스터까지"처럼 범위면 min_difficulty/max_difficulty를 준다(BASIC<ADVANCED<EXPERT<MASTER<ULTIMA).
     조건을 하나도 안 줬으면 범위가 너무 넓으니 바로 에러를 돌려주고, 조건을 더 물어본다.
+    pack은 Arcaea 수록 팩 이름의 일부(영어, "Memory Archive"·"Lanota")다 — 한글로 들은 팩 이름은 영어로 바꿔 준다.
     결과는 상수 큰 것부터인 표다. 다른 순서가 필요하면 표에 `table_query`를 쓴다."""
     if not new_only and all(
         v is None
         for v in (
             min_const, max_const, level, version, difficulty, other_difficulty, min_difficulty, max_difficulty,
-            min_note_count, max_note_count, title, exclude_title,
+            min_note_count, max_note_count, title, exclude_title, pack,
         )
     ):
-        return ToolResult(error="조건을 하나는 줘야 해(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡, 곡명 글자 중)")
+        return ToolResult(error="조건을 하나는 줘야 해(상수 범위, 레벨, 버전, 난이도, 노트 수, 신곡, 곡명 글자, 팩 중)")
 
     codes = [code for code in (tc.difficulty_code(difficulty), tc.difficulty_code(other_difficulty)) if code is not None]
     low, high = tc.difficulty_code(min_difficulty), tc.difficulty_code(max_difficulty)
@@ -238,7 +242,7 @@ async def find_songs(
             min_const=min_const, max_const=max_const, level=level, version=version,
             difficulty=codes or None, min_difficulty=low, max_difficulty=high,
             min_note_count=min_note_count, max_note_count=max_note_count, new_only=new_only,
-            title=title, exclude_title=exclude_title,
+            title=title, exclude_title=exclude_title, pack=pack,
         )
     except ValueError as exc:
         return ToolResult(error=str(exc))
@@ -257,6 +261,7 @@ async def find_songs(
         "신곡만" if new_only else None,
         f"곡에 {title} 포함" if title else None,
         f"곡에 {exclude_title} 없음" if exclude_title else None,
+        f"{pack} 팩" if pack else None,
     ]
     return ToolResult(data={"count": len(hits)}, table=_chart_table(hits, conditions, ctx.game))
 
